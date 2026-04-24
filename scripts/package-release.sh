@@ -86,3 +86,12 @@ PY
   echo "$out"
   exit 0
 fi
+
+# macOS / Windows: copy the artifact found in the case statement
+if [[ -z "${src:-}" || ! -f "$src" ]]; then
+  echo "bundle not found under $BUNDLE_DIR" >&2
+  exit 1
+fi
+
+cp "$src" "$out"
+echo "$out"
