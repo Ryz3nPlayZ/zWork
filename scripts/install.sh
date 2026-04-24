@@ -15,7 +15,7 @@ esac
 asset_name=""
 case "$OS" in
   linux)
-    asset_name="zWork-linux-${ARCH}.tar.gz"
+    asset_name="zWork-linux-${ARCH}.AppImage"
     ;;
   darwin)
     asset_name="zWork-macos-${ARCH}.dmg"
@@ -55,12 +55,11 @@ mkdir -p "$INSTALL_ROOT" "$BIN_DIR"
 
 case "$OS" in
   linux)
-    install_path="$INSTALL_ROOT/zWork-linux-${ARCH}"
-    rm -rf "$install_path"
-    mkdir -p "$install_path"
-    tar -xzf "$download_path" -C "$install_path" --strip-components=1
-    ln -sf "$install_path/zWork" "$BIN_DIR/zwork"
-    chmod +x "$install_path/zWork"
+    install_path="$INSTALL_ROOT/zWork-linux-${ARCH}.AppImage"
+    rm -f "$install_path"
+    cp "$download_path" "$install_path"
+    chmod +x "$install_path"
+    ln -sf "$install_path" "$BIN_DIR/zwork"
     echo "Installed to $install_path"
     echo "Symlinked $BIN_DIR/zwork"
     ;;

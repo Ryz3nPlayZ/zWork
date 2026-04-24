@@ -19,7 +19,7 @@ fi
 assets=()
 while IFS= read -r -d '' file; do
   assets+=("$file")
-done < <(find dist -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.dmg' -o -name '*.AppImage' \) -print0)
+done < <(find dist -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.exe' \) -print0)
 
 if [[ ${#assets[@]} -eq 0 ]]; then
   echo "no release assets found in dist/" >&2

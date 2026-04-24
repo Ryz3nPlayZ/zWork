@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { ExternalLink } from "lucide-react";
+import { Download, Clock3 } from "lucide-react";
 import { ChatInput } from "./ChatInput";
 import { LogoParticles } from "./LogoParticles";
 import { useApp } from "../lib/store";
@@ -137,36 +137,39 @@ export function Landing({
           </div>
 
           {updateCard && (
-            <div className="mt-4 w-full max-w-[640px] rounded-2xl border border-line bg-paper-raised px-4 py-3 shadow-sm">
-              <div className="flex items-start justify-between gap-3">
+            <div className="mt-4 w-full max-w-[640px] rounded-[22px] border border-line bg-paper-raised px-4 py-3 shadow-sm">
+              <div className="flex items-center justify-between gap-4">
                 <div className="min-w-0">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-faint">
-                    Update available
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink-faint">
+                    Update ready
                   </div>
                   <div className="mt-1 text-[13px] font-medium text-ink">
-                    zWork {updateCard.latestVersion} is ready.
+                    zWork {updateCard.latestVersion}
                   </div>
                   <div className="mt-1 text-[12px] leading-5 text-ink-muted">
-                    Download the latest release to keep the Linux and macOS app current.
+                    A newer release is available for Linux and macOS.
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => window.open(updateCard.releaseUrl, "_blank", "noreferrer")}
-                  className="press inline-flex shrink-0 items-center gap-1.5 rounded-full border border-line bg-paper px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-paper-sunken"
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  Release
-                </button>
-                {onDismissUpdate && (
+                <div className="flex shrink-0 items-center gap-2">
                   <button
                     type="button"
-                    onClick={onDismissUpdate}
-                    className="press inline-flex shrink-0 items-center gap-1.5 rounded-full border border-line bg-paper px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:bg-paper-sunken hover:text-ink"
+                    onClick={() => window.open(updateCard.releaseUrl, "_blank", "noreferrer")}
+                    className="press inline-flex items-center gap-1.5 rounded-full bg-ink px-3 py-1.5 text-[12px] font-medium text-paper transition-colors hover:bg-ink-soft"
                   >
-                    Later
+                    <Download className="h-3.5 w-3.5" />
+                    Update
                   </button>
-                )}
+                  {onDismissUpdate && (
+                    <button
+                      type="button"
+                      onClick={onDismissUpdate}
+                      className="press inline-flex items-center gap-1.5 rounded-full border border-line bg-paper px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:bg-paper-sunken hover:text-ink"
+                    >
+                      <Clock3 className="h-3.5 w-3.5" />
+                      Remind me later
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           )}

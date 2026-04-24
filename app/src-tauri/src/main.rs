@@ -30,13 +30,19 @@ impl BackendChild {
 /// Managed handle to the Python or packaged backend process.
 struct Backend(Mutex<Option<BackendChild>>);
 
+fn zwork_data_dir() -> PathBuf {
+    if let Ok(v) = std::env::var("ZWORK_HOME") {
+        return PathBuf::from(v);
+    }
+    dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join("zWork")
+}
+
 fn append_log(msg: &str) {
     use std::io::Write;
 
-    let mut base = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"));
-    base.push(".zwork");
+    let mut base = zwork_data_dir();
     let _ = std::fs::create_dir_all(&base);
     base.push("backend.log");
 
@@ -83,8 +89,8 @@ fn find_dev_repo_root() -> Option<PathBuf> {
         }
     }
 
-    if let Ok(home) = std::env::var("HOME") {
-        let p = PathBuf::from(home).join("zwork");
+    if let Some(home) = dirs::home_dir() {
+        let p = home.join("zwork");
         if p.join("sidecar").is_dir() && p.join(".venv").is_dir() {
             return Some(p);
         }
@@ -104,6 +110,11 @@ fn python_executable(root: &PathBuf) -> PathBuf {
     }
 
     let python = root.join(".venv").join("bin").join("python");
+    if python.exists() {
+        return python;
+    }
+
+    let python = root.join(".venv").join("Scripts").join("python.exe");
     if python.exists() {
         return python;
     }
@@ -155,10 +166,7 @@ fn start_dev_backend() -> Option<BackendChild> {
         .create(true)
         .append(true)
         .open({
-            let mut path = std::env::var_os("HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("/tmp"));
-            path.push(".zwork");
+            let mut path = zwork_data_dir();
             let _ = std::fs::create_dir_all(&path);
             path.push("backend.log");
             path

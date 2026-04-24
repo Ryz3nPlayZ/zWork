@@ -17,15 +17,18 @@ mkdir -p "$DIST_DIR"
 
 case "$PLATFORM" in
   linux)
-    APP_BIN="$ROOT_DIR/app/src-tauri/target/release/sidecar-app"
-    BACKEND_BIN="$ROOT_DIR/app/src-tauri/binaries/zwork-backend-$HOST_TRIPLE"
-    stage="$DIST_DIR/zWork-linux-${ARCH}"
-    out="$DIST_DIR/zWork-linux-${ARCH}.tar.gz"
+    BUNDLE_DIR="$ROOT_DIR/app/src-tauri/target/release/bundle/appimage"
+    out="$DIST_DIR/zWork-linux-${ARCH}.AppImage"
     ;;
   macos)
     BUNDLE_DIR="$ROOT_DIR/app/src-tauri/target/release/bundle/dmg"
     src="$(find "$BUNDLE_DIR" -maxdepth 1 -name '*.dmg' | head -n 1)"
     out="$DIST_DIR/zWork-macos-${ARCH}.dmg"
+    ;;
+  windows)
+    BUNDLE_DIR="$ROOT_DIR/app/src-tauri/target/release/bundle/nsis"
+    src="$(find "$BUNDLE_DIR" -maxdepth 1 -name '*_x64-setup.exe' | head -n 1)"
+    out="$DIST_DIR/zWork-windows-${ARCH}-setup.exe"
     ;;
   *)
     echo "unknown platform: $PLATFORM" >&2
@@ -34,30 +37,52 @@ case "$PLATFORM" in
 esac
 
 if [[ "$PLATFORM" == "linux" ]]; then
-  if [[ ! -f "$APP_BIN" ]]; then
-    echo "app binary not found: $APP_BIN" >&2
+  APPDIR="$BUNDLE_DIR/zWork.AppDir"
+  PLUGIN="$HOME/.cache/tauri/linuxdeploy-plugin-appimage.AppImage"
+
+  if [[ ! -d "$APPDIR" ]]; then
+    echo "AppDir not found: $APPDIR" >&2
     exit 1
   fi
-  if [[ ! -f "$BACKEND_BIN" ]]; then
-    echo "backend binary not found: $BACKEND_BIN" >&2
+  if [[ ! -x "$PLUGIN" ]]; then
+    echo "AppImage plugin not found: $PLUGIN" >&2
     exit 1
   fi
-  rm -rf "$stage"
-  mkdir -p "$stage/binaries"
-  cp "$APP_BIN" "$stage/zWork"
-  cp "$BACKEND_BIN" "$stage/binaries/"
-  chmod +x "$stage/zWork" "$stage/binaries/$(basename "$BACKEND_BIN")"
-  tar -C "$DIST_DIR" -czf "$out" "$(basename "$stage")"
-  rm -rf "$stage"
+
+  ln -sf zWork.png "$APPDIR/sidecar-app.png"
+  (
+    cd "$BUNDLE_DIR"
+    APPIMAGE_EXTRACT_AND_RUN=1 "$PLUGIN" --appdir "$APPDIR"
+  )
+
+  src="$(python3 - "$BUNDLE_DIR" <<'PY'
+import sys
+from pathlib import Path
+
+bundle_dir = Path(sys.argv[1])
+candidates = []
+for root in [Path("/tmp"), bundle_dir]:
+    if not root.exists():
+        continue
+    for path in root.rglob("zWork-*.AppImage"):
+        try:
+            if path.is_file():
+                candidates.append((path.stat().st_mtime, str(path)))
+        except OSError:
+            pass
+
+if candidates:
+    candidates.sort()
+    print(candidates[-1][1])
+PY
+)"
+  if [[ -z "${src:-}" || ! -f "$src" ]]; then
+    echo "AppImage bundle not found under $BUNDLE_DIR" >&2
+    exit 1
+  fi
+
+  cp "$src" "$out"
+  chmod +x "$out" || true
   echo "$out"
   exit 0
 fi
-
-if [[ -z "${src:-}" || ! -f "$src" ]]; then
-  echo "bundle asset not found under $BUNDLE_DIR" >&2
-  exit 1
-fi
-
-cp "$src" "$out"
-chmod +x "$out" || true
-echo "$out"

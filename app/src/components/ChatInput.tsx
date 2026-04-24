@@ -32,7 +32,7 @@ interface Props {
 export function ChatInput({ placeholder = "Send a message", autoFocus, onSend }: Props) {
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
-  const [artifactMode, setArtifactMode] = useState(true);
+  const [artifactMode, setArtifactMode] = useState(false);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const areaRef = useRef<HTMLTextAreaElement>(null);
@@ -187,7 +187,7 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend }:
   return (
     <div
       className={cn(
-        "group relative w-full rounded-xxl border border-line bg-paper-raised transition-[border-color,box-shadow]",
+        "group relative w-full rounded-2xl border border-line bg-paper-raised transition-[border-color,box-shadow]",
         focused ? "border-line-strong shadow-pop" : "shadow-chat",
       )}
     >

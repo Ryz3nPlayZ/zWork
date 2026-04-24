@@ -32,6 +32,16 @@ curl -fsSL https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/insta
 
 Download the latest `.dmg` from [GitHub Releases](https://github.com/Ryz3nPlayZ/zWork/releases), open it, and drag zWork to your Applications folder.
 
+### Windows
+
+Download the latest installer from [GitHub Releases](https://github.com/Ryz3nPlayZ/zWork/releases) and run it.
+
+Or via PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install-windows.ps1 | iex
+```
+
 ## Example tasks
 
 > "Rename all these files based on what's inside them."

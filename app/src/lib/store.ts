@@ -326,7 +326,7 @@ export const useApp = create<AppState>((set, get) => ({
   setActiveProject: (id) => set({ activeProjectId: id }),
   memoryContent: "",
   userMdContent: "",
-  artifactMode: true,
+  artifactMode: false,
   setArtifactMode: (v) => set({ artifactMode: v }),
 
   refreshProjects: async () => {
@@ -386,7 +386,7 @@ export const useApp = create<AppState>((set, get) => ({
       api
         .onboardStatus()
         .then((st) => set({ onboardingDone: !!st.completed }))
-        .catch(() => set({ onboardingDone: true })),
+        .catch(() => set({ onboardingDone: false })),
     ]);
     // default model: backend default if not chosen, else first configured model
     if (!get().model) {
