@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { ExternalLink } from "lucide-react";
 import { ChatInput } from "./ChatInput";
 import { LogoParticles } from "./LogoParticles";
 import { useApp } from "../lib/store";
@@ -8,6 +9,11 @@ interface GreetingOption {
   text: string;
   /** true = greet with name ("Good morning, Zemu."), false = standalone */
   withName: boolean;
+}
+
+export interface UpdateCardState {
+  latestVersion: string;
+  releaseUrl: string;
 }
 
 /** Rotating, time-aware friendly greetings. */
@@ -60,7 +66,15 @@ function pickGreeting(): GreetingOption {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-export function Landing({ particlesExiting = false }: { particlesExiting?: boolean }) {
+export function Landing({
+  particlesExiting = false,
+  updateCard = null,
+  onDismissUpdate,
+}: {
+  particlesExiting?: boolean;
+  updateCard?: UpdateCardState | null;
+  onDismissUpdate?: () => void;
+}) {
   const me = useApp((s) => s.me);
   const firstName = (me?.name?.split(/\s+/)[0] || "friend").trim();
   const [sending, setSending] = useState(false);
@@ -121,6 +135,41 @@ export function Landing({ particlesExiting = false }: { particlesExiting?: boole
               onSend={() => setSending(true)}
             />
           </div>
+
+          {updateCard && (
+            <div className="mt-4 w-full max-w-[640px] rounded-2xl border border-line bg-paper-raised px-4 py-3 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-faint">
+                    Update available
+                  </div>
+                  <div className="mt-1 text-[13px] font-medium text-ink">
+                    zWork {updateCard.latestVersion} is ready.
+                  </div>
+                  <div className="mt-1 text-[12px] leading-5 text-ink-muted">
+                    Download the latest release to keep the Linux and macOS app current.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => window.open(updateCard.releaseUrl, "_blank", "noreferrer")}
+                  className="press inline-flex shrink-0 items-center gap-1.5 rounded-full border border-line bg-paper px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-paper-sunken"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  Release
+                </button>
+                {onDismissUpdate && (
+                  <button
+                    type="button"
+                    onClick={onDismissUpdate}
+                    className="press inline-flex shrink-0 items-center gap-1.5 rounded-full border border-line bg-paper px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:bg-paper-sunken hover:text-ink"
+                  >
+                    Later
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

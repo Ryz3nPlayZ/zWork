@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import appPackage from "../package.json";
 import { Sidebar } from "./components/Sidebar";
 import { Landing } from "./components/Landing";
@@ -13,6 +13,7 @@ import { cn } from "./lib/cn";
 
 export default function App() {
   const appVersion = appPackage.version;
+  const releaseRepo = "https://api.github.com/repos/Ryz3nPlayZ/zWork/releases/latest";
   const bootstrap = useApp((s) => s.bootstrap);
   const view = useApp((s) => s.view);
   const active = useApp((s) => s.activeChatId);
@@ -23,22 +24,62 @@ export default function App() {
   const setView = useApp((s) => s.setView);
   const setSearchOpen = useApp((s) => s.setSearchOpen);
   const onboardingDone = useApp((s) => s.onboardingDone);
-  const [showUpdateNotice, setShowUpdateNotice] = useState(false);
+  const [updateCard, setUpdateCard] = useState<{ latestVersion: string; releaseUrl: string } | null>(null);
 
   useEffect(() => {
     void bootstrap();
   }, [bootstrap]);
 
+  const currentVersionParts = useMemo(() => parseVersion(appVersion), [appVersion]);
+
   useEffect(() => {
-    try {
-      const seenVersion = window.localStorage.getItem("zwork:last-seen-version");
-      if (seenVersion !== appVersion) {
-        setShowUpdateNotice(true);
+    let cancelled = false;
+
+    async function checkForUpdates() {
+      try {
+        const r = await fetch(releaseRepo, {
+          headers: { accept: "application/vnd.github+json" },
+        });
+        if (!r.ok) return;
+        const data = (await r.json()) as { tag_name?: string; html_url?: string };
+        const latestTag = (data.tag_name || "").trim();
+        const latestVersion = normalizeVersion(latestTag);
+        if (!latestVersion) return;
+
+        const latestParts = parseVersion(latestVersion);
+        if (compareVersions(latestParts, currentVersionParts) <= 0) return;
+
+        const releaseUrl = data.html_url || `https://github.com/Ryz3nPlayZ/zWork/releases/latest`;
+        const dismissed = window.localStorage.getItem("zwork:dismissed-update");
+        if (dismissed === latestVersion) return;
+        if (!cancelled) {
+          setUpdateCard({ latestVersion, releaseUrl });
+        }
+      } catch {
+        /* ignore */
       }
-    } catch {
-      setShowUpdateNotice(false);
     }
-  }, [appVersion]);
+
+    void checkForUpdates();
+    const interval = window.setInterval(() => {
+      void checkForUpdates();
+    }, 6 * 60 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [currentVersionParts]);
+
+  const dismissUpdate = () => {
+    if (updateCard) {
+      try {
+        window.localStorage.setItem("zwork:dismissed-update", updateCard.latestVersion);
+      } catch {
+        /* ignore */
+      }
+    }
+    setUpdateCard(null);
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -90,15 +131,6 @@ export default function App() {
     return <div className="h-screen w-screen bg-paper" />;
   }
 
-  const dismissUpdateNotice = () => {
-    try {
-      window.localStorage.setItem("zwork:last-seen-version", appVersion);
-    } catch {
-      /* ignore */
-    }
-    setShowUpdateNotice(false);
-  };
-
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-paper">
       <Sidebar />
@@ -123,49 +155,38 @@ export default function App() {
                   particlesExiting ? "opacity-0" : "opacity-100",
                 )}
               >
-                <Landing particlesExiting={particlesExiting} />
+                <Landing
+                  particlesExiting={particlesExiting}
+                  updateCard={updateCard}
+                  onDismissUpdate={updateCard ? dismissUpdate : undefined}
+                />
               </div>
             )}
           </>
         )}
       </main>
       {artifactPanelOpen && <ArtifactPanel />}
-      {showUpdateNotice && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/35 px-4">
-          <div className="w-full max-w-md rounded-3xl border border-line bg-paper-raised p-5 shadow-[0_24px_80px_rgba(0,0,0,0.18)]">
-            <div className="text-[10.5px] font-semibold uppercase tracking-[0.22em] text-ink-faint">
-              Update available
-            </div>
-            <div className="mt-2 text-[18px] font-semibold tracking-tight text-ink">
-              zWork has been updated.
-            </div>
-            <p className="mt-2 text-[13px] leading-6 text-ink-muted">
-              You’re on version <span className="font-medium text-ink">{appVersion}</span>.
-              Reload the app to pick up the latest changes.
-            </p>
-            <div className="mt-5 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={dismissUpdateNotice}
-                className="rounded-full border border-line bg-paper px-3.5 py-2 text-[12.5px] font-medium text-ink-muted hover:bg-line/40 hover:text-ink"
-              >
-                Later
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  dismissUpdateNotice();
-                  window.location.reload();
-                }}
-                className="rounded-full bg-ink px-3.5 py-2 text-[12.5px] font-medium text-paper hover:bg-ink/90"
-              >
-                Reload now
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
       <SearchModal />
     </div>
   );
+}
+
+function normalizeVersion(value: string): string {
+  return value.replace(/^v/i, "").trim();
+}
+
+function parseVersion(value: string): number[] {
+  return normalizeVersion(value)
+    .split(".")
+    .map((part) => Number.parseInt(part.replace(/[^\d].*$/, ""), 10) || 0);
+}
+
+function compareVersions(a: number[], b: number[]): number {
+  const n = Math.max(a.length, b.length);
+  for (let i = 0; i < n; i += 1) {
+    const av = a[i] ?? 0;
+    const bv = b[i] ?? 0;
+    if (av !== bv) return av - bv;
+  }
+  return 0;
 }
