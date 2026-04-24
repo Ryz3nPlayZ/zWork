@@ -1,208 +1,63 @@
 # zWork
 
-zWork is a desktop AI work assistant built to do real work on a user's machine:
-read files, write files, run commands, use skills, and manage ongoing work
-through a native app interface.
+Your AI assistant that lives on your desktop and actually gets things done.
 
-This repository is the **source tree only**. Build outputs, runtime state,
-personal settings, chats, generated files, and local workspaces are intentionally
-kept out of git.
+zWork is a desktop app that works like a chat — but instead of just answering questions, it can take action on your computer. Organize files, research topics, fill out forms, create documents, and handle the repetitive stuff you don't want to.
+
+Just describe what you need. zWork figures out the rest.
 
 ![made-with-tauri](https://img.shields.io/badge/built%20with-Tauri%202-black?style=flat-square)
 ![made-with-fastapi](https://img.shields.io/badge/backend-FastAPI-black?style=flat-square)
 ![made-with-react](https://img.shields.io/badge/frontend-React%20%2B%20TS-black?style=flat-square)
 
-## V1 focus
+## What it can do
 
-zWork v1 is focused on functional desktop-assistant features:
+- **Chat naturally** — tell it what you need in plain language
+- **Work with your files** — read, write, move, rename, and organize
+- **Create documents** — reports, spreadsheets, summaries, and more
+- **Browse the web** — research, compare, extract, and summarize
+- **Run commands** — automate tasks you'd normally type out
+- **Remember context** — picks up where you left off across sessions
+- **Use skills** — built-in abilities for specialized tasks like document creation and data work
 
-- chat-first task execution
-- local file and command workflows
-- reusable skills/playbooks
-- personalization and memory
-- model/provider flexibility
+## Install
 
-The current product emphasis is capability and reliability first, with UI
-polish following after launch.
+### Linux
 
-## Architecture
-
-zWork has three main layers:
-
-- `app/` — Tauri desktop shell + React/TypeScript UI
-- `sidecar/` — Python backend that handles chat orchestration, tool execution,
-  settings, persistence, and provider integration
-- `zWork-Skills/` — the shipped skills library discovered at runtime from
-  `SKILL.md` files
-
-High-level request flow:
-
-1. The Tauri app opens the frontend and starts the backend.
-2. The frontend streams chat requests to the FastAPI server.
-3. The backend builds the system prompt, resolves the selected model, and runs
-   the tool/skill loop.
-4. Tool activity and streamed output are sent back to the UI in real time.
-
-## Repository layout
-
-```text
-app/                   Desktop frontend (Tauri + React + TS)
-  src/                 React UI
-  src-tauri/           Rust shell that starts the backend
-
-sidecar/               Python backend
-  agent/               providers, tools, skills, settings, detection
-  core/                planning / execution primitives
-  server.py            FastAPI API used by the desktop app
-
-zWork-Skills/          Runtime skills library
-tests/                 Backend unit tests
-BENCHMARKS.md          Agent benchmark tasks
-desktop-agent-prd.md   Product brief / product direction
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install.sh | bash
 ```
 
-## Runtime data
+### macOS
 
-zWork stores user-specific runtime state outside the repo under `~/.zwork/` by
-default, including:
+Download the latest `.dmg` from [GitHub Releases](https://github.com/Ryz3nPlayZ/zWork/releases), open it, and drag zWork to your Applications folder.
 
-- `settings.json`
-- `chats/`
-- `projects/`
-- `memory.md`
-- `zwork.md`
-- `workspace/` for generated user work
-- logs and other runtime artifacts
+## Example tasks
 
-This keeps the repository clean and makes packaged desktop behavior match local
-development behavior more closely.
+> "Rename all these files based on what's inside them."
 
-## Skills library
+> "Summarize these tabs into a one-page brief and save it."
 
-The runtime skills library is loaded from `zWork-Skills/`.
+> "Extract the tracking numbers from this page and put them in a spreadsheet."
 
-Examples currently shipped in this repo include:
+> "Draft a follow-up email based on these meeting notes."
 
-- `anthropic-skills/docx`
-- `anthropic-skills/pdf`
-- `anthropic-skills/xlsx`
-- `anthropic-skills/frontend-design`
-- `anthropic-skills/web-artifacts-builder`
-- `uiux-pro-max`
+> "Organize my Downloads folder by file type."
 
-The backend discovers skills by walking `zWork-Skills/` for `SKILL.md` files.
+## Your data stays yours
+
+zWork runs locally on your machine. Your chats, files, and settings live on your computer — not in someone else's cloud.
 
 ## Development
 
-### One-command desktop dev
+If you're building from source:
 
 ```bash
 ./run.sh
 ```
 
-This will:
-
-1. create `.venv/` if missing
-2. install the Python package in editable mode
-3. install frontend dependencies if needed
-4. start the backend on `http://127.0.0.1:8787`
-5. open the Tauri desktop app with the Vite dev server
-
-### Split backend/frontend dev
-
-Backend:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-python3 -m sidecar.server
-```
-
-Frontend:
-
-```bash
-cd app
-npm install
-npm run dev
-```
-
-### Web mode
-
-```bash
-./run-web.sh
-```
-
-This builds the frontend and serves both the API and SPA from the Python
-backend.
-
-## Models and credentials
-
-zWork supports:
-
-- Anthropic-compatible endpoints
-- OpenAI-compatible endpoints
-- Claude Code credential reuse
-
-Runtime settings are stored locally in `~/.zwork/settings.json`.
-
-Credentials can come from:
-
-1. local settings saved by the app
-2. Claude Code config reuse
-3. environment variables
-
-## Tests
-
-Current backend tests:
-
-```bash
-python3 -m unittest discover -s tests -v
-```
-
-`BENCHMARKS.md` contains higher-level agent tasks used to evaluate product
-behavior beyond unit tests.
-
-## Packaging notes
-
-The desktop shell is built with Tauri, and release packaging is now centered on
-GitHub Releases.
-
-Current packaging path:
-
-- Linux: tar.gz release bundle
-- macOS: DMG
-- backend: packaged sidecar binary staged into `app/src-tauri/binaries/`
-
-Build and install helpers live in `scripts/` and are documented in
-[docs/RELEASES.md](docs/RELEASES.md).
-
-## Git hygiene
-
-This repository is intended to contain:
-
-- source code
-- tests
-- skills
-- product/docs
-
-It is **not** intended to contain:
-
-- virtual environments
-- `node_modules`
-- build artifacts
-- Rust target output
-- local caches
-- local chat history
-- personal config files
-- generated user work
+This sets everything up and opens the desktop app. See [docs/RELEASES.md](docs/RELEASES.md) for build and packaging details.
 
 ## Credits
 
-zWork uses:
-
-- [Tauri](https://tauri.app)
-- [FastAPI](https://fastapi.tiangolo.com)
-- [React](https://react.dev)
-- [Three.js](https://threejs.org)
-- [Anthropic Skills](https://github.com/anthropics/skills)
+zWork is built with [Tauri](https://tauri.app), [FastAPI](https://fastapi.tiangolo.com), [React](https://react.dev), [Three.js](https://threejs.org), and [Anthropic Skills](https://github.com/anthropics/skills).

@@ -62,7 +62,7 @@ The current v1 frontend provides:
 - landing / composer flow
 - chat view with streaming output
 - activity/status updates during tool execution
-- settings for models, credentials, memory, personalization, and projects
+- settings for models, credentials, memory, and personalization
 - sidebar navigation and chat history
 
 ## Important note
