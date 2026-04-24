@@ -83,40 +83,45 @@ jobs:
         id: version
         run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
-      - name: Generate release notes
-        id: notes
+      - name: Build release body
         run: |
-          version="${{ steps.version.outputs tag }}"
-          # Extract changelog section for this version
-          section=$(sed -n "/^## ${version#v}/,/^## /{ /^## /!p }" CHANGELOG.md | head -n -1)
-          cat > /tmp/release-body.md << 'HEADER'
-          Download zWork for your platform:
+          VERSION="${{ steps.version.outputs.tag }}"
+          VERSION_NUM="${VERSION#v}"
+          python3 -c "
+          import re
+          with open('CHANGELOG.md') as f:
+              text = f.read()
+          # extract the section for this version
+          pattern = r'## v' + re.escape('${VERSION_NUM}') + r'\n(.*?)(?=\n## |\Z)'
+          m = re.search(pattern, text, re.DOTALL)
+          changes = m.group(1).strip() if m else 'See CHANGELOG.md for details.'
+          body = '''Download zWork for your platform:
 
           | Platform | File |
           |----------|------|
-          | **Linux** | `zWork-linux-x86_64.AppImage` |
-          | **macOS** | `zWork-macos-x86_64.dmg` |
-          | **Windows** | `zWork-windows-x86_64-setup.exe` |
+          | **Linux** | \`zWork-linux-x86_64.AppImage\` |
+          | **macOS** | \`zWork-macos-x86_64.dmg\` |
+          | **Windows** | \`zWork-windows-x86_64-setup.exe\` |
 
           ### Install
 
-          **Linux** — one command:
-          ```bash
+          **Linux** - one command:
+          \`\`\`bash
           curl -fsSL https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install.sh | bash
-          ```
+          \`\`\`
 
-          **macOS** — download the `.dmg`, open it, drag zWork to Applications.
+          **macOS** - download the \`.dmg\`, open it, drag zWork to Applications.
 
-          **Windows** — download the installer and run it. If you see a SmartScreen warning, click "More info" → "Run anyway".
+          **Windows** - download the installer and run it. If you see a SmartScreen warning, click \"More info\" then \"Run anyway\".
 
           ---
-          HEADER
-          {
-            echo "## What's new"
-            echo ""
-            echo "$section"
-          } >> /tmp/release-body.md
-          echo "file=/tmp/release-body.md" >> "$GITHUB_OUTPUT"
+
+          ## What\'s new
+
+          ''' + changes
+          with open('/tmp/release-body.md', 'w') as f:
+              f.write(body)
+          "
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
