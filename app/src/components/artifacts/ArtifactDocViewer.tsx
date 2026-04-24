@@ -6,14 +6,8 @@ import type { Artifact } from "../../lib/store";
 
 export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
   return (
-    <div className="h-full overflow-auto px-6 py-5">
-      {/* Title */}
-      <h1 className="mb-4 text-[20px] font-bold leading-tight text-ink">
-        {artifact.title}
-      </h1>
-
-      {/* Markdown body */}
-      <article className="text-[13.5px] leading-6 text-ink">
+    <div className="h-full overflow-auto bg-paper px-6 py-5">
+      <article className="max-w-none text-[13.5px] leading-6 text-ink">
         <ReactMarkdown
           remarkPlugins={[remarkGfm, remarkMath]}
           rehypePlugins={[rehypeKatex]}

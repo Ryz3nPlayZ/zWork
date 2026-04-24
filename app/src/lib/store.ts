@@ -43,6 +43,9 @@ export interface Chat {
   needsSetup?: boolean;
   /** Last user message in this chat, used for the retry button. */
   lastUserMessage?: string;
+  /** Chat-scoped artifact panel state. */
+  artifactPanelOpen?: boolean;
+  activeArtifactId?: string | null;
 }
 
 export type View = "chat" | "settings" | "projects";
@@ -180,8 +183,6 @@ interface AppState {
 
   // Artifacts
   artifacts: Artifact[];
-  activeArtifactId: string | null;
-  artifactPanelOpen: boolean;
   openArtifact: (a: Artifact) => void;
   closeArtifactPanel: () => void;
   clearArtifacts: () => void;
@@ -271,17 +272,54 @@ export const useApp = create<AppState>((set, get) => ({
   _abort: null,
 
   artifacts: [],
-  activeArtifactId: null,
-  artifactPanelOpen: false,
   openArtifact: (a) => {
     set((s) => {
+      const chatId = s.activeChatId;
+      if (!chatId) return s;
       const exists = s.artifacts.find((x) => x.id === a.id);
       const artifacts = exists ? s.artifacts : [...s.artifacts, a];
-      return { artifacts, activeArtifactId: a.id, artifactPanelOpen: true };
+      const chat = s.chats[chatId];
+      if (!chat) return { artifacts };
+      return {
+        artifacts,
+        chats: {
+          ...s.chats,
+          [chatId]: {
+            ...chat,
+            artifactPanelOpen: true,
+            activeArtifactId: a.id,
+          },
+        },
+      };
     });
   },
-  closeArtifactPanel: () => set({ artifactPanelOpen: false, activeArtifactId: null }),
-  clearArtifacts: () => set({ artifacts: [], activeArtifactId: null, artifactPanelOpen: false }),
+  closeArtifactPanel: () =>
+    set((s) => {
+      const chatId = s.activeChatId;
+      if (!chatId) return s;
+      const chat = s.chats[chatId];
+      if (!chat) return s;
+      return {
+        chats: {
+          ...s.chats,
+          [chatId]: {
+            ...chat,
+            artifactPanelOpen: false,
+            activeArtifactId: null,
+          },
+        },
+      };
+    }),
+  clearArtifacts: () =>
+    set((s) => ({
+      artifacts: [],
+      chats: Object.fromEntries(
+        Object.entries(s.chats).map(([id, chat]) => [
+          id,
+          { ...chat, artifactPanelOpen: false, activeArtifactId: null },
+        ]),
+      ),
+    })),
 
   projects: [],
   activeProjectId: null,
@@ -432,6 +470,8 @@ export const useApp = create<AppState>((set, get) => ({
               updatedAt: full.updated_at,
               messages,
               activities: [],
+              artifactPanelOpen: false,
+              activeArtifactId: null,
             },
           },
         }));
@@ -446,6 +486,8 @@ export const useApp = create<AppState>((set, get) => ({
               messages: [],
               error: String(e),
               activities: [],
+              artifactPanelOpen: false,
+              activeArtifactId: null,
             },
           },
         }));
@@ -579,6 +621,8 @@ export const useApp = create<AppState>((set, get) => ({
           status: "Thinking",
           lastUserMessage: userMsgText,
           activities: [],
+          artifactPanelOpen: false,
+          activeArtifactId: null,
         };
       return {
         chats: { ...s.chats, [localId]: chat },

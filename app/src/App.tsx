@@ -17,6 +17,7 @@ export default function App() {
   const view = useApp((s) => s.view);
   const active = useApp((s) => s.activeChatId);
   const chat = useApp((s) => (active ? s.chats[active] : undefined));
+  const artifactPanelOpen = !!(view === "chat" && active && chat?.artifactPanelOpen);
   const openLanding = useApp((s) => s.openLanding);
   const toggleSidebar = useApp((s) => s.toggleSidebar);
   const setView = useApp((s) => s.setView);
@@ -128,7 +129,7 @@ export default function App() {
           </>
         )}
       </main>
-      <ArtifactPanel />
+      {artifactPanelOpen && <ArtifactPanel />}
       {showUpdateNotice && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/35 px-4">
           <div className="w-full max-w-md rounded-3xl border border-line bg-paper-raised p-5 shadow-[0_24px_80px_rgba(0,0,0,0.18)]">
