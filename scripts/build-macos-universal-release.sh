@@ -26,6 +26,6 @@ lipo -create "$X64_BACKEND" "$ARM64_BACKEND" -output "$UNIVERSAL_BACKEND"
 chmod +x "$UNIVERSAL_BACKEND"
 
 cd "$ROOT_DIR/app"
-npm run tauri -- build --bundles dmg --target universal-apple-darwin --ci
+npm run tauri -- build --bundles app,dmg --target universal-apple-darwin --ci
 
 "$ROOT_DIR/scripts/package-release.sh" macos universal-apple-darwin
