@@ -33,6 +33,9 @@
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
+    "macOS": {
+      "minimumSystemVersion": "10.13"
+    },
     "externalBin": ["binaries/zwork-backend"],
     "targets": "all",
     "icon": [
@@ -45,7 +48,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU0MzdBMDU3QTNEODJGRUIKUldUckw5aWpWNkEzNU5pYWoxWFFBK2VMekZpNStPRnZKeXdCaFFQTTg1eW5heTZCdXYrY3A0elIK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQyNjFFODFFMDk0MDEzQzUKUldURkUwQUpIdWhoMGkrSThWeHdseXB1ZTVvWFBCV2MrRXhIU1RJRVZkMm4wR0F0Q3pBR1d0VzcK",
       "endpoints": [
         "https://github.com/Ryz3nPlayZ/zWork/releases/latest/download/latest.json"
       ],

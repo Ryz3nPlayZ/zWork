@@ -141,6 +141,13 @@ cd app
 npx tauri signer generate --ci -p '' -w /tmp/zwork-updater.key
 ```
 
+On this machine the current keypair lives at:
+
+```text
+~/.tauri/zwork-updater.key
+~/.tauri/zwork-updater.key.pub
+```
+
 The homepage update card uses the updater first and falls back to the GitHub
 release page only if the native updater is unavailable.
 
