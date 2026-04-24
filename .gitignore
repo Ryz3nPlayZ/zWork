@@ -22,6 +22,10 @@ app/workspace/
 # ===== Rust / Tauri =====
 app/src-tauri/target/
 app/src-tauri/gen/
+app/src-tauri/binaries/*
+!app/src-tauri/binaries/zwork-backend-x86_64-unknown-linux-gnu
+.release/
+dist/
 
 # ===== zWork runtime state =====
 .sidecar/

@@ -5,23 +5,64 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use tauri::{Manager, RunEvent};
+use tauri_plugin_shell::process::{CommandChild, CommandEvent};
+use tauri_plugin_shell::ShellExt;
 
-/// Managed handle to the Python backend child process.
-/// Wrapped in a Mutex<Option<Child>> so we can kill it cleanly on exit.
-struct Backend(Mutex<Option<Child>>);
+enum BackendChild {
+    Packaged(CommandChild),
+    Dev(Child),
+}
 
-/// Find the repository root. In dev `cargo run` runs from `app/src-tauri`,
-/// so go up two levels. Packaged builds can override the defaults with
-/// `ZWORK_ROOT` and `ZWORK_PYTHON`.
-fn find_repo_root() -> Option<PathBuf> {
-    // 1) Env override
+impl BackendChild {
+    fn shutdown(self) {
+        match self {
+            BackendChild::Packaged(child) => {
+                let _ = child.kill();
+            }
+            BackendChild::Dev(mut child) => {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
+}
+
+/// Managed handle to the Python or packaged backend process.
+struct Backend(Mutex<Option<BackendChild>>);
+
+fn append_log(msg: &str) {
+    use std::io::Write;
+
+    let mut base = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/tmp"));
+    base.push(".zwork");
+    let _ = std::fs::create_dir_all(&base);
+    base.push("backend.log");
+
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(base) {
+        let _ = writeln!(f, "[{}] {}", timestamp(), msg);
+    }
+}
+
+fn timestamp() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    secs.to_string()
+}
+
+fn find_dev_repo_root() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("ZWORK_ROOT") {
         let p = PathBuf::from(p);
-        if p.join("sidecar").is_dir() {
+        if p.join("sidecar").is_dir() && p.join(".venv").is_dir() {
             return Some(p);
         }
     }
-    // 2) Walk up from the current exe's directory
+
     if let Ok(exe) = std::env::current_exe() {
         let mut cur = exe.parent().map(|p| p.to_path_buf());
         while let Some(dir) = cur {
@@ -31,7 +72,7 @@ fn find_repo_root() -> Option<PathBuf> {
             cur = dir.parent().map(|p| p.to_path_buf());
         }
     }
-    // 3) CWD walk-up (useful when launched from a shell)
+
     if let Ok(cwd) = std::env::current_dir() {
         let mut cur: Option<PathBuf> = Some(cwd);
         while let Some(dir) = cur {
@@ -41,29 +82,18 @@ fn find_repo_root() -> Option<PathBuf> {
             cur = dir.parent().map(|p| p.to_path_buf());
         }
     }
-    // 4) Fallback: ~/zwork
+
     if let Ok(home) = std::env::var("HOME") {
         let p = PathBuf::from(home).join("zwork");
-        if p.join("sidecar").is_dir() {
+        if p.join("sidecar").is_dir() && p.join(".venv").is_dir() {
             return Some(p);
         }
     }
+
     None
 }
 
-fn log_path() -> PathBuf {
-    let mut base = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"));
-    base.push(".zwork");
-    let _ = std::fs::create_dir_all(&base);
-    base.push("backend.log");
-    base
-}
-
 fn python_executable(root: &PathBuf) -> PathBuf {
-    // Allow packaged builds to point at a bundled interpreter instead of the
-    // repo-local .venv. This keeps developer and release launch paths separate.
     if let Ok(value) = std::env::var("ZWORK_PYTHON") {
         return PathBuf::from(value);
     }
@@ -81,41 +111,58 @@ fn python_executable(root: &PathBuf) -> PathBuf {
     PathBuf::from("python3")
 }
 
-fn append_log(msg: &str) {
-    use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_path())
-    {
-        let _ = writeln!(f, "[{}] {}", chrono_like_timestamp(), msg);
-    }
-}
-
-fn chrono_like_timestamp() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    format!("{}", secs)
-}
-
-fn spawn_backend() -> Option<Child> {
-    let root = match find_repo_root() {
-        Some(r) => r,
-        None => {
-            append_log("find_repo_root() returned None — backend not started.");
+fn start_packaged_backend(app: &tauri::AppHandle) -> Option<BackendChild> {
+    let mut sidecar = match app.shell().sidecar("zwork-backend") {
+        Ok(cmd) => cmd,
+        Err(err) => {
+            append_log(&format!("sidecar lookup failed: {err}"));
             return None;
         }
     };
+
+    sidecar = sidecar.env("PYTHONUNBUFFERED", "1");
+
+    match sidecar.spawn() {
+        Ok((mut rx, child)) => {
+            append_log("Spawning packaged backend");
+            tauri::async_runtime::spawn(async move {
+                while let Some(event) = rx.recv().await {
+                    match event {
+                        CommandEvent::Stdout(line) => {
+                            append_log(&format!("[backend stdout] {}", String::from_utf8_lossy(&line)));
+                        }
+                        CommandEvent::Stderr(line) => {
+                            append_log(&format!("[backend stderr] {}", String::from_utf8_lossy(&line)));
+                        }
+                        _ => {}
+                    }
+                }
+            });
+            Some(BackendChild::Packaged(child))
+        }
+        Err(err) => {
+            append_log(&format!("Packaged sidecar spawn failed: {err}"));
+            None
+        }
+    }
+}
+
+fn start_dev_backend() -> Option<BackendChild> {
+    let root = find_dev_repo_root()?;
     let python_exe = python_executable(&root);
 
-    // Write stdout/stderr to a log file so we can diagnose launch issues.
     let log = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(log_path())
+        .open({
+            let mut path = std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/tmp"));
+            path.push(".zwork");
+            let _ = std::fs::create_dir_all(&path);
+            path.push("backend.log");
+            path
+        })
         .ok();
 
     let mut cmd = Command::new(&python_exe);
@@ -123,6 +170,7 @@ fn spawn_backend() -> Option<Child> {
         .arg("-m")
         .arg("sidecar.server")
         .env("PYTHONUNBUFFERED", "1");
+
     if let Some(f) = log {
         if let Ok(f2) = f.try_clone() {
             cmd.stdout(Stdio::from(f));
@@ -133,38 +181,50 @@ fn spawn_backend() -> Option<Child> {
     }
 
     append_log(&format!(
-        "Spawning backend: python={} root={}",
+        "Spawning dev backend: python={} root={}",
         python_exe.display(),
         root.display()
     ));
 
     match cmd.spawn() {
         Ok(child) => {
-            append_log(&format!("Backend spawned pid={}", child.id()));
-            Some(child)
+            append_log(&format!("Dev backend spawned pid={}", child.id()));
+            Some(BackendChild::Dev(child))
         }
         Err(err) => {
-            append_log(&format!("Spawn failed: {err}"));
+            append_log(&format!("Dev backend spawn failed: {err}"));
             None
         }
     }
 }
 
-fn main() {
-    let backend_child = spawn_backend();
+fn spawn_backend(app: &tauri::AppHandle) -> Option<BackendChild> {
+    if let Some(child) = start_packaged_backend(app) {
+        return Some(child);
+    }
+    start_dev_backend()
+}
 
+fn main() {
     let app = tauri::Builder::default()
-        .manage(Backend(Mutex::new(backend_child)))
+        .plugin(tauri_plugin_shell::init())
+        .manage(Backend(Mutex::new(None)))
         .build(tauri::generate_context!())
         .expect("error while building zWork");
 
+    let app_handle = app.handle().clone();
+    if let Some(backend) = app_handle.try_state::<Backend>() {
+        if let Ok(mut guard) = backend.0.lock() {
+            *guard = spawn_backend(&app_handle);
+        }
+    }
+
     app.run(|app_handle, event| {
-        if let RunEvent::ExitRequested { .. } | RunEvent::Exit = event {
+        if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
             if let Some(backend) = app_handle.try_state::<Backend>() {
                 if let Ok(mut guard) = backend.0.lock() {
-                    if let Some(mut child) = guard.take() {
-                        let _ = child.kill();
-                        let _ = child.wait();
+                    if let Some(child) = guard.take() {
+                        child.shutdown();
                         eprintln!("[zwork] backend stopped");
                     }
                 }

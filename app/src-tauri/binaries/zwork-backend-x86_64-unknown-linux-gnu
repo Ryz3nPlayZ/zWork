@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+echo "zWork backend placeholder. Run scripts/build-backend.sh before packaging." >&2
+exit 1

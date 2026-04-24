@@ -48,8 +48,12 @@ npm run tauri dev
 
 - In development, the frontend runs on Vite and proxies API requests to the
   backend.
-- In desktop mode, the Tauri shell starts the backend automatically.
+- In desktop mode, the Tauri shell starts a packaged backend binary when one is
+  available and falls back to the local Python backend in development.
 - User-specific runtime state lives outside the repo under `~/.zwork/`.
+
+For release packaging and GitHub Release install flows, see
+[docs/RELEASES.md](../docs/RELEASES.md).
 
 ## Frontend scope
 

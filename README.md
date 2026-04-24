@@ -165,10 +165,17 @@ behavior beyond unit tests.
 
 ## Packaging notes
 
-The desktop shell is built with Tauri, but production packaging still depends on
-how the Python backend is bundled and launched. The repo is structured so the
-runtime user state lives outside the source tree; final packaging should keep
-that behavior.
+The desktop shell is built with Tauri, and release packaging is now centered on
+GitHub Releases.
+
+Current packaging path:
+
+- Linux: tar.gz release bundle
+- macOS: DMG
+- backend: packaged sidecar binary staged into `app/src-tauri/binaries/`
+
+Build and install helpers live in `scripts/` and are documented in
+[docs/RELEASES.md](docs/RELEASES.md).
 
 ## Git hygiene
 

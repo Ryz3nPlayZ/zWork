@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 
@@ -31,12 +32,22 @@ def repo_root() -> Path:
     Best-effort repo root. The desktop app sets CWD to the repo before
     launching the server; in dev we run from the repo as well.
     `zwork.md` and `zWork-Skills/` both live here.
+
+    Packaged PyInstaller builds can expose bundled data through ``_MEIPASS``;
+    when present, treat that as the root that owns the shipped skills tree.
     """
     env = os.environ.get("ZWORK_ROOT")
     if env:
         p = Path(env).expanduser()
         if p.exists():
             return p
+
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        p = Path(bundle_root)
+        if (p / "zWork-Skills").exists():
+            return p
+
     return Path.cwd()
 
 

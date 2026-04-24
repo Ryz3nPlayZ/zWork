@@ -5,7 +5,7 @@
   "identifier": "com.zwork.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "bash ../scripts/build-backend.sh && npm run build",
     "devUrl": "http://127.0.0.1:1420",
     "frontendDist": "../dist"
   },
@@ -32,6 +32,7 @@
   },
   "bundle": {
     "active": true,
+    "externalBin": ["binaries/zwork-backend"],
     "targets": "all",
     "icon": [
       "icons/32x32.png",
