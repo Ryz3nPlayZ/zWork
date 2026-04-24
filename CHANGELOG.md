@@ -2,6 +2,16 @@
 
 All notable changes to zWork are documented here.
 
+## v0.3.1
+
+**Patch onboarding performance and first-run model setup.**
+
+- Replaced the onboarding WebGL dither background with a lightweight CSS backdrop
+- Restricted the pre-v1 Ollama path to MiniMax M2.7 Cloud
+- Repaired stale/default model selection after onboarding and provider refreshes
+- Persisted onboarding completion before personalization generation can fail or stall
+- Improved onboarding headline spacing and card readability
+
 ## v0.3.0
 
 **Pre-v1 desktop release for macOS, Windows, and Linux.**

@@ -30,6 +30,10 @@ from .tools import TOOL_SCHEMAS, execute_tool, parse_tool_calls
 
 
 MAX_TURNS = 24
+PREV1_OLLAMA_MODEL_ID = "minimax-m2.7:cloud"
+PREV1_OLLAMA_ZWORK_ID = "ollama-minimax-m2-7-cloud"
+PREV1_OLLAMA_MODEL_NAME = "MiniMax M2.7 Cloud"
+PREV1_OLLAMA_BASE_URL = "https://ollama.com/v1"
 
 
 def _max_tokens_for(model_id: str) -> int:
@@ -67,6 +71,46 @@ def _is_local_ollama_base(url: str) -> bool:
         base.startswith("http://localhost:11434")
         or base.startswith("http://127.0.0.1:11434")
     )
+
+
+def is_ollama_cloud_base(url: str) -> bool:
+    base = (url or "").strip().rstrip("/").lower()
+    return base in ("https://ollama.com/v1", "https://api.ollama.com/v1") or "ollama.com" in base
+
+
+def _has_ollama_cloud_setup(s: settings_mod.Settings) -> bool:
+    configured_base = (s.provider_config.get("openai", {}).get("base_url") or "").strip()
+    if s.api_keys.get("openai") and is_ollama_cloud_base(configured_base):
+        return True
+    return any(
+        m.get("credential") == "openai"
+        and m.get("model_id") == PREV1_OLLAMA_MODEL_ID
+        and is_ollama_cloud_base(m.get("base_url_override") or configured_base)
+        for m in s.custom_models
+    )
+
+
+def prev1_ollama_model(s: settings_mod.Settings) -> dict | None:
+    """The first pre-v1 release intentionally exposes one known-good model.
+
+    Older onboarding builds could persist other Ollama Cloud catalog entries.
+    Returning a synthesized stable model keeps the UI and chat backend usable
+    after users update from those builds.
+    """
+    if not _has_ollama_cloud_setup(s):
+        return None
+    cred = resolve("openai", s, PREV1_OLLAMA_BASE_URL)
+    return {
+        "id": PREV1_OLLAMA_ZWORK_ID,
+        "name": PREV1_OLLAMA_MODEL_NAME,
+        "subtitle": f"Ollama Cloud · {PREV1_OLLAMA_BASE_URL}",
+        "shape": "openai",
+        "credential": "openai",
+        "model_id": PREV1_OLLAMA_MODEL_ID,
+        "base_url_override": PREV1_OLLAMA_BASE_URL,
+        "configured": bool(cred),
+        "synthesized": True,
+    }
 
 
 def resolve(credential: str, s: settings_mod.Settings, override_base_url: str = "") -> Optional[Credentials]:
@@ -145,6 +189,10 @@ def credential_status(s: settings_mod.Settings) -> dict:
 # ---------------- Dynamic model list ----------------
 
 def available_models(s: settings_mod.Settings) -> list[dict]:
+    prev1 = prev1_ollama_model(s)
+    if prev1 is not None:
+        return [prev1]
+
     out: list[dict] = []
 
     cc = resolve("claude_code", s)

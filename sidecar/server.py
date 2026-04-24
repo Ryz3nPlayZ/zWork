@@ -409,6 +409,27 @@ def _fallback_zwork_md(user_name: str, qna_text: str, answers: list[OnboardAnswe
 """
 
 
+def _write_onboarding_complete(answers: list[OnboardAnswer], user_name: str, zmd: Path) -> None:
+    home_mod.onboarding_path().write_text(
+        json.dumps(
+            {
+                "completed": True,
+                "skipped": False,
+                "display_name": user_name,
+                "answers": [
+                    {
+                        "key": a.key,
+                        "question": a.question,
+                        "answer": a.answer,
+                    }
+                    for a in answers
+                ],
+                "zwork_md_path": str(zmd),
+            }
+        )
+    )
+
+
 @app.post("/api/onboard/complete")
 async def onboard_complete(body: OnboardBody) -> dict:
     # Save any provider credential the user picked.
@@ -422,6 +443,12 @@ async def onboard_complete(body: OnboardBody) -> dict:
         model_id = cred.get("model_id", "")
         model_name = cred.get("model_name", model_id)
 
+        if credkey == "openai" and providers.is_ollama_cloud_base(base_url):
+            shape = "openai"
+            base_url = providers.PREV1_OLLAMA_BASE_URL
+            model_id = providers.PREV1_OLLAMA_MODEL_ID
+            model_name = providers.PREV1_OLLAMA_MODEL_NAME
+
         if credkey in ("anthropic", "openai") and api_key:
             s.api_keys[credkey] = api_key
         if base_url:
@@ -429,7 +456,7 @@ async def onboard_complete(body: OnboardBody) -> dict:
         if model_id:
             m = settings_mod.upsert_custom_model(
                 s,
-                id=None,
+                id=providers.PREV1_OLLAMA_ZWORK_ID if model_id == providers.PREV1_OLLAMA_MODEL_ID else None,
                 name=model_name,
                 shape=shape,
                 credential=credkey,
@@ -441,29 +468,22 @@ async def onboard_complete(body: OnboardBody) -> dict:
 
     # Build a zwork.md via LLM (or fallback) and save at repo root.
     user_name = _preferred_name_from_answers(body.answers) or _display_name()
-    md = await _generate_zwork_md(body.answers, user_name)
     zmd = home_mod.zwork_md_path()
     zmd.parent.mkdir(parents=True, exist_ok=True)
+    _write_onboarding_complete(body.answers, user_name, zmd)
+
+    try:
+        md = await _generate_zwork_md(body.answers, user_name)
+    except Exception:
+        qna_lines = [
+            f"- {a.question}\n  → {a.answer}"
+            for a in body.answers
+            if a.answer and a.answer.strip()
+        ]
+        md = _fallback_zwork_md(user_name, "\n".join(qna_lines), body.answers)
     zmd.write_text(md, encoding="utf-8")
 
-    home_mod.onboarding_path().write_text(
-        json.dumps(
-            {
-                "completed": True,
-                "skipped": False,
-                "display_name": user_name,
-                "answers": [
-                    {
-                        "key": a.key,
-                        "question": a.question,
-                        "answer": a.answer,
-                    }
-                    for a in body.answers
-                ],
-                "zwork_md_path": str(zmd),
-            }
-        )
-    )
+    _write_onboarding_complete(body.answers, user_name, zmd)
     return {"ok": True, "zwork_md_path": str(zmd), "preview": md}
 
 
@@ -475,10 +495,17 @@ def integrations() -> dict:
 @app.get("/api/providers")
 def provider_status() -> dict:
     s = settings_mod.load()
+    models = providers.available_models(s)
+    default_model = s.default_model
+    if not any(m["id"] == default_model for m in models):
+        default_model = models[0]["id"] if models else ""
+        if default_model:
+            s.default_model = default_model
+            settings_mod.save(s)
     return {
         "credentials": providers.credential_status(s),
-        "models": providers.available_models(s),
-        "default_model": s.default_model,
+        "models": models,
+        "default_model": default_model,
     }
 
 
@@ -780,9 +807,9 @@ def _chat_public(c: chatstore.Chat) -> dict[str, Any]:
 # ---------------- Chat stream ----------------
 
 def _resolve_model_id(requested: str | None, s: settings_mod.Settings) -> str | None:
-    if requested:
+    if requested and providers.lookup_model(requested, s):
         return requested
-    if s.default_model:
+    if s.default_model and providers.lookup_model(s.default_model, s):
         return s.default_model
     # Auto-fallback to the first available model
     avail = providers.available_models(s)

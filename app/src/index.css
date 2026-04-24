@@ -197,6 +197,34 @@ textarea {
     "Iowan Old Style",
     "Times New Roman",
     serif;
+  -webkit-font-smoothing: antialiased;
+  font-optical-sizing: auto;
+  text-rendering: geometricPrecision;
+}
+
+@keyframes onboarding-drift {
+  0% {
+    transform: translate3d(-1.5%, -0.5%, 0) rotate(0deg) scale(1);
+  }
+
+  50% {
+    transform: translate3d(1.5%, 1%, 0) rotate(4deg) scale(1.03);
+  }
+
+  100% {
+    transform: translate3d(-1.5%, -0.5%, 0) rotate(0deg) scale(1);
+  }
+}
+
+.animate-onboarding-drift {
+  animation: onboarding-drift 28s ease-in-out infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-onboarding-drift {
+    animation: none;
+  }
 }
 
 /* --------------------------------------------------------

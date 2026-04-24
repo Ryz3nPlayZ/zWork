@@ -6,7 +6,8 @@ import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
 import { useResolvedTheme } from "../lib/theme";
 import { api, type OnboardingAnswer, type OnboardingCredential } from "../lib/api";
-import Dither from "./Dither";
+
+const PREV1_OLLAMA_MODEL_ID = "minimax-m2.7:cloud";
 
 /* ------------------------------------------------------------------ *
  *  Question model
@@ -251,27 +252,9 @@ export interface ModelChoice {
 export const MODEL_CATALOG: Record<CredentialPreset["id"], ModelChoice[]> = {
   ollama: [
     {
-      id: "qwen3.5:cloud",
-      label: "Qwen 3.5 Cloud",
-      description: "Strong all-round reasoning and multilingual chat.",
-      cost: "Free tier on Ollama Cloud",
-    },
-    {
-      id: "gemma4:31b-cloud",
-      label: "Gemma 4 · 31B",
-      description: "Google's open-weights model — solid general purpose.",
-      cost: "Free tier on Ollama Cloud",
-    },
-    {
-      id: "minimax-m2.7:cloud",
+      id: PREV1_OLLAMA_MODEL_ID,
       label: "MiniMax M2.7",
       description: "Huge context window — great for long docs & code.",
-      cost: "Free tier on Ollama Cloud",
-    },
-    {
-      id: "glm-4.7:cloud",
-      label: "GLM 4.7",
-      description: "Fast, balanced — good default for chat and tools.",
       cost: "Free tier on Ollama Cloud",
     },
   ],
@@ -337,6 +320,7 @@ export function Onboarding() {
   }));
   const [credential, setCredential] = useState<OnboardingCredential | null>(null);
   const [showHelp, setShowHelp] = useState<"ollama" | null>(null);
+  const [error, setError] = useState("");
 
   // Final "Personalizing..." phase
   const [finalizing, setFinalizing] = useState(false);
@@ -367,6 +351,8 @@ export function Onboarding() {
   };
 
   const complete = async () => {
+    if (finalizing) return;
+    setError("");
     setFinalizing(true);
     const payload: OnboardingAnswer[] = QUESTIONS.filter(
       (qq) => qq.kind !== "apikey",
@@ -386,8 +372,8 @@ export function Onboarding() {
       setTimeout(() => setOnboardingDone(true), 900);
     } catch (err) {
       console.error(err);
-      // Still mark done; the user can fix things in Settings.
-      setOnboardingDone(true);
+      setFinalizing(false);
+      setError("Setup did not save. Check the model key/base URL and try again.");
     }
   };
 
@@ -444,23 +430,7 @@ export function Onboarding() {
       ref={rootRef}
       className="onboarding-shell relative flex h-full min-h-screen min-w-0 flex-1 flex-col overflow-hidden bg-paper"
     >
-      {/* Dithered wave background — full-bleed, theme-aware. */}
-      <div className="pointer-events-none absolute inset-0 z-0">
-        <Dither
-          // Re-mount on theme change so the shader uniforms re-init cleanly.
-          key={theme}
-          waveColor={waveColor}
-          baseColor={baseColor}
-          waveSpeed={0.028}
-          waveFrequency={5.8}
-          waveAmplitude={0.34}
-          colorNum={3.7}
-          pixelSize={2}
-          disableAnimation={false}
-          enableMouseInteraction={false}
-          mouseRadius={0.3}
-        />
-      </div>
+      <OnboardingBackdrop theme={theme} baseColor={baseColor} waveColor={waveColor} />
 
       {/* Subtle gradient that fades the dither toward the card side so text
           on the card always has breathing room. */}
@@ -490,7 +460,7 @@ export function Onboarding() {
           transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
           className={cn(
             "relative flex h-full w-full max-w-[520px] flex-col ml-auto",
-            "rounded-2xl border border-line/80 bg-paper-raised/85 backdrop-blur-xl",
+            "rounded-2xl border border-line/80 bg-paper-raised/92 backdrop-blur-lg",
             "shadow-[0_20px_60px_-20px_rgb(var(--shadow)/0.35),0_2px_6px_-2px_rgb(var(--shadow)/0.15)]",
             "overflow-hidden",
           )}
@@ -525,11 +495,11 @@ export function Onboarding() {
                         {q.eyebrow}
                       </span>
                     )}
-                    <h2 className="text-[24px] font-medium leading-snug tracking-tight text-ink md:text-[26px]">
+                    <h2 className="text-[25px] font-medium leading-[1.18] tracking-tight text-ink md:text-[28px]">
                       {q.question}
                     </h2>
                     {q.subtitle && (
-                      <p className="mt-2 text-[13px] leading-5 text-ink-muted">
+                      <p className="mt-2.5 text-[14px] leading-6 text-ink-muted">
                         {q.subtitle}
                       </p>
                     )}
@@ -558,6 +528,11 @@ export function Onboarding() {
                         />
                       )}
                     </div>
+                    {error && (
+                      <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[12.5px] text-red-700 dark:text-red-200">
+                        {error}
+                      </p>
+                    )}
                   </motion.div>
                 </AnimatePresence>
               </MorphContainer>
@@ -645,6 +620,50 @@ function ProgressDots({ step, total }: { step: number; total: number }) {
   );
 }
 
+function OnboardingBackdrop({
+  theme,
+  baseColor,
+  waveColor,
+}: {
+  theme: "light" | "dark";
+  baseColor: [number, number, number];
+  waveColor: [number, number, number];
+}) {
+  const base = toRgb(baseColor);
+  const wave = toRgb(waveColor);
+  const opacity = theme === "dark" ? 0.42 : 0.26;
+
+  return (
+    <div
+      className="pointer-events-none absolute inset-0 z-0 overflow-hidden"
+      aria-hidden="true"
+      style={{
+        backgroundColor: `rgb(${base})`,
+        backgroundImage: [
+          `radial-gradient(circle at 18% 22%, rgb(${wave} / ${opacity}) 0 1px, transparent 1.7px)`,
+          `radial-gradient(circle at 68% 56%, rgb(${wave} / ${opacity * 0.75}) 0 1px, transparent 1.8px)`,
+          `linear-gradient(135deg, rgb(${wave} / ${opacity * 0.4}), transparent 45%)`,
+        ].join(", "),
+        backgroundSize: "10px 10px, 14px 14px, 100% 100%",
+      }}
+    >
+      <div
+        className="absolute -inset-[12%] animate-onboarding-drift opacity-80"
+        style={{
+          background:
+            `conic-gradient(from 210deg at 34% 48%, transparent 0deg, rgb(${wave} / ${opacity}) 70deg, transparent 145deg, rgb(${wave} / ${opacity * 0.45}) 230deg, transparent 315deg)`,
+          filter: "blur(46px)",
+          transform: "translateZ(0)",
+        }}
+      />
+    </div>
+  );
+}
+
+function toRgb(rgb: [number, number, number]) {
+  return rgb.map((v) => Math.round(v * 255)).join(" ");
+}
+
 /** A container that smoothly resizes its height when children change. */
 function MorphContainer({ children }: { children: React.ReactNode }) {
   const outer = useRef<HTMLDivElement>(null);
@@ -699,9 +718,9 @@ function OnboardingVisual() {
           <Logo size={90} className="text-ink" />
         </span>
       </div>
-      <div className="flex items-baseline gap-[0.045em] text-4xl tracking-tight text-ink md:text-5xl lg:text-6xl">
+      <div className="flex flex-wrap items-baseline justify-center gap-x-4 gap-y-1 text-center text-4xl leading-[1.05] tracking-tight text-ink md:text-5xl lg:text-6xl">
         <span>Your agent for</span>
-        <div className="relative -mx-[0.08em] flex h-[1.18em] items-center overflow-hidden px-[0.08em] leading-none">
+        <div className="relative inline-flex h-[1.18em] min-w-[7.4em] items-center overflow-hidden leading-none">
           <span className="invisible italic select-none pointer-events-none">
             getting unstuck
           </span>

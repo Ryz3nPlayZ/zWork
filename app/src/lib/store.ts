@@ -244,6 +244,19 @@ interface AppState {
 const uid = () =>
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
+function pickAvailableModel(providers: ProvidersResponse | null, current = "") {
+  if (!providers) return current;
+  if (current && providers.models.some((m) => m.id === current && m.configured)) {
+    return current;
+  }
+  return (
+    providers.default_model ||
+    providers.models.find((m) => m.configured)?.id ||
+    providers.models[0]?.id ||
+    ""
+  );
+}
+
 export const useApp = create<AppState>((set, get) => ({
   sidebarOpen: true,
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
@@ -388,16 +401,8 @@ export const useApp = create<AppState>((set, get) => ({
         .then((st) => set({ onboardingDone: !!st.completed }))
         .catch(() => set({ onboardingDone: false })),
     ]);
-    // default model: backend default if not chosen, else first configured model
-    if (!get().model) {
-      const p = get().providers;
-      const fallback =
-        p?.default_model ||
-        p?.models.find((m) => m.configured)?.id ||
-        p?.models[0]?.id ||
-        "";
-      if (fallback) set({ model: fallback });
-    }
+    const fallback = pickAvailableModel(get().providers, get().model);
+    if (fallback !== get().model) set({ model: fallback });
   },
 
   refreshChats: async () => {
@@ -412,7 +417,7 @@ export const useApp = create<AppState>((set, get) => ({
   refreshProviders: async () => {
     try {
       const p = await api.providers();
-      set({ providers: p });
+      set((s) => ({ providers: p, model: pickAvailableModel(p, s.model) }));
     } catch {
       /* ignore */
     }
@@ -565,13 +570,8 @@ export const useApp = create<AppState>((set, get) => ({
     // Refresh providers so a newly added key is picked up, then send.
     await get().refreshProviders();
     const p = get().providers;
-    if (p && !get().model) {
-      const fallback = p.default_model
-        || p.models.find((m) => m.configured)?.id
-        || p.models[0]?.id
-        || "";
-      if (fallback) set({ model: fallback });
-    }
+    const fallback = pickAvailableModel(p, get().model);
+    if (fallback !== get().model) set({ model: fallback });
     await get().send(last);
   },
 
