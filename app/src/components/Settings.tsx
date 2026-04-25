@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import appPackage from "../../package.json";
 import {
   ArrowLeft,
   Eye,
@@ -548,6 +549,7 @@ function GeneralPanel({
   settings: ReturnType<typeof useApp.getState>["settings"];
   onSave: (patch: { default_model?: string; use_claude_code_config?: boolean }) => Promise<void>;
 }) {
+  const appVersion = appPackage.version;
   const providers = useApp((s) => s.providers);
   const models = providers?.models ?? [];
   const [defaultModel, setDefaultModel] = useState(settings?.default_model ?? "");
@@ -601,6 +603,15 @@ function GeneralPanel({
                 <span className="text-[11px] font-medium">{opt.label}</span>
               </button>
             ))}
+          </div>
+        </Field>
+      </section>
+
+      <section className="rounded-xl border border-line bg-paper-raised p-4">
+        <Field label="Version" description="The currently installed desktop build.">
+          <div className="inline-flex items-center gap-2 rounded-lg border border-line bg-paper px-3 py-2 text-[12.5px] text-ink">
+            <span className="font-medium">zWork</span>
+            <span className="font-mono text-ink-muted">{appVersion}</span>
           </div>
         </Field>
       </section>

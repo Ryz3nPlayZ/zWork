@@ -1,8 +1,9 @@
 import { Suspense, lazy, useMemo, useState } from "react";
-import { Download, Clock3 } from "lucide-react";
+import { Clock3, Download, ExternalLink, RefreshCw } from "lucide-react";
 import { ChatInput } from "./ChatInput";
 import { useApp } from "../lib/store";
 import { cn } from "../lib/cn";
+import type { UpdateCardState, UpdateProgress } from "../lib/update";
 
 const LogoParticles = lazy(() => import("./LogoParticles").then((m) => ({ default: m.LogoParticles })));
 
@@ -10,11 +11,6 @@ interface GreetingOption {
   text: string;
   /** true = greet with name ("Good morning, Zemu."), false = standalone */
   withName: boolean;
-}
-
-export interface UpdateCardState {
-  latestVersion: string;
-  releaseUrl: string;
 }
 
 /** Rotating, time-aware friendly greetings. */
@@ -70,13 +66,13 @@ function pickGreeting(): GreetingOption {
 export function Landing({
   particlesExiting = false,
   updateCard = null,
-  updateBusy = false,
+  updateProgress = { phase: "idle" },
   onUpdate,
   onDismissUpdate,
 }: {
   particlesExiting?: boolean;
   updateCard?: UpdateCardState | null;
-  updateBusy?: boolean;
+  updateProgress?: UpdateProgress;
   onUpdate?: () => void | Promise<void>;
   onDismissUpdate?: () => void;
 }) {
@@ -85,11 +81,24 @@ export function Landing({
   const [sending, setSending] = useState(false);
 
   const greeting = useMemo(() => pickGreeting(), []);
+  const updateBusy = updateProgress.phase !== "idle" && updateProgress.phase !== "error";
+  const updateLabel =
+    updateProgress.phase === "checking"
+      ? "Checking…"
+      : updateProgress.phase === "downloading"
+        ? updateProgress.totalBytes && updateProgress.totalBytes > 0
+          ? `Updating… ${Math.max(1, Math.min(99, Math.round((updateProgress.downloadedBytes / updateProgress.totalBytes) * 100)))}%`
+          : "Downloading…"
+        : updateProgress.phase === "installing"
+          ? "Installing…"
+          : updateProgress.phase === "relaunching"
+            ? "Relaunching…"
+            : "Update now";
 
   return (
     <div className="relative flex h-full min-w-0 flex-1 flex-col bg-paper">
       {/* Drag-only titlebar */}
-      <div className="titlebar-drag absolute inset-x-0 top-0 h-10" />
+      <div className="titlebar-drag absolute inset-x-0 top-0 h-12" />
 
       {/* Galaxy backdrop behind the welcome block. */}
       <div
@@ -157,20 +166,15 @@ export function Landing({
           </div>
 
           {updateCard && (
-            <div className="mt-4 w-full max-w-[640px] rounded-[22px] border border-line bg-paper-raised px-4 py-3 shadow-sm">
-              <div className="flex items-center justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink-faint">
-                    Update ready
-                  </div>
-                  <div className="mt-1 text-[13px] font-medium text-ink">
-                    zWork {updateCard.latestVersion}
-                  </div>
-                  <div className="mt-1 text-[12px] leading-5 text-ink-muted">
-                    A newer release is available. Update now, then zWork will relaunch.
-                  </div>
+            <div className="mt-4 w-full max-w-[560px] rounded-2xl border border-line bg-paper-raised px-4 py-3 shadow-sm">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="min-w-0 flex-1 text-[12.5px] text-ink">
+                  <span className="font-medium">An update is available.</span>{" "}
+                  <span className="text-ink-muted">
+                    {updateCard.currentVersion} {"->"} {updateCard.latestVersion}
+                  </span>
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
+                <div className="flex shrink-0 items-center gap-2" data-no-drag>
                   <button
                     type="button"
                     onClick={() => {
@@ -183,8 +187,8 @@ export function Landing({
                     disabled={updateBusy}
                     className="press inline-flex items-center gap-1.5 rounded-full bg-ink px-3 py-1.5 text-[12px] font-medium text-paper transition-colors hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <Download className="h-3.5 w-3.5" />
-                    {updateBusy ? "Updating…" : "Update"}
+                    {updateCard.source === "github" ? <ExternalLink className="h-3.5 w-3.5" /> : <Download className="h-3.5 w-3.5" />}
+                    {updateCard.source === "github" && !updateBusy ? "Update now" : updateLabel}
                   </button>
                   {onDismissUpdate && (
                     <button
@@ -193,11 +197,23 @@ export function Landing({
                       className="press inline-flex items-center gap-1.5 rounded-full border border-line bg-paper px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:bg-paper-sunken hover:text-ink"
                     >
                       <Clock3 className="h-3.5 w-3.5" />
-                      Remind me later
+                      Remind me later?
                     </button>
                   )}
                 </div>
               </div>
+              {(updateProgress.phase === "error" || updateBusy) && (
+                <div className="mt-2 flex items-center gap-2 text-[11.5px] text-ink-muted">
+                  <RefreshCw className={cn("h-3.5 w-3.5", updateBusy && "animate-spin")} />
+                  <span>
+                    {updateProgress.phase === "error"
+                      ? updateProgress.message
+                      : updateProgress.phase === "relaunching"
+                        ? "Update installed. Relaunching zWork…"
+                        : "The update is running in-app. Keep zWork open until it relaunches."}
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -36,19 +36,6 @@ export function SearchModal() {
     if (activeIdx >= results.length) setActiveIdx(Math.max(0, results.length - 1));
   }, [results.length, activeIdx]);
 
-  // Global hotkey: Cmd/Ctrl+K toggles
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const mod = e.metaKey || e.ctrlKey;
-      if (mod && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setOpen(!useApp.getState().searchOpen);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [setOpen]);
-
   if (!open) return null;
 
   const selectAt = (idx: number) => {

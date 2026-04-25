@@ -1,9 +1,10 @@
 import { Suspense, lazy, useEffect, useState } from "react";
+import { CheckCircle2, ExternalLink, X } from "lucide-react";
 import appPackage from "../package.json";
 import { Sidebar } from "./components/Sidebar";
 import { Landing } from "./components/Landing";
 import { useApp } from "./lib/store";
-import { detectUpdate, installUpdate } from "./lib/update";
+import { consumeInstalledUpdateNotice, detectUpdate, installUpdate, type UpdateCardState, type UpdateProgress } from "./lib/update";
 import { cn } from "./lib/cn";
 
 const Onboarding = lazy(() => import("./components/Onboarding").then((m) => ({ default: m.Onboarding })));
@@ -26,8 +27,13 @@ export default function App() {
   const setView = useApp((s) => s.setView);
   const setSearchOpen = useApp((s) => s.setSearchOpen);
   const onboardingDone = useApp((s) => s.onboardingDone);
-  const [updateCard, setUpdateCard] = useState<{ latestVersion: string; releaseUrl: string; source: "updater" | "github" } | null>(null);
-  const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateCard, setUpdateCard] = useState<UpdateCardState | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<UpdateProgress>({ phase: "idle" });
+  const [recentUpdateNotice, setRecentUpdateNotice] = useState<{
+    version: string;
+    releaseUrl: string;
+    notes?: string;
+  } | null>(null);
 
   useEffect(() => {
     void bootstrap();
@@ -36,6 +42,10 @@ export default function App() {
   useEffect(() => {
     void loadChatView();
   }, []);
+
+  useEffect(() => {
+    setRecentUpdateNotice(consumeInstalledUpdateNotice(appVersion));
+  }, [appVersion]);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,15 +70,23 @@ export default function App() {
   }, [appVersion]);
 
   const runUpdate = async () => {
-    if (updateBusy) return;
-    setUpdateBusy(true);
+    if (!updateCard) return;
+    if (updateProgress.phase !== "idle" && updateProgress.phase !== "error") return;
+    setUpdateProgress({ phase: "checking" });
     try {
-      const installed = await installUpdate();
-      if (!installed && updateCard?.releaseUrl) {
+      const result = await installUpdate(updateCard, setUpdateProgress);
+      if (!result.ok && updateCard.source === "github" && updateCard.releaseUrl) {
         window.open(updateCard.releaseUrl, "_blank", "noreferrer");
+        setUpdateProgress({ phase: "idle" });
       }
-    } finally {
-      setUpdateBusy(false);
+      if (!result.ok && updateCard.source === "updater") {
+        setUpdateProgress({ phase: "error", message: result.message });
+      }
+    } catch (error) {
+      setUpdateProgress({
+        phase: "error",
+        message: error instanceof Error ? error.message : "Update failed.",
+      });
     }
   };
 
@@ -81,6 +99,7 @@ export default function App() {
       }
     }
     setUpdateCard(null);
+    setUpdateProgress({ phase: "idle" });
   };
 
   useEffect(() => {
@@ -144,9 +163,13 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-paper">
-      <Sidebar />
-      <main className="relative flex min-w-0 flex-1 overflow-hidden">
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-paper">
+      <div className="titlebar-drag shrink-0 border-b border-line/70 bg-paper px-3 py-2">
+        <div className="h-2" />
+      </div>
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <Sidebar />
+        <main className="relative flex min-w-0 flex-1 overflow-hidden">
         {view === "settings" ? (
           <Suspense fallback={panelFallback}>
             <SettingsPage />
@@ -172,7 +195,7 @@ export default function App() {
                 <Landing
                   particlesExiting={particlesExiting}
                   updateCard={updateCard}
-                  updateBusy={updateBusy}
+                  updateProgress={updateProgress}
                   onUpdate={updateCard ? runUpdate : undefined}
                   onDismissUpdate={updateCard ? dismissUpdate : undefined}
                 />
@@ -180,15 +203,41 @@ export default function App() {
             )}
           </>
         )}
-      </main>
-      {artifactPanelOpen && (
+        {recentUpdateNotice && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-5 z-20 flex justify-center px-6">
+            <div className="pointer-events-auto flex w-full max-w-[640px] items-center gap-3 rounded-2xl border border-line bg-paper-raised px-4 py-3 shadow-pop">
+              <CheckCircle2 className="h-4.5 w-4.5 shrink-0 text-emerald-600" />
+              <div className="min-w-0 flex-1 text-[12.5px] text-ink">
+                zWork {recentUpdateNotice.version} installed.{" "}
+                <button
+                  type="button"
+                  onClick={() => window.open(recentUpdateNotice.releaseUrl, "_blank", "noreferrer")}
+                  className="inline-flex items-center gap-1 font-medium text-ink underline underline-offset-2"
+                >
+                  View changelog <ExternalLink className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRecentUpdateNotice(null)}
+                className="press rounded-full p-1 text-ink-faint hover:bg-paper-sunken hover:text-ink"
+                aria-label="Dismiss update notice"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+        </main>
+        {artifactPanelOpen && (
+          <Suspense fallback={null}>
+            <ArtifactPanel />
+          </Suspense>
+        )}
         <Suspense fallback={null}>
-          <ArtifactPanel />
+          <SearchModal />
         </Suspense>
-      )}
-      <Suspense fallback={null}>
-        <SearchModal />
-      </Suspense>
+      </div>
     </div>
   );
 }

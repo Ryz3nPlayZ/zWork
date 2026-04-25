@@ -2,6 +2,17 @@
 
 All notable changes to zWork are documented here.
 
+## v0.3.7
+
+**Tighten updater UX and fix app shell shortcuts.**
+
+- Added visible version info in Settings
+- Simplified the update card copy and layout to a compact current-version -> latest-version prompt
+- Added real in-app updater progress states so Update now no longer appears to flash and reset
+- Added a post-update changelog notice after relaunch
+- Fixed the duplicate `Cmd+K` handler that could immediately close search
+- Added a dedicated top drag strip so the window is easier to move
+
 ## v0.3.6
 
 **Remove chat-load flashes and harden long-running streams.**
