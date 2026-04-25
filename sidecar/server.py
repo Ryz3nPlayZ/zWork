@@ -8,6 +8,7 @@ import os
 import platform
 import getpass
 import re
+import sys
 import base64
 import binascii
 import mimetypes
@@ -954,9 +955,24 @@ if _STATIC_DIR.is_dir():
 
 def main() -> None:
     import uvicorn
+
+    # Windows packaged builds can inherit a legacy console encoding such as
+    # cp1252. Force UTF-8 so startup/status logs cannot crash the backend when
+    # they include unicode characters.
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+    if hasattr(sys.stderr, "reconfigure"):
+        try:
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     host = os.environ.get("ZWORK_HOST", "127.0.0.1")
     port = int(os.environ.get("ZWORK_PORT", "8787"))
-    print(f"zWork web app → http://{host}:{port}")
+    print(f"zWork web app -> http://{host}:{port}")
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 

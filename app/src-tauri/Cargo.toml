@@ -1,6 +1,6 @@
 [package]
 name = "sidecar-app"
-version = "0.3.7"
+version = "0.3.8"
 description = "Sidecar desktop assistant"
 authors = ["Sidecar"]
 edition = "2021"

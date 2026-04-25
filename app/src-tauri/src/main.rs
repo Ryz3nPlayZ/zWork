@@ -156,6 +156,8 @@ fn start_packaged_backend(app: &tauri::AppHandle) -> Option<BackendChild> {
 
     sidecar = sidecar
         .env("PYTHONUNBUFFERED", "1")
+        .env("PYTHONUTF8", "1")
+        .env("PYTHONIOENCODING", "utf-8")
         .env("ZWORK_HOME", zwork_sidecar_home().display().to_string());
 
     match sidecar.spawn() {
@@ -210,6 +212,8 @@ fn start_dev_backend() -> Option<BackendChild> {
         .arg("-m")
         .arg("sidecar.server")
         .env("PYTHONUNBUFFERED", "1")
+        .env("PYTHONUTF8", "1")
+        .env("PYTHONIOENCODING", "utf-8")
         .env("ZWORK_HOME", sidecar_home.as_os_str());
 
     if let Some(f) = log {

@@ -2,6 +2,14 @@
 
 All notable changes to zWork are documented here.
 
+## v0.3.8
+
+**Fix Windows backend startup encoding.**
+
+- Forced the backend process to use UTF-8 I/O on Windows so startup logs cannot crash the packaged Python server
+- Changed the startup banner to ASCII-safe text so the backend can launch cleanly under cp1252 consoles
+- Applied the UTF-8 environment settings to both packaged and dev backend launchers
+
 ## v0.3.7
 
 **Tighten updater UX and fix app shell shortcuts.**
