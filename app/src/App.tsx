@@ -6,6 +6,7 @@ import { Landing } from "./components/Landing";
 import { useApp } from "./lib/store";
 import { consumeInstalledUpdateNotice, detectUpdate, installUpdate, type UpdateCardState, type UpdateProgress } from "./lib/update";
 import { cn } from "./lib/cn";
+import { recordTelemetry, setTelemetryEnabled, startTelemetrySession, stopTelemetrySession } from "./lib/telemetry";
 
 const Onboarding = lazy(() => import("./components/Onboarding").then((m) => ({ default: m.Onboarding })));
 const loadChatView = () => import("./components/ChatView").then((m) => ({ default: m.ChatView }));
@@ -19,6 +20,7 @@ export default function App() {
   const appVersion = appPackage.version;
   const bootstrap = useApp((s) => s.bootstrap);
   const view = useApp((s) => s.view);
+  const settings = useApp((s) => s.settings);
   const active = useApp((s) => s.activeChatId);
   const chat = useApp((s) => (active ? s.chats[active] : undefined));
   const artifactPanelOpen = !!(view === "chat" && active && chat?.artifactPanelOpen);
@@ -34,10 +36,28 @@ export default function App() {
     releaseUrl: string;
     notes?: string;
   } | null>(null);
+  const showLanding = view === "chat" && active === null;
 
   useEffect(() => {
     void bootstrap();
   }, [bootstrap]);
+
+  useEffect(() => {
+    const enabled = !!settings?.telemetry_enabled;
+    setTelemetryEnabled(enabled);
+    if (!enabled) {
+      stopTelemetrySession("telemetry_disabled");
+      return;
+    }
+    startTelemetrySession({
+      appVersion,
+      os: navigator.platform,
+      screen: showLanding ? "landing" : view,
+    });
+    return () => {
+      stopTelemetrySession("app_unmounted");
+    };
+  }, [appVersion, settings?.telemetry_enabled]);
 
   useEffect(() => {
     void loadChatView();
@@ -48,11 +68,23 @@ export default function App() {
   }, [appVersion]);
 
   useEffect(() => {
+    recordTelemetry("screen_view", {
+      screen: showLanding ? "landing" : view,
+      has_chat: !!active,
+    });
+  }, [showLanding, view, active]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function checkForUpdates() {
       const detected = await detectUpdate(appVersion);
       if (cancelled || !detected) return;
+      recordTelemetry("update_available", {
+        current_version: detected.currentVersion,
+        latest_version: detected.latestVersion,
+        source: detected.source,
+      });
 
       const dismissed = window.localStorage.getItem("zwork:dismissed-update");
       if (dismissed === detected.latestVersion) return;
@@ -72,17 +104,46 @@ export default function App() {
   const runUpdate = async () => {
     if (!updateCard) return;
     if (updateProgress.phase !== "idle" && updateProgress.phase !== "error") return;
+    recordTelemetry("update_started", {
+      current_version: updateCard.currentVersion,
+      latest_version: updateCard.latestVersion,
+      source: updateCard.source,
+    });
     setUpdateProgress({ phase: "checking" });
     try {
       const result = await installUpdate(updateCard, setUpdateProgress);
       if (!result.ok && updateCard.source === "github" && updateCard.releaseUrl) {
+        recordTelemetry("update_failed", {
+          current_version: updateCard.currentVersion,
+          latest_version: updateCard.latestVersion,
+          source: updateCard.source,
+          reason: "github_fallback",
+        });
         window.open(updateCard.releaseUrl, "_blank", "noreferrer");
         setUpdateProgress({ phase: "idle" });
       }
       if (!result.ok && updateCard.source === "updater") {
+        recordTelemetry("update_failed", {
+          current_version: updateCard.currentVersion,
+          latest_version: updateCard.latestVersion,
+          source: updateCard.source,
+          reason: "updater_error",
+        });
         setUpdateProgress({ phase: "error", message: result.message });
+      } else if (result.ok) {
+        recordTelemetry("update_finished", {
+          current_version: updateCard.currentVersion,
+          latest_version: updateCard.latestVersion,
+          source: updateCard.source,
+        });
       }
     } catch (error) {
+      recordTelemetry("update_failed", {
+        current_version: updateCard.currentVersion,
+        latest_version: updateCard.latestVersion,
+        source: updateCard.source,
+        reason: "exception",
+      });
       setUpdateProgress({
         phase: "error",
         message: error instanceof Error ? error.message : "Update failed.",
@@ -123,7 +184,6 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [openLanding, toggleSidebar, setView, setSearchOpen]);
 
-  const showLanding = view === "chat" && active === null;
   const [showLandingOverlay, setShowLandingOverlay] = useState(showLanding);
   const [particlesExiting, setParticlesExiting] = useState(false);
   const panelFallback = (

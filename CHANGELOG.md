@@ -2,6 +2,15 @@
 
 All notable changes to zWork are documented here.
 
+## v0.3.9
+
+**Remove broken landing particles and add anonymous analytics opt-in.**
+
+- Removed the broken landing particle renderer and the duplicate top drag strip
+- Added an explicit anonymous analytics opt-in with a clear privacy disclosure
+- Added anonymous telemetry for app open/close, active session time, onboarding completion, chat turn counts, settings changes, and update success/failure
+- Kept message content, files, API keys, screenshots, and paths out of telemetry
+
 ## v0.3.8
 
 **Fix Windows backend startup encoding.**

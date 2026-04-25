@@ -92,6 +92,7 @@ export interface CustomModel {
 export interface SettingsPublic {
   default_model: string;
   use_claude_code_config: boolean;
+  telemetry_enabled: boolean;
   api_keys: Record<string, string>;
   provider_config: Record<string, Record<string, string>>;
   custom_models: CustomModel[];
@@ -148,6 +149,7 @@ export interface OnboardingPayload {
   answers: OnboardingAnswer[];
   credential?: OnboardingCredential;
   prefer_theme?: "light" | "dark" | "system";
+  telemetry_enabled?: boolean;
 }
 
 export interface Project {
@@ -204,12 +206,26 @@ export const api = {
     provider_config: Record<string, Record<string, string>>;
     default_model: string;
     use_claude_code_config: boolean;
+    telemetry_enabled: boolean;
   }>) =>
     fetch(u("/api/settings"), {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(patch),
     }).then((r) => j<SettingsPublic>(r)),
+
+  telemetryEvent: (body: {
+    event: string;
+    session_id?: string;
+    properties?: Record<string, unknown>;
+    ts?: number;
+  }) =>
+    fetch(u("/api/telemetry/event"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      keepalive: true,
+    }).then((r) => j<{ ok: boolean }>(r)),
 
   upsertCustomModel: (body: Omit<CustomModel, "id"> & { id?: string }) =>
     fetch(u("/api/custom-models"), {

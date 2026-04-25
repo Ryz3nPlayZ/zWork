@@ -167,6 +167,18 @@ const QUESTIONS: Question[] = [
     ],
   },
   {
+    kind: "choice",
+    key: "telemetry",
+    eyebrow: "Help improve zWork",
+    question: "Share anonymous usage analytics?",
+    subtitle:
+      "We only collect app open time, active time, feature usage, onboarding completion, errors, and update success. No prompts, messages, files, keys, screenshots, or outputs.",
+    options: [
+      "Yes, share anonymous analytics",
+      "No, keep it local",
+    ],
+  },
+  {
     kind: "apikey",
     key: "credential",
     eyebrow: "Almost there",
@@ -356,7 +368,7 @@ export function Onboarding() {
     setError("");
     setFinalizing(true);
     const payload: OnboardingAnswer[] = QUESTIONS.filter(
-      (qq) => qq.kind !== "apikey",
+      (qq) => qq.kind !== "apikey" && qq.key !== "telemetry",
     ).map((qq) => ({
       key: qq.key,
       question: qq.question,
@@ -367,6 +379,7 @@ export function Onboarding() {
       await api.onboardComplete({
         answers: payload,
         credential: credential || undefined,
+        telemetry_enabled: answers.telemetry === "Yes, share anonymous analytics",
       });
       await Promise.all([refreshProviders(), refreshSettings(), refreshMe()]);
       setDone(true);

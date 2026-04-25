@@ -547,13 +547,14 @@ function GeneralPanel({
   onSave,
 }: {
   settings: ReturnType<typeof useApp.getState>["settings"];
-  onSave: (patch: { default_model?: string; use_claude_code_config?: boolean }) => Promise<void>;
+  onSave: (patch: { default_model?: string; use_claude_code_config?: boolean; telemetry_enabled?: boolean }) => Promise<void>;
 }) {
   const appVersion = appPackage.version;
   const providers = useApp((s) => s.providers);
   const models = providers?.models ?? [];
   const [defaultModel, setDefaultModel] = useState(settings?.default_model ?? "");
   const [useClaude, setUseClaude] = useState(!!settings?.use_claude_code_config);
+  const [telemetryEnabled, setTelemetryEnabled] = useState(!!settings?.telemetry_enabled);
   const [themePref, setThemePref] = useState<"system" | "light" | "dark">(() => {
     const v = localStorage.getItem("zwork.theme");
     if (v === "light" || v === "dark") return v;
@@ -563,6 +564,7 @@ function GeneralPanel({
   useEffect(() => {
     setDefaultModel(settings?.default_model ?? "");
     setUseClaude(!!settings?.use_claude_code_config);
+    setTelemetryEnabled(!!settings?.telemetry_enabled);
   }, [settings]);
 
   const applyTheme = (v: "system" | "light" | "dark") => {
@@ -614,6 +616,28 @@ function GeneralPanel({
             <span className="font-mono text-ink-muted">{appVersion}</span>
           </div>
         </Field>
+      </section>
+
+      <section className="rounded-xl border border-line bg-paper-raised p-4">
+        <label className="flex items-start gap-3">
+          <input
+            type="checkbox"
+            checked={telemetryEnabled}
+            onChange={async (e) => {
+              const next = e.target.checked;
+              setTelemetryEnabled(next);
+              await onSave({ telemetry_enabled: next });
+            }}
+            className="mt-[3px] h-4 w-4 accent-ink"
+          />
+          <div className="space-y-1">
+            <div className="text-[13px] font-medium text-ink">Anonymous usage analytics</div>
+            <div className="text-[12px] leading-5 text-ink-muted">
+              Helps track installs, active usage time, onboarding completion, chat volume, error rates, and update success.
+              It never collects prompt text, message content, file contents, API keys, screenshots, or paths.
+            </div>
+          </div>
+        </label>
       </section>
 
       {/* Default model */}

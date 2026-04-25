@@ -10,6 +10,7 @@ import {
   type MeResponse,
   type Project,
 } from "./api";
+import { setTelemetryEnabled } from "./telemetry";
 
 export type Role = "user" | "assistant";
 
@@ -427,6 +428,7 @@ export const useApp = create<AppState>((set, get) => ({
     try {
       const s = await api.getSettings();
       set({ settings: s });
+      setTelemetryEnabled(!!s.telemetry_enabled);
     } catch {
       /* ignore */
     }
@@ -889,6 +891,7 @@ export const useApp = create<AppState>((set, get) => ({
   saveSettings: async (patch) => {
     const s = await api.putSettings(patch);
     set({ settings: s });
+    setTelemetryEnabled(!!s.telemetry_enabled);
     await get().refreshProviders();
   },
 

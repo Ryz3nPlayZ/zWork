@@ -17,6 +17,7 @@ import os
 import re
 from dataclasses import dataclass, field, asdict
 from typing import Any
+import uuid
 
 from .home import (
     memory_path,
@@ -283,6 +284,8 @@ class Settings:
 
     default_model: str = ""  # zWork model id (empty = first available)
     use_claude_code_config: bool = True
+    telemetry_enabled: bool = False
+    telemetry_install_id: str = ""
 
     custom_models: list[dict[str, Any]] = field(default_factory=list)
 
@@ -300,11 +303,15 @@ def load() -> Settings:
         provider_config={k: dict(v) for k, v in (data.get("provider_config") or {}).items()},
         default_model=str(data.get("default_model") or ""),
         use_claude_code_config=bool(data.get("use_claude_code_config", True)),
+        telemetry_enabled=bool(data.get("telemetry_enabled", False)),
+        telemetry_install_id=str(data.get("telemetry_install_id") or ""),
         custom_models=list(data.get("custom_models") or []),
     )
 
 
 def save(settings: Settings) -> None:
+    if settings.telemetry_enabled and not settings.telemetry_install_id:
+        settings.telemetry_install_id = uuid.uuid4().hex
     p = settings_path()
     p.write_text(json.dumps(asdict(settings), indent=2))
     try:
@@ -325,6 +332,7 @@ def public_view(settings: Settings) -> dict[str, Any]:
     return {
         "default_model": settings.default_model,
         "use_claude_code_config": settings.use_claude_code_config,
+        "telemetry_enabled": settings.telemetry_enabled,
         "api_keys": {p: mask(k) for p, k in settings.api_keys.items() if k},
         "provider_config": settings.provider_config,
         "custom_models": settings.custom_models,

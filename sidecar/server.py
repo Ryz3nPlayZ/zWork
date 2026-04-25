@@ -13,6 +13,7 @@ import base64
 import binascii
 import mimetypes
 import traceback
+import time
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 try:
     from .agent import chatstore, detect, providers, skills as skills_mod
@@ -66,6 +67,7 @@ class SettingsPatch(BaseModel):
     provider_config: dict[str, dict[str, str]] | None = None
     default_model: str | None = None
     use_claude_code_config: bool | None = None
+    telemetry_enabled: bool | None = None
 
 
 class CustomModelBody(BaseModel):
@@ -273,6 +275,52 @@ class OnboardBody(BaseModel):
     answers: list[OnboardAnswer]
     credential: dict[str, str] | None = None  # {shape, credential, api_key, base_url, model_id, model_name}
     prefer_theme: str | None = None  # "light" | "dark" | "system"
+    telemetry_enabled: bool | None = None
+
+
+class TelemetryEventBody(BaseModel):
+    event: str
+    session_id: str | None = None
+    properties: dict[str, Any] = Field(default_factory=dict)
+    ts: int | None = None
+
+
+async def _record_telemetry_event(
+    event: str,
+    *,
+    session_id: str | None = None,
+    properties: dict[str, Any] | None = None,
+    ts: int | None = None,
+) -> None:
+    s = settings_mod.load()
+    if not s.telemetry_enabled:
+        return
+
+    payload = {
+        "event": event,
+        "session_id": session_id or "",
+        "properties": properties or {},
+        "ts": ts or int(time.time() * 1000),
+        "install_id": s.telemetry_install_id,
+        "os": _os_pretty(),
+    }
+
+    path = home_mod.zwork_home() / "telemetry.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+    endpoint = os.environ.get("ZW_TELEMETRY_ENDPOINT", "").strip()
+    if not endpoint:
+        return
+
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            await client.post(endpoint, json=payload)
+    except Exception:
+        pass
 
 
 def _onboarding_state() -> dict:
@@ -293,10 +341,11 @@ def onboard_status() -> dict:
 
 
 @app.post("/api/onboard/skip")
-def onboard_skip() -> dict:
+async def onboard_skip() -> dict:
     home_mod.onboarding_path().write_text(
         json.dumps({"completed": True, "skipped": True})
     )
+    await _record_telemetry_event("onboarding_skipped")
     return {"ok": True}
 
 
@@ -468,6 +517,8 @@ async def onboard_complete(body: OnboardBody) -> dict:
                 base_url_override=base_url if credkey == "openai" else "",
             )
             s.default_model = m.id
+        if body.telemetry_enabled is not None:
+            s.telemetry_enabled = bool(body.telemetry_enabled)
         settings_mod.save(s)
 
     # Build a zwork.md via LLM (or fallback) and save at repo root.
@@ -488,6 +539,16 @@ async def onboard_complete(body: OnboardBody) -> dict:
     zmd.write_text(md, encoding="utf-8")
 
     _write_onboarding_complete(body.answers, user_name, zmd)
+    await _record_telemetry_event(
+        "onboarding_completed",
+        properties={
+            "telemetry_enabled": bool(body.telemetry_enabled),
+            "credential": (body.credential or {}).get("credential", ""),
+            "shape": (body.credential or {}).get("shape", ""),
+            "has_custom_model": bool((body.credential or {}).get("model_id")),
+            "answers_count": len(body.answers),
+        },
+    )
     return {"ok": True, "zwork_md_path": str(zmd), "preview": md}
 
 
@@ -550,8 +611,23 @@ def put_settings(patch: SettingsPatch) -> dict:
         s.default_model = patch.default_model
     if patch.use_claude_code_config is not None:
         s.use_claude_code_config = patch.use_claude_code_config
+    if patch.telemetry_enabled is not None:
+        s.telemetry_enabled = patch.telemetry_enabled
     settings_mod.save(s)
     return settings_mod.public_view(s)
+
+
+# ---------------- Telemetry ----------------
+
+@app.post("/api/telemetry/event")
+async def telemetry_event(body: TelemetryEventBody) -> dict:
+    await _record_telemetry_event(
+        body.event,
+        session_id=body.session_id,
+        properties=body.properties,
+        ts=body.ts,
+    )
+    return {"ok": True}
 
 
 # ---------------- Custom models ----------------
@@ -824,6 +900,7 @@ def _resolve_model_id(requested: str | None, s: settings_mod.Settings) -> str | 
 async def chat_stream(req: StreamRequest):
     s = settings_mod.load()
     model_id = _resolve_model_id(req.model, s)
+    started_at = time.time()
 
     # If no model is available, still create/reuse the chat and stream a friendly
     # setup error back — never 400 hard.
@@ -833,6 +910,18 @@ async def chat_stream(req: StreamRequest):
     chatstore.append_message(chat.id, "user", req.message)
     chat = chatstore.get(chat.id)
     assert chat is not None
+
+    await _record_telemetry_event(
+        "chat_turn_started",
+        properties={
+            "chat_id": chat.id,
+            "requested_model": req.model or "",
+            "resolved_model": model_id or "",
+            "artifact_mode": bool(req.artifact_mode),
+            "attachment_count": len(req.attachments or []),
+            "has_existing_chat": bool(req.chat_id),
+        },
+    )
 
     if not model_id:
         async def no_model_sse() -> Any:
@@ -850,6 +939,15 @@ async def chat_stream(req: StreamRequest):
             yield _sse({"type": "needs_setup"})
             yield _sse({"type": "done"})
             yield _sse({"type": "end"})
+            await _record_telemetry_event(
+                "chat_turn_finished",
+                properties={
+                    "chat_id": chat.id,
+                    "status": "needs_setup",
+                    "duration_ms": int((time.time() - started_at) * 1000),
+                    "resolved_model": "",
+                },
+            )
         return StreamingResponse(no_model_sse(), media_type="text/event-stream")
 
     # Build a system prompt with live model identity
@@ -900,6 +998,15 @@ async def chat_stream(req: StreamRequest):
             yield _sse({"type": "error", "text": str(e)})
         if full_text:
             chatstore.append_message(chat.id, "assistant", full_text)
+        await _record_telemetry_event(
+            "chat_turn_finished",
+            properties={
+                "chat_id": chat.id,
+                "status": "ok" if full_text else "empty",
+                "duration_ms": int((time.time() - started_at) * 1000),
+                "resolved_model": model_id,
+            },
+        )
         yield _sse({"type": "end"})
 
     return StreamingResponse(
