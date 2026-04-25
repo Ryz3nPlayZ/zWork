@@ -415,12 +415,12 @@ function ThinkingSection({
 }
 
 function WorkingLabel({ status }: { status?: string }) {
-  // Cycle through a shuffled pool of whimsical "-ing" words every ~1.8s.
+  // Cycle through a shuffled pool of whimsical "-ing" words at a slower pace.
   // The backend's `status` string wins if it isn't the generic "Thinking".
   const pool = useMemo(() => shuffled(THINKING_WORDS), []);
   const [idx, setIdx] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setIdx((i) => (i + 1) % pool.length), 1800);
+    const id = setInterval(() => setIdx((i) => (i + 1) % pool.length), 5000);
     return () => clearInterval(id);
   }, [pool.length]);
 

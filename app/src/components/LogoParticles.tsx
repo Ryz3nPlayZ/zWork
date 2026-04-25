@@ -30,7 +30,7 @@ function prefersReducedMotion(): boolean {
 }
 
 function getSampledCloud(count: number): Promise<SampledCloud> {
-  const normalizedCount = Math.max(900, Math.min(count, 12000));
+  const normalizedCount = Math.max(900, Math.min(count, 16000));
   const cached = sampledCloudCache.get(normalizedCount);
   if (cached) return cached;
 

@@ -102,11 +102,11 @@ export function Landing({
       >
         <Suspense fallback={null}>
           <LogoParticles
-            size={1800}
-            particleCount={12000}
+            particleCount={14200}
             pointScale={2.9}
             spinSpeed={0.00054}
             fill
+            className="inset-auto left-1/2 top-1/2 h-[min(96vw,84vh,1100px)] w-[min(96vw,84vh,1100px)] -translate-x-1/2 -translate-y-1/2"
           />
         </Suspense>
       </div>
@@ -149,7 +149,10 @@ export function Landing({
             <ChatInput
               autoFocus
               placeholder="What can I help with?"
-              onSend={() => setSending(true)}
+              onSend={() => {
+                void import("./ChatView");
+                setSending(true);
+              }}
             />
           </div>
 

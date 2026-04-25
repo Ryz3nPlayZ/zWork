@@ -1,6 +1,8 @@
 """zWork backend: FastAPI server."""
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import os
 import platform
@@ -884,11 +886,11 @@ async def chat_stream(req: StreamRequest):
         yield _sse({"type": "chat", "id": chat.id, "title": chat.title})
         full_text = ""
         try:
-            async for evt in providers.stream_chat(
+            async for evt in _heartbeat_stream(providers.stream_chat(
                 [{"role": "system", "content": prompt}, *history],
                 model_id,
                 s,
-            ):
+            )):
                 if evt.get("type") == "delta":
                     full_text += evt.get("text", "")
                 yield _sse(evt)
@@ -899,11 +901,42 @@ async def chat_stream(req: StreamRequest):
             chatstore.append_message(chat.id, "assistant", full_text)
         yield _sse({"type": "end"})
 
-    return StreamingResponse(sse(), media_type="text/event-stream")
+    return StreamingResponse(
+        sse(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload)}\n\n"
+
+
+async def _heartbeat_stream(source: Any, interval: float = 5.0):
+    pending: asyncio.Task | None = None
+    try:
+        while True:
+            if pending is None:
+                pending = asyncio.create_task(source.__anext__())
+            done, _ = await asyncio.wait({pending}, timeout=interval)
+            if not done:
+                yield {"type": "heartbeat"}
+                continue
+            try:
+                item = pending.result()
+            except StopAsyncIteration:
+                break
+            pending = None
+            yield item
+    finally:
+        if pending is not None and not pending.done():
+            pending.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await pending
 
 
 # ---- SPA catch-all: serve index.html for any non-API, non-static route ----

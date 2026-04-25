@@ -7,7 +7,8 @@ import { detectUpdate, installUpdate } from "./lib/update";
 import { cn } from "./lib/cn";
 
 const Onboarding = lazy(() => import("./components/Onboarding").then((m) => ({ default: m.Onboarding })));
-const ChatView = lazy(() => import("./components/ChatView").then((m) => ({ default: m.ChatView })));
+const loadChatView = () => import("./components/ChatView").then((m) => ({ default: m.ChatView }));
+const ChatView = lazy(loadChatView);
 const SettingsPage = lazy(() => import("./components/Settings").then((m) => ({ default: m.SettingsPage })));
 const SearchModal = lazy(() => import("./components/SearchModal").then((m) => ({ default: m.SearchModal })));
 const ProjectView = lazy(() => import("./components/ProjectView").then((m) => ({ default: m.ProjectView })));
@@ -31,6 +32,10 @@ export default function App() {
   useEffect(() => {
     void bootstrap();
   }, [bootstrap]);
+
+  useEffect(() => {
+    void loadChatView();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -100,7 +105,6 @@ export default function App() {
   }, [openLanding, toggleSidebar, setView, setSearchOpen]);
 
   const showLanding = view === "chat" && active === null;
-  const showChatLoading = view === "chat" && !!active && !chat;
   const [showLandingOverlay, setShowLandingOverlay] = useState(showLanding);
   const [particlesExiting, setParticlesExiting] = useState(false);
   const panelFallback = (
@@ -151,16 +155,10 @@ export default function App() {
           <Suspense fallback={panelFallback}>
             <ProjectView />
           </Suspense>
-        ) : showChatLoading ? (
-          <div className="flex h-full w-full items-center justify-center bg-paper">
-            <div className="rounded-2xl border border-line bg-paper-raised px-4 py-2 text-[12.5px] text-ink-muted">
-              Loading chat…
-            </div>
-          </div>
         ) : (
           <>
             {!showLanding && (
-              <Suspense fallback={panelFallback}>
+              <Suspense fallback={null}>
                 <ChatView />
               </Suspense>
             )}

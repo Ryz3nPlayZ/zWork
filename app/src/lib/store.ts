@@ -756,6 +756,8 @@ export const useApp = create<AppState>((set, get) => ({
                 },
               };
             });
+          } else if (evt.type === "heartbeat") {
+            return;
           } else if (evt.type === "done" || evt.type === "end") {
             set((s) => {
               const c = s.chats[localId];
@@ -777,6 +779,16 @@ export const useApp = create<AppState>((set, get) => ({
       );
 
       const assistantContent = get().chats[localId]?.messages.find((m) => m.id === asstId)?.content || "";
+      set((s) => {
+        const c = s.chats[localId];
+        if (!c || !c.working) return s;
+        return {
+          chats: {
+            ...s.chats,
+            [localId]: { ...c, working: false, status: undefined },
+          },
+        };
+      });
       const { cleaned, artifacts } = extractArtifacts(assistantContent, asstId);
       if (artifacts.length > 0) {
         for (const artifact of artifacts) {

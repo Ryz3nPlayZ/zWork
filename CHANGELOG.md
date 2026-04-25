@@ -2,6 +2,15 @@
 
 All notable changes to zWork are documented here.
 
+## v0.3.6
+
+**Remove chat-load flashes and harden long-running streams.**
+
+- Removed the centered loading-card transition when sending the first message from the landing screen
+- Slowed the rotating in-thread working copy to a 5-second cadence instead of rapid cycling
+- Added SSE heartbeat events and stricter stream finalization so long skill/tool turns do not silently die in the UI
+- Tightened the landing logo-particle field into a denser square composition instead of stretching it across one axis
+
 ## v0.3.5
 
 **Fix landing particle renderer boot.**

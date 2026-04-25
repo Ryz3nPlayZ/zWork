@@ -349,6 +349,7 @@ export type StreamEvent =
   | { type: "delta"; text: string }
   | { type: "done" }
   | { type: "end" }
+  | { type: "heartbeat" }
   | { type: "error"; text: string }
   | { type: "needs_setup" }
   | { type: "activity"; id: string; label: string; icon?: string; done?: boolean }
@@ -371,13 +372,16 @@ export async function streamChat(
   onEvent: (evt: StreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
+  let sawEvent = false;
   const parseFrame = (frame: string) => {
     for (const line of frame.split("\n")) {
       if (!line.startsWith("data:")) continue;
       const data = line.slice(5).trim();
       if (!data) continue;
       try {
-        onEvent(JSON.parse(data) as StreamEvent);
+        const evt = JSON.parse(data) as StreamEvent;
+        sawEvent = true;
+        onEvent(evt);
       } catch {
         /* ignore malformed partial event */
       }
@@ -417,6 +421,14 @@ export async function streamChat(
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
       throw error;
+    }
+    if (sawEvent) {
+      onEvent({
+        type: "error",
+        text: "The local backend ended this response unexpectedly. Partial progress is preserved above.",
+      });
+      onEvent({ type: "end" });
+      return;
     }
     const detail =
       error instanceof Error && error.message
