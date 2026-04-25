@@ -1,11 +1,9 @@
-import { Suspense, lazy, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Clock3, Download, ExternalLink, RefreshCw } from "lucide-react";
 import { ChatInput } from "./ChatInput";
 import { useApp } from "../lib/store";
 import { cn } from "../lib/cn";
 import type { UpdateCardState, UpdateProgress } from "../lib/update";
-
-const LogoParticles = lazy(() => import("./LogoParticles").then((m) => ({ default: m.LogoParticles })));
 
 interface GreetingOption {
   text: string;
@@ -103,21 +101,13 @@ export function Landing({
       {/* Galaxy backdrop behind the welcome block. */}
       <div
         className={cn(
-          "pointer-events-none absolute inset-0 opacity-[0.42] blur-0",
-          "transition-[opacity,filter] duration-300 ease-out",
-          particlesExiting && "opacity-0 blur-[10px]",
+          "pointer-events-none absolute inset-0 opacity-100",
+          "bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.07)_0%,rgba(255,255,255,0.025)_28%,rgba(255,255,255,0)_58%),linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0))]",
+          "transition-opacity duration-300 ease-out",
+          particlesExiting && "opacity-0",
         )}
         aria-hidden="true"
       >
-        <Suspense fallback={null}>
-          <LogoParticles
-            particleCount={14200}
-            pointScale={2.9}
-            spinSpeed={0.00054}
-            fill
-            className="inset-auto left-1/2 top-1/2 h-[min(96vw,84vh,1100px)] w-[min(96vw,84vh,1100px)] -translate-x-1/2 -translate-y-1/2"
-          />
-        </Suspense>
       </div>
 
       <div
