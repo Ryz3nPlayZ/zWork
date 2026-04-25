@@ -2,6 +2,14 @@
 
 All notable changes to zWork are documented here.
 
+## v0.3.3
+
+**Patch macOS backend resource path and onboarding visual.**
+
+- Swapped onboarding to the React Bits LightRays visual backed by `ogl`
+- Fixed the macOS universal backend launcher for Tauri's nested resource path
+- Kept the onboarding headline centered in the left visual area
+
 ## v0.3.2
 
 **Patch universal macOS backend launch and restore optimized onboarding dither.**

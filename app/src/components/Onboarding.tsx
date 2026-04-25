@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowRight, ArrowLeft, Check, ChevronDown, ExternalLink, Sparkles } from "lucide-react";
 import { Logo } from "./Logo";
@@ -6,7 +6,7 @@ import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
 import { useResolvedTheme } from "../lib/theme";
 import { api, type OnboardingAnswer, type OnboardingCredential } from "../lib/api";
-import Dither from "./Dither";
+import LightRays from "./LightRays";
 
 const PREV1_OLLAMA_MODEL_ID = "minimax-m2.7:cloud";
 
@@ -414,24 +414,7 @@ export function Onboarding() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  // Theme-aware dither colors. Both endpoints are drawn from the same palette
-  // tokens we use in `index.css` so the background always sits in harmony with
-  // the rest of the UI.
-  //   Light: base = warm cream (paper-sunken), wave = deep ink (ink-soft)
-  //   Dark:  base = near-black (paper-sunken), wave = soft fog (ink-muted)
   const theme = useResolvedTheme();
-  const { baseColor, waveColor } = useMemo(() => {
-    if (theme === "dark") {
-      return {
-        baseColor: [18 / 255, 18 / 255, 20 / 255] as [number, number, number],
-        waveColor: [160 / 255, 160 / 255, 157 / 255] as [number, number, number],
-      };
-    }
-    return {
-      baseColor: [239 / 255, 237 / 255, 232 / 255] as [number, number, number],
-      waveColor: [37 / 255, 36 / 255, 31 / 255] as [number, number, number],
-    };
-  }, [theme]);
 
   // Personalizing / setting up screen
   if (finalizing) {
@@ -443,19 +426,21 @@ export function Onboarding() {
       ref={rootRef}
       className="onboarding-shell relative flex h-full min-h-screen min-w-0 flex-1 flex-col overflow-hidden bg-paper"
     >
-      <div className="pointer-events-none absolute inset-0 z-0">
-        <Dither
+      <div className="pointer-events-none absolute inset-0 z-0 bg-paper-sunken">
+        <LightRays
           key={theme}
-          waveColor={waveColor}
-          baseColor={baseColor}
-          waveSpeed={0.018}
-          waveFrequency={3.4}
-          waveAmplitude={0.22}
-          colorNum={3}
-          pixelSize={2}
-          disableAnimation={false}
-          enableMouseInteraction={false}
-          mouseRadius={0.3}
+          raysOrigin="top-left"
+          raysColor={theme === "dark" ? "#d7f7ff" : "#273431"}
+          raysSpeed={0.45}
+          lightSpread={0.72}
+          rayLength={1.35}
+          followMouse
+          mouseInfluence={0.08}
+          noiseAmount={0.18}
+          distortion={0.035}
+          fadeDistance={1.1}
+          saturation={theme === "dark" ? 1.15 : 0.75}
+          pulsating
         />
       </div>
 

@@ -45,11 +45,19 @@ set -euo pipefail
 
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 RESOURCE_DIR="$SELF_DIR/../Resources/macos-backends"
+if [[ ! -d "$RESOURCE_DIR" ]]; then
+  RESOURCE_DIR="$SELF_DIR/../Resources/resources/macos-backends"
+fi
 
 case "$(uname -m)" in
   arm64) backend="$RESOURCE_DIR/zwork-backend-aarch64-apple-darwin" ;;
   *) backend="$RESOURCE_DIR/zwork-backend-x86_64-apple-darwin" ;;
 esac
+
+if [[ ! -x "$backend" ]]; then
+  echo "zWork backend not found for $(uname -m): $backend" >&2
+  exit 127
+fi
 
 exec "$backend" "$@"
 EOF
