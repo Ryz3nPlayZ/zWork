@@ -94,7 +94,7 @@ export function Landing({
       {/* Galaxy backdrop behind the welcome block. */}
       <div
         className={cn(
-          "pointer-events-none absolute inset-0 opacity-[0.34] blur-0",
+          "pointer-events-none absolute inset-0 opacity-[0.42] blur-0",
           "transition-[opacity,filter] duration-300 ease-out",
           particlesExiting && "opacity-0 blur-[10px]",
         )}
@@ -103,9 +103,9 @@ export function Landing({
         <Suspense fallback={null}>
           <LogoParticles
             size={1800}
-            particleCount={7200}
-            pointScale={2.6}
-            spinSpeed={0.00056}
+            particleCount={12000}
+            pointScale={2.9}
+            spinSpeed={0.00054}
             fill
           />
         </Suspense>
@@ -114,7 +114,7 @@ export function Landing({
       <div
         className={cn(
           "pointer-events-none absolute inset-0",
-          "bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.08)_0%,rgba(255,255,255,0.02)_28%,rgba(255,255,255,0)_58%)]",
+          "bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.05)_0%,rgba(255,255,255,0.015)_24%,rgba(255,255,255,0)_56%)]",
           "transition-opacity duration-300 ease-out",
           particlesExiting && "opacity-0",
         )}

@@ -200,20 +200,41 @@ export function LogoParticles({
     let bootTimer = 0;
     let raf = 0;
 
+    const measureBounds = () => {
+      const width = fill
+        ? Math.max(
+            mount.clientWidth,
+            mount.getBoundingClientRect().width,
+            window.innerWidth,
+            1,
+          )
+        : size;
+      const height = fill
+        ? Math.max(
+            mount.clientHeight,
+            mount.getBoundingClientRect().height,
+            window.innerHeight,
+            1,
+          )
+        : size;
+      return {
+        width: Math.round(width),
+        height: Math.round(height),
+      };
+    };
+
     const boot = async () => {
       try {
-        if (prefersReducedMotion()) {
-          setRenderFailed(true);
-          return;
-        }
-
-        const cloud = await getSampledCloud(particleCount);
+        const reducedMotion = prefersReducedMotion();
+        const effectiveParticleCount = reducedMotion
+          ? Math.max(1800, Math.round(particleCount * 0.45))
+          : particleCount;
+        const cloud = await getSampledCloud(effectiveParticleCount);
         if (cancelled || !mount) return;
 
-        const dpr = Math.min(window.devicePixelRatio || 1, fill ? 1.5 : 2);
-        const w = fill ? mount.clientWidth : size;
-        const h = fill ? mount.clientHeight : size;
-        renderer = new THREE.WebGLRenderer({ alpha: true, antialias: !fill });
+        const dpr = Math.min(window.devicePixelRatio || 1, fill ? 1.35 : 1.75);
+        const { width: w, height: h } = measureBounds();
+        renderer = new THREE.WebGLRenderer({ alpha: true, antialias: false, powerPreference: "high-performance" });
         renderer.setPixelRatio(dpr);
         renderer.setSize(w, h, false);
         renderer.setClearColor(0x000000, 0);
@@ -266,7 +287,7 @@ export function LogoParticles({
               ? new THREE.Color(0xececea)
               : new THREE.Color(0x171716),
           },
-          uPointScale: { value: dpr * 1.9 * pointScale },
+          uPointScale: { value: dpr * 1.9 * pointScale * (reducedMotion ? 0.9 : 1) },
         };
 
         material = new THREE.ShaderMaterial({
@@ -334,12 +355,10 @@ export function LogoParticles({
 
         timer = new THREE.Timer();
         timer.connect(document);
-        const angularVelocity = spinSpeed * 165;
+        const angularVelocity = spinSpeed * 165 * (reducedMotion ? 0.38 : 1);
         const resize = () => {
           if (!fill || !mount || !renderer || !camera) return;
-          const width = mount.clientWidth;
-          const height = mount.clientHeight;
-          if (width <= 0 || height <= 0) return;
+          const { width, height } = measureBounds();
           camera.aspect = width / height;
           camera.updateProjectionMatrix();
           renderer.setSize(width, height, false);
@@ -348,6 +367,7 @@ export function LogoParticles({
         resizeObs =
           fill && "ResizeObserver" in window ? new ResizeObserver(resize) : null;
         resizeObs?.observe(mount);
+        resize();
 
         const tick = () => {
           if (
@@ -404,7 +424,7 @@ export function LogoParticles({
     >
       {renderFailed && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-75">
-          <Logo size={Math.max(22, Math.round(Math.min(size, 200) * 0.58))} />
+          <Logo size={Math.max(22, Math.round(Math.min(size, 200) * 0.58))} className="text-ink/70" />
         </div>
       )}
     </div>

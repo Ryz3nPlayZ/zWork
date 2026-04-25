@@ -2,6 +2,14 @@
 
 All notable changes to zWork are documented here.
 
+## v0.3.5
+
+**Fix landing particle renderer boot.**
+
+- Fixed the landing particle canvas initializing at `0px` height in fill mode, which could make the home screen look blank
+- Kept the particle renderer code-split so the landing fix does not bloat the main app bundle
+- Preserved lower-motion behavior without falling back to a fully static logo
+
 ## v0.3.4
 
 **Harden desktop state isolation and chat streaming.**
