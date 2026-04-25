@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { Pencil, Check, X, AlertCircle, Settings as SettingsIcon, RefreshCcw } from "lucide-react";
 import { useApp } from "../lib/store";
 import { ChatInput } from "./ChatInput";
-import { Message, ThinkingRow } from "./Message";
+import { Message } from "./Message";
 import { IconButton } from "./IconButton";
 
 export function ChatView() {
@@ -39,16 +39,6 @@ export function ChatView() {
   );
 
   if (!chat) return null;
-
-  const lastIsUser =
-    chat.messages.length > 0 &&
-    chat.messages[chat.messages.length - 1].role === "user";
-  const lastAssistantStreaming =
-    chat.messages.length > 0 &&
-    chat.messages[chat.messages.length - 1].role === "assistant" &&
-    chat.messages[chat.messages.length - 1].content.length === 0;
-  const showThinking =
-    !!chat.working && (lastIsUser || lastAssistantStreaming);
 
   const commitRename = () => {
     const t = titleDraft.trim();
@@ -122,10 +112,10 @@ export function ChatView() {
                   artifacts={artifacts}
                   streaming={isStreaming}
                   activities={activities}
+                  status={isStreaming ? chat.status : undefined}
                 />
               );
             })}
-            {showThinking && chat.activities.length === 0 && <ThinkingRow status={chat.status || "Thinking"} />}
             {chat.error && (
               <div className="flex animate-fade-in items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12.5px] text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />

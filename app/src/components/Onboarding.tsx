@@ -429,18 +429,19 @@ export function Onboarding() {
       <div className="pointer-events-none absolute inset-0 z-0 bg-paper-sunken">
         <LightRays
           key={theme}
-          raysOrigin="top-left"
-          raysColor={theme === "dark" ? "#d7f7ff" : "#273431"}
-          raysSpeed={0.45}
-          lightSpread={0.72}
-          rayLength={1.35}
+          raysOrigin="left"
+          raysColor={theme === "dark" ? "#d9fbff" : "#20312b"}
+          raysSpeed={0.58}
+          lightSpread={0.8}
+          rayLength={1.45}
           followMouse
-          mouseInfluence={0.08}
-          noiseAmount={0.18}
-          distortion={0.035}
-          fadeDistance={1.1}
-          saturation={theme === "dark" ? 1.15 : 0.75}
+          mouseInfluence={0.12}
+          noiseAmount={0.24}
+          distortion={0.06}
+          fadeDistance={1.18}
+          saturation={theme === "dark" ? 1.2 : 0.82}
           pulsating
+          className="opacity-90"
         />
       </div>
 
@@ -451,8 +452,8 @@ export function Onboarding() {
         style={{
           background:
             theme === "dark"
-              ? "linear-gradient(90deg, rgb(var(--paper) / 0.15) 0%, rgb(var(--paper) / 0.3) 35%, rgb(var(--paper) / 0.75) 100%)"
-              : "linear-gradient(90deg, rgb(var(--paper) / 0.1) 0%, rgb(var(--paper) / 0.25) 35%, rgb(var(--paper) / 0.7) 100%)",
+              ? "linear-gradient(90deg, rgb(var(--paper) / 0.06) 0%, rgb(var(--paper) / 0.18) 38%, rgb(var(--paper) / 0.74) 100%)"
+              : "linear-gradient(90deg, rgb(var(--paper) / 0.04) 0%, rgb(var(--paper) / 0.14) 38%, rgb(var(--paper) / 0.68) 100%)",
         }}
       />
 
@@ -463,8 +464,10 @@ export function Onboarding() {
       <div className="relative z-20 flex h-full flex-1 items-center p-5 md:p-6">
         
         {/* Left side visual */}
-        <div className="absolute inset-y-6 left-6 right-[560px] hidden select-none flex-col items-center justify-center lg:flex xl:right-[600px]">
-          <OnboardingVisual />
+        <div className="absolute inset-y-0 left-0 right-[548px] hidden select-none lg:block xl:right-[596px]">
+          <div className="flex h-full w-full items-center justify-center px-10">
+            <OnboardingVisual />
+          </div>
         </div>
 
         <motion.div
@@ -680,16 +683,16 @@ function OnboardingVisual() {
   }, []);
 
   return (
-    <div className="flex flex-col items-center justify-center gap-8">
+    <div className="mx-auto flex w-full max-w-[640px] flex-col items-center justify-center gap-8 text-center">
       <div className="logo-hover-trigger rounded-3xl p-4">
         <span className="logo-spin-target inline-flex will-change-transform">
           <Logo size={90} className="text-ink" />
         </span>
       </div>
-      <div className="flex flex-wrap items-baseline justify-center gap-x-4 gap-y-1 text-center text-4xl leading-[1.05] tracking-tight text-ink md:text-5xl lg:text-6xl">
-        <span>Your agent for</span>
-        <div className="relative inline-flex h-[1.18em] min-w-[7.4em] items-center overflow-hidden leading-none">
-          <span className="invisible italic select-none pointer-events-none">
+      <div className="flex flex-col items-center justify-center gap-2 text-center text-4xl leading-[1.02] tracking-tight text-ink md:text-5xl lg:text-6xl">
+        <span className="block">Your agent for</span>
+        <div className="relative flex h-[1.18em] min-w-[8.2em] items-center justify-center overflow-hidden leading-none">
+          <span className="pointer-events-none invisible select-none italic">
             getting unstuck
           </span>
           <AnimatePresence mode="popLayout">
@@ -699,7 +702,7 @@ function OnboardingVisual() {
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: "-100%", opacity: 0 }}
               transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-              className="absolute left-0 italic whitespace-nowrap"
+              className="absolute inset-0 flex items-center justify-center italic whitespace-nowrap"
             >
               {ROTATING_WORDS[index]}
             </motion.span>

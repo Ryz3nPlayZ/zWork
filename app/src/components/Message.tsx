@@ -205,6 +205,7 @@ export function Message({
   artifacts,
   streaming,
   activities,
+  status,
 }: {
   message: Msg;
   onAskSubmit?: (msgId: string, choice: string) => void;
@@ -212,11 +213,15 @@ export function Message({
   artifacts?: Artifact[];
   streaming?: boolean;
   activities?: Activity[];
+  status?: string;
 }) {
   const isUser = message.role === "user";
   const [askAnswers, setAskAnswers] = useState<Record<string, string>>({});
+  const showWorkingPlaceholder = !isUser && !!streaming && message.content.length === 0;
 
-  if (!isUser && message.content.length === 0 && (!activities || activities.length === 0)) return null;
+  if (!isUser && !showWorkingPlaceholder && message.content.length === 0 && (!activities || activities.length === 0)) {
+    return null;
+  }
 
   if (isUser) {
     return (
@@ -249,47 +254,51 @@ export function Message({
           />
         )}
         <div className="text-[14px] leading-6 text-ink">
-          {parts.map((part, i) => {
-            if (part.type === "text") {
-              const trimmed = part.value.trim();
-              if (!trimmed) return null;
+          {showWorkingPlaceholder ? (
+            <WorkingLabel status={status} />
+          ) : (
+            parts.map((part, i) => {
+              if (part.type === "text") {
+                const trimmed = part.value.trim();
+                if (!trimmed) return null;
+                return (
+                  <AssistantMarkdown
+                    key={i}
+                    content={trimmed}
+                    onOpenPanel={onOpenArtifact ? (code, lang) => {
+                      onOpenArtifact({
+                        id: `code-${Date.now()}`,
+                        kind: "code",
+                        title: lang || "Untitled code",
+                        language: lang,
+                        content: code,
+                        createdAt: Date.now(),
+                        sourceMessageId: message.id,
+                      });
+                    } : undefined}
+                  />
+                );
+              }
+              // AskCard segment
+              const payload = parseAskPayload(part.value);
+              if (!payload) return null;
+              const key = `${message.id}-ask-${i}`;
+              const chosen = askAnswers[key];
               return (
-                <AssistantMarkdown
-                  key={i}
-                  content={trimmed}
-                  onOpenPanel={onOpenArtifact ? (code, lang) => {
-                    onOpenArtifact({
-                      id: `code-${Date.now()}`,
-                      kind: "code",
-                      title: lang || "Untitled code",
-                      language: lang,
-                      content: code,
-                      createdAt: Date.now(),
-                      sourceMessageId: message.id,
-                    });
-                  } : undefined}
+                <AskCard
+                  key={key}
+                  payload={payload}
+                  submitted={!!chosen}
+                  chosenLabel={chosen}
+                  onSubmit={(choice) => {
+                    setAskAnswers((prev) => ({ ...prev, [key]: choice }));
+                    onAskSubmit?.(message.id, choice);
+                  }}
                 />
               );
-            }
-            // AskCard segment
-            const payload = parseAskPayload(part.value);
-            if (!payload) return null;
-            const key = `${message.id}-ask-${i}`;
-            const chosen = askAnswers[key];
-            return (
-              <AskCard
-                key={key}
-                payload={payload}
-                submitted={!!chosen}
-                chosenLabel={chosen}
-                onSubmit={(choice) => {
-                  setAskAnswers((prev) => ({ ...prev, [key]: choice }));
-                  onAskSubmit?.(message.id, choice);
-                }}
-              />
-            );
-          })}
-          {streaming && (
+            })
+          )}
+          {streaming && !showWorkingPlaceholder && (
             <span className="inline-block h-[1em] w-[2px] align-middle bg-ink animate-typing-cursor ml-0.5" />
           )}
         </div>
@@ -405,10 +414,7 @@ function ThinkingSection({
   );
 }
 
-/**
- * Shown while the assistant is working, before (or instead of) tokens arriving.
- */
-export function ThinkingRow({ status }: { status: string }) {
+function WorkingLabel({ status }: { status?: string }) {
   // Cycle through a shuffled pool of whimsical "-ing" words every ~1.8s.
   // The backend's `status` string wins if it isn't the generic "Thinking".
   const pool = useMemo(() => shuffled(THINKING_WORDS), []);
@@ -422,16 +428,17 @@ export function ThinkingRow({ status }: { status: string }) {
   const label = generic ? pool[idx] : status;
 
   return (
-    <div className="flex animate-fade-in items-center gap-3">
-      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-line bg-paper">
-        <Logo size={14} muted />
-      </div>
+    <span
+      key={label}
+      className="shimmer-text inline-flex animate-fade-in items-center gap-2 text-[13.5px] font-medium text-ink-faint"
+    >
+      <span className="inline-flex h-1.5 w-1.5 rounded-full bg-ink-faint/70 animate-pulse" />
       <span
         key={label /* re-fade on word change */}
-        className="shimmer-text animate-fade-in text-[13.5px] font-medium text-ink-faint"
+        className="shimmer-text animate-fade-in"
       >
         {label}
       </span>
-    </div>
+    </span>
   );
 }
