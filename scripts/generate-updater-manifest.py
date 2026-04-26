@@ -41,7 +41,11 @@ def paired_signature(path: Path) -> str:
     sig = path.with_name(path.name + ".sig")
     if not sig.exists():
       raise FileNotFoundError(f"missing signature for {path.name}")
-    return sig.read_text(encoding="utf-8").strip()
+    lines = [line.strip() for line in sig.read_text(encoding="utf-8").splitlines() if line.strip()]
+    for line in reversed(lines):
+        if line.startswith("dW50cnVzdGVk"):
+            return line
+    raise ValueError(f"could not find signature payload in {sig}")
 
 
 def main() -> int:

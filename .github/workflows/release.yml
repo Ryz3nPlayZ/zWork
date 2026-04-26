@@ -203,9 +203,14 @@ jobs:
 
           ### Install
 
-          **Linux**:
+          **Linux** (recommended):
           \`\`\`bash
           curl -fsSL https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install.sh | bash
+          \`\`\`
+          Or download the \`.AppImage\` and run:
+          \`\`\`bash
+          chmod +x zWork-linux-x86_64.AppImage
+          ./zWork-linux-x86_64.AppImage
           \`\`\`
 
           **macOS**: download \`zWork-macos-universal.dmg\`, open it, then drag zWork to Applications.
