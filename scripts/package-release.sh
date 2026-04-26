@@ -64,6 +64,12 @@ if [[ "$PLATFORM" == "linux" ]]; then
   fi
 
   ln -sf zWork.png "$APPDIR/sidecar-app.png"
+
+  # Remove bundled WebKitGTK auxiliary processes — they're compiled against
+  # the CI environment's libraries and crash on user machines. The system's
+  # own WebKitGTK (libwebkit2gtk-4.1) must be used instead.
+  rm -rf "$APPDIR/usr/lib/webkit2gtk-4.1" "$APPDIR/usr/lib64/webkit2gtk-4.1"
+
   (
     cd "$BUNDLE_DIR"
     APPIMAGE_EXTRACT_AND_RUN=1 "$PLUGIN" --appdir "$APPDIR"
