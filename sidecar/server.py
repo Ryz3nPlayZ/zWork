@@ -996,6 +996,10 @@ async def chat_stream(req: StreamRequest):
         except Exception as e:  # pragma: no cover
             traceback.print_exc()
             yield _sse({"type": "error", "text": str(e)})
+            await _record_telemetry_event(
+                "agent_task_error",
+                properties={"chat_id": chat.id, "error": str(e), "model": model_id}
+            )
         if full_text:
             chatstore.append_message(chat.id, "assistant", full_text)
         await _record_telemetry_event(

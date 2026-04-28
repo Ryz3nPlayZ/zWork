@@ -140,3 +140,15 @@ export function recordTelemetry(event: string, properties: TelemetryProps = {}) 
   void post(event, properties);
 }
 
+// Analytics Helpers
+export function trackFeatureUsage(featureName: string, properties: TelemetryProps = {}) {
+  void post("feature_used", { feature: featureName, ...properties });
+}
+
+export function trackOnboardingStep(step: string, completed: boolean) {
+  void post("onboarding_step", { step, completed });
+}
+
+export function trackTokenConsumption(model: string, inputTokens: number, outputTokens: number) {
+  void post("token_consumption", { model, input_tokens: inputTokens, output_tokens: outputTokens, total_tokens: inputTokens + outputTokens });
+}
