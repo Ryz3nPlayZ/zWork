@@ -28,6 +28,7 @@ services:
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
       - POSTHOG_API_KEY=${POSTHOG_API_KEY}
       - POSTHOG_HOST=https://app.posthog.com
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     depends_on:
       - postgres
 
