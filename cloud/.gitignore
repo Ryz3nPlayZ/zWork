@@ -1,0 +1,9 @@
+# Rust
+api/target/
+
+# Node
+auth/node_modules/
+
+# Environment
+.env
+.env.*

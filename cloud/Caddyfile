@@ -1,0 +1,8 @@
+api.yourdomain.com {
+    reverse_proxy /api/auth/* better_auth:3000
+    reverse_proxy /api/* axum_api:8080
+}
+
+auth.yourdomain.com {
+    reverse_proxy * better_auth:3000
+}
