@@ -58,36 +58,34 @@ async fn ingest_telemetry(
     }
 }
 
-// AI Proxy Layer
+// AI Proxy Layer (Ollama Cloud)
 async fn ai_proxy(
     State(state): State<AppState>,
     req: Request<axum::body::Body>,
 ) -> Result<Response<axum::body::Body>, StatusCode> {
-    // In a full implementation, we'd check session cookies or tokens here against the db.
-    // Let's assume for now that requests provide an authorization token if we wanted.
-    
-    // We'll just read the body and forward it to Anthropic
-    let anthropic_key = std::env::var("ANTHROPIC_API_KEY").unwrap_or_default();
-    
-    if anthropic_key.is_empty() {
-        tracing::error!("ANTHROPIC_API_KEY is not configured on the server");
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
-    }
-    
-    let client = reqwest::Client::new();
-    
-    let path = req.uri().path().replace("/api/chat/stream", "/v1/messages").replace("/api/v1/messages", "/v1/messages");
-    let url = format!("https://api.anthropic.com{}", path);
-    
-    let mut builder = client.post(&url)
-        .header("x-api-key", anthropic_key)
-        .header("anthropic-version", "2023-06-01")
-        .header("content-type", "application/json");
+    // Ollama Cloud API Configuration
+    let ollama_api_key = "48dc3d9713554e81b1ff43c39187f491.mGuuk200M2L6VRM05MVzdvEc";
+    let ollama_endpoint = "https://api.ollama.com/v1/chat/completions";
+    let allowed_model = "minimax-m2.7:cloud";
 
-    // Optional: forward any incoming headers we want, but we'll keep it simple
     let body_bytes = axum::body::to_bytes(req.into_body(), 1024 * 1024 * 10).await.map_err(|_| StatusCode::BAD_REQUEST)?;
     
-    let resp = builder.body(body_bytes).send().await.map_err(|_| StatusCode::BAD_GATEWAY)?;
+    // Parse body to enforce model constraint
+    let mut body_json: Value = serde_json::from_slice(&body_bytes).map_err(|_| StatusCode::BAD_REQUEST)?;
+    
+    // Always force the allowed model for this proxy
+    if let Some(obj) = body_json.as_object_mut() {
+        obj.insert("model".to_string(), serde_json::Value::String(allowed_model.to_string()));
+    }
+
+    let client = reqwest::Client::new();
+    let resp = client.post(ollama_endpoint)
+        .header("Authorization", format!("Bearer {}", ollama_api_key))
+        .header("Content-Type", "application/json")
+        .json(&body_json)
+        .send()
+        .await
+        .map_err(|_| StatusCode::BAD_GATEWAY)?;
     
     let status = resp.status();
     let stream = resp.bytes_stream();
@@ -129,7 +127,7 @@ async fn main() {
         .route("/health", get(health_check))
         .route("/api/telemetry/event", post(ingest_telemetry))
         .route("/api/chat/stream", post(ai_proxy))
-        .route("/api/v1/messages", post(ai_proxy))
+        .route("/api/v1/chat/completions", post(ai_proxy))
         .route("/api/webhooks/stripe", post(stripe_webhook))
         .with_state(state);
 

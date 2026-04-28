@@ -79,6 +79,10 @@ fn configure_linux_webview_env() {
     if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     }
+    // Additional fixes for ABRT signal 6 on certain Linux drivers
+    std::env::set_var("WEBKIT_USE_GLIB_NETWORKING", "1");
+    std::env::set_var("WEBP_MALLOC", "1");
+    
     // Wayland EGL can fail on Intel GPUs (EGL_BAD_PARAMETER).
     // Use XWayland which works reliably.
     if std::env::var_os("GDK_BACKEND").is_none()
