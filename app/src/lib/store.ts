@@ -10,7 +10,7 @@ import {
   type MeResponse,
   type Project,
 } from "./api";
-import { setTelemetryEnabled } from "./telemetry";
+import { setTelemetryEnabled, trackError, trackArtifactCreated } from "./telemetry";
 
 export type Role = "user" | "assistant";
 
@@ -743,6 +743,7 @@ export const useApp = create<AppState>((set, get) => ({
               };
             });
           } else if (evt.type === "error") {
+            trackError("api_error", evt.text);
             set((s) => {
               const c = s.chats[localId];
               if (!c) return s;
@@ -816,6 +817,7 @@ export const useApp = create<AppState>((set, get) => ({
       if (artifacts.length > 0) {
         for (const artifact of artifacts) {
           get().openArtifact(artifact);
+          trackArtifactCreated(artifact.kind, artifact.content?.length);
         }
         set((s) => {
           const c = s.chats[localId];
@@ -868,6 +870,7 @@ export const useApp = create<AppState>((set, get) => ({
             artifact.src = assistantContent.trim();
           }
           get().openArtifact(artifact);
+          trackArtifactCreated(artifact.kind, artifact.content?.length);
           set((s) => {
             const c = s.chats[localId];
             if (!c) return s;
@@ -891,6 +894,7 @@ export const useApp = create<AppState>((set, get) => ({
     } catch (e) {
       const isAbort = e instanceof DOMException && e.name === "AbortError";
       if (!isAbort) {
+        trackError("chat_error", String(e));
         set((s) => {
           const c = s.chats[localId];
           if (!c) return s;
