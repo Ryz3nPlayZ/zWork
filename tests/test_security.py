@@ -6,15 +6,18 @@ from pathlib import Path
 # The fix we applied
 def simulate_serve_spa_logic(_STATIC_DIR, path):
     # This matches the FIXED implementation in sidecar/server.py
-    candidate = (_STATIC_DIR / path).resolve()
+    # First, sanitize input to block obvious traversal attempts.
+    if ".." in path or path.startswith("/") or "\\" in path:
+        return _STATIC_DIR / "index.html"
+
+    # Then, verify the resolved path remains under the static directory.
     try:
-        # Check if candidate is still under _STATIC_DIR
-        candidate.relative_to(_STATIC_DIR.resolve())
-        if path and candidate.is_file():
+        candidate = (_STATIC_DIR / path).resolve()
+        if candidate.is_file() and os.path.commonpath([_STATIC_DIR.resolve(), candidate]) == str(_STATIC_DIR.resolve()):
             return candidate
-    except ValueError:
-        # path is outside of _STATIC_DIR
+    except (ValueError, OSError):
         pass
+
     # Fall back to index.html for SPA routing.
     return _STATIC_DIR / "index.html"
 
@@ -35,12 +38,19 @@ class TestPathTraversal(unittest.TestCase):
             res = simulate_serve_spa_logic(static_dir, "index.html")
             self.assertEqual(res, index_file)
 
-            # Traversal request
+            # Traversal request (dot-dot)
             traversal_path = "../../secret.txt"
             res = simulate_serve_spa_logic(static_dir, traversal_path)
+            self.assertEqual(res, index_file, "Path traversal with .. should be blocked")
 
-            # It should NOT be the secret file, it should be index.html
-            self.assertEqual(res, index_file, "Path traversal should be blocked and return index.html")
+            # Absolute path request
+            abs_path = str(secret_file)
+            res = simulate_serve_spa_logic(static_dir, abs_path)
+            self.assertEqual(res, index_file, "Path traversal with absolute path should be blocked")
+
+            # Backslash request
+            res = simulate_serve_spa_logic(static_dir, "assets\\..\\..\\secret.txt")
+            self.assertEqual(res, index_file, "Path traversal with backslashes should be blocked")
 
             # Subdirectory request
             assets_dir = static_dir / "assets"
