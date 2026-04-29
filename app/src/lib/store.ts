@@ -164,6 +164,13 @@ function stripArtifactJunk(text: string): string {
   return out;
 }
 
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  picture?: string;
+}
+
 interface AppState {
   // UI
   sidebarOpen: boolean;
@@ -171,6 +178,12 @@ interface AppState {
   setSidebarOpen: (v: boolean) => void;
   view: View;
   setView: (v: View) => void;
+
+  // Auth
+  user: User | null;
+  isLoadingAuth: boolean;
+  signInWithGoogle: () => Promise<void>;
+  signOut: () => void;
 
   // Backend state
   providers: ProvidersResponse | null;
@@ -285,6 +298,96 @@ export const useApp = create<AppState>((set, get) => ({
   setSidebarOpen: (v) => set({ sidebarOpen: v }),
   view: "chat",
   setView: (v) => set({ view: v }),
+
+  user: null,
+  isLoadingAuth: false,
+  signInWithGoogle: async () => {
+    set({ isLoadingAuth: true });
+    try {
+      const clientId = "499797585133-o6rsh3vddbsh5sjjb5d74f1q15tl1ovp.apps.googleusercontent.com";
+      const redirectUri = `${window.location.origin}/oauth-callback.html`;
+      const scope = "openid profile email";
+      
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+        `client_id=${clientId}&` +
+        `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+        `response_type=token&` +
+        `scope=${encodeURIComponent(scope)}`;
+      
+      const width = 500;
+      const height = 600;
+      const left = window.screenX + (window.outerWidth - width) / 2;
+      const top = window.screenY + (window.outerHeight - height) / 2;
+      
+      const popup = window.open(
+        authUrl,
+        "Google Sign In",
+        `width=${width},height=${height},left=${left},top=${top}`
+      );
+      
+      if (!popup) {
+        throw new Error("Popup blocked. Please allow popups for this app.");
+      }
+      
+      return new Promise((resolve, reject) => {
+        const messageListener = (event: MessageEvent) => {
+          if (event.origin !== window.location.origin) return;
+          
+          if (event.data?.type === "OAUTH_SUCCESS") {
+            const { access_token } = event.data;
+            
+            // Fetch user info with the access token
+            fetch(`https://www.googleapis.com/oauth2/v3/userinfo?access_token=${access_token}`)
+              .then(res => res.json())
+              .then(userInfo => {
+                const user: User = {
+                  id: userInfo.sub,
+                  email: userInfo.email,
+                  name: userInfo.name,
+                  picture: userInfo.picture,
+                };
+                localStorage.setItem("zwork_user", JSON.stringify(user));
+                localStorage.setItem("zwork_token", access_token);
+                set({ user, isLoadingAuth: false });
+                window.removeEventListener("message", messageListener);
+                popup.close();
+                resolve();
+              })
+              .catch(err => {
+                set({ isLoadingAuth: false });
+                window.removeEventListener("message", messageListener);
+                popup.close();
+                reject(err);
+              });
+          } else if (event.data?.type === "OAUTH_ERROR") {
+            set({ isLoadingAuth: false });
+            window.removeEventListener("message", messageListener);
+            popup.close();
+            reject(new Error(event.data.error || "OAuth failed"));
+          }
+        };
+        
+        window.addEventListener("message", messageListener);
+        
+        const checkClosed = setInterval(() => {
+          if (popup.closed) {
+            set({ isLoadingAuth: false });
+            clearInterval(checkClosed);
+            window.removeEventListener("message", messageListener);
+            reject(new Error("OAuth window was closed"));
+          }
+        }, 1000);
+      });
+    } catch (error) {
+      set({ isLoadingAuth: false });
+      throw error;
+    }
+  },
+  signOut: () => {
+    localStorage.removeItem("zwork_user");
+    localStorage.removeItem("zwork_token");
+    set({ user: null });
+  },
 
   providers: null,
   integrations: [],
@@ -411,6 +514,15 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   bootstrap: async () => {
+    // Load user from localStorage on startup
+    try {
+      const savedUser = localStorage.getItem("zwork_user");
+      if (savedUser) {
+        const user = JSON.parse(savedUser) as User;
+        set({ user });
+      }
+    } catch { /* ignore */ }
+    
     await Promise.all([
       get().refreshProviders(),
       get().refreshSettings(),

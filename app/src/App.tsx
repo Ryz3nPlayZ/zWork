@@ -7,6 +7,7 @@ import { useApp } from "./lib/store";
 import { consumeInstalledUpdateNotice, detectUpdate, installUpdate, openReleaseUrl, type UpdateCardState, type UpdateProgress } from "./lib/update";
 import { cn } from "./lib/cn";
 import { recordTelemetry, setTelemetryEnabled, startTelemetrySession, stopTelemetrySession } from "./lib/telemetry";
+import { LoginScreen } from "./components/LoginScreen";
 
 const Onboarding = lazy(() => import("./components/Onboarding").then((m) => ({ default: m.Onboarding })));
 const loadChatView = () => import("./components/ChatView").then((m) => ({ default: m.ChatView }));
@@ -21,6 +22,7 @@ export default function App() {
   const bootstrap = useApp((s) => s.bootstrap);
   const view = useApp((s) => s.view);
   const settings = useApp((s) => s.settings);
+  const user = useApp((s) => s.user);
   const active = useApp((s) => s.activeChatId);
   const chat = useApp((s) => (active ? s.chats[active] : undefined));
   const artifactPanelOpen = !!(view === "chat" && active && chat?.artifactPanelOpen);
@@ -37,6 +39,11 @@ export default function App() {
     notes?: string;
   } | null>(null);
   const showLanding = view === "chat" && active === null;
+
+  // Show login screen if user is not authenticated
+  if (!user) {
+    return <LoginScreen />;
+  }
 
   useEffect(() => {
     void bootstrap();

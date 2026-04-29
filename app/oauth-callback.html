@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>OAuth Callback</title>
+</head>
+<body>
+  <script>
+    // Parse the access token from the URL hash (implicit flow)
+    const hash = window.location.hash.substring(1);
+    const params = new URLSearchParams(hash);
+    const accessToken = params.get('access_token');
+    const idToken = params.get('id_token');
+    const error = params.get('error');
+
+    if (error) {
+      window.opener.postMessage({
+        type: 'OAUTH_ERROR',
+        error: error
+      }, window.location.origin);
+      window.close();
+    } else if (accessToken) {
+      window.opener.postMessage({
+        type: 'OAUTH_SUCCESS',
+        access_token: accessToken,
+        id_token: idToken
+      }, window.location.origin);
+      window.close();
+    } else {
+      window.opener.postMessage({
+        type: 'OAUTH_ERROR',
+        error: 'No access token received'
+      }, window.location.origin);
+      window.close();
+    }
+  </script>
+</body>
+</html>
