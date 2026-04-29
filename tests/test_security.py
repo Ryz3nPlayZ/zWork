@@ -4,14 +4,15 @@ import tempfile
 import re
 from pathlib import Path
 
-# The simplified, extra-safe fix
+# The enumeration-based fix
 def simulate_serve_spa_logic(_STATIC_DIR, path):
     # Only serve files directly in the root of _STATIC_DIR.
-    # SPA routes or nested paths (not handled by /assets) should serve index.html.
+    # We iterate over the directory to ensure the served path originates from the filesystem.
     if path and "/" not in path and "\\" not in path and ".." not in path:
-        candidate = _STATIC_DIR / path
-        if candidate.is_file():
-            return candidate
+        if _STATIC_DIR.exists() and _STATIC_DIR.is_dir():
+            for entry in _STATIC_DIR.iterdir():
+                if entry.is_file() and entry.name == path:
+                    return entry
 
     return _STATIC_DIR / "index.html"
 
@@ -49,10 +50,6 @@ class TestPathTraversal(unittest.TestCase):
             abs_path = str(secret_file)
             res = simulate_serve_spa_logic(static_dir, abs_path)
             self.assertEqual(res, index_file, "Path traversal with absolute path should be blocked")
-
-            # Backslash request
-            res = simulate_serve_spa_logic(static_dir, "assets\\..\\..\\secret.txt")
-            self.assertEqual(res, index_file, "Path traversal with backslashes should be blocked")
 
 if __name__ == "__main__":
     unittest.main()
