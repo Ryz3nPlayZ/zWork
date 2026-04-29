@@ -1057,9 +1057,16 @@ if _STATIC_DIR.is_dir():
     @app.get("/{path:path}")
     async def serve_spa(request: Request, path: str) -> HTMLResponse:
         # Try to serve a matching static file first (e.g. favicon, SVGs).
-        candidate = _STATIC_DIR / path
-        if path and candidate.is_file():
-            return FileResponse(candidate)
+        # We must prevent path traversal by ensuring the resolved path is within _STATIC_DIR.
+        candidate = (_STATIC_DIR / path).resolve()
+        try:
+            # Check if candidate is still under _STATIC_DIR
+            candidate.relative_to(_STATIC_DIR.resolve())
+            if path and candidate.is_file():
+                return FileResponse(candidate)
+        except ValueError:
+            # path is outside of _STATIC_DIR
+            pass
         # Fall back to index.html for SPA routing.
         return FileResponse(_STATIC_DIR / "index.html")
 
