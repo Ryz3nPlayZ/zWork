@@ -1057,18 +1057,13 @@ if _STATIC_DIR.is_dir():
     @app.get("/{path:path}")
     async def serve_spa(request: Request, path: str) -> HTMLResponse:
         # Try to serve a matching static file first (e.g. favicon, SVGs).
-        # We must prevent path traversal by ensuring the resolved path is within _STATIC_DIR.
-        # First, sanitize input to block obvious traversal attempts.
-        if ".." in path or path.startswith("/") or "\\" in path:
-            return FileResponse(_STATIC_DIR / "index.html")
-
-        # Then, verify the resolved path remains under the static directory.
-        try:
-            candidate = (_STATIC_DIR / path).resolve()
-            if candidate.is_file() and os.path.commonpath([_STATIC_DIR.resolve(), candidate]) == str(_STATIC_DIR.resolve()):
+        # To avoid any risk of path traversal or leaking server files, we only allow
+        # serving files directly located in the root of _STATIC_DIR.
+        # Nested static assets like /assets/... are already handled by the app.mount() above.
+        if path and "/" not in path and "\\" not in path and ".." not in path:
+            candidate = _STATIC_DIR / path
+            if candidate.is_file():
                 return FileResponse(candidate)
-        except (ValueError, OSError):
-            pass
 
         # Fall back to index.html for SPA routing.
         return FileResponse(_STATIC_DIR / "index.html")

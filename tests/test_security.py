@@ -1,24 +1,18 @@
 import unittest
 import os
 import tempfile
+import re
 from pathlib import Path
 
-# The fix we applied
+# The simplified, extra-safe fix
 def simulate_serve_spa_logic(_STATIC_DIR, path):
-    # This matches the FIXED implementation in sidecar/server.py
-    # First, sanitize input to block obvious traversal attempts.
-    if ".." in path or path.startswith("/") or "\\" in path:
-        return _STATIC_DIR / "index.html"
-
-    # Then, verify the resolved path remains under the static directory.
-    try:
-        candidate = (_STATIC_DIR / path).resolve()
-        if candidate.is_file() and os.path.commonpath([_STATIC_DIR.resolve(), candidate]) == str(_STATIC_DIR.resolve()):
+    # Only serve files directly in the root of _STATIC_DIR.
+    # SPA routes or nested paths (not handled by /assets) should serve index.html.
+    if path and "/" not in path and "\\" not in path and ".." not in path:
+        candidate = _STATIC_DIR / path
+        if candidate.is_file():
             return candidate
-    except (ValueError, OSError):
-        pass
 
-    # Fall back to index.html for SPA routing.
     return _STATIC_DIR / "index.html"
 
 class TestPathTraversal(unittest.TestCase):
@@ -31,11 +25,19 @@ class TestPathTraversal(unittest.TestCase):
             index_file = static_dir / "index.html"
             index_file.write_text("index")
 
+            # A legitimate file in the root
+            favicon = static_dir / "favicon.ico"
+            favicon.write_text("icon")
+
             secret_file = tmp_path / "secret.txt"
             secret_file.write_text("secret_content")
 
-            # Normal request
-            res = simulate_serve_spa_logic(static_dir, "index.html")
+            # Normal root file request
+            res = simulate_serve_spa_logic(static_dir, "favicon.ico")
+            self.assertEqual(res, favicon)
+
+            # Normal SPA route request
+            res = simulate_serve_spa_logic(static_dir, "chat/123")
             self.assertEqual(res, index_file)
 
             # Traversal request (dot-dot)
@@ -51,15 +53,6 @@ class TestPathTraversal(unittest.TestCase):
             # Backslash request
             res = simulate_serve_spa_logic(static_dir, "assets\\..\\..\\secret.txt")
             self.assertEqual(res, index_file, "Path traversal with backslashes should be blocked")
-
-            # Subdirectory request
-            assets_dir = static_dir / "assets"
-            assets_dir.mkdir()
-            logo_file = assets_dir / "logo.png"
-            logo_file.write_text("logo")
-
-            res = simulate_serve_spa_logic(static_dir, "assets/logo.png")
-            self.assertEqual(res, logo_file)
 
 if __name__ == "__main__":
     unittest.main()
