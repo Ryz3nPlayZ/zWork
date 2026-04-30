@@ -2,6 +2,9 @@
 
 zWork is a desktop AI agent that runs on your computer, can use local tools, and can optionally route through a managed cloud gateway for auth, telemetry, and paid plans.
 
+[![GitHub Release](https://img.shields.io/github/v/release/Ryz3nPlayZ/zWork)](https://github.com/Ryz3nPlayZ/zWork/releases)
+[![License](https://img.shields.io/github/license/Ryz3nPlayZ/zWork)](LICENSE)
+
 ## What it is
 
 - Desktop app: Tauri + React
