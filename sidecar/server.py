@@ -50,10 +50,12 @@ if _STATIC_DIR.is_dir():
 
 app.add_middleware(
     CORSMiddleware,
-    # Backend is bound to 127.0.0.1 only, so wildcarding origins is safe.
-    # The Tauri bundled app loads from a `tauri://` or `http://tauri.localhost`
-    # origin depending on platform, and the dev server from :1420.
-    allow_origin_regex=".*",
+    # Restrict origins to the Tauri app and local dev server for defense-in-depth.
+    allow_origins=[
+        "tauri://localhost",
+        "http://tauri.localhost",
+        "http://localhost:1420",
+    ],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
