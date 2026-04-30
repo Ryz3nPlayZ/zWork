@@ -102,10 +102,15 @@ async fn ai_proxy(
     _state: State<AppState>,
     req: Request<axum::body::Body>,
 ) -> Result<Response<axum::body::Body>, StatusCode> {
-    // Ollama Cloud API Configuration
-    let ollama_api_key = "48dc3d9713554e81b1ff43c39187f491.mGuuk200M2L6VRM05MVzdvEc";
+    let ollama_api_key = std::env::var("OLLAMA_API_KEY")
+        .or_else(|_| std::env::var("ZWORK_TEST_OLLAMA_API_KEY"))
+        .unwrap_or_default();
     let ollama_endpoint = "https://api.ollama.com/v1/chat/completions";
     let allowed_model = "minimax-m2.7:cloud";
+
+    if ollama_api_key.trim().is_empty() {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
 
     let body_bytes = axum::body::to_bytes(req.into_body(), 1024 * 1024 * 10).await.map_err(|_| StatusCode::BAD_REQUEST)?;
     

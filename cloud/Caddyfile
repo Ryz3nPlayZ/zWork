@@ -21,10 +21,9 @@ api.tryzwork.app {
     }
 }
 
-# 2. Database Management (Private)
+# 2. Database Management (disabled by default)
 db.tryzwork.app {
-    # TODO: Add basicauth or IP allowlist before exposing publicly
-    reverse_proxy pgadmin:80
+    respond "disabled" 403
 }
 
 # 3. Analytics Shortcut
