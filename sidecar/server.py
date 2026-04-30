@@ -45,7 +45,9 @@ app = FastAPI(title="zWork", version="0.1.0")
 
 # Serve built frontend as static files when running as a web app.
 _STATIC_DIR = Path(__file__).resolve().parent.parent / "app" / "dist"
+_static_app: StaticFiles | None = None
 if _STATIC_DIR.is_dir():
+    _static_app = StaticFiles(directory=_STATIC_DIR)
     app.mount("/assets", StaticFiles(directory=_STATIC_DIR / "assets"), name="assets")
 
 app.add_middleware(
@@ -1055,16 +1057,18 @@ async def _heartbeat_stream(source: Any, interval: float = 5.0):
 if _STATIC_DIR.is_dir():
 
     @app.get("/{path:path}")
-    async def serve_spa(request: Request, path: str) -> HTMLResponse:
+    async def serve_spa(request: Request, path: str):
         # Try to serve a matching static file first (e.g. favicon, SVGs).
-        # To prevent path traversal, we avoid direct path construction from user input.
-        # Instead, we check if the requested file exists in the root of our static directory.
-        if path and "/" not in path and "\\" not in path and ".." not in path:
-            # We iterate over the directory to ensure the served path originates from
-            # the filesystem itself, which satisfies security scanners like CodeQL.
-            for entry in _STATIC_DIR.iterdir():
-                if entry.is_file() and entry.name == path:
-                    return FileResponse(entry)
+        # We delegate static file resolution to FastAPI's StaticFiles component
+        # for a secure and standard implementation.
+        if _static_app and path and "/" not in path and "\\" not in path and ".." not in path:
+            try:
+                # StaticFiles.get_response handles path traversal protection internally.
+                resp = await _static_app.get_response(path, request.scope)
+                if resp.status_code == 200:
+                    return resp
+            except Exception:
+                pass
 
         # Fall back to index.html for SPA routing.
         return FileResponse(_STATIC_DIR / "index.html")
