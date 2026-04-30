@@ -50,10 +50,14 @@ if _STATIC_DIR.is_dir():
 
 app.add_middleware(
     CORSMiddleware,
-    # Backend is bound to 127.0.0.1 only, so wildcarding origins is safe.
-    # The Tauri bundled app loads from a `tauri://` or `http://tauri.localhost`
-    # origin depending on platform, and the dev server from :1420.
-    allow_origin_regex=".*",
+    # Only desktop/webview and local dev origins should ever talk to the
+    # local sidecar. A browser page on an arbitrary origin should not.
+    allow_origins=[
+        "tauri://localhost",
+        "http://tauri.localhost",
+        "http://localhost:1420",
+        "http://127.0.0.1:1420",
+    ],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1057,9 +1061,17 @@ if _STATIC_DIR.is_dir():
     @app.get("/{path:path}")
     async def serve_spa(request: Request, path: str) -> HTMLResponse:
         # Try to serve a matching static file first (e.g. favicon, SVGs).
-        candidate = _STATIC_DIR / path
-        if path and candidate.is_file():
-            return FileResponse(candidate)
+        if path:
+            normalized = Path(path.lstrip("/"))
+            if not normalized.is_absolute() and ".." not in normalized.parts and "\\" not in path:
+                static_root = _STATIC_DIR.resolve()
+                candidate = (static_root / normalized).resolve()
+                try:
+                    candidate.relative_to(static_root)
+                except ValueError:
+                    candidate = None
+                if candidate is not None and candidate.is_file():
+                    return FileResponse(candidate)
         # Fall back to index.html for SPA routing.
         return FileResponse(_STATIC_DIR / "index.html")
 
