@@ -1,44 +1,61 @@
 # zWork
 
-**Your Personal AI Assistant that actually gets work done.**
+zWork is a desktop AI agent that runs on your computer, can use local tools, and can optionally route through a managed cloud gateway for auth, telemetry, and paid plans.
 
-zWork isn't just another chatbot. It's an intelligent assistant that lives directly on your computer. Instead of just answering questions, zWork takes action: it organizes your files, browses the web to do research, creates spreadsheets, and handles the repetitive tasks you don't want to do.
+## What it is
 
-Imagine telling your AI to "Fill out the weekly expense report in Excel based on these receipts" and watching it happen automatically.
+- Desktop app: Tauri + React
+- Local runtime: Python FastAPI sidecar
+- Optional cloud layer: Axum API + Better Auth + Postgres
 
-## 🚀 Get zWork
+The product direction is not “more AI features.” It is “useful desktop jobs that work end to end”:
 
-Download the latest version of zWork for your computer:
+- research a market and produce a comparison sheet
+- turn notes into a brief or follow-up draft
+- organize files and clean up folders
+- run agentic workflows with tools and visible progress
 
-- **[Download for macOS (.dmg)](https://github.com/Ryz3nPlayZ/zWork/releases)** (Works on Intel and Apple Silicon)
-- **[Download for Windows (.exe)](https://github.com/Ryz3nPlayZ/zWork/releases)**
+## Install
 
-*(Linux users: Download the AppImage from the releases page).*
+Download the latest build from [GitHub Releases](https://github.com/Ryz3nPlayZ/zWork/releases/latest).
 
-## ✨ What zWork Can Do For You
+- macOS: `zWork-macos-universal.dmg`
+- Windows: `zWork-windows-x86_64-setup.exe`
+- Linux: `zWork-linux-x86_64.AppImage`
 
-- **Chat Naturally**: Tell it what you need in plain English. No coding required.
-- **Manage Your Files**: Ask it to sort, rename, or organize your messy Downloads folder.
-- **Create Documents**: Instantly generate reports, briefs, and spreadsheets directly on your desktop.
-- **Automate Browsing**: Have it research competitors, extract data from websites, and summarize long articles.
-- **Remember Everything**: zWork learns your preferences and remembers context across your sessions.
+## What works today
 
-## 💡 Example Tasks
+- desktop chat UI with streaming responses
+- local file and command workflows
+- local BYOK model setup
+- required account sign-in for managed flows
+- analytics/usage view for signed-in users
+- in-app updater backed by GitHub release artifacts
 
-> *"Rename all the files in this folder based on what's inside them."*
+## Documentation
 
-> *"Research the top 5 email marketing tools and create a spreadsheet comparing their prices."*
+- [Wiki / Docs Index](docs/WIKI.md)
+- [Architecture Overview](docs/ARCHITECTURE.md)
+- [Authentication](docs/AUTH.md)
+- [Cloud Deployment](docs/CLOUD.md)
+- [Release and Updater Runbook](docs/RELEASES.md)
+- [Contributing / local development](CONTRIBUTING.md)
 
-> *"Draft a follow-up email based on the meeting notes I just took."*
+## Development
 
-## 🔒 Privacy & Pricing
+```bash
+./run.sh
+```
 
-**zWork Open Source (Free)**
-Run zWork entirely locally on your machine. You control your data. Just bring your own API key (BYOK) for OpenAI or Anthropic, and you are ready to go!
+That bootstraps the local Python sidecar, installs frontend dependencies, and starts the Tauri desktop app in dev mode.
 
-**zWork Cloud (Pro)**
-*Coming Soon.* Zero-configuration required. Upgrade to Pro to use our optimized AI endpoints without needing API keys, sync your workspaces seamlessly across all your devices, and unlock premium workflow templates.
+## Product focus
 
----
+The near-term bar is simple:
 
-*For developers looking to build zWork from source, please see our [Developer Guide](CONTRIBUTING.md).*
+- install cleanly
+- sign in cleanly
+- complete a real task cleanly
+- update cleanly
+
+Once that loop is stable, zWork can be packaged around sellable use cases rather than a loose feature list.
