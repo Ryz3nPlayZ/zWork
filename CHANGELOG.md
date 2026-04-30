@@ -2,6 +2,19 @@
 
 All notable changes to zWork are documented here.
 
+## Unreleased
+
+**Documentation and developer experience improvements.**
+
+- Added product vision document (docs/VISION.md) articulating design principles
+- Added technical roadmap (ROADMAP2.md) with quarterly implementation priorities
+- Expanded CONTRIBUTING.md with comprehensive development setup and guidelines
+- Added VSCode workspace configuration for consistent development experience
+- Added CI workflow for automated frontend linting and backend testing
+- Enhanced README with project badges for better visibility
+- Improved release documentation with troubleshooting section
+- Updated wiki index for better documentation discoverability
+
 ## v0.4.0 — Cloud Auth & User Tracking
 
 **Authentication, cloud proxy, and user management.**
