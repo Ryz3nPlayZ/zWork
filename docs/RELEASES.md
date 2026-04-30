@@ -183,3 +183,34 @@ local Gatekeeper behavior and how the asset was downloaded.
 
 Windows builds are not code-signed. Users may see a SmartScreen warning and need
 to click "More info" > "Run anyway".
+
+## Troubleshooting
+
+### macOS "unidentified developer" warning
+
+If Gatekeeper blocks the app on first launch:
+
+```bash
+xattr -cr /Applications/zWork.app
+```
+
+Then try launching again.
+
+### Windows SmartScreen warning
+
+Click "More info" → "Run anyway" to proceed. This is expected for unsigned binaries.
+
+### Linux AppImage won't execute
+
+```bash
+chmod +x ~/.local/share/zWork/zWork-linux-*.AppImage
+```
+
+### Update fails to download
+
+Check the updater logs in:
+- macOS: `~/Library/Logs/zWork/`
+- Windows: `%APPDATA%\zWork\logs\`
+- Linux: `~/.local/share/zWork/logs/`
+
+Manual fallback: Download from [GitHub Releases](https://github.com/Ryz3nPlayZ/zWork/releases).
