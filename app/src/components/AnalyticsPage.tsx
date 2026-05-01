@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Activity, BarChart3, ExternalLink, Shield, Zap } from "lucide-react";
+import { Activity, ArrowRight, BarChart3, Calendar, CheckCircle, ExternalLink, LogOut, Sparkles, TrendingUp, User, Zap } from "lucide-react";
 import { api } from "../lib/api";
 import {
   clearManagedBackup,
@@ -13,6 +13,7 @@ import {
 } from "../lib/cloud";
 import { recordTelemetry } from "../lib/telemetry";
 import { useApp } from "../lib/store";
+import { cn } from "../lib/cn";
 
 const MANAGED_MODEL_ID = "zwork-router";
 const MANAGED_BASE_URL = "https://api.tryzwork.app/api/v1";
@@ -23,19 +24,21 @@ function StatCard({
   value,
   hint,
   icon,
+  trend,
 }: {
   label: string;
   value: string;
   hint: string;
   icon: ReactNode;
+  trend?: "up" | "down" | "neutral";
 }) {
   return (
-    <div className="rounded-[24px] border border-line bg-paper-raised p-5 shadow-[0_10px_40px_rgba(17,17,17,0.05)]">
+    <div className="rounded-2xl border border-line bg-paper-raised p-5 shadow-[0_8px_32px_rgba(17,17,17,0.06)] transition-shadow hover:shadow-[0_12px_40px_rgba(17,17,17,0.1)]">
       <div className="flex items-center justify-between">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-faint">{label}</div>
+        <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-faint">{label}</div>
         <div className="text-ink-muted">{icon}</div>
       </div>
-      <div className="mt-4 text-[34px] font-light tracking-tight text-ink">{value}</div>
+      <div className="mt-3 text-[32px] font-light tracking-tight text-ink">{value}</div>
       <div className="mt-1 text-[12.5px] leading-5 text-ink-muted">{hint}</div>
     </div>
   );
@@ -43,41 +46,58 @@ function StatCard({
 
 function ProgressQuotaCard({
   label,
+  icon,
   used,
   limit,
   hint,
+  period,
 }: {
   label: string;
+  icon: ReactNode;
   used: number;
   limit: number;
   hint: string;
+  period: string;
 }) {
   const remaining = Math.max(limit - used, 0);
   const percentRemaining = limit > 0 ? Math.max(0, Math.min(100, (remaining / limit) * 100)) : 0;
-  const tone =
-    percentRemaining <= 10 ? "bg-[#dc2626]"
-      : percentRemaining <= 25 ? "bg-[#f59e0b]"
-        : "bg-[#15803d]";
+  const percentUsed = limit > 0 ? Math.max(0, Math.min(100, (used / limit) * 100)) : 0;
+
+  const getColor = () => {
+    if (percentRemaining <= 10) return { bar: "bg-rose-500", text: "text-rose-600", sub: "text-rose-500/20" };
+    if (percentRemaining <= 25) return { bar: "bg-amber-500", text: "text-amber-600", sub: "text-amber-500/20" };
+    return { bar: "bg-emerald-500", text: "text-emerald-600", sub: "text-emerald-500/20" };
+  };
+
+  const colors = getColor();
 
   return (
-    <div className="rounded-[28px] border border-line bg-paper-raised p-5 shadow-[0_10px_40px_rgba(17,17,17,0.05)]">
+    <div className="rounded-2xl border border-line bg-paper-raised p-5 shadow-[0_8px_32px_rgba(17,17,17,0.06)]">
       <div className="flex items-center justify-between">
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-faint">{label}</div>
-          <div className="mt-3 text-[28px] font-light tracking-tight text-ink">
+        <div className="flex items-center gap-3">
+          <div className={cn("flex h-10 w-10 items-center justify-center rounded-xl", colors.sub)}>
+            {icon}
+          </div>
+          <div>
+            <div className="text-[13px] font-semibold text-ink">{label}</div>
+            <div className="text-[11.5px] text-ink-muted">{period}</div>
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="text-[28px] font-light tracking-tight text-ink">
             {remaining}
             <span className="ml-1 text-[14px] text-ink-muted">left</span>
           </div>
-        </div>
-        <div className="text-right text-[12px] text-ink-muted">
-          <div>{used} used</div>
-          <div>{limit} total</div>
+          <div className="text-[12px] text-ink-muted">{used} of {limit} used</div>
         </div>
       </div>
-      <div className="mt-4 h-3 overflow-hidden rounded-full bg-[#d7d7d1]">
-        <div className={`h-full rounded-full transition-[width] duration-300 ${tone}`} style={{ width: `${percentRemaining}%` }} />
+      <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-paper-sunken">
+        <div
+          className={cn("h-full rounded-full transition-all duration-500", colors.bar)}
+          style={{ width: `${percentUsed}%` }}
+        />
       </div>
-      <div className="mt-2 text-[12.5px] leading-5 text-ink-muted">{hint}</div>
+      <div className="mt-2 text-[12px] text-ink-muted">{hint}</div>
     </div>
   );
 }
@@ -224,104 +244,148 @@ export function AnalyticsPage({
   const trendData = trendRange === "1m" ? (summary?.past_month || []) : (summary?.past_week || []);
   const maxDay = Math.max(1, ...(trendData.map((day) => day.roots) || [1]));
   const user = summary?.user || cloudUser;
-  const ownerProviders = summary?.owner_provider_overview || [];
+  const isPro = user.tier === "pro";
+  const firstName = user.name.split(/\s+/)[0] || "there";
 
   return (
     <div className="flex h-full min-w-0 flex-1 overflow-y-auto bg-paper">
-      <div className="mx-auto flex w-full max-w-[1180px] flex-col gap-6 px-6 py-8">
-        <section className="overflow-hidden rounded-[32px] border border-line bg-[linear-gradient(135deg,rgba(247,240,226,0.95),rgba(255,255,255,0.82)),radial-gradient(circle_at_top_right,rgba(15,118,110,0.14),transparent_34%)] p-6 shadow-[0_24px_90px_rgba(17,17,17,0.08)] md:p-8">
-          <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
+      <div className="mx-auto flex w-full max-w-[1080px] flex-col gap-5 px-6 py-8">
+        {/* Welcome Header */}
+        <section className="overflow-hidden rounded-2xl border border-line bg-gradient-to-br from-paper-raised to-paper p-6 shadow-[0_16px_60px_rgba(17,17,17,0.08)] md:p-8">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-faint">Managed analytics</div>
-              <h1 className="mt-3 text-[40px] font-light leading-[0.95] tracking-tight text-ink md:text-[52px]">
-                {user.name.split(/\s+/)[0] || "zWork"} is signed in.
+              <div className="flex items-center gap-2">
+                {isPro ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">
+                    <Sparkles className="h-3 w-3" />
+                    Pro
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-paper-sunken px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
+                    Free
+                  </span>
+                )}
+              </div>
+              <h1 className="mt-3 text-[32px] font-light leading-tight tracking-tight text-ink md:text-[40px]">
+                Welcome back, {firstName}!
               </h1>
-              <p className="mt-3 max-w-[60ch] text-[14px] leading-6 text-ink-muted">
-                Your hosted account, access status, request volume, and server access all land here. Root user actions are counted separately from internal tool and continuation turns so agentic runs do not get rate-limited into the floor.
+              <p className="mt-2 max-w-[50ch] text-[14px] leading-6 text-ink-muted">
+                Here's your activity overview and usage. {isPro ? "You have full access to all features." : "Upgrade to Pro for extended limits and hosted access."}
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full border border-line-strong bg-white/80 px-3 py-1.5 text-[12px] font-medium text-ink">
-                {user.tier === "pro" ? "Pro plan unlocked" : "Free plan"}
-              </span>
-              <button
-                type="button"
-                onClick={() => void signOut()}
-                disabled={logoutBusy}
-                className="rounded-full border border-line bg-white/80 px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:text-ink disabled:opacity-50"
-              >
-                {logoutBusy ? "Signing out…" : "Sign out"}
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => void signOut()}
+              disabled={logoutBusy}
+              className="press inline-flex items-center gap-2 rounded-full border border-line bg-paper px-4 py-2 text-[13px] font-medium text-ink-muted hover:border-line-strong hover:bg-paper-sunken hover:text-ink disabled:opacity-50"
+            >
+              <LogOut className="h-4 w-4" />
+              {logoutBusy ? "Signing out…" : "Sign out"}
+            </button>
           </div>
         </section>
 
+        {/* Usage Limits */}
         <section className="grid gap-4 xl:grid-cols-2">
           <ProgressQuotaCard
-            label="5 Hour Limit"
+            label="Requests remaining"
+            icon={<Zap className="h-5 w-5 text-ink-muted" />}
             used={loading ? 0 : (summary?.five_hour_used || 0)}
             limit={loading ? 0 : (summary?.five_hour_limit || 0)}
-            hint="Rolling product quota for user-initiated runs in the last five hours."
+            hint="Based on your last 5 hours of activity"
+            period="Rolling window"
           />
           <ProgressQuotaCard
-            label="Weekly Limit"
+            label="Weekly budget"
+            icon={<Calendar className="h-5 w-5 text-ink-muted" />}
             used={loading ? 0 : (summary?.weekly_used || 0)}
             limit={loading ? 0 : (summary?.weekly_limit || 0)}
-            hint="Rolling seven-day budget. This resets gradually as older usage falls out of the window."
+            hint="Resets gradually over 7 days"
+            period="Rolling week"
           />
         </section>
 
+        {/* Quick Stats */}
         <section className="grid gap-4 md:grid-cols-3">
-          <StatCard label="Plan" value={user.tier === "pro" ? "Pro" : "Free"} hint={user.access_code || user.coupon_code ? `Code: ${user.access_code || user.coupon_code}` : "No access code applied yet."} icon={<Shield className="h-4 w-4" />} />
-          <StatCard label="Active Runs" value={loading ? "…" : String(summary?.active_runs || 0)} hint="Concurrent root runs still in flight right now." icon={<Activity className="h-4 w-4" />} />
-          <StatCard label="Continuations" value={loading ? "…" : String(summary?.continuation_requests_today || 0)} hint="Internal tool/model turns today. These do not burn root quota directly." icon={<Zap className="h-4 w-4" />} />
+          <StatCard
+            label="Active tasks"
+            value={loading ? "…" : String(summary?.active_runs || 0)}
+            hint="Running right now"
+            icon={<Activity className="h-4 w-4" />}
+          />
+          <StatCard
+            label="Today's conversations"
+            value={loading ? "…" : String(summary?.continuation_requests_today || 0)}
+            hint="Started today"
+            icon={<TrendingUp className="h-4 w-4" />}
+          />
+          <StatCard
+            label="Plan"
+            value={isPro ? "Pro" : "Free"}
+            hint={isPro ? "Full access enabled" : "Upgrade anytime"}
+            icon={<User className="h-4 w-4" />}
+          />
         </section>
 
-        <section className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-          <div className="rounded-[28px] border border-line bg-paper-raised p-6">
+        {/* Usage Chart and Quick Actions */}
+        <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+          {/* Usage Trend Chart */}
+          <div className="rounded-2xl border border-line bg-paper-raised p-6">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <h2 className="text-[18px] font-semibold tracking-tight text-ink">Usage trend</h2>
-                <p className="mt-1 text-[13px] text-ink-muted">Root-request volume over time so users can see pace before they slam into quota.</p>
+                <h2 className="text-[17px] font-semibold tracking-tight text-ink">Your activity</h2>
+                <p className="mt-1 text-[13px] text-ink-muted">See how much you've been using zWork</p>
               </div>
               <div className="flex items-center gap-2">
                 <div className="rounded-full border border-line bg-paper-sunken p-1">
                   <button
                     type="button"
                     onClick={() => setTrendRange("7d")}
-                    className={`rounded-full px-3 py-1 text-[11px] font-medium ${trendRange === "7d" ? "bg-ink text-paper" : "text-ink-muted"}`}
+                    className={cn(
+                      "rounded-full px-3 py-1 text-[11px] font-medium transition-colors",
+                      trendRange === "7d" ? "bg-ink text-paper" : "text-ink-muted hover:text-ink"
+                    )}
                   >
-                    7d
+                    7 days
                   </button>
                   <button
                     type="button"
                     onClick={() => setTrendRange("1m")}
-                    className={`rounded-full px-3 py-1 text-[11px] font-medium ${trendRange === "1m" ? "bg-ink text-paper" : "text-ink-muted"}`}
+                    className={cn(
+                      "rounded-full px-3 py-1 text-[11px] font-medium transition-colors",
+                      trendRange === "1m" ? "bg-ink text-paper" : "text-ink-muted hover:text-ink"
+                    )}
                   >
-                    1m
+                    30 days
                   </button>
                 </div>
                 <BarChart3 className="h-5 w-5 text-ink-faint" />
               </div>
             </div>
             <div
-              className="mt-6 grid gap-3"
+              className="mt-6 grid gap-2"
               style={{ gridTemplateColumns: `repeat(${Math.max(trendData.length, 1)}, minmax(0, 1fr))` }}
             >
               {trendData.map((day) => {
-                const height = `${Math.max(8, (day.roots / maxDay) * 180)}px`;
+                const height = `${Math.max(8, (day.roots / maxDay) * 160)}px`;
+                const hasActivity = day.roots > 0;
                 return (
                   <div key={day.day} className="flex flex-col items-center gap-2">
-                    <div className="flex h-[200px] w-full items-end justify-center rounded-[22px] bg-paper-sunken px-2 pb-2">
+                    <div className="flex h-[160px] w-full items-end justify-center rounded-xl bg-paper-sunken px-1.5 pb-1.5">
                       <div
-                        className="flex w-full flex-col overflow-hidden rounded-[16px] border border-line/70 bg-white/80"
+                        className={cn(
+                          "flex w-full flex-col overflow-hidden rounded-lg border transition-all duration-300",
+                          hasActivity
+                            ? "border-line/60 bg-white/80 dark:bg-white/10"
+                            : "border-transparent bg-transparent"
+                        )}
                         style={{ height }}
                       >
-                        <div className="flex-1 bg-[#15803d]" />
+                        {hasActivity && <div className="flex-1 bg-emerald-500/80 dark:bg-emerald-400/70" />}
                       </div>
                     </div>
-                    <div className="text-center text-[11px] text-ink-muted">
-                      {day.day.slice(5)}
+                    <div className={cn("text-center text-[10.5px]", hasActivity ? "text-ink" : "text-ink-faint")}>
+                      {day.day.slice(5).replace("-", "/")}
                     </div>
                   </div>
                 );
@@ -329,159 +393,160 @@ export function AnalyticsPage({
             </div>
           </div>
 
+          {/* Quick Actions Panel */}
           <div className="flex flex-col gap-4">
-            <div className="rounded-[28px] border border-line bg-paper-raised p-6">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-faint">Managed route</div>
-              <h2 className="mt-3 text-[20px] font-semibold tracking-tight text-ink">Use the hosted gateway</h2>
-              <p className="mt-2 text-[13px] leading-6 text-ink-muted">
-                This repoints the local sidecar to {summary?.router_label || "zWork Router"} with your signed-in desktop token, while keeping the agent loop local on-device.
-              </p>
-              <div className="mt-5 flex flex-wrap gap-2">
+            {/* Hosted Mode Toggle */}
+            <div className="rounded-2xl border border-line bg-paper-raised p-5">
+              <div className="flex items-start gap-3">
+                <div className={cn(
+                  "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl",
+                  isPro ? "bg-emerald-100 dark:bg-emerald-500/20" : "bg-paper-sunken"
+                )}>
+                  <Sparkles className={cn("h-5 w-5", isPro ? "text-emerald-600 dark:text-emerald-400" : "text-ink-muted")} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-[15px] font-semibold text-ink">Hosted access</h3>
+                  <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
+                    {managedActive
+                      ? "Using zWork's hosted AI gateway"
+                      : isPro
+                        ? "Activate hosted AI access"
+                        : "Upgrade to Pro to use hosted access"}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4">
                 {managedActive ? (
                   <button
                     type="button"
                     disabled={routeBusy}
                     onClick={() => void restorePersonalMode()}
-                    className="rounded-full border border-line-strong bg-paper px-4 py-2 text-[12.5px] font-medium text-ink hover:bg-paper-sunken disabled:opacity-50"
+                    className="press w-full rounded-full border border-line bg-paper px-4 py-2.5 text-[13px] font-medium text-ink hover:border-line-strong hover:bg-paper-sunken disabled:opacity-50"
                   >
-                    {routeBusy ? "Restoring…" : "Return to personal setup"}
+                    {routeBusy ? "Switching…" : "Use personal setup"}
                   </button>
-                ) : (
+                ) : isPro ? (
                   <button
                     type="button"
-                    disabled={routeBusy || user.tier !== "pro" || !managedReady}
+                    disabled={routeBusy || !managedReady}
                     onClick={() => void activateManagedMode()}
-                    className="rounded-full bg-ink px-4 py-2 text-[12.5px] font-medium text-paper hover:bg-ink-soft disabled:opacity-50"
+                    className="press w-full rounded-full bg-ink px-4 py-2.5 text-[13px] font-medium text-paper hover:bg-ink/90 disabled:opacity-50"
                   >
-                    {routeBusy
-                      ? "Activating…"
-                      : user.tier !== "pro"
-                        ? "Unlock pro first"
-                        : managedReady
-                          ? "Activate managed mode"
-                          : "Hosted gateway not ready"}
+                    {routeBusy ? "Activating…" : "Turn on hosted access"}
                   </button>
+                ) : (
+                  <div className="rounded-xl bg-paper-sunken px-4 py-3 text-[12px] text-ink-muted">
+                    Upgrade to Pro to enable hosted access
+                  </div>
                 )}
               </div>
-              <div className="mt-3 rounded-2xl border border-line bg-paper-sunken px-4 py-3 text-[12.5px] text-ink-muted">
-                {managedStatus}
-              </div>
+              {managedStatus && !managedActive && (
+                <div className="mt-3 text-[11.5px] text-ink-faint">
+                  {managedStatus}
+                </div>
+              )}
               {routeError && (
-                <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-[12.5px] text-rose-700">
+                <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
                   {routeError}
                 </div>
               )}
             </div>
 
-            <div className="rounded-[28px] border border-line bg-paper-raised p-6">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-faint">Pro testing</div>
-              <h2 className="mt-3 text-[20px] font-semibold tracking-tight text-ink">Access code</h2>
-              <p className="mt-2 text-[13px] leading-6 text-ink-muted">
-                Use a dev access code to test the paid path before Stripe is live.
-              </p>
-              <div className="mt-4 flex gap-2">
-                <input
-                  value={accessCode}
-                  onChange={(e) => setAccessCode(e.target.value)}
-                  className="min-w-0 flex-1 rounded-full border border-line bg-paper px-4 py-2 text-[12.5px] text-ink focus:border-line-strong focus:outline-none"
-                  placeholder="zwork-dev-pro"
-                />
-                <button
-                  type="button"
-                  disabled={accessCodeBusy}
-                  onClick={() => void redeemAccess()}
-                  className="rounded-full border border-line-strong bg-paper px-4 py-2 text-[12.5px] font-medium text-ink hover:bg-paper-sunken disabled:opacity-50"
-                >
-                  {accessCodeBusy ? "Applying…" : "Apply code"}
-                </button>
-              </div>
-              {accessCodeError && (
-                <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-[12.5px] text-rose-700">
-                  {accessCodeError}
+            {/* Access Code (Pro testing) */}
+            {!isPro && (
+              <div className="rounded-2xl border border-line bg-paper-raised p-5">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 dark:bg-amber-500/20">
+                    <Sparkles className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-[15px] font-semibold text-ink">Try Pro free</h3>
+                    <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
+                      Use an access code to test Pro features
+                    </p>
+                  </div>
                 </div>
-              )}
-            </div>
+                <div className="mt-4 flex gap-2">
+                  <input
+                    value={accessCode}
+                    onChange={(e) => setAccessCode(e.target.value)}
+                    className="min-w-0 flex-1 rounded-full border border-line bg-paper px-4 py-2.5 text-[12.5px] text-ink focus:border-line-strong focus:outline-none"
+                    placeholder="Enter access code"
+                  />
+                  <button
+                    type="button"
+                    disabled={accessCodeBusy}
+                    onClick={() => void redeemAccess()}
+                    className="press shrink-0 rounded-full bg-ink px-4 py-2.5 text-[13px] font-medium text-paper hover:bg-ink/90 disabled:opacity-50"
+                  >
+                    {accessCodeBusy ? "Applying…" : "Apply"}
+                  </button>
+                </div>
+                {accessCodeError && (
+                  <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
+                    {accessCodeError}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </section>
 
-        <section className="grid gap-4 md:grid-cols-3">
-          {[
-            { label: "API", href: summary?.api_url || "https://api.tryzwork.app/health", note: "Health check and the hosted gateway edge." },
-            { label: "Analytics", href: summary?.analytics_url || "https://us.posthog.com/project/397748", note: "PostHog project for funnels, auth, and usage stats." },
-            { label: "DB", href: summary?.db_url || "https://db.tryzwork.app/", note: "Private admin surface. Public access should stay blocked." },
-          ].map((link) => (
-            <a
-              key={link.label}
-              href={link.href}
-              target="_blank"
-              rel="noreferrer"
-              className="group rounded-[24px] border border-line bg-paper-raised p-5 transition-transform hover:-translate-y-0.5"
-            >
-              <div className="flex items-center justify-between">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-faint">{link.label}</div>
-                <ExternalLink className="h-4 w-4 text-ink-faint transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
-              </div>
-              <div className="mt-4 text-[16px] font-semibold tracking-tight text-ink">{link.href.replace(/^https?:\/\//, "")}</div>
-              <div className="mt-2 text-[12.5px] leading-6 text-ink-muted">{link.note}</div>
-            </a>
-          ))}
-        </section>
-
-        {ownerProviders.length > 0 && (
-          <section className="rounded-[28px] border border-line bg-paper-raised p-6">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-faint">Owner view</div>
-                <h2 className="mt-3 text-[20px] font-semibold tracking-tight text-ink">Provider usage overview</h2>
-                <p className="mt-2 text-[13px] leading-6 text-ink-muted">
-                  Seven-day request and token volume across the hosted router, plus the latest observed provider headroom when the upstream exposes it.
-                </p>
-              </div>
+        {/* Quick Links - Only for admins/owners */}
+        {summary?.owner_provider_overview && summary.owner_provider_overview.length > 0 && (
+          <section className="rounded-2xl border border-line bg-paper-raised p-5">
+            <div className="flex items-center gap-3">
+              <ExternalLink className="h-5 w-5 text-ink-muted" />
+              <h2 className="text-[15px] font-semibold text-ink">Quick links</h2>
             </div>
-            <div className="mt-5 grid gap-4 lg:grid-cols-3">
-              {ownerProviders.map((provider) => (
-                <div key={provider.provider_name} className="rounded-[22px] border border-line bg-paper p-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-[15px] font-semibold text-ink">{provider.provider_name}</div>
-                      <div className="mt-1 text-[12px] text-ink-muted">
-                        {provider.last_model_id || "No recent model recorded"}
-                      </div>
-                    </div>
-                    <div className="rounded-full border border-line bg-paper-sunken px-2.5 py-1 text-[11px] text-ink-muted">
-                      {provider.last_status ? `HTTP ${provider.last_status}` : "No status"}
-                    </div>
-                  </div>
-                  <div className="mt-4 grid grid-cols-2 gap-3">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.16em] text-ink-faint">7d requests</div>
-                      <div className="mt-1 text-[22px] font-light tracking-tight text-ink">{provider.requests_7d}</div>
-                    </div>
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.16em] text-ink-faint">7d tokens</div>
-                      <div className="mt-1 text-[22px] font-light tracking-tight text-ink">{provider.total_tokens_7d}</div>
-                    </div>
-                  </div>
-                  <div className="mt-4 space-y-1 text-[12px] text-ink-muted">
-                    <div>Roots: {provider.roots_7d} • Continuations: {provider.continuations_7d}</div>
-                    <div>Prompt: {provider.prompt_tokens_7d} • Completion: {provider.completion_tokens_7d}</div>
-                    <div>
-                      Remaining req/day: {provider.requests_remaining_day ?? "n/a"}
-                      {provider.requests_limit_day ? ` / ${provider.requests_limit_day}` : ""}
-                    </div>
-                    <div>
-                      Remaining tok/min: {provider.tokens_remaining_minute ?? "n/a"}
-                      {provider.tokens_limit_minute ? ` / ${provider.tokens_limit_minute}` : ""}
-                    </div>
-                    <div>
-                      Last seen: {provider.last_observed_at ? new Date(provider.last_observed_at).toLocaleString() : "n/a"}
-                    </div>
-                  </div>
-                </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              {[
+                { label: "API status", href: summary?.api_url || "https://api.tryzwork.app/health" },
+                { label: "Analytics", href: summary?.analytics_url || "https://us.posthog.com/project/397748" },
+              ].map((link) => (
+                <a
+                  key={link.label}
+                  href={link.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="press group flex items-center justify-between rounded-xl border border-line bg-paper px-4 py-3 hover:border-line-strong hover:bg-paper-sunken"
+                >
+                  <span className="text-[13px] font-medium text-ink">{link.label}</span>
+                  <ExternalLink className="h-4 w-4 text-ink-faint transition-transform group-hover:translate-x-0.5" />
+                </a>
               ))}
             </div>
           </section>
         )}
+
+        {/* How limits work - helpful explanation */}
+        <section className="rounded-2xl border border-line bg-paper-raised p-5">
+          <h2 className="text-[15px] font-semibold text-ink">Understanding your limits</h2>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <div className="flex gap-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-500/20">
+                <CheckCircle className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+              </div>
+              <div>
+                <div className="text-[13px] font-medium text-ink">What counts</div>
+                <div className="mt-1 text-[12px] text-ink-muted">
+                  Only your main requests count toward your limit. Background work doesn't use up your quota.
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-500/20">
+                <TrendingUp className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+              </div>
+              <div>
+                <div className="text-[13px] font-medium text-ink">Rolling limits</div>
+                <div className="mt-1 text-[12px] text-ink-muted">
+                  Your limits reset gradually over time, not all at once. Older usage drops off automatically.
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
   );

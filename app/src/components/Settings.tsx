@@ -21,6 +21,12 @@ import {
   User,
   LogOut,
   Shield,
+  Sparkles,
+  Zap,
+  Clock,
+  Calendar,
+  BarChart3,
+  ArrowRight,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
@@ -853,94 +859,220 @@ function PlanPanel() {
 
   const remaining5h = Math.max((summary?.five_hour_limit || 0) - (summary?.five_hour_used || 0), 0);
   const remainingWeek = Math.max((summary?.weekly_limit || 0) - (summary?.weekly_used || 0), 0);
+  const isPro = user?.tier === "pro";
+
+  // Calculate percentage for progress bars
+  const percent5h = (summary?.five_hour_limit || 1) > 0
+    ? Math.max(0, Math.min(100, (remaining5h / (summary?.five_hour_limit || 1)) * 100))
+    : 0;
+  const percentWeek = (summary?.weekly_limit || 1) > 0
+    ? Math.max(0, Math.min(100, (remainingWeek / (summary?.weekly_limit || 1)) * 100))
+    : 0;
+
+  const getQuotaColor = (percent: number) => {
+    if (percent <= 10) return "bg-rose-500";
+    if (percent <= 25) return "bg-amber-500";
+    return "bg-emerald-500";
+  };
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
+      {/* Header */}
       <div>
-        <h2 className="text-[17px] font-semibold tracking-tight text-ink">Plan</h2>
-        <p className="mt-1 text-[13px] leading-5 text-ink-muted">
-          Manage your hosted access, review quota state, and control how zWork Router is used on this device.
+        <h2 className="text-[20px] font-semibold tracking-tight text-ink">Your Plan</h2>
+        <p className="mt-1 text-[14px] leading-6 text-ink-muted">
+          {isPro
+            ? "You're on the Pro plan with extended limits and hosted access."
+            : "Start free and upgrade when you need more."}
         </p>
       </div>
 
-      <section className="rounded-2xl border border-line bg-paper-raised p-5">
+      {/* Current Plan Card */}
+      <section className={cn(
+        "rounded-2xl border p-6 transition-all",
+        isPro
+          ? "border-emerald-200 bg-gradient-to-br from-emerald-50 to-paper dark:border-emerald-500/30 dark:from-emerald-500/10"
+          : "border-line bg-paper-raised"
+      )}>
         <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-faint">Current plan</div>
-            <div className="mt-3 text-[28px] font-light tracking-tight text-ink">
-              {user?.tier === "pro" ? "zWork Pro" : "zWork Free"}
+          <div className="flex-1">
+            <div className="flex items-center gap-3">
+              {isPro ? (
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-500/20">
+                  <Sparkles className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                </div>
+              ) : (
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-paper-sunken">
+                  <Zap className="h-5 w-5 text-ink-muted" />
+                </div>
+              )}
+              <div>
+                <div className="text-[24px] font-light tracking-tight text-ink">
+                  {isPro ? "zWork Pro" : "zWork Free"}
+                </div>
+                <p className="mt-1 text-[13px] text-ink-muted">
+                  {isPro
+                    ? "Unlocked: hosted routing, extended quotas, priority support"
+                    : "Perfect for getting started. Upgrade anytime."}
+                </p>
+              </div>
             </div>
-            <p className="mt-2 max-w-[58ch] text-[13px] leading-6 text-ink-muted">
-              {user?.tier === "pro"
-                ? "Hosted routing is unlocked on this account. Use Analytics to activate zWork Router and watch rolling quota in real time."
-                : "This account is still on the free tier. Unlock Pro with an access code or future billing flow before switching traffic onto the hosted router."}
-            </p>
           </div>
-          <span className="rounded-full border border-line bg-paper px-3 py-1 text-[12px] font-medium text-ink">
-            {user?.tier === "pro" ? "Pro" : "Free"}
-          </span>
+          {!isPro && (
+            <button
+              type="button"
+              onClick={() => setView("analytics")}
+              className="press shrink-0 rounded-full bg-ink px-4 py-2 text-[13px] font-medium text-paper hover:bg-ink/90"
+            >
+              Upgrade to Pro
+            </button>
+          )}
         </div>
-        <div className="mt-5 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setView("analytics")}
-            className="press rounded-full bg-ink px-4 py-2 text-[12.5px] font-medium text-paper hover:bg-ink-soft"
-          >
-            Open quota dashboard
-          </button>
-          <button
-            type="button"
-            onClick={() => setView("analytics")}
-            className="press rounded-full border border-line bg-paper px-4 py-2 text-[12.5px] font-medium text-ink hover:bg-paper-sunken"
-          >
-            Manage hosted mode
-          </button>
+      </section>
+
+      {/* Usage Cards */}
+      <section className="grid gap-4 md:grid-cols-2">
+        {/* 5-Hour Quota */}
+        <div className="rounded-2xl border border-line bg-paper-raised p-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-paper-sunken">
+                <Clock className="h-4 w-4 text-ink-muted" />
+              </div>
+              <div>
+                <div className="text-[13px] font-semibold text-ink">5-hour limit</div>
+                <div className="text-[11.5px] text-ink-muted">Resets gradually</div>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="text-[24px] font-light tracking-tight text-ink">
+                {loading ? "…" : remaining5h}
+              </div>
+              <div className="text-[12px] text-ink-muted">
+                {loading ? "loading" : "remaining"}
+              </div>
+            </div>
+          </div>
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-paper-sunken">
+            <div
+              className={cn("h-full rounded-full transition-all duration-500", getQuotaColor(percent5h))}
+              style={{ width: `${percent5h}%` }}
+            />
+          </div>
+          <div className="mt-2 text-[11.5px] text-ink-faint">
+            {loading ? "Loading..." : `${summary?.five_hour_used || 0} used of ${summary?.five_hour_limit || 0}`}
+          </div>
         </div>
-        <div className="mt-5 grid gap-3 md:grid-cols-3">
-          <div className="rounded-xl border border-line bg-paper px-4 py-3">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-faint">5 hour runway</div>
-            <div className="mt-2 text-[24px] font-light tracking-tight text-ink">
-              {loading ? "…" : remaining5h}
+
+        {/* Weekly Quota */}
+        <div className="rounded-2xl border border-line bg-paper-raised p-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-paper-sunken">
+                <Calendar className="h-4 w-4 text-ink-muted" />
+              </div>
+              <div>
+                <div className="text-[13px] font-semibold text-ink">Weekly limit</div>
+                <div className="text-[11.5px] text-ink-muted">Rolling 7 days</div>
+              </div>
             </div>
-            <div className="mt-1 text-[12px] leading-5 text-ink-muted">
-              {loading ? "Loading quota…" : `${summary?.five_hour_used || 0} used of ${summary?.five_hour_limit || 0}`}
+            <div className="text-right">
+              <div className="text-[24px] font-light tracking-tight text-ink">
+                {loading ? "…" : remainingWeek}
+              </div>
+              <div className="text-[12px] text-ink-muted">
+                {loading ? "loading" : "remaining"}
+              </div>
             </div>
           </div>
-          <div className="rounded-xl border border-line bg-paper px-4 py-3">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-faint">Weekly runway</div>
-            <div className="mt-2 text-[24px] font-light tracking-tight text-ink">
-              {loading ? "…" : remainingWeek}
-            </div>
-            <div className="mt-1 text-[12px] leading-5 text-ink-muted">
-              {loading ? "Loading quota…" : `${summary?.weekly_used || 0} used of ${summary?.weekly_limit || 0}`}
-            </div>
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-paper-sunken">
+            <div
+              className={cn("h-full rounded-full transition-all duration-500", getQuotaColor(percentWeek))}
+              style={{ width: `${percentWeek}%` }}
+            />
           </div>
-          <div className="rounded-xl border border-line bg-paper px-4 py-3">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-faint">Hosted route</div>
-            <div className="mt-2 text-[16px] font-medium text-ink">
-              {loading ? "Checking…" : summary?.managed_gateway_ready ? "Ready" : "Unavailable"}
-            </div>
-            <div className="mt-1 text-[12px] leading-5 text-ink-muted">
-              {loading ? "Loading route status…" : summary?.managed_gateway_status || "No hosted route status yet."}
-            </div>
+          <div className="mt-2 text-[11.5px] text-ink-faint">
+            {loading ? "Loading..." : `${summary?.weekly_used || 0} used of ${summary?.weekly_limit || 0}`}
           </div>
         </div>
       </section>
 
+      {/* Quick Actions */}
       <section className="rounded-2xl border border-line bg-paper-raised p-5">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-faint">What lives where</div>
-        <div className="mt-3 grid gap-3 md:grid-cols-3">
-          <div className="rounded-xl border border-line bg-paper px-4 py-3">
-            <div className="text-[13px] font-medium text-ink">Account</div>
-            <div className="mt-1 text-[12px] leading-5 text-ink-muted">Identity, plan, access code, and hosted quota.</div>
+        <div className="text-[13px] font-semibold text-ink mb-4">Quick actions</div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => setView("analytics")}
+            className="press flex items-center gap-3 rounded-xl border border-line bg-paper px-4 py-3 text-left hover:border-line-strong hover:bg-paper-sunken"
+          >
+            <BarChart3 className="h-5 w-5 text-ink-muted" />
+            <div>
+              <div className="text-[13px] font-medium text-ink">View usage</div>
+              <div className="text-[11.5px] text-ink-muted">See detailed analytics</div>
+            </div>
+            <ArrowRight className="ml-auto h-4 w-4 text-ink-faint" />
+          </button>
+          {isPro ? (
+            <button
+              type="button"
+              onClick={() => setView("analytics")}
+              className="press flex items-center gap-3 rounded-xl border border-line bg-paper px-4 py-3 text-left hover:border-line-strong hover:bg-paper-sunken"
+            >
+              <Zap className="h-5 w-5 text-ink-muted" />
+              <div>
+                <div className="text-[13px] font-medium text-ink">Hosted mode</div>
+                <div className="text-[11.5px] text-ink-muted">Manage zWork Router</div>
+              </div>
+              <ArrowRight className="ml-auto h-4 w-4 text-ink-faint" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setView("analytics")}
+              className="press flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-left hover:border-emerald-300 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10"
+            >
+              <Sparkles className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+              <div>
+                <div className="text-[13px] font-medium text-ink">Upgrade now</div>
+                <div className="text-[11.5px] text-ink-muted">Get Pro access</div>
+              </div>
+              <ArrowRight className="ml-auto h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+            </button>
+          )}
+        </div>
+      </section>
+
+      {/* Info cards */}
+      <section className="rounded-2xl border border-line bg-paper-raised p-5">
+        <div className="text-[13px] font-semibold text-ink mb-4">How limits work</div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="flex gap-3">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-paper-sunken">
+              <span className="text-[12px] font-bold text-ink-faint">1</span>
+            </div>
+            <div>
+              <div className="text-[13px] font-medium text-ink">Root requests</div>
+              <div className="mt-1 text-[12px] text-ink-muted">What you ask zWork to do counts toward your limit</div>
+            </div>
           </div>
-          <div className="rounded-xl border border-line bg-paper px-4 py-3">
-            <div className="text-[13px] font-medium text-ink">Analytics</div>
-            <div className="mt-1 text-[12px] leading-5 text-ink-muted">Five-hour and weekly runway, trend graph, and hosted route status.</div>
+          <div className="flex gap-3">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-paper-sunken">
+              <span className="text-[12px] font-bold text-ink-faint">2</span>
+            </div>
+            <div>
+              <div className="text-[13px] font-medium text-ink">Internal turns</div>
+              <div className="mt-1 text-[12px] text-ink-muted">Background work doesn't use up your quota</div>
+            </div>
           </div>
-          <div className="rounded-xl border border-line bg-paper px-4 py-3">
-            <div className="text-[13px] font-medium text-ink">Models</div>
-            <div className="mt-1 text-[12px] leading-5 text-ink-muted">Bring-your-own keys and local model configuration when you do not want hosted routing.</div>
+          <div className="flex gap-3">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-paper-sunken">
+              <span className="text-[12px] font-bold text-ink-faint">3</span>
+            </div>
+            <div>
+              <div className="text-[13px] font-medium text-ink">Rolling windows</div>
+              <div className="mt-1 text-[12px] text-ink-muted">Limits reset gradually as time passes</div>
+            </div>
           </div>
         </div>
       </section>

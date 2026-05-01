@@ -2,6 +2,18 @@
 
 All notable changes to zWork are documented here.
 
+## v0.3.18-beta.3
+
+**UI/UX refactoring for non-technical users.**
+
+- completely redesigned LoginScreen with animated background, rotating headline, and clear feature cards
+- refactored Settings Plan panel with user-friendly language, visual progress bars, and quick actions
+- redesigned Analytics page to remove developer jargon and focus on user-facing metrics
+- added color-coded quota indicators (green/amber/red) for at-a-glance usage status
+- simplified "how limits work" explanation for regular users
+- improved visual hierarchy across all auth and settings screens
+- temporarily disabled non-gpt-oss-120B models on hosted server (20b, llama, mistral)
+
 ## Unreleased
 
 **Documentation and developer experience improvements.**
