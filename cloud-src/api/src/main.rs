@@ -73,8 +73,8 @@ fn load_gateway_providers() -> Vec<GatewayProvider> {
                 name: "Cerebras".to_string(),
                 base_url: env_or("CEREBRAS_BASE_URL", "https://api.cerebras.ai/v1"),
                 api_key: std::env::var("CEREBRAS_API_KEY").unwrap_or_default(),
-                primary_model: env_or("CEREBRAS_MODEL_PRIMARY", "gpt-oss-120b"),
-                fallback_model: env_or("CEREBRAS_MODEL_FALLBACK", "llama3.1-8b"),
+                primary_model: env_or("CEREBRAS_MODEL_PRIMARY", "qwen-3-235b-a22b-instruct-2507"),
+                fallback_model: env_or("CEREBRAS_MODEL_FALLBACK", "llama-4-scout-17b-16e-instruct"),
             },
             "mistral" => GatewayProvider {
                 name: "Mistral".to_string(),

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Activity, BarChart3, Calendar, CheckCircle, ExternalLink, LogOut, Sparkles, TrendingUp, User, Zap } from "lucide-react";
+import { Activity, ArrowUpRight, ExternalLink, LogOut, Sparkles, TrendingUp, User, Zap, Calendar, Info } from "lucide-react";
 import { api } from "../lib/api";
 import {
   clearManagedBackup,
@@ -19,83 +19,99 @@ const MANAGED_MODEL_ID = "zwork-router";
 const MANAGED_BASE_URL = "https://api.tryzwork.app/api/v1";
 const MANAGED_MODEL_NAME = "zWork Router";
 
-function StatCard({
+function StatBar({
   label,
   value,
-  hint,
-  icon,
+  used,
+  limit,
+  color = "emerald",
 }: {
   label: string;
   value: string;
-  hint: string;
-  icon: ReactNode;
+  used: number;
+  limit: number;
+  color?: "emerald" | "amber" | "rose";
 }) {
+  const percent = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
+  const remaining = Math.max(limit - used, 0);
+
+  const colors = {
+    emerald: { bar: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400" },
+    amber: { bar: "bg-amber-500", text: "text-amber-600 dark:text-amber-400" },
+    rose: { bar: "bg-rose-500", text: "text-rose-600 dark:text-rose-400" },
+  }[color];
+
   return (
-    <div className="rounded-2xl border border-line bg-paper-raised p-5 shadow-[0_8px_32px_rgba(17,17,17,0.06)] transition-shadow hover:shadow-[0_12px_40px_rgba(17,17,17,0.1)]">
-      <div className="flex items-center justify-between">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-faint">{label}</div>
-        <div className="text-ink-muted">{icon}</div>
+    <div className="flex items-center gap-4 py-3">
+      <div className="w-24 shrink-0 text-[13px] text-ink-muted">{label}</div>
+      <div className="flex-1">
+        <div className="mb-1.5 flex items-baseline justify-between">
+          <span className="text-[26px] font-light tracking-tight text-ink">{value}</span>
+          <span className={cn("text-[12px]", colors.text)}>{remaining} left</span>
+        </div>
+        <div className="h-1.5 rounded-full bg-paper-sunken">
+          <div className={cn("h-full rounded-full transition-all duration-500", colors.bar)} style={{ width: `${percent}%` }} />
+        </div>
       </div>
-      <div className="mt-3 text-[32px] font-light tracking-tight text-ink">{value}</div>
-      <div className="mt-1 text-[12.5px] leading-5 text-ink-muted">{hint}</div>
     </div>
   );
 }
 
-function ProgressQuotaCard({
+function MiniStat({
   label,
+  value,
   icon,
-  used,
-  limit,
-  hint,
-  period,
 }: {
   label: string;
+  value: string | number;
   icon: ReactNode;
-  used: number;
-  limit: number;
-  hint: string;
-  period: string;
 }) {
-  const remaining = Math.max(limit - used, 0);
-  const percentRemaining = limit > 0 ? Math.max(0, Math.min(100, (remaining / limit) * 100)) : 0;
-  const percentUsed = limit > 0 ? Math.max(0, Math.min(100, (used / limit) * 100)) : 0;
-
-  const getColor = () => {
-    if (percentRemaining <= 10) return { bar: "bg-rose-500", text: "text-rose-600", sub: "text-rose-500/20" };
-    if (percentRemaining <= 25) return { bar: "bg-amber-500", text: "text-amber-600", sub: "text-amber-500/20" };
-    return { bar: "bg-emerald-500", text: "text-emerald-600", sub: "text-emerald-500/20" };
-  };
-
-  const colors = getColor();
-
   return (
-    <div className="rounded-2xl border border-line bg-paper-raised p-5 shadow-[0_8px_32px_rgba(17,17,17,0.06)]">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className={cn("flex h-10 w-10 items-center justify-center rounded-xl", colors.sub)}>
-            {icon}
-          </div>
-          <div>
-            <div className="text-[13px] font-semibold text-ink">{label}</div>
-            <div className="text-[11.5px] text-ink-muted">{period}</div>
-          </div>
-        </div>
-        <div className="text-right">
-          <div className="text-[28px] font-light tracking-tight text-ink">
-            {remaining}
-            <span className="ml-1 text-[14px] text-ink-muted">left</span>
-          </div>
-          <div className="text-[12px] text-ink-muted">{used} of {limit} used</div>
-        </div>
+    <div className="flex items-center gap-3 rounded-xl border border-line/50 bg-paper px-4 py-3">
+      <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-paper-sunken text-ink-muted">
+        {icon}
       </div>
-      <div className="mt-4 h-2.5 overflow-hidden rounded-full bg-paper-sunken">
-        <div
-          className={cn("h-full rounded-full transition-all duration-500", colors.bar)}
-          style={{ width: `${percentUsed}%` }}
-        />
+      <div>
+        <div className="text-[22px] font-light leading-none text-ink">{value}</div>
+        <div className="mt-1 text-[11.5px] uppercase tracking-wide text-ink-faint">{label}</div>
       </div>
-      <div className="mt-2 text-[12px] text-ink-muted">{hint}</div>
+    </div>
+  );
+}
+
+function ActionCard({
+  icon,
+  title,
+  description,
+  action,
+  variant = "default",
+}: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+  action: ReactNode;
+  variant?: "default" | "pro";
+}) {
+  return (
+    <div className={cn(
+      "flex items-start gap-4 rounded-2xl border p-5",
+      variant === "pro"
+        ? "border-line bg-paper-sunken"
+        : "border-line bg-paper"
+    )}>
+      <div className={cn(
+        "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl",
+        variant === "pro"
+          ? "bg-emerald-100 dark:bg-emerald-500/20"
+          : "bg-paper-sunken"
+      )}>
+        {icon}
+      </div>
+      <div className="min-w-0 flex-1">
+        <h3 className="text-[15px] font-semibold text-ink">{title}</h3>
+        <p className="mt-1 text-[13px] text-ink-muted">{description}</p>
+        <div className="mt-3">{action}</div>
+      </div>
     </div>
   );
 }
@@ -149,7 +165,6 @@ export function AnalyticsPage({
     return currentBase === MANAGED_BASE_URL && currentDefault === MANAGED_MODEL_ID;
   }, [settings]);
   const managedReady = summary?.managed_gateway_ready ?? false;
-  const managedStatus = summary?.managed_gateway_status || "Checking hosted gateway status…";
 
   const activateManagedMode = async () => {
     if (!settings) return;
@@ -245,102 +260,95 @@ export function AnalyticsPage({
   const isPro = user.tier === "pro";
   const firstName = user.name.split(/\s+/)[0] || "there";
 
+  const fiveHourUsed = summary?.five_hour_used || 0;
+  const fiveHourLimit = summary?.five_hour_limit || 0;
+  const weeklyUsed = summary?.weekly_used || 0;
+  const weeklyLimit = summary?.weekly_limit || 0;
+
+  const fiveHourColor = fiveHourLimit > 0
+    ? ((fiveHourLimit - fiveHourUsed) / fiveHourLimit <= 0.1 ? "rose" : ((fiveHourLimit - fiveHourUsed) / fiveHourLimit <= 0.25 ? "amber" : "emerald"))
+    : "emerald";
+  const weeklyColor = weeklyLimit > 0
+    ? ((weeklyLimit - weeklyUsed) / weeklyLimit <= 0.1 ? "rose" : ((weeklyLimit - weeklyUsed) / weeklyLimit <= 0.25 ? "amber" : "emerald"))
+    : "emerald";
+
   return (
     <div className="flex h-full min-w-0 flex-1 overflow-y-auto bg-paper">
-      <div className="mx-auto flex w-full max-w-[1080px] flex-col gap-5 px-6 py-8">
-        {/* Welcome Header */}
-        <section className="overflow-hidden rounded-2xl border border-line bg-gradient-to-br from-paper-raised to-paper p-6 shadow-[0_16px_60px_rgba(17,17,17,0.08)] md:p-8">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                {isPro ? (
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">
-                    <Sparkles className="h-3 w-3" />
-                    Pro
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1.5 rounded-full bg-paper-sunken px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-ink-muted">
-                    Free
-                  </span>
-                )}
-              </div>
-              <h1 className="mt-3 text-[32px] font-light leading-tight tracking-tight text-ink md:text-[40px]">
-                Welcome back, {firstName}!
+      <div className="mx-auto w-full max-w-[1000px] px-6 py-8">
+
+        {/* Header */}
+        <header className="mb-8 flex items-center justify-between border-b border-line/50 pb-6">
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className="text-[36px] font-light tracking-tight text-ink">
+                Analytics
               </h1>
-              <p className="mt-2 max-w-[50ch] text-[14px] leading-6 text-ink-muted">
-                Here's your activity overview and usage. {isPro ? "You have full access to all features." : "Upgrade to Pro for extended limits and hosted access."}
-              </p>
+              {isPro && (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">
+                  <Sparkles className="h-3 w-3" />
+                  Pro
+                </span>
+              )}
             </div>
-            <button
-              type="button"
-              onClick={() => void signOut()}
-              disabled={logoutBusy}
-              className="press inline-flex items-center gap-2 rounded-full border border-line bg-paper px-4 py-2 text-[13px] font-medium text-ink-muted hover:border-line-strong hover:bg-paper-sunken hover:text-ink disabled:opacity-50"
-            >
-              <LogOut className="h-4 w-4" />
-              {logoutBusy ? "Signing out…" : "Sign out"}
-            </button>
+            <p className="mt-2 text-[14px] text-ink-muted">
+              Welcome back, {firstName}. Here's your activity overview.
+            </p>
           </div>
-        </section>
+          <button
+            type="button"
+            onClick={() => void signOut()}
+            disabled={logoutBusy}
+            className="press ring-focus inline-flex items-center gap-2 rounded-full border border-line/50 bg-paper px-4 py-2 text-[13px] text-ink-muted hover:border-line hover:bg-paper-sunken hover:text-ink disabled:opacity-50"
+          >
+            <LogOut className="h-4 w-4" />
+            Sign out
+          </button>
+        </header>
 
-        {/* Usage Limits */}
-        <section className="grid gap-4 xl:grid-cols-2">
-          <ProgressQuotaCard
-            label="Requests remaining"
-            icon={<Zap className="h-5 w-5 text-ink-muted" />}
-            used={loading ? 0 : (summary?.five_hour_used || 0)}
-            limit={loading ? 0 : (summary?.five_hour_limit || 0)}
-            hint="Based on your last 5 hours of activity"
-            period="Rolling window"
-          />
-          <ProgressQuotaCard
-            label="Weekly budget"
-            icon={<Calendar className="h-5 w-5 text-ink-muted" />}
-            used={loading ? 0 : (summary?.weekly_used || 0)}
-            limit={loading ? 0 : (summary?.weekly_limit || 0)}
-            hint="Resets gradually over 7 days"
-            period="Rolling week"
-          />
-        </section>
+        {/* Main Content Grid */}
+        <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
 
-        {/* Quick Stats */}
-        <section className="grid gap-4 md:grid-cols-3">
-          <StatCard
-            label="Active tasks"
-            value={loading ? "…" : String(summary?.active_runs || 0)}
-            hint="Running right now"
-            icon={<Activity className="h-4 w-4" />}
-          />
-          <StatCard
-            label="Today's conversations"
-            value={loading ? "…" : String(summary?.continuation_requests_today || 0)}
-            hint="Started today"
-            icon={<TrendingUp className="h-4 w-4" />}
-          />
-          <StatCard
-            label="Plan"
-            value={isPro ? "Pro" : "Free"}
-            hint={isPro ? "Full access enabled" : "Upgrade anytime"}
-            icon={<User className="h-4 w-4" />}
-          />
-        </section>
+          {/* Left Column */}
+          <div className="space-y-6">
 
-        {/* Usage Chart and Quick Actions */}
-        <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-          {/* Usage Trend Chart */}
-          <div className="rounded-2xl border border-line bg-paper-raised p-6">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-[17px] font-semibold tracking-tight text-ink">Your activity</h2>
-                <p className="mt-1 text-[13px] text-ink-muted">See how much you've been using zWork</p>
+            {/* Usage Section */}
+            <section className="rounded-2xl border border-line bg-paper p-6">
+              <div className="mb-4 flex items-center gap-2">
+                <Zap className="h-5 w-5 text-ink-muted" />
+                <h2 className="text-[16px] font-semibold text-ink">Usage Limits</h2>
               </div>
-              <div className="flex items-center gap-2">
-                <div className="rounded-full border border-line bg-paper-sunken p-1">
+              <div className="space-y-1">
+                <StatBar
+                  label="5-hour window"
+                  value={`${fiveHourUsed}/${fiveHourLimit}`}
+                  used={fiveHourUsed}
+                  limit={fiveHourLimit}
+                  color={fiveHourColor}
+                />
+                <div className="my-2 border-t border-line/30" />
+                <StatBar
+                  label="Weekly budget"
+                  value={`${weeklyUsed}/${weeklyLimit}`}
+                  used={weeklyUsed}
+                  limit={weeklyLimit}
+                  color={weeklyColor}
+                />
+              </div>
+            </section>
+
+            {/* Activity Chart */}
+            <section className="rounded-2xl border border-line bg-paper p-6">
+              <div className="mb-5 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5 text-ink-muted" />
+                  <h2 className="text-[16px] font-semibold text-ink">Activity</h2>
+                </div>
+                <div className="flex items-center gap-1 rounded-full border border-line/50 bg-paper p-0.5">
                   <button
                     type="button"
                     onClick={() => setTrendRange("7d")}
                     className={cn(
-                      "rounded-full px-3 py-1 text-[11px] font-medium transition-colors",
+                      "ring-focus rounded-full px-3 py-1 text-[11.5px] font-medium transition-colors",
                       trendRange === "7d" ? "bg-ink text-paper" : "text-ink-muted hover:text-ink"
                     )}
                   >
@@ -350,201 +358,176 @@ export function AnalyticsPage({
                     type="button"
                     onClick={() => setTrendRange("1m")}
                     className={cn(
-                      "rounded-full px-3 py-1 text-[11px] font-medium transition-colors",
+                      "ring-focus rounded-full px-3 py-1 text-[11.5px] font-medium transition-colors",
                       trendRange === "1m" ? "bg-ink text-paper" : "text-ink-muted hover:text-ink"
                     )}
                   >
                     30 days
                   </button>
                 </div>
-                <BarChart3 className="h-5 w-5 text-ink-faint" />
               </div>
-            </div>
-            <div
-              className="mt-6 grid gap-2"
-              style={{ gridTemplateColumns: `repeat(${Math.max(trendData.length, 1)}, minmax(0, 1fr))` }}
-            >
-              {trendData.map((day) => {
-                const height = `${Math.max(8, (day.roots / maxDay) * 160)}px`;
-                const hasActivity = day.roots > 0;
-                return (
-                  <div key={day.day} className="flex flex-col items-center gap-2">
-                    <div className="flex h-[160px] w-full items-end justify-center rounded-xl bg-paper-sunken px-1.5 pb-1.5">
+              <div
+                className="flex items-end justify-between gap-1"
+                style={{ height: "140px" }}
+              >
+                {trendData.map((day) => {
+                  const height = Math.max(8, (day.roots / maxDay) * 120);
+                  const hasActivity = day.roots > 0;
+                  return (
+                    <div key={day.day} className="flex flex-1 flex-col items-center gap-1.5">
                       <div
                         className={cn(
-                          "flex w-full flex-col overflow-hidden rounded-lg border transition-all duration-300",
-                          hasActivity
-                            ? "border-line/60 bg-white/80 dark:bg-white/10"
-                            : "border-transparent bg-transparent"
+                          "w-full rounded-t-md transition-all duration-300",
+                          hasActivity ? "bg-ink/80 dark:bg-white/15" : "bg-paper-sunken"
                         )}
-                        style={{ height }}
-                      >
-                        {hasActivity && <div className="flex-1 bg-emerald-500/80 dark:bg-emerald-400/70" />}
+                        style={{ height: `${height}px` }}
+                      />
+                      <div className={cn("text-[9.5px]", hasActivity ? "text-ink-faint" : "text-ink-faint/50")}>
+                        {day.day.slice(5).replace("-", "")}
                       </div>
                     </div>
-                    <div className={cn("text-center text-[10.5px]", hasActivity ? "text-ink" : "text-ink-faint")}>
-                      {day.day.slice(5).replace("-", "/")}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+                  );
+                })}
+              </div>
+            </section>
 
-          {/* Quick Actions Panel */}
-          <div className="flex flex-col gap-4">
-            {/* Hosted Mode Toggle */}
-            <div className="rounded-2xl border border-line bg-paper-raised p-5">
+            {/* Quick Stats */}
+            <section className="grid gap-3 sm:grid-cols-3">
+              <MiniStat
+                label="Active tasks"
+                value={loading ? "—" : (summary?.active_runs || 0)}
+                icon={<Activity className="h-4 w-4" />}
+              />
+              <MiniStat
+                label="Today's chats"
+                value={loading ? "—" : (summary?.continuation_requests_today || 0)}
+                icon={<Calendar className="h-4 w-4" />}
+              />
+              <MiniStat
+                label="Plan"
+                value={isPro ? "Pro" : "Free"}
+                icon={<User className="h-4 w-4" />}
+              />
+            </section>
+
+            {/* Help Section */}
+            <section className="rounded-2xl border border-line/50 bg-paper px-5 py-4">
               <div className="flex items-start gap-3">
-                <div className={cn(
-                  "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl",
-                  isPro ? "bg-emerald-100 dark:bg-emerald-500/20" : "bg-paper-sunken"
-                )}>
-                  <Sparkles className={cn("h-5 w-5", isPro ? "text-emerald-600 dark:text-emerald-400" : "text-ink-muted")} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <h3 className="text-[15px] font-semibold text-ink">Hosted access</h3>
-                  <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
-                    {managedActive
-                      ? "Using zWork's hosted AI gateway"
-                      : isPro
-                        ? "Activate hosted AI access"
-                        : "Upgrade to Pro to use hosted access"}
-                  </p>
+                <Info className="h-4 w-4 mt-0.5 text-ink-faint" />
+                <div className="text-[12.5px] text-ink-muted">
+                  <span className="font-medium text-ink">How limits work:</span> Only your main requests count. Background tasks don't use quota. Limits reset gradually over time.
                 </div>
               </div>
-              <div className="mt-4">
-                {managedActive ? (
+            </section>
+          </div>
+
+          {/* Right Column - Actions */}
+          <div className="space-y-4">
+
+            {/* Hosted Access */}
+            <ActionCard
+              icon={<Sparkles className={cn("h-5 w-5", isPro ? "text-emerald-600 dark:text-emerald-400" : "text-ink-muted")} />}
+              title="Hosted Access"
+              description={managedActive
+                ? "Using zWork's hosted AI gateway"
+                : isPro
+                  ? "Activate hosted AI access"
+                  : "Pro feature — upgrade to enable"}
+              variant={isPro ? "pro" : "default"}
+              action={
+                managedActive ? (
                   <button
                     type="button"
                     disabled={routeBusy}
                     onClick={() => void restorePersonalMode()}
-                    className="press w-full rounded-full border border-line bg-paper px-4 py-2.5 text-[13px] font-medium text-ink hover:border-line-strong hover:bg-paper-sunken disabled:opacity-50"
+                    className="press ring-focus w-full rounded-full border border-line/50 bg-paper px-4 py-2 text-[13px] font-medium text-ink hover:bg-paper-sunken disabled:opacity-50"
                   >
-                    {routeBusy ? "Switching…" : "Use personal setup"}
+                    Use personal setup
                   </button>
                 ) : isPro ? (
                   <button
                     type="button"
                     disabled={routeBusy || !managedReady}
                     onClick={() => void activateManagedMode()}
-                    className="press w-full rounded-full bg-ink px-4 py-2.5 text-[13px] font-medium text-paper hover:bg-ink/90 disabled:opacity-50"
+                    className="press ring-focus w-full rounded-full bg-ink px-4 py-2 text-[13px] font-medium text-paper hover:bg-ink/90 disabled:opacity-50"
                   >
-                    {routeBusy ? "Activating…" : "Turn on hosted access"}
+                    {routeBusy ? "Activating…" : "Turn on"}
                   </button>
                 ) : (
-                  <div className="rounded-xl bg-paper-sunken px-4 py-3 text-[12px] text-ink-muted">
-                    Upgrade to Pro to enable hosted access
-                  </div>
-                )}
-              </div>
-              {managedStatus && !managedActive && (
-                <div className="mt-3 text-[11.5px] text-ink-faint">
-                  {managedStatus}
-                </div>
-              )}
-              {routeError && (
-                <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
-                  {routeError}
-                </div>
-              )}
-            </div>
-
-            {/* Access Code (Pro testing) */}
-            {!isPro && (
-              <div className="rounded-2xl border border-line bg-paper-raised p-5">
-                <div className="flex items-start gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-100 dark:bg-amber-500/20">
-                    <Sparkles className="h-5 w-5 text-amber-600 dark:text-amber-400" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <h3 className="text-[15px] font-semibold text-ink">Try Pro free</h3>
-                    <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
-                      Use an access code to test Pro features
-                    </p>
-                  </div>
-                </div>
-                <div className="mt-4 flex gap-2">
-                  <input
-                    value={accessCode}
-                    onChange={(e) => setAccessCode(e.target.value)}
-                    className="min-w-0 flex-1 rounded-full border border-line bg-paper px-4 py-2.5 text-[12.5px] text-ink focus:border-line-strong focus:outline-none"
-                    placeholder="Enter access code"
-                  />
-                  <button
-                    type="button"
-                    disabled={accessCodeBusy}
-                    onClick={() => void redeemAccess()}
-                    className="press shrink-0 rounded-full bg-ink px-4 py-2.5 text-[13px] font-medium text-paper hover:bg-ink/90 disabled:opacity-50"
-                  >
-                    {accessCodeBusy ? "Applying…" : "Apply"}
-                  </button>
-                </div>
-                {accessCodeError && (
-                  <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[12px] text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
-                    {accessCodeError}
-                  </div>
-                )}
+                  <div className="text-[12px] text-ink-muted">Upgrade to Pro required</div>
+                )
+              }
+            />
+            {routeError && (
+              <div className="rounded-xl border border-line-strong bg-paper-sunken px-3 py-2 text-[12px] text-ink">
+                {routeError}
               </div>
             )}
-          </div>
-        </section>
 
-        {/* Quick Links - Only for admins/owners */}
-        {summary?.owner_provider_overview && summary.owner_provider_overview.length > 0 && (
-          <section className="rounded-2xl border border-line bg-paper-raised p-5">
-            <div className="flex items-center gap-3">
-              <ExternalLink className="h-5 w-5 text-ink-muted" />
-              <h2 className="text-[15px] font-semibold text-ink">Quick links</h2>
-            </div>
-            <div className="mt-4 grid gap-3 md:grid-cols-3">
-              {[
-                { label: "API status", href: summary?.api_url || "https://api.tryzwork.app/health" },
-                { label: "Analytics", href: summary?.analytics_url || "https://us.posthog.com/project/397748" },
-              ].map((link) => (
-                <a
-                  key={link.label}
-                  href={link.href}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="press group flex items-center justify-between rounded-xl border border-line bg-paper px-4 py-3 hover:border-line-strong hover:bg-paper-sunken"
-                >
-                  <span className="text-[13px] font-medium text-ink">{link.label}</span>
-                  <ExternalLink className="h-4 w-4 text-ink-faint transition-transform group-hover:translate-x-0.5" />
-                </a>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* How limits work - helpful explanation */}
-        <section className="rounded-2xl border border-line bg-paper-raised p-5">
-          <h2 className="text-[15px] font-semibold text-ink">Understanding your limits</h2>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <div className="flex gap-3">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-500/20">
-                <CheckCircle className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+            {/* Access Code */}
+            {!isPro && (
+              <ActionCard
+                icon={<Sparkles className="h-5 w-5 text-amber-600 dark:text-amber-400" />}
+                title="Try Pro Free"
+                description="Use an access code to test Pro features"
+                action={
+                  <div className="flex gap-2">
+                    <input
+                      value={accessCode}
+                      onChange={(e) => setAccessCode(e.target.value)}
+                      className="ring-focus flex-1 rounded-full border border-line/50 bg-paper px-3 py-2 text-[12.5px] text-ink focus:border-line focus:outline-none"
+                      placeholder="Access code"
+                    />
+                    <button
+                      type="button"
+                      disabled={accessCodeBusy}
+                      onClick={() => void redeemAccess()}
+                      className="press ring-focus shrink-0 rounded-full bg-ink px-4 py-2 text-[13px] font-medium text-paper hover:bg-ink/90 disabled:opacity-50"
+                    >
+                      {accessCodeBusy ? "…" : "Go"}
+                    </button>
+                  </div>
+                }
+              />
+            )}
+            {accessCodeError && (
+              <div className="rounded-xl border border-line-strong bg-paper-sunken px-3 py-2 text-[12px] text-ink">
+                {accessCodeError}
               </div>
-              <div>
-                <div className="text-[13px] font-medium text-ink">What counts</div>
-                <div className="mt-1 text-[12px] text-ink-muted">
-                  Only your main requests count toward your limit. Background work doesn't use up your quota.
+            )}
+
+            {/* Quick Links */}
+            {summary?.owner_provider_overview && summary.owner_provider_overview.length > 0 && (
+              <div className="rounded-2xl border border-line/50 bg-paper p-5">
+                <div className="mb-3 flex items-center gap-2">
+                  <ExternalLink className="h-4 w-4 text-ink-muted" />
+                  <h3 className="text-[14px] font-semibold text-ink">Quick Links</h3>
+                </div>
+                <div className="space-y-2">
+                  <a
+                    href={summary?.api_url || "https://api.tryzwork.app/health"}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="press ring-focus flex items-center justify-between rounded-lg border border-line/50 px-3 py-2 text-[13px] text-ink hover:bg-paper-sunken"
+                  >
+                    <span>API Status</span>
+                    <ArrowUpRight className="h-3.5 w-3.5 text-ink-faint" />
+                  </a>
+                  <a
+                    href={summary?.analytics_url || "https://us.posthog.com/project/397748"}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="press ring-focus flex items-center justify-between rounded-lg border border-line/50 px-3 py-2 text-[13px] text-ink hover:bg-paper-sunken"
+                  >
+                    <span>Analytics Dashboard</span>
+                    <ArrowUpRight className="h-3.5 w-3.5 text-ink-faint" />
+                  </a>
                 </div>
               </div>
-            </div>
-            <div className="flex gap-3">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-500/20">
-                <TrendingUp className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-              </div>
-              <div>
-                <div className="text-[13px] font-medium text-ink">Rolling limits</div>
-                <div className="mt-1 text-[12px] text-ink-muted">
-                  Your limits reset gradually over time, not all at once. Older usage drops off automatically.
-                </div>
-              </div>
-            </div>
+            )}
+
           </div>
-        </section>
+        </div>
       </div>
     </div>
   );

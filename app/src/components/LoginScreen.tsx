@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { ArrowRight, Sparkles, Check, Zap, Shield } from "lucide-react";
+import { Sparkles, Check, Zap, Shield } from "lucide-react";
 import { Logo } from "./Logo";
 import LightRays from "./LightRays";
 import { useResolvedTheme } from "../lib/theme";
@@ -34,7 +34,6 @@ export function LoginScreen() {
     try {
       await signInWithGoogle();
     } catch (err) {
-      console.error("Sign in failed:", err);
       setError(err instanceof Error ? err.message : "Sign in failed. Please try again.");
     }
   };
@@ -112,18 +111,17 @@ export function LoginScreen() {
               disabled={isLoadingAuth}
               onClick={handleSignIn}
               className={cn(
-                "mt-8 flex w-full items-center justify-center gap-3 rounded-full bg-ink px-5 py-3.5 text-[14px] font-medium text-paper transition-transform hover:scale-[1.02] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60",
+                "press ring-focus mt-8 flex w-full items-center justify-center gap-3 rounded-full bg-ink px-5 py-3.5 text-[14px] font-medium text-paper disabled:cursor-not-allowed disabled:opacity-60",
                 isLoadingAuth && "animate-pulse",
               )}
             >
               <Sparkles className="h-4 w-4" />
               {isLoadingAuth ? "Signing in..." : "Continue with Google"}
-              <ArrowRight className="h-4 w-4" />
             </button>
 
             {/* Error message */}
             {error && (
-              <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-[13px] text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-200">
+              <div className="mt-4 rounded-2xl border border-line-strong bg-paper-sunken px-4 py-3 text-[13px] text-ink">
                 {error}
               </div>
             )}
@@ -156,7 +154,7 @@ export function LoginScreen() {
               ].map((feature, index) => (
                 <div
                   key={index}
-                  className="flex items-start gap-3 rounded-xl border border-line bg-paper px-4 py-3"
+                  className="press flex items-start gap-3 rounded-xl border border-line bg-paper px-4 py-3 transition-colors hover:bg-paper-sunken"
                 >
                   <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-paper-sunken text-ink">
                     {feature.icon}

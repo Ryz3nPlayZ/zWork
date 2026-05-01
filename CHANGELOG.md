@@ -2,6 +2,20 @@
 
 All notable changes to zWork are documented here.
 
+## v0.3.18-beta.4
+
+**Design system polish and accessibility improvements.**
+
+- added keyboard focus indicators (ring-focus) to all interactive elements
+- replaced hard-coded error colors with design tokens (border-line-strong, bg-paper-sunken)
+- removed console.error statements from production code
+- unified hover and press states using the `.press` class across components
+- simplified visual treatments (removed gradient backgrounds for cleaner aesthetic)
+- improved Analytics page layout with balanced 2-column grid
+- cleaned up unused imports and code
+- added hover states to feature cards
+- consistent error messaging across all UI surfaces
+
 ## v0.3.18-beta.3
 
 **UI/UX refactoring for non-technical users.**

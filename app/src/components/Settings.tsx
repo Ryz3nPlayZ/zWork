@@ -891,7 +891,7 @@ function PlanPanel() {
       <section className={cn(
         "rounded-2xl border p-6 transition-all",
         isPro
-          ? "border-emerald-200 bg-gradient-to-br from-emerald-50 to-paper dark:border-emerald-500/30 dark:from-emerald-500/10"
+          ? "border-line bg-paper-sunken"
           : "border-line bg-paper-raised"
       )}>
         <div className="flex items-start justify-between gap-4">
@@ -922,7 +922,7 @@ function PlanPanel() {
             <button
               type="button"
               onClick={() => setView("analytics")}
-              className="press shrink-0 rounded-full bg-ink px-4 py-2 text-[13px] font-medium text-paper hover:bg-ink/90"
+              className="press ring-focus shrink-0 rounded-full bg-ink px-4 py-2 text-[13px] font-medium text-paper hover:bg-ink/90"
             >
               Upgrade to Pro
             </button>
@@ -1004,7 +1004,7 @@ function PlanPanel() {
           <button
             type="button"
             onClick={() => setView("analytics")}
-            className="press flex items-center gap-3 rounded-xl border border-line bg-paper px-4 py-3 text-left hover:border-line-strong hover:bg-paper-sunken"
+            className="press ring-focus flex items-center gap-3 rounded-xl border border-line bg-paper px-4 py-3 text-left hover:border-line-strong hover:bg-paper-sunken"
           >
             <BarChart3 className="h-5 w-5 text-ink-muted" />
             <div>
@@ -1017,7 +1017,7 @@ function PlanPanel() {
             <button
               type="button"
               onClick={() => setView("analytics")}
-              className="press flex items-center gap-3 rounded-xl border border-line bg-paper px-4 py-3 text-left hover:border-line-strong hover:bg-paper-sunken"
+              className="press ring-focus flex items-center gap-3 rounded-xl border border-line bg-paper px-4 py-3 text-left hover:border-line-strong hover:bg-paper-sunken"
             >
               <Zap className="h-5 w-5 text-ink-muted" />
               <div>
@@ -1030,14 +1030,14 @@ function PlanPanel() {
             <button
               type="button"
               onClick={() => setView("analytics")}
-              className="press flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-left hover:border-emerald-300 hover:bg-emerald-100 dark:border-emerald-500/30 dark:bg-emerald-500/10"
+              className="press ring-focus flex items-center gap-3 rounded-xl border border-line bg-paper px-4 py-3 text-left hover:border-line-strong hover:bg-paper-sunken"
             >
               <Sparkles className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
               <div>
                 <div className="text-[13px] font-medium text-ink">Upgrade now</div>
                 <div className="text-[11.5px] text-ink-muted">Get Pro access</div>
               </div>
-              <ArrowRight className="ml-auto h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+              <ArrowRight className="ml-auto h-4 w-4 text-ink-faint" />
             </button>
           )}
         </div>
@@ -1090,7 +1090,6 @@ function AccountPanel() {
     try {
       await signInWithGoogle();
     } catch (error) {
-      console.error("Sign in failed:", error);
       alert(`Sign in failed: ${error instanceof Error ? error.message : "Unknown error"}`);
     }
   };
