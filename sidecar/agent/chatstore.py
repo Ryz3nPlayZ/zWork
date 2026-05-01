@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass, field, asdict
 from typing import Any
 
-from .home import chats_dir
+from .home import chats_dir, is_safe_id
 
 
 def _now_ms() -> int:
@@ -37,6 +37,8 @@ class Chat:
 
 
 def _path(chat_id: str):
+    if not is_safe_id(chat_id):
+        raise ValueError(f"Invalid chat_id: {chat_id}")
     return chats_dir() / f"{chat_id}.json"
 
 

@@ -1,8 +1,17 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
+
+
+def is_safe_id(value: str) -> bool:
+    """Check if an identifier (chat_id, project_id) is safe for path construction."""
+    if not value or not isinstance(value, str):
+        return False
+    # Allow alphanumeric, hyphen, underscore. No dots, no slashes.
+    return bool(re.match(r"^[a-zA-Z0-9_-]+$", value))
 
 
 def zwork_home() -> Path:
@@ -109,6 +118,8 @@ def projects_dir() -> Path:
 
 
 def project_dir(project_id: str) -> Path:
+    if not is_safe_id(project_id):
+        raise ValueError(f"Invalid project_id: {project_id}")
     d = projects_dir() / project_id
     d.mkdir(parents=True, exist_ok=True)
     return d
