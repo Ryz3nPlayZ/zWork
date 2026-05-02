@@ -36,6 +36,10 @@ ZWORK_ROUTER_ZWORK_ID = "zwork-router"
 ZWORK_ROUTER_MODEL_NAME = "zWork Router"
 ZWORK_ROUTER_BASE_URL = "https://api.tryzwork.app/api/v1"
 
+# Legacy constants for migration/tests
+PREV1_OLLAMA_MODEL_ID = "qwen3.5:cloud"
+PREV1_OLLAMA_ZWORK_ID = "qwen3-5-cloud-ollama"
+
 
 def _max_tokens_for(model_id: str) -> int:
     """Sensible ceiling per model family. Anthropic claude-sonnet-4/4.5 allow 64k."""

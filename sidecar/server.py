@@ -757,6 +757,8 @@ def create_project(body: ProjectCreate) -> dict:
 
 @app.get("/api/projects/{project_id}")
 def get_project(project_id: str) -> dict:
+    if not home_mod.is_safe_id(project_id):
+        raise HTTPException(400, "invalid project_id")
     p = projects_mod.get(project_id)
     if not p:
         raise HTTPException(404, "project not found")
@@ -765,6 +767,8 @@ def get_project(project_id: str) -> dict:
 
 @app.patch("/api/projects/{project_id}")
 def update_project(project_id: str, body: ProjectUpdate) -> dict:
+    if not home_mod.is_safe_id(project_id):
+        raise HTTPException(400, "invalid project_id")
     kwargs = {}
     if body.name is not None:
         kwargs["name"] = body.name
@@ -778,6 +782,8 @@ def update_project(project_id: str, body: ProjectUpdate) -> dict:
 
 @app.delete("/api/projects/{project_id}")
 def delete_project(project_id: str) -> dict:
+    if not home_mod.is_safe_id(project_id):
+        raise HTTPException(400, "invalid project_id")
     ok = projects_mod.delete(project_id)
     if not ok:
         raise HTTPException(404, "project not found")
@@ -786,6 +792,8 @@ def delete_project(project_id: str) -> dict:
 
 @app.get("/api/projects/{project_id}/context")
 def get_project_context(project_id: str) -> dict:
+    if not home_mod.is_safe_id(project_id):
+        raise HTTPException(400, "invalid project_id")
     p = projects_mod.get(project_id)
     if not p:
         raise HTTPException(404, "project not found")
@@ -795,6 +803,8 @@ def get_project_context(project_id: str) -> dict:
 
 @app.put("/api/projects/{project_id}/context")
 def put_project_context(project_id: str, body: ContentBody) -> dict:
+    if not home_mod.is_safe_id(project_id):
+        raise HTTPException(400, "invalid project_id")
     ok = projects_mod.set_context(project_id, body.content)
     if not ok:
         raise HTTPException(404, "project not found")
@@ -803,10 +813,31 @@ def put_project_context(project_id: str, body: ContentBody) -> dict:
 
 # ---------------- Ollama model proxy ----------------
 
+def _is_safe_ollama_url(url_str: str) -> bool:
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(url_str)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        # Allow localhost, 127.0.0.1, and ollama.com
+        host = parsed.hostname or ""
+        if host in ("localhost", "127.0.0.1", "ollama.com") or host.endswith(".ollama.com"):
+            return True
+        # For other hosts, we might want to be more restrictive or use a whitelist.
+        # Given this is a local tool, allowing the user to point to their own local
+        # network might be desired, but for SSRF protection we should be careful.
+        return False
+    except Exception:
+        return False
+
+
 @app.get("/api/ollama/models")
 async def ollama_models(base_url: str = "https://ollama.com/v1", api_key: str = "") -> dict:
     """Proxy Ollama's OpenAI-compatible `/v1/models` listing so the onboarding
     UI can show a dropdown. Returns `{models: [{id, name}], error?}`."""
+    if not _is_safe_ollama_url(base_url):
+        return {"models": [], "error": "Invalid or unauthorized base_url"}
+
     import httpx
     url = base_url.rstrip("/") + "/models"
     headers = {"Accept": "application/json"}
@@ -849,6 +880,8 @@ def create_chat(body: ChatCreate) -> dict:
 
 @app.get("/api/chats/{chat_id}")
 def get_chat(chat_id: str) -> dict:
+    if not home_mod.is_safe_id(chat_id):
+        raise HTTPException(400, "invalid chat_id")
     c = chatstore.get(chat_id)
     if not c:
         raise HTTPException(404, "chat not found")
@@ -857,6 +890,8 @@ def get_chat(chat_id: str) -> dict:
 
 @app.patch("/api/chats/{chat_id}")
 def rename_chat(chat_id: str, body: ChatRename) -> dict:
+    if not home_mod.is_safe_id(chat_id):
+        raise HTTPException(400, "invalid chat_id")
     c = chatstore.rename(chat_id, body.title)
     if not c:
         raise HTTPException(404, "chat not found")
@@ -865,6 +900,8 @@ def rename_chat(chat_id: str, body: ChatRename) -> dict:
 
 @app.delete("/api/chats/{chat_id}")
 def delete_chat(chat_id: str) -> dict:
+    if not home_mod.is_safe_id(chat_id):
+        raise HTTPException(400, "invalid chat_id")
     ok = chatstore.delete(chat_id)
     if not ok:
         raise HTTPException(404, "chat not found")
