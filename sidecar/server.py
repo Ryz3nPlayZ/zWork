@@ -757,6 +757,8 @@ def create_project(body: ProjectCreate) -> dict:
 
 @app.get("/api/projects/{project_id}")
 def get_project(project_id: str) -> dict:
+    if not home_mod.is_safe_id(project_id):
+        raise HTTPException(400, "invalid project id")
     p = projects_mod.get(project_id)
     if not p:
         raise HTTPException(404, "project not found")
@@ -765,6 +767,8 @@ def get_project(project_id: str) -> dict:
 
 @app.patch("/api/projects/{project_id}")
 def update_project(project_id: str, body: ProjectUpdate) -> dict:
+    if not home_mod.is_safe_id(project_id):
+        raise HTTPException(400, "invalid project id")
     kwargs = {}
     if body.name is not None:
         kwargs["name"] = body.name
@@ -778,6 +782,8 @@ def update_project(project_id: str, body: ProjectUpdate) -> dict:
 
 @app.delete("/api/projects/{project_id}")
 def delete_project(project_id: str) -> dict:
+    if not home_mod.is_safe_id(project_id):
+        raise HTTPException(400, "invalid project id")
     ok = projects_mod.delete(project_id)
     if not ok:
         raise HTTPException(404, "project not found")
@@ -786,6 +792,8 @@ def delete_project(project_id: str) -> dict:
 
 @app.get("/api/projects/{project_id}/context")
 def get_project_context(project_id: str) -> dict:
+    if not home_mod.is_safe_id(project_id):
+        raise HTTPException(400, "invalid project id")
     p = projects_mod.get(project_id)
     if not p:
         raise HTTPException(404, "project not found")
@@ -795,6 +803,8 @@ def get_project_context(project_id: str) -> dict:
 
 @app.put("/api/projects/{project_id}/context")
 def put_project_context(project_id: str, body: ContentBody) -> dict:
+    if not home_mod.is_safe_id(project_id):
+        raise HTTPException(400, "invalid project id")
     ok = projects_mod.set_context(project_id, body.content)
     if not ok:
         raise HTTPException(404, "project not found")
@@ -849,6 +859,8 @@ def create_chat(body: ChatCreate) -> dict:
 
 @app.get("/api/chats/{chat_id}")
 def get_chat(chat_id: str) -> dict:
+    if not home_mod.is_safe_id(chat_id):
+        raise HTTPException(400, "invalid chat id")
     c = chatstore.get(chat_id)
     if not c:
         raise HTTPException(404, "chat not found")
@@ -857,6 +869,8 @@ def get_chat(chat_id: str) -> dict:
 
 @app.patch("/api/chats/{chat_id}")
 def rename_chat(chat_id: str, body: ChatRename) -> dict:
+    if not home_mod.is_safe_id(chat_id):
+        raise HTTPException(400, "invalid chat id")
     c = chatstore.rename(chat_id, body.title)
     if not c:
         raise HTTPException(404, "chat not found")
@@ -865,6 +879,8 @@ def rename_chat(chat_id: str, body: ChatRename) -> dict:
 
 @app.delete("/api/chats/{chat_id}")
 def delete_chat(chat_id: str) -> dict:
+    if not home_mod.is_safe_id(chat_id):
+        raise HTTPException(400, "invalid chat id")
     ok = chatstore.delete(chat_id)
     if not ok:
         raise HTTPException(404, "chat not found")
@@ -896,6 +912,8 @@ def _resolve_model_id(requested: str | None, s: settings_mod.Settings) -> str | 
 
 @app.post("/api/chat/stream")
 async def chat_stream(req: StreamRequest):
+    if not home_mod.is_safe_id(req.chat_id):
+        raise HTTPException(400, "invalid chat id")
     s = settings_mod.load()
     model_id = _resolve_model_id(req.model, s)
     started_at = time.time()

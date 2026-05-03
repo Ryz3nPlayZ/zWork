@@ -1,8 +1,16 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
+
+
+def is_safe_id(id_str: str | None) -> bool:
+    """Ensure an ID only contains alphanumeric characters, underscores, or hyphens."""
+    if id_str is None:
+        return True
+    return bool(re.match(r"^[a-zA-Z0-9_-]+$", id_str))
 
 
 def zwork_home() -> Path:

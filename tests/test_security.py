@@ -61,6 +61,26 @@ class TestServerSecurity(unittest.TestCase):
             finally:
                 server._STATIC_DIR = original_static_dir
 
+    def test_project_id_validation(self) -> None:
+        # Invalid characters should be rejected with 400
+        response = self.client.get("/api/projects/project!123")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("invalid project id", response.text)
+
+    def test_chat_id_validation(self) -> None:
+        # Invalid characters should be rejected with 400
+        response = self.client.get("/api/chats/chat!123")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("invalid chat id", response.text)
+
+    def test_chat_stream_traversal_is_blocked(self) -> None:
+        response = self.client.post("/api/chat/stream", json={
+            "chat_id": "../secret",
+            "message": "hello"
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("invalid chat id", response.text)
+
 
 if __name__ == "__main__":
     unittest.main()
