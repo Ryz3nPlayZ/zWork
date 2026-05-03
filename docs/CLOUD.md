@@ -22,7 +22,7 @@ The older `cloud/` directory is not the deployment source to trust for current b
 |---------|------|----------------|
 | Caddy | `cloud-src/Caddyfile` | TLS, host routing, reverse proxy |
 | Axum API | `cloud-src/api` | desktop auth exchange, analytics, managed model gateway |
-| Better Auth | `cloud-src/auth` | Google OAuth and session management |
+| Better Auth | `cloud-src/auth` | Google OAuth, email/password auth, verification, password reset |
 | Postgres | compose service | auth and zWork app state |
 | pgAdmin | compose service | admin tooling, intentionally not public |
 
@@ -65,15 +65,47 @@ DATABASE_URL=postgres://...
 GOOGLE_CLIENT_ID=...
 GOOGLE_CLIENT_SECRET=...
 BETTER_AUTH_SECRET=...
+APP_PUBLIC_URL=https://tryzwork.app
+
+SMTP_HOST=...
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=...
+SMTP_PASS=...
+SMTP_FROM="zWork <no-reply@tryzwork.app>"
 
 POSTHOG_API_KEY=...
 POSTHOG_HOST=https://us.i.posthog.com
 
-OLLAMA_API_KEY=...
-OLLAMA_BASE_URL=https://api.ollama.com/v1
-OLLAMA_MODEL=minimax-m2.7:cloud
+STRIPE_SECRET_KEY=...
+STRIPE_WEBHOOK_SECRET=...
+STRIPE_PRICE_PRO_MONTHLY=price_...
+STRIPE_PRICE_PRO_ANNUAL=price_...
 
-ROOT_REQUESTS_PER_DAY=200
+ROUTER_PROVIDER_ORDER=groq,cerebras,mistral
+GROQ_API_KEY=...
+GROQ_BASE_URL=https://api.groq.com/openai/v1
+GROQ_MODEL_PRIMARY=openai/gpt-oss-120b
+GROQ_MODEL_FALLBACK=openai/gpt-oss-20b
+CEREBRAS_API_KEY=...
+CEREBRAS_BASE_URL=https://api.cerebras.ai/v1
+CEREBRAS_MODEL_PRIMARY=qwen-3-235b-a22b-instruct-2507
+CEREBRAS_MODEL_FALLBACK=llama3.1-8b
+MISTRAL_API_KEY=...
+MISTRAL_BASE_URL=https://api.mistral.ai/v1
+MISTRAL_MODEL_PRIMARY=mistral-medium-3.5
+MISTRAL_MODEL_FALLBACK=devstral-2512
+
+AUTH_INTERNAL_BASE=http://better_auth:3000/api/auth
+AUTH_SESSION_URL=http://better_auth:3000/api/auth/get-session
+
+ENABLE_HOSTED_GATEWAY=false
+ENABLE_BILLING=false
+ENABLE_EMAIL_AUTH=false
+ENABLE_COUPONS=false
+
+ROOT_REQUESTS_PER_5H=200
+WEEKLY_LIMIT_MULTIPLIER=5
 MAX_CONCURRENT_ROOT_RUNS=3
 DEV_COUPON_CODES=zwork-dev-pro
 
@@ -82,8 +114,11 @@ CORS_ALLOWED_ORIGINS=tauri://localhost,http://tauri.localhost,http://localhost:1
 
 Notes:
 
-- `OLLAMA_API_KEY` should be provided through env, not embedded in source.
-- If you insist on a non-production fallback for internal testing, use `ZWORK_TEST_OLLAMA_API_KEY` in env rather than checking a token into git.
+- for pre-V1 public release on a shared server, leave `ENABLE_HOSTED_GATEWAY`, `ENABLE_BILLING`, `ENABLE_EMAIL_AUTH`, and `ENABLE_COUPONS` set to `false`
+- email/password verification requires SMTP env to be valid
+- Better Auth sends a verification **link**, not a numeric code
+- Stripe billing is only ready when `STRIPE_SECRET_KEY` and at least `STRIPE_PRICE_PRO_MONTHLY` are set
+- zWork Router is only ready when at least one provider API key is set
 
 ## Deployment
 
@@ -108,6 +143,15 @@ Expected:
 - `/api/desktop/auth/start` returns `200`
 - `db.tryzwork.app` returns `403`
 
+Billing checks:
+
+```bash
+curl -i https://api.tryzwork.app/api/analytics/summary
+curl -i -X POST https://api.tryzwork.app/api/billing/checkout
+```
+
+The checkout route should return `401` signed out, and should return a Stripe checkout URL when called with a valid desktop bearer token on a configured server.
+
 ## Security posture
 
 ## Already tightened
@@ -126,6 +170,6 @@ Expected:
 
 ## Operational reminders
 
-- Stripe is optional for now; coupon unlocks can exercise the paid path before billing goes live.
+- coupon unlocks can still exercise the paid path, but Stripe checkout and portal routes now exist and should be treated as the primary paid-plan path
 - Rate limits should be enforced on root user requests, not every internal model continuation.
 - The updater path is only as trustworthy as the release pipeline; keep the release workflow green and signed.

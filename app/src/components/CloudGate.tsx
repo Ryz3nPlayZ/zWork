@@ -62,7 +62,7 @@ export function CloudGate({
                   "Account-backed sessions and device identity",
                   "Anonymous-but-account-linked telemetry and usage stats",
                   "Managed model access with rate limits on user requests, not tool turns",
-                  "Pro unlocks through coupon testing before Stripe goes live",
+                  "Pro access through Stripe billing or server-issued access codes",
                 ].map((line) => (
                   <div key={line} className="rounded-2xl border border-[#151313]/8 bg-white/70 px-4 py-3 text-[13px] leading-6 text-[#3d3733]">
                     {line}

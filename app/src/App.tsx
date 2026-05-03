@@ -2,16 +2,16 @@ import { Suspense, lazy, useEffect, useState } from "react";
 import { CheckCircle2, ExternalLink, X } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
 import { Landing } from "./components/Landing";
-import { CloudGate } from "./components/CloudGate";
 import { useApp } from "./lib/store";
 import { consumeInstalledUpdateNotice, detectUpdate, installUpdate, openReleaseUrl, type UpdateCardState, type UpdateProgress } from "./lib/update";
 import { cn } from "./lib/cn";
 import { recordTelemetry, setTelemetryEnabled, startTelemetrySession, stopTelemetrySession } from "./lib/telemetry";
 import { fallbackAppVersion, resolveAppVersion } from "./lib/appVersion";
-import { fetchCloudSession, onCloudAuthChanged, startDesktopGoogleSignIn, type CloudUser } from "./lib/cloud";
+import { fetchCloudSession, onCloudAuthChanged, type CloudUser } from "./lib/cloud";
 import { identifyPostHogUser, resetPostHogUser } from "./lib/posthog";
 
 const Onboarding = lazy(() => import("./components/Onboarding").then((m) => ({ default: m.Onboarding })));
+const LoginScreen = lazy(() => import("./components/LoginScreen").then((m) => ({ default: m.LoginScreen })));
 const loadChatView = () => import("./components/ChatView").then((m) => ({ default: m.ChatView }));
 const ChatView = lazy(loadChatView);
 const SettingsPage = lazy(() => import("./components/Settings").then((m) => ({ default: m.SettingsPage })));
@@ -42,8 +42,6 @@ export default function App() {
   } | null>(null);
   const [cloudUser, setCloudUser] = useState<CloudUser | null>(null);
   const [cloudLoading, setCloudLoading] = useState(true);
-  const [cloudBusy, setCloudBusy] = useState(false);
-  const [cloudError, setCloudError] = useState<string | null>(null);
   const showLanding = view === "chat" && active === null;
 
   const syncStoreUser = (user: CloudUser | null) => {
@@ -271,33 +269,15 @@ export default function App() {
       return () => window.clearTimeout(t);
     }
   }, [showLanding, showLandingOverlay]);
-  const beginCloudSignIn = async () => {
-    setCloudBusy(true);
-    setCloudError(null);
-    try {
-      const user = await startDesktopGoogleSignIn();
-      setCloudUser(user);
-      syncStoreUser(user);
-      recordTelemetry("cloud_sign_in_succeeded", {
-        tier: user.tier,
-        coupon_code: user.access_code ?? user.coupon_code ?? null,
-      });
-    } catch (error) {
-      setCloudError(error instanceof Error ? error.message : "Sign-in failed.");
-      recordTelemetry("cloud_sign_in_failed", {
-        message: error instanceof Error ? error.message : "Sign-in failed.",
-      });
-    } finally {
-      setCloudBusy(false);
-      setCloudLoading(false);
-    }
-  };
-
   if (cloudLoading) {
     return <div className="h-screen w-screen bg-paper" />;
   }
   if (!cloudUser) {
-    return <CloudGate busy={cloudBusy} error={cloudError} onContinue={beginCloudSignIn} />;
+    return (
+      <Suspense fallback={<div className="h-screen w-screen bg-paper" />}>
+        <LoginScreen />
+      </Suspense>
+    );
   }
 
   // Show onboarding when we know it's NOT done. `null` = still loading; render
@@ -324,13 +304,7 @@ export default function App() {
             </Suspense>
           ) : view === "analytics" ? (
             <Suspense fallback={panelFallback}>
-              <AnalyticsPage
-                cloudUser={cloudUser}
-                onCloudUserChange={(user) => {
-                  setCloudUser(user);
-                  syncStoreUser(user);
-                }}
-              />
+              <AnalyticsPage />
             </Suspense>
           ) : view === "projects" ? (
             <Suspense fallback={panelFallback}>

@@ -29,6 +29,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify version sync
+        run: python3 scripts/check-version-sync.py
+
       - name: Verify updater signing secret
         shell: bash
         run: |
@@ -113,6 +116,9 @@ jobs:
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify version sync
+        run: python3 scripts/check-version-sync.py
 
       - name: Verify updater signing secret
         shell: bash

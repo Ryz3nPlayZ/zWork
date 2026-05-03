@@ -1,4 +1,5 @@
 use axum::{
+    body::Bytes,
     extract::{Json, Path, Query, Request, State},
     http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode},
     response::{IntoResponse, Redirect, Response},
@@ -6,9 +7,11 @@ use axum::{
     Router,
 };
 use chrono::{DateTime, Duration, NaiveDate, Utc};
+use hmac::{Hmac, Mac};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::Sha256;
 use sqlx::{postgres::PgPoolOptions, PgPool};
 use tokio::net::TcpListener;
 use tower_http::cors::{Any, CorsLayer};
@@ -20,15 +23,26 @@ struct AppState {
     posthog_client: Client,
     posthog_key: String,
     posthog_host: String,
+    stripe_secret_key: String,
     stripe_webhook_secret: String,
     db: PgPool,
     http_client: Client,
     auth_session_url: String,
+    auth_internal_base: String,
     auth_public_base: String,
     google_client_id: String,
     google_client_secret: String,
     owner_emails: Vec<String>,
+    features: AppFeatures,
     gateway: GatewayConfig,
+}
+
+#[derive(Clone)]
+struct AppFeatures {
+    hosted_gateway: bool,
+    billing: bool,
+    email_auth: bool,
+    coupons: bool,
 }
 
 #[derive(Clone)]
@@ -55,6 +69,13 @@ fn env_or(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_string())
 }
 
+fn env_bool(key: &str, default: bool) -> bool {
+    match std::env::var(key) {
+        Ok(value) => matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"),
+        Err(_) => default,
+    }
+}
+
 fn load_gateway_providers() -> Vec<GatewayProvider> {
     let order = std::env::var("ROUTER_PROVIDER_ORDER")
         .unwrap_or_else(|_| "groq,cerebras,mistral".to_string());
@@ -74,7 +95,7 @@ fn load_gateway_providers() -> Vec<GatewayProvider> {
                 base_url: env_or("CEREBRAS_BASE_URL", "https://api.cerebras.ai/v1"),
                 api_key: std::env::var("CEREBRAS_API_KEY").unwrap_or_default(),
                 primary_model: env_or("CEREBRAS_MODEL_PRIMARY", "qwen-3-235b-a22b-instruct-2507"),
-                fallback_model: env_or("CEREBRAS_MODEL_FALLBACK", "llama-4-scout-17b-16e-instruct"),
+                fallback_model: env_or("CEREBRAS_MODEL_FALLBACK", "llama3.1-8b"),
             },
             "mistral" => GatewayProvider {
                 name: "Mistral".to_string(),
@@ -160,6 +181,11 @@ struct AppUser {
     name: String,
     tier: String,
     coupon_code: Option<String>,
+    stripe_customer_id: Option<String>,
+    subscription_id: Option<String>,
+    subscription_status: Option<String>,
+    subscription_price_id: Option<String>,
+    subscription_current_period_end: Option<DateTime<Utc>>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -212,6 +238,44 @@ struct DesktopAuthExchangeRequest {
 struct DesktopAuthExchangeResponse {
     token: String,
     user: AppUser,
+}
+
+#[derive(Deserialize)]
+struct DesktopEmailSignInRequest {
+    email: String,
+    password: String,
+}
+
+#[derive(Deserialize)]
+struct DesktopEmailSignUpRequest {
+    name: String,
+    email: String,
+    password: String,
+    callback_url: Option<String>,
+}
+
+#[derive(Serialize)]
+struct DesktopEmailSignUpResponse {
+    ok: bool,
+    verification_required: bool,
+    message: String,
+}
+
+#[derive(Deserialize)]
+struct BillingCheckoutRequest {
+    success_url: String,
+    cancel_url: String,
+    annual: Option<bool>,
+}
+
+#[derive(Deserialize)]
+struct BillingPortalRequest {
+    return_url: String,
+}
+
+#[derive(Serialize)]
+struct BillingSessionResponse {
+    url: String,
 }
 
 #[derive(Deserialize, sqlx::FromRow)]
@@ -270,6 +334,8 @@ struct AnalyticsSummary {
     past_month: Vec<AnalyticsDay>,
     managed_gateway_ready: bool,
     managed_gateway_status: String,
+    billing_enabled: bool,
+    billing_status: String,
     owner_provider_overview: Vec<ProviderOverview>,
     api_url: String,
     analytics_url: String,
@@ -321,9 +387,59 @@ async fn bootstrap_schema(db: &PgPool) -> Result<(), sqlx::Error> {
             name TEXT NOT NULL,
             tier TEXT NOT NULL DEFAULT 'free' CHECK (tier IN ('free', 'pro')),
             coupon_code TEXT,
+            stripe_customer_id TEXT,
+            subscription_id TEXT,
+            subscription_status TEXT,
+            subscription_price_id TEXT,
+            subscription_current_period_end TIMESTAMPTZ,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE app_users
+        ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE app_users
+        ADD COLUMN IF NOT EXISTS subscription_id TEXT;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE app_users
+        ADD COLUMN IF NOT EXISTS subscription_status TEXT;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE app_users
+        ADD COLUMN IF NOT EXISTS subscription_price_id TEXT;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE app_users
+        ADD COLUMN IF NOT EXISTS subscription_current_period_end TIMESTAMPTZ;
         "#,
     )
     .execute(db)
@@ -539,7 +655,10 @@ async fn session_user_from_cookie(state: &AppState, headers: &HeaderMap) -> Opti
 async fn app_user_from_desktop_token(state: &AppState, token: &str) -> Option<AppUser> {
     let user = sqlx::query_as::<_, AppUser>(
         r#"
-        SELECT u.user_id, u.email, u.name, u.tier, u.coupon_code, u.created_at, u.updated_at
+        SELECT u.user_id, u.email, u.name, u.tier, u.coupon_code,
+               u.stripe_customer_id, u.subscription_id, u.subscription_status,
+               u.subscription_price_id, u.subscription_current_period_end,
+               u.created_at, u.updated_at
         FROM desktop_access_tokens t
         JOIN app_users u ON u.user_id = t.user_id
         WHERE t.token = $1
@@ -621,7 +740,10 @@ async fn upsert_app_user(state: &AppState, auth_user: &BetterAuthUser) -> Result
             email = EXCLUDED.email,
             name = EXCLUDED.name,
             updated_at = NOW()
-        RETURNING user_id, email, name, tier, coupon_code, created_at, updated_at
+        RETURNING user_id, email, name, tier, coupon_code,
+                  stripe_customer_id, subscription_id, subscription_status,
+                  subscription_price_id, subscription_current_period_end,
+                  created_at, updated_at
         "#,
     )
     .bind(&auth_user.id)
@@ -642,6 +764,145 @@ async fn resolve_app_user(state: &AppState, access: GatewayAccess) -> Result<Opt
         GatewayAccess::ServiceToken => Ok(None),
         GatewayAccess::CookieSession(user) => upsert_app_user(state, &user).await.map(Some),
         GatewayAccess::DesktopToken(user) => Ok(Some(user)),
+    }
+}
+
+async fn ensure_owner_or_service(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<Option<AppUser>, StatusCode> {
+    let access = ensure_gateway_access(state, headers).await?;
+    match access {
+        GatewayAccess::ServiceToken => Ok(None),
+        other => {
+            let user = resolve_app_user(state, other)
+                .await?
+                .ok_or(StatusCode::UNAUTHORIZED)?;
+            if is_owner_email(state, &user.email) {
+                Ok(Some(user))
+            } else {
+                Err(StatusCode::FORBIDDEN)
+            }
+        }
+    }
+}
+
+async fn mint_desktop_access_token(
+    state: &AppState,
+    user: &AppUser,
+) -> Result<DesktopAuthExchangeResponse, StatusCode> {
+    let token = format!("zw_{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let expires_at = Utc::now() + Duration::days(30);
+
+    sqlx::query(
+        r#"
+        INSERT INTO desktop_access_tokens (token, user_id, expires_at)
+        VALUES ($1, $2, $3)
+        "#,
+    )
+    .bind(&token)
+    .bind(&user.user_id)
+    .bind(expires_at)
+    .execute(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(DesktopAuthExchangeResponse {
+        token,
+        user: user.clone(),
+    })
+}
+
+fn better_auth_cookie_from_headers(headers: &reqwest::header::HeaderMap) -> String {
+    headers
+        .get_all(reqwest::header::SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .filter_map(|value| value.split(';').next())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+async fn better_auth_sign_in_email(
+    state: &AppState,
+    email: &str,
+    password: &str,
+) -> Result<BetterAuthUser, (StatusCode, String)> {
+    let response = state
+        .http_client
+        .post(format!("{}/sign-in/email", state.auth_internal_base.trim_end_matches('/')))
+        .json(&serde_json::json!({
+            "email": email,
+            "password": password,
+            "rememberMe": true
+        }))
+        .send()
+        .await
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "auth_service_unreachable".to_string()))?;
+
+    if !response.status().is_success() {
+        let status = StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+        let body = response.text().await.unwrap_or_default();
+        return Err((status, body));
+    }
+
+    let cookie = better_auth_cookie_from_headers(response.headers());
+    if cookie.is_empty() {
+        return Err((StatusCode::BAD_GATEWAY, "missing_auth_cookie".to_string()));
+    }
+
+    let session_response = state
+        .http_client
+        .get(&state.auth_session_url)
+        .header(reqwest::header::COOKIE, cookie)
+        .send()
+        .await
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "auth_session_lookup_failed".to_string()))?;
+
+    if !session_response.status().is_success() {
+        let status = StatusCode::from_u16(session_response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+        let body = session_response.text().await.unwrap_or_default();
+        return Err((status, body));
+    }
+
+    let body = session_response.text().await.unwrap_or_default();
+    let session = serde_json::from_str::<BetterAuthSession>(&body)
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "invalid_auth_session_payload".to_string()))?;
+    Ok(session.user)
+}
+
+async fn better_auth_sign_up_email(
+    state: &AppState,
+    name: &str,
+    email: &str,
+    password: &str,
+    callback_url: Option<&str>,
+) -> Result<(), (StatusCode, String)> {
+    let mut payload = serde_json::json!({
+        "name": name,
+        "email": email,
+        "password": password,
+    });
+    if let Some(callback_url) = callback_url.filter(|value| !value.trim().is_empty()) {
+        payload["callbackURL"] = Value::String(callback_url.to_string());
+    }
+
+    let response = state
+        .http_client
+        .post(format!("{}/sign-up/email", state.auth_internal_base.trim_end_matches('/')))
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "auth_service_unreachable".to_string()))?;
+
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        let status = StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+        let body = response.text().await.unwrap_or_default();
+        Err((status, body))
     }
 }
 
@@ -880,8 +1141,13 @@ async fn finish_gateway_request(state: &AppState, request_id: Uuid, status: Opti
 
 async fn ingest_telemetry(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<TelemetryPayload>,
 ) -> impl IntoResponse {
+    if ensure_gateway_access(&state, &headers).await.is_err() {
+        return (StatusCode::UNAUTHORIZED, "Telemetry auth required").into_response();
+    }
+
     if state.posthog_key.trim().is_empty() {
         return (StatusCode::ACCEPTED, "Telemetry disabled").into_response();
     }
@@ -914,6 +1180,10 @@ async fn ai_proxy(
     State(state): State<AppState>,
     req: Request<axum::body::Body>,
 ) -> Result<Response<axum::body::Body>, (StatusCode, String)> {
+    if !state.features.hosted_gateway {
+        return Err((StatusCode::NOT_FOUND, "hosted_gateway_disabled".to_string()));
+    }
+
     let headers = req.headers().clone();
     let access = ensure_gateway_access(&state, &headers)
         .await
@@ -1099,10 +1369,427 @@ fn cors_allowed_origins() -> Vec<HeaderValue> {
         .collect()
 }
 
-async fn stripe_webhook(State(state): State<AppState>) -> impl IntoResponse {
+fn stripe_billing_ready(state: &AppState) -> bool {
+    state.features.billing
+        && !state.stripe_secret_key.trim().is_empty()
+        && !std::env::var("STRIPE_PRICE_PRO_MONTHLY").unwrap_or_default().trim().is_empty()
+}
+
+fn stripe_price_id(annual: bool) -> Option<String> {
+    if annual {
+        let annual_price = std::env::var("STRIPE_PRICE_PRO_ANNUAL").unwrap_or_default();
+        if !annual_price.trim().is_empty() {
+            return Some(annual_price);
+        }
+    }
+
+    let monthly_price = std::env::var("STRIPE_PRICE_PRO_MONTHLY").unwrap_or_default();
+    if monthly_price.trim().is_empty() {
+        None
+    } else {
+        Some(monthly_price)
+    }
+}
+
+async fn ensure_stripe_customer(state: &AppState, user: &AppUser) -> Result<String, (StatusCode, String)> {
+    if let Some(customer_id) = user
+        .stripe_customer_id
+        .as_ref()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(customer_id);
+    }
+
+    let params = vec![
+        ("email".to_string(), user.email.clone()),
+        ("name".to_string(), user.name.clone()),
+        ("metadata[user_id]".to_string(), user.user_id.clone()),
+    ];
+    let response = state
+        .http_client
+        .post("https://api.stripe.com/v1/customers")
+        .bearer_auth(&state.stripe_secret_key)
+        .form(&params)
+        .send()
+        .await
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "stripe_customer_create_failed".to_string()))?;
+
+    if !response.status().is_success() {
+        let detail = response.text().await.unwrap_or_default();
+        return Err((StatusCode::BAD_GATEWAY, detail));
+    }
+
+    let payload: Value = response
+        .json()
+        .await
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "stripe_customer_payload_invalid".to_string()))?;
+    let customer_id = payload
+        .get("id")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+
+    if customer_id.is_empty() {
+        return Err((StatusCode::BAD_GATEWAY, "stripe_customer_id_missing".to_string()));
+    }
+
+    sqlx::query(
+        r#"
+        UPDATE app_users
+        SET stripe_customer_id = $2,
+            updated_at = NOW()
+        WHERE user_id = $1
+        "#,
+    )
+    .bind(&user.user_id)
+    .bind(&customer_id)
+    .execute(&state.db)
+    .await
+    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "stripe_customer_persist_failed".to_string()))?;
+
+    Ok(customer_id)
+}
+
+fn stripe_signature_valid(secret: &str, payload: &[u8], header_value: &str) -> bool {
+    type HmacSha256 = Hmac<Sha256>;
+
+    let mut timestamp = None;
+    let mut signatures = Vec::new();
+    for part in header_value.split(',') {
+        let mut pieces = part.trim().splitn(2, '=');
+        let key = pieces.next().unwrap_or("").trim();
+        let value = pieces.next().unwrap_or("").trim();
+        if key == "t" {
+            timestamp = Some(value.to_string());
+        } else if key == "v1" {
+            signatures.push(value.to_string());
+        }
+    }
+
+    let timestamp = match timestamp {
+        Some(value) if !value.is_empty() => value,
+        _ => return false,
+    };
+
+    let mut signed = timestamp.into_bytes();
+    signed.push(b'.');
+    signed.extend_from_slice(payload);
+
+    for candidate in signatures {
+        let expected = match hex::decode(candidate) {
+            Ok(bytes) => bytes,
+            Err(_) => continue,
+        };
+        let mut mac = match HmacSha256::new_from_slice(secret.as_bytes()) {
+            Ok(mac) => mac,
+            Err(_) => return false,
+        };
+        mac.update(&signed);
+        if mac.verify_slice(&expected).is_ok() {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn subscription_tier(status: &str) -> &'static str {
+    match status {
+        "active" | "trialing" | "past_due" => "pro",
+        _ => "free",
+    }
+}
+
+fn stripe_timestamp_to_datetime(value: Option<i64>) -> Option<DateTime<Utc>> {
+    value.and_then(|seconds| DateTime::<Utc>::from_timestamp(seconds, 0))
+}
+
+async fn billing_checkout(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<BillingCheckoutRequest>,
+) -> Result<Json<BillingSessionResponse>, (StatusCode, String)> {
+    if !state.features.billing {
+        return Err((StatusCode::NOT_FOUND, "billing_disabled".to_string()));
+    }
+
+    if !stripe_billing_ready(&state) {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "stripe_billing_not_configured".to_string()));
+    }
+
+    if body.success_url.trim().is_empty() || body.cancel_url.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "success_and_cancel_urls_required".to_string()));
+    }
+
+    let access = ensure_gateway_access(&state, &headers)
+        .await
+        .map_err(|status| (status, "access_denied".to_string()))?;
+    let user = resolve_app_user(&state, access)
+        .await
+        .map_err(|status| (status, "user_lookup_failed".to_string()))?
+        .ok_or((StatusCode::UNAUTHORIZED, "not_signed_in".to_string()))?;
+    let customer_id = ensure_stripe_customer(&state, &user).await?;
+    let price_id = stripe_price_id(body.annual.unwrap_or(false))
+        .ok_or((StatusCode::SERVICE_UNAVAILABLE, "stripe_price_not_configured".to_string()))?;
+
+    let params = vec![
+        ("mode".to_string(), "subscription".to_string()),
+        ("customer".to_string(), customer_id),
+        ("client_reference_id".to_string(), user.user_id.clone()),
+        ("success_url".to_string(), body.success_url.trim().to_string()),
+        ("cancel_url".to_string(), body.cancel_url.trim().to_string()),
+        ("line_items[0][price]".to_string(), price_id),
+        ("line_items[0][quantity]".to_string(), "1".to_string()),
+        ("metadata[user_id]".to_string(), user.user_id.clone()),
+        ("subscription_data[metadata][user_id]".to_string(), user.user_id.clone()),
+        ("allow_promotion_codes".to_string(), "true".to_string()),
+    ];
+
+    let response = state
+        .http_client
+        .post("https://api.stripe.com/v1/checkout/sessions")
+        .bearer_auth(&state.stripe_secret_key)
+        .form(&params)
+        .send()
+        .await
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "stripe_checkout_create_failed".to_string()))?;
+
+    if !response.status().is_success() {
+        let detail = response.text().await.unwrap_or_default();
+        return Err((StatusCode::BAD_GATEWAY, detail));
+    }
+
+    let payload: Value = response
+        .json()
+        .await
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "stripe_checkout_payload_invalid".to_string()))?;
+    let url = payload
+        .get("url")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+
+    if url.is_empty() {
+        return Err((StatusCode::BAD_GATEWAY, "stripe_checkout_url_missing".to_string()));
+    }
+
+    Ok(Json(BillingSessionResponse { url }))
+}
+
+async fn billing_portal(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<BillingPortalRequest>,
+) -> Result<Json<BillingSessionResponse>, (StatusCode, String)> {
+    if !state.features.billing {
+        return Err((StatusCode::NOT_FOUND, "billing_disabled".to_string()));
+    }
+
+    if !stripe_billing_ready(&state) {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "stripe_billing_not_configured".to_string()));
+    }
+
+    if body.return_url.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "return_url_required".to_string()));
+    }
+
+    let access = ensure_gateway_access(&state, &headers)
+        .await
+        .map_err(|status| (status, "access_denied".to_string()))?;
+    let user = resolve_app_user(&state, access)
+        .await
+        .map_err(|status| (status, "user_lookup_failed".to_string()))?
+        .ok_or((StatusCode::UNAUTHORIZED, "not_signed_in".to_string()))?;
+    let customer_id = ensure_stripe_customer(&state, &user).await?;
+
+    let params = vec![
+        ("customer".to_string(), customer_id),
+        ("return_url".to_string(), body.return_url.trim().to_string()),
+    ];
+    let response = state
+        .http_client
+        .post("https://api.stripe.com/v1/billing_portal/sessions")
+        .bearer_auth(&state.stripe_secret_key)
+        .form(&params)
+        .send()
+        .await
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "stripe_portal_create_failed".to_string()))?;
+
+    if !response.status().is_success() {
+        let detail = response.text().await.unwrap_or_default();
+        return Err((StatusCode::BAD_GATEWAY, detail));
+    }
+
+    let payload: Value = response
+        .json()
+        .await
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "stripe_portal_payload_invalid".to_string()))?;
+    let url = payload
+        .get("url")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+
+    if url.is_empty() {
+        return Err((StatusCode::BAD_GATEWAY, "stripe_portal_url_missing".to_string()));
+    }
+
+    Ok(Json(BillingSessionResponse { url }))
+}
+
+async fn stripe_webhook(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> impl IntoResponse {
+    if !state.features.billing {
+        return (StatusCode::NOT_FOUND, "Billing disabled").into_response();
+    }
+
     if state.stripe_webhook_secret.trim().is_empty() {
         return (StatusCode::ACCEPTED, "Stripe disabled").into_response();
     }
+
+    let signature = match headers
+        .get("stripe-signature")
+        .and_then(|value| value.to_str().ok())
+    {
+        Some(value) if stripe_signature_valid(&state.stripe_webhook_secret, &body, value) => value,
+        _ => return (StatusCode::BAD_REQUEST, "Invalid Stripe signature").into_response(),
+    };
+    let _ = signature;
+
+    let event: Value = match serde_json::from_slice(&body) {
+        Ok(event) => event,
+        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid Stripe payload").into_response(),
+    };
+
+    let event_type = event.get("type").and_then(|value| value.as_str()).unwrap_or("");
+    let object = event
+        .get("data")
+        .and_then(|value| value.get("object"))
+        .cloned()
+        .unwrap_or(Value::Null);
+
+    match event_type {
+        "checkout.session.completed" => {
+            let customer_id = object.get("customer").and_then(|value| value.as_str()).unwrap_or("");
+            let subscription_id = object.get("subscription").and_then(|value| value.as_str()).unwrap_or("");
+            let user_id = object
+                .get("client_reference_id")
+                .and_then(|value| value.as_str())
+                .or_else(|| {
+                    object
+                        .get("metadata")
+                        .and_then(|value| value.get("user_id"))
+                        .and_then(|value| value.as_str())
+                })
+                .unwrap_or("");
+
+            if !user_id.is_empty() {
+                let _ = sqlx::query(
+                    r#"
+                    UPDATE app_users
+                    SET stripe_customer_id = NULLIF($2, ''),
+                        subscription_id = NULLIF($3, ''),
+                        updated_at = NOW()
+                    WHERE user_id = $1
+                    "#,
+                )
+                .bind(user_id)
+                .bind(customer_id)
+                .bind(subscription_id)
+                .execute(&state.db)
+                .await;
+            }
+        }
+        "customer.subscription.created" | "customer.subscription.updated" | "customer.subscription.deleted" => {
+            let customer_id = object.get("customer").and_then(|value| value.as_str()).unwrap_or("");
+            let subscription_id = object.get("id").and_then(|value| value.as_str()).unwrap_or("");
+            let status = object.get("status").and_then(|value| value.as_str()).unwrap_or("");
+            let user_id = object
+                .get("metadata")
+                .and_then(|value| value.get("user_id"))
+                .and_then(|value| value.as_str())
+                .map(|value| value.to_string())
+                .or_else(|| {
+                    if customer_id.is_empty() {
+                        None
+                    } else {
+                        Some(String::new())
+                    }
+                });
+            let price_id = object
+                .get("items")
+                .and_then(|value| value.get("data"))
+                .and_then(|value| value.as_array())
+                .and_then(|items| items.first())
+                .and_then(|item| item.get("price"))
+                .and_then(|price| price.get("id"))
+                .and_then(|value| value.as_str())
+                .map(|value| value.to_string());
+            let current_period_end = stripe_timestamp_to_datetime(
+                object.get("current_period_end").and_then(|value| value.as_i64()),
+            );
+
+            if let Some(user_id) = user_id {
+                let result = if user_id.is_empty() {
+                    sqlx::query(
+                        r#"
+                        UPDATE app_users
+                        SET subscription_id = CASE WHEN $2 = 'customer.subscription.deleted' THEN NULL ELSE NULLIF($3, '') END,
+                            subscription_status = NULLIF($4, ''),
+                            subscription_price_id = $5,
+                            subscription_current_period_end = $6,
+                            tier = $7,
+                            updated_at = NOW()
+                        WHERE stripe_customer_id = $1
+                        "#,
+                    )
+                    .bind(customer_id)
+                    .bind(event_type)
+                    .bind(subscription_id)
+                    .bind(status)
+                    .bind(price_id)
+                    .bind(current_period_end)
+                    .bind(subscription_tier(status))
+                    .execute(&state.db)
+                    .await
+                } else {
+                    sqlx::query(
+                        r#"
+                        UPDATE app_users
+                        SET stripe_customer_id = NULLIF($2, ''),
+                            subscription_id = CASE WHEN $3 = 'customer.subscription.deleted' THEN NULL ELSE NULLIF($4, '') END,
+                            subscription_status = NULLIF($5, ''),
+                            subscription_price_id = $6,
+                            subscription_current_period_end = $7,
+                            tier = $8,
+                            updated_at = NOW()
+                        WHERE user_id = $1
+                        "#,
+                    )
+                    .bind(user_id)
+                    .bind(customer_id)
+                    .bind(event_type)
+                    .bind(subscription_id)
+                    .bind(status)
+                    .bind(price_id)
+                    .bind(current_period_end)
+                    .bind(subscription_tier(status))
+                    .execute(&state.db)
+                    .await
+                };
+                let _ = result;
+            }
+        }
+        _ => {}
+    }
+
     (StatusCode::OK, "Webhook received").into_response()
 }
 
@@ -1111,7 +1798,7 @@ async fn get_user_by_google_id(
     headers: HeaderMap,
     Path(google_id): Path<String>,
 ) -> Result<Json<User>, StatusCode> {
-    let _ = ensure_gateway_access(&state, &headers).await?;
+    let _ = ensure_owner_or_service(&state, &headers).await?;
     sqlx::query_as::<_, User>("SELECT * FROM users WHERE google_id = $1")
         .bind(&google_id)
         .fetch_optional(&state.db)
@@ -1125,7 +1812,7 @@ async fn upsert_user(
     headers: HeaderMap,
     Json(req): Json<CreateUserRequest>,
 ) -> Result<Json<User>, StatusCode> {
-    let _ = ensure_gateway_access(&state, &headers).await?;
+    let _ = ensure_owner_or_service(&state, &headers).await?;
     let user = sqlx::query_as::<_, User>(
         r#"
         INSERT INTO users (google_id, email, name, picture_url)
@@ -1156,7 +1843,7 @@ async fn update_user_tier(
     Path(google_id): Path<String>,
     Json(req): Json<UpdateTierRequest>,
 ) -> Result<Json<User>, StatusCode> {
-    let _ = ensure_gateway_access(&state, &headers).await?;
+    let _ = ensure_owner_or_service(&state, &headers).await?;
     sqlx::query_as::<_, User>(
         r#"
         UPDATE users
@@ -1197,6 +1884,10 @@ async fn redeem_coupon(
     headers: HeaderMap,
     Json(body): Json<CouponRedeemRequest>,
 ) -> Result<Json<AppUser>, (StatusCode, String)> {
+    if !state.features.coupons {
+        return Err((StatusCode::NOT_FOUND, "coupons_disabled".to_string()));
+    }
+
     let access = ensure_gateway_access(&state, &headers)
         .await
         .map_err(|status| (status, "access_denied".to_string()))?;
@@ -1226,7 +1917,10 @@ async fn redeem_coupon(
             coupon_code = $2,
             updated_at = NOW()
         WHERE user_id = $1
-        RETURNING user_id, email, name, tier, coupon_code, created_at, updated_at
+        RETURNING user_id, email, name, tier, coupon_code,
+                  stripe_customer_id, subscription_id, subscription_status,
+                  subscription_price_id, subscription_current_period_end,
+                  created_at, updated_at
         "#,
     )
     .bind(&user.user_id)
@@ -1434,7 +2128,10 @@ async fn desktop_auth_exchange(
             email = EXCLUDED.email,
             name = EXCLUDED.name,
             updated_at = NOW()
-        RETURNING user_id, email, name, tier, coupon_code, created_at, updated_at
+        RETURNING user_id, email, name, tier, coupon_code,
+                  stripe_customer_id, subscription_id, subscription_status,
+                  subscription_price_id, subscription_current_period_end,
+                  created_at, updated_at
         "#,
     )
     .bind(code)
@@ -1443,23 +2140,7 @@ async fn desktop_auth_exchange(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    let token = format!("zw_{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
-    let expires_at = Utc::now() + Duration::days(30);
-
-    sqlx::query(
-        r#"
-        INSERT INTO desktop_access_tokens (token, user_id, expires_at)
-        VALUES ($1, $2, $3)
-        "#,
-    )
-    .bind(&token)
-    .bind(&claimed.user_id)
-    .bind(expires_at)
-    .execute(&state.db)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    Ok(Json(DesktopAuthExchangeResponse { token, user: claimed }))
+    Ok(Json(mint_desktop_access_token(&state, &claimed).await?))
 }
 
 async fn desktop_auth_logout(
@@ -1478,6 +2159,56 @@ async fn desktop_auth_logout(
     }
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn desktop_email_sign_in(
+    State(state): State<AppState>,
+    Json(body): Json<DesktopEmailSignInRequest>,
+) -> Result<Json<DesktopAuthExchangeResponse>, (StatusCode, String)> {
+    if !state.features.email_auth {
+        return Err((StatusCode::NOT_FOUND, "email_auth_disabled".to_string()));
+    }
+
+    let email = body.email.trim();
+    let password = body.password.trim();
+
+    if email.is_empty() || password.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "email_and_password_required".to_string()));
+    }
+
+    let auth_user = better_auth_sign_in_email(&state, email, password).await?;
+    let app_user = upsert_app_user(&state, &auth_user)
+        .await
+        .map_err(|status| (status, "app_user_upsert_failed".to_string()))?;
+    let response = mint_desktop_access_token(&state, &app_user)
+        .await
+        .map_err(|status| (status, "desktop_token_create_failed".to_string()))?;
+    Ok(Json(response))
+}
+
+async fn desktop_email_sign_up(
+    State(state): State<AppState>,
+    Json(body): Json<DesktopEmailSignUpRequest>,
+) -> Result<Json<DesktopEmailSignUpResponse>, (StatusCode, String)> {
+    if !state.features.email_auth {
+        return Err((StatusCode::NOT_FOUND, "email_auth_disabled".to_string()));
+    }
+
+    let name = body.name.trim();
+    let email = body.email.trim();
+    let password = body.password.trim();
+
+    if name.is_empty() || email.is_empty() || password.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "name_email_password_required".to_string()));
+    }
+
+    better_auth_sign_up_email(&state, name, email, password, body.callback_url.as_deref()).await?;
+
+    Ok(Json(DesktopEmailSignUpResponse {
+        ok: true,
+        verification_required: true,
+        message: "Check your email to verify your account before signing in.".to_string(),
+    }))
 }
 
 async fn analytics_summary(
@@ -1639,7 +2370,7 @@ async fn analytics_summary(
         })
         .collect();
 
-    let managed_gateway_ready = !state.gateway.providers.is_empty();
+    let managed_gateway_ready = state.features.hosted_gateway && !state.gateway.providers.is_empty();
     let managed_gateway_status = if managed_gateway_ready {
         let provider_list = state
             .gateway
@@ -1649,8 +2380,19 @@ async fn analytics_summary(
             .collect::<Vec<_>>()
             .join(" · ");
         format!("{} is ready via {}", state.gateway.router_label, provider_list)
+    } else if !state.features.hosted_gateway {
+        "Hosted gateway is disabled on this server.".to_string()
     } else {
         "Hosted gateway is not configured yet. Add at least one provider API key on the server.".to_string()
+    };
+
+    let billing_enabled = state.features.billing && stripe_billing_ready(&state);
+    let billing_status = if billing_enabled {
+        "Stripe billing is configured.".to_string()
+    } else if !state.features.billing {
+        "Stripe billing is disabled on this server.".to_string()
+    } else {
+        "Stripe billing is not configured yet. Set the Stripe secret and Pro price IDs on the server.".to_string()
     };
 
     let five_hour_limit = state.gateway.root_requests_per_5h;
@@ -1742,6 +2484,8 @@ async fn analytics_summary(
         past_month,
         managed_gateway_ready,
         managed_gateway_status,
+        billing_enabled,
+        billing_status,
         owner_provider_overview,
         api_url: "https://api.tryzwork.app/health".to_string(),
         analytics_url: "https://us.posthog.com/project/397748".to_string(),
@@ -1769,11 +2513,14 @@ async fn main() {
         posthog_key: std::env::var("POSTHOG_API_KEY").unwrap_or_default(),
         posthog_host: std::env::var("POSTHOG_HOST")
             .unwrap_or_else(|_| "https://app.posthog.com".to_string()),
+        stripe_secret_key: std::env::var("STRIPE_SECRET_KEY").unwrap_or_default(),
         stripe_webhook_secret: std::env::var("STRIPE_WEBHOOK_SECRET").unwrap_or_default(),
         db: pool,
         http_client: Client::new(),
         auth_session_url: std::env::var("AUTH_SESSION_URL")
             .unwrap_or_else(|_| "http://better_auth:3000/api/auth/get-session".to_string()),
+        auth_internal_base: std::env::var("AUTH_INTERNAL_BASE")
+            .unwrap_or_else(|_| "http://better_auth:3000/api/auth".to_string()),
         auth_public_base: std::env::var("AUTH_PUBLIC_BASE")
             .unwrap_or_else(|_| "https://api.tryzwork.app/api/auth".to_string()),
         google_client_id: std::env::var("GOOGLE_CLIENT_ID").unwrap_or_default(),
@@ -1784,6 +2531,12 @@ async fn main() {
             .map(|item| item.trim().to_ascii_lowercase())
             .filter(|item| !item.is_empty())
             .collect(),
+        features: AppFeatures {
+            hosted_gateway: env_bool("ENABLE_HOSTED_GATEWAY", false),
+            billing: env_bool("ENABLE_BILLING", false),
+            email_auth: env_bool("ENABLE_EMAIL_AUTH", false),
+            coupons: env_bool("ENABLE_COUPONS", false),
+        },
         gateway: GatewayConfig {
             router_label: env_or("ROUTER_LABEL", "zWork Router"),
             providers: load_gateway_providers(),
@@ -1822,8 +2575,12 @@ async fn main() {
         .route("/api/chat/stream", post(ai_proxy))
         .route("/api/v1/chat/completions", post(ai_proxy))
         .route("/api/webhooks/stripe", post(stripe_webhook))
+        .route("/api/billing/checkout", post(billing_checkout))
+        .route("/api/billing/portal", post(billing_portal))
         .route("/api/dev/redeem-coupon", post(redeem_coupon))
         .route("/api/desktop/auth/start", get(desktop_auth_start))
+        .route("/api/desktop/auth/email/sign-in", post(desktop_email_sign_in))
+        .route("/api/desktop/auth/email/sign-up", post(desktop_email_sign_up))
         .route("/api/auth/desktop/google", get(desktop_google_auth_start))
         .route("/api/auth/callback/google", get(desktop_google_callback))
         .route("/api/desktop/auth/exchange", post(desktop_auth_exchange))

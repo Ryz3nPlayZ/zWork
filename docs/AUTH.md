@@ -7,6 +7,7 @@ This document describes the current auth model that is actually wired into the d
 zWork uses a **server-backed desktop auth flow**:
 
 - Google OAuth happens on the server through **Better Auth**
+- email/password auth is also hosted by **Better Auth**
 - the desktop app opens that flow in a browser
 - the cloud API returns a short-lived desktop auth code
 - the desktop app exchanges that code for a bearer token used by cloud endpoints
@@ -17,11 +18,11 @@ This is not the old browser-popup implicit-token flow. If you see docs mentionin
 
 | Component | Path | Role |
 |-----------|------|------|
-| Desktop auth UI | `app/src/components/CloudGate.tsx` | blocks app entry until account auth is complete |
+| Desktop auth UI | `app/src/components/LoginScreen.tsx` | blocks app entry until account auth is complete |
 | Desktop auth client | `app/src/lib/cloud.ts` | starts auth, exchanges code, stores bearer token |
 | Native auth helper | `app/src-tauri/src/main.rs` | opens browser and listens on localhost callback |
 | Cloud API | `cloud-src/api/src/main.rs` | desktop auth start/complete/exchange/logout endpoints |
-| Better Auth service | `cloud-src/auth/index.ts` | Google OAuth provider and session management |
+| Better Auth service | `cloud-src/auth/index.ts` | Google OAuth, email/password auth, email verification, password reset delivery |
 
 ## Current desktop flow
 
@@ -67,9 +68,33 @@ https://api.tryzwork.app/api/auth/*
 Examples:
 
 - `/api/auth/sign-in/social`
+- `/api/auth/sign-in/email`
+- `/api/auth/sign-up/email`
 - `/api/auth/sign-out`
 - `/api/auth/get-session`
 - `/api/auth/callback/google`
+
+## Email/password behavior
+
+The auth service now supports:
+
+- email/password sign-up
+- email/password sign-in
+- email verification emails
+- password reset emails
+
+Important detail:
+
+- zWork currently sends a **verification email link**, not a numeric verification code
+- this is Better Auth's standard email verification flow
+- if you want a 6-digit code UX later, that is a different auth mode and should be implemented explicitly
+
+Desktop-specific cloud routes now also exist for direct desktop auth:
+
+- `POST /api/desktop/auth/email/sign-up`
+- `POST /api/desktop/auth/email/sign-in`
+
+Sign-up returns a verification-required response. Sign-in only succeeds after the email has been verified.
 
 ## Desktop token model
 
@@ -118,6 +143,14 @@ From a signed-out state:
 5. Confirm the desktop app returns with a signed-in session.
 6. Open Analytics and confirm `/api/analytics/summary` succeeds.
 
+Email/password checks:
+
+1. Sign up with email/password.
+2. Confirm a verification email is delivered.
+3. Open the verification link.
+4. Sign in with the same email/password.
+5. Confirm the desktop app receives a bearer token and `/api/session` succeeds.
+
 Server-side spot checks:
 
 ```bash
@@ -143,6 +176,19 @@ https://api.tryzwork.app/api/auth/callback/google
 ## “New user can’t sign in”
 
 If Google OAuth is still in testing mode, that user is probably not listed as a test user.
+
+## “Email sign-up works but no verification email arrives”
+
+Check the auth service mailer env:
+
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_SECURE`
+- `SMTP_USER`
+- `SMTP_PASS`
+- `SMTP_FROM`
+
+If those are missing, email/password signup cannot complete the verification loop.
 
 ## Desktop auth appears signed out after logout
 

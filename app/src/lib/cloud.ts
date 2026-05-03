@@ -12,6 +12,11 @@ export interface CloudUser {
   tier: "free" | "pro";
   access_code?: string | null;
   coupon_code?: string | null;
+  stripe_customer_id?: string | null;
+  subscription_id?: string | null;
+  subscription_status?: string | null;
+  subscription_price_id?: string | null;
+  subscription_current_period_end?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -57,10 +62,16 @@ export interface AnalyticsSummary {
   past_month: AnalyticsDay[];
   managed_gateway_ready: boolean;
   managed_gateway_status: string;
+  billing_enabled: boolean;
+  billing_status: string;
   owner_provider_overview: ProviderOverview[];
   api_url: string;
   analytics_url: string;
   db_url: string;
+}
+
+export interface BillingSession {
+  url: string;
 }
 
 function friendlyCloudError(status: number, statusText: string, body: string) {
@@ -69,6 +80,12 @@ function friendlyCloudError(status: number, statusText: string, body: string) {
   const mapped =
     normalized === "missing_access_code"
       ? "Enter an access code first."
+      : normalized === "email_and_password_required"
+        ? "Enter both your email and password."
+        : normalized === "name_email_password_required"
+          ? "Enter your name, email, and password."
+          : normalized.includes("verify your email")
+            ? "Verify your email before signing in."
       : normalized === "invalid_access_code"
         ? "That access code is not valid on this server."
         : normalized === "not_signed_in"
@@ -85,6 +102,10 @@ function friendlyCloudError(status: number, statusText: string, body: string) {
                     ? "You already have too many active runs. Wait for one to finish before starting another."
                     : normalized === "hosted_gateway_not_configured"
                       ? "zWork Router is not configured on the server right now."
+                      : normalized === "stripe_billing_not_configured"
+                        ? "Stripe billing is not configured on this server yet."
+                        : normalized === "stripe_price_not_configured"
+                          ? "The Pro Stripe price is not configured on this server."
                       : normalized.startsWith("router_upstreams_failed:")
                         ? "zWork Router could not get a healthy response from any upstream provider."
                         : normalized;
@@ -169,6 +190,31 @@ export async function startDesktopGoogleSignIn(): Promise<CloudUser> {
   return result.user;
 }
 
+export async function startDesktopEmailSignIn(email: string, password: string): Promise<CloudUser> {
+  const result = await cloudFetch<{ token: string; user: CloudUser }>("/api/desktop/auth/email/sign-in", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  }, "");
+  setToken(result.token);
+  return result.user;
+}
+
+export async function startDesktopEmailSignUp(name: string, email: string, password: string, callbackUrl?: string) {
+  return cloudFetch<{ ok: boolean; verification_required: boolean; message: string }>(
+    "/api/desktop/auth/email/sign-up",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        email,
+        password,
+        callback_url: callbackUrl || `${window.location.origin}/auth/verified`,
+      }),
+    },
+    "",
+  );
+}
+
 export async function fetchCloudSession(): Promise<CloudUser | null> {
   const token = getToken();
   if (!token) return null;
@@ -199,4 +245,28 @@ export async function redeemAccessCode(code: string) {
 
 export async function fetchAnalyticsSummary() {
   return cloudFetch<AnalyticsSummary>("/api/analytics/summary");
+}
+
+export async function createBillingCheckoutSession(annual = false) {
+  return cloudFetch<BillingSession>("/api/billing/checkout", {
+    method: "POST",
+    body: JSON.stringify({
+      annual,
+      success_url: `${window.location.origin}/billing/success`,
+      cancel_url: `${window.location.origin}/billing/cancel`,
+    }),
+  });
+}
+
+export async function createBillingPortalSession() {
+  return cloudFetch<BillingSession>("/api/billing/portal", {
+    method: "POST",
+    body: JSON.stringify({
+      return_url: `${window.location.origin}/settings/billing`,
+    }),
+  });
+}
+
+export async function openExternalCloudUrl(url: string) {
+  await invoke("open_external", { url });
 }

@@ -18,3 +18,6 @@ async-stripe = { version = "0.41", features = ["runtime-tokio-hyper-rustls"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.0", features = ["serde", "v4"] }
 urlencoding = "2.1"
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
