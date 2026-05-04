@@ -1,64 +1,176 @@
+<div align="center">
+
+<img src="app/public/zwork.svg" alt="zWork" width="88" height="88">
+
 # zWork
 
-zWork is a desktop AI agent that runs on your computer, can use local tools, and can optionally route through a managed cloud gateway for auth, telemetry, and paid plans.
+**A desktop AI assistant that does jobs, not just answers questions.**
 
-[![GitHub Release](https://img.shields.io/github/v/release/Ryz3nPlayZ/zWork)](https://github.com/Ryz3nPlayZ/zWork/releases)
-[![License](https://img.shields.io/github/license/Ryz3nPlayZ/zWork)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/Ryz3nPlayZ/zWork?style=flat-square&color=171716&labelColor=2a2a2a)](https://github.com/Ryz3nPlayZ/zWork/releases)
+[![Platforms](https://img.shields.io/badge/runs%20on-macOS%20%7C%20Windows%20%7C%20Linux-171716?style=flat-square&labelColor=2a2a2a)](#install)
+[![License](https://img.shields.io/github/license/Ryz3nPlayZ/zWork?style=flat-square&color=171716&labelColor=2a2a2a)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/Ryz3nPlayZ/zWork?style=flat-square&color=171716&labelColor=2a2a2a)](https://github.com/Ryz3nPlayZ/zWork/stargazers)
 
-## What it is
+[**Download**](https://github.com/Ryz3nPlayZ/zWork/releases/latest) &nbsp;·&nbsp; [Docs](docs/WIKI.md) &nbsp;·&nbsp; [Roadmap](ROADMAP.md) &nbsp;·&nbsp; [Contributing](CONTRIBUTING.md)
 
-- Desktop app: Tauri + React
-- Local runtime: Python FastAPI sidecar
-- Optional cloud layer: Axum API + Better Auth + Postgres
+</div>
 
-The product direction is not “more AI features.” It is “useful desktop jobs that work end to end”:
+---
 
-- research a market and produce a comparison sheet
-- turn notes into a brief or follow-up draft
-- organize files and clean up folders
-- run agentic workflows with tools and visible progress
+## What it does
+
+Tell zWork what you want done. It does it.
+
+<table>
+<tr>
+<td width="33%" valign="top">
+
+**Compare three vacuum cleaners**
+
+You get a side-by-side sheet — not a paragraph telling you to "consider features and reviews."
+
+</td>
+<td width="33%" valign="top">
+
+**Turn yesterday's notes into a follow-up email**
+
+You get a real draft, not advice on how to write one.
+
+</td>
+<td width="33%" valign="top">
+
+**Clean up your downloads folder**
+
+It moves the files. You watch it happen.
+
+</td>
+</tr>
+</table>
+
+zWork is for people who want the thing done, not another app to master.
+
+---
 
 ## Install
 
-Download the latest build from [GitHub Releases](https://github.com/Ryz3nPlayZ/zWork/releases/latest).
+<div align="center">
 
-- macOS: `zWork-macos-universal.dmg`
-- Windows: `zWork-windows-x86_64-setup.exe`
-- Linux: `zWork-linux-x86_64.AppImage`
+<table>
+<tr>
+<td align="center" width="33%">
+<b>macOS</b><br>
+<sub>Intel &amp; Apple Silicon</sub><br><br>
+<a href="https://github.com/Ryz3nPlayZ/zWork/releases/latest">Download .dmg</a>
+</td>
+<td align="center" width="33%">
+<b>Windows</b><br>
+<sub>x86_64</sub><br><br>
+<a href="https://github.com/Ryz3nPlayZ/zWork/releases/latest">Download .exe</a>
+</td>
+<td align="center" width="33%">
+<b>Linux</b><br>
+<sub>AppImage, x86_64</sub><br><br>
+<a href="https://github.com/Ryz3nPlayZ/zWork/releases/latest">Download .AppImage</a>
+</td>
+</tr>
+</table>
+
+</div>
+
+Open it, sign in, ask for something.
+
+---
 
 ## What works today
 
-- desktop chat UI with streaming responses
-- local file and command workflows
-- local BYOK model setup
-- required account sign-in for managed flows
-- analytics/usage view for signed-in users
-- in-app updater backed by GitHub release artifacts
+<table>
+<tr>
+<td width="50%" valign="top">
 
-## Documentation
+**Chat that streams**
 
-- [Wiki / Docs Index](docs/WIKI.md)
-- [Architecture Overview](docs/ARCHITECTURE.md)
-- [Authentication](docs/AUTH.md)
-- [Cloud Deployment](docs/CLOUD.md)
-- [Release and Updater Runbook](docs/RELEASES.md)
-- [Contributing / local development](CONTRIBUTING.md)
+Watch answers and activity appear live, as the agent works.
 
-## Development
+</td>
+<td width="50%" valign="top">
+
+**Files and folders**
+
+zWork can read, write, and reorganise things on your computer.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+**Local commands**
+
+Runs shell tasks on your machine when a job needs them.
+
+</td>
+<td width="50%" valign="top">
+
+**Web research**
+
+Pulls in current sources from the open web.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+**Skills library**
+
+Save what works once, reuse it any time.
+
+</td>
+<td width="50%" valign="top">
+
+**Auto-updates**
+
+The app updates itself between releases.
+
+</td>
+</tr>
+</table>
+
+---
+
+## What's next
+
+The next version turns chat into a workspace. The output of a job — a document, a spreadsheet, a chart, a small to-do list — sits next to the conversation that produced it, where you can edit and keep it.
+
+See the [roadmap](ROADMAP.md) for the order of work.
+
+---
+
+## How it's built
+
+| Layer | Stack | What it does |
+|---|---|---|
+| **Desktop** | Tauri + React | The window you look at |
+| **Local engine** | Python + FastAPI sidecar | Runs the agent on your machine |
+| **Cloud** | Rust (Axum) + Better Auth + Postgres | Sign-in, usage, managed model routing |
+
+[Architecture](docs/ARCHITECTURE.md) &nbsp;·&nbsp; [Auth](docs/AUTH.md) &nbsp;·&nbsp; [Cloud](docs/CLOUD.md) &nbsp;·&nbsp; [Releases](docs/RELEASES.md) &nbsp;·&nbsp; [Contributing](CONTRIBUTING.md)
+
+### Run from source
 
 ```bash
 ./run.sh
 ```
 
-That bootstraps the local Python sidecar, installs frontend dependencies, and starts the Tauri desktop app in dev mode.
+That bootstraps the Python sidecar, installs frontend deps, and opens the desktop app in dev mode.
 
-## Product focus
+---
 
-The near-term bar is simple:
+<div align="center">
+<sub>
 
-- install cleanly
-- sign in cleanly
-- complete a real task cleanly
-- update cleanly
+**v0.3.x** &nbsp;·&nbsp; the bar before anything new ships:<br>
+install · sign in · finish a real job · update
 
-Once that loop is stable, zWork can be packaged around sellable use cases rather than a loose feature list.
+[Releases](https://github.com/Ryz3nPlayZ/zWork/releases) &nbsp;·&nbsp; [Issues](https://github.com/Ryz3nPlayZ/zWork/issues) &nbsp;·&nbsp; [Discussions](https://github.com/Ryz3nPlayZ/zWork/discussions)
+
+</sub>
+</div>
