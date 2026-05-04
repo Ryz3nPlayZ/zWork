@@ -21,7 +21,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      - DATABASE_URL=postgres://zwork:zwork_password@postgres:5432/zwork_db
+      - DATABASE_URL=postgres://zwork:${POSTGRES_PASSWORD}@postgres:5432/zwork_db
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
@@ -43,7 +43,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      - DATABASE_URL=postgres://zwork:zwork_password@postgres:5432/zwork_db
+      - DATABASE_URL=postgres://zwork:${POSTGRES_PASSWORD}@postgres:5432/zwork_db
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
@@ -88,7 +88,7 @@ services:
     restart: unless-stopped
     environment:
       - POSTGRES_USER=zwork
-      - POSTGRES_PASSWORD=zwork_password
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_DB=zwork_db
     volumes:
       - pg_data:/var/lib/postgresql/data
