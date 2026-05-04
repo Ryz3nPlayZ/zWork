@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
 import json
 import os
 import platform
@@ -16,6 +17,7 @@ import traceback
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -803,12 +805,53 @@ def put_project_context(project_id: str, body: ContentBody) -> dict:
 
 # ---------------- Ollama model proxy ----------------
 
+def _safe_proxy_base_url(base_url: str) -> str:
+    """Validate a user-supplied base URL before the sidecar fetches it.
+
+    Accepts http/https only. For IP-literal hosts, allows loopback (so a
+    self-hosted Ollama on 127.0.0.1 still works) and globally routable
+    addresses, but rejects RFC1918/link-local/multicast/reserved ranges so
+    the endpoint can't be turned into an SSRF probe against the LAN or the
+    cloud-metadata service. Hostnames are not resolved here; that's a
+    deliberate trade-off — DNS-based bypasses would need a resolving
+    pre-flight that's out of scope for this fix.
+
+    Returns the URL with any trailing slash trimmed. Raises ValueError on
+    anything that fails the checks.
+    """
+    parsed = urlparse(base_url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"unsupported scheme {parsed.scheme!r}")
+    host = parsed.hostname
+    if not host:
+        raise ValueError("missing host")
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return base_url.rstrip("/")
+    if ip.is_loopback:
+        return base_url.rstrip("/")
+    if (
+        ip.is_private
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+    ):
+        raise ValueError(f"private or reserved IP not allowed: {host}")
+    return base_url.rstrip("/")
+
+
 @app.get("/api/ollama/models")
 async def ollama_models(base_url: str = "https://ollama.com/v1", api_key: str = "") -> dict:
     """Proxy Ollama's OpenAI-compatible `/v1/models` listing so the onboarding
     UI can show a dropdown. Returns `{models: [{id, name}], error?}`."""
     import httpx
-    url = base_url.rstrip("/") + "/models"
+    try:
+        clean_base = _safe_proxy_base_url(base_url)
+    except ValueError as e:
+        return {"models": [], "error": f"invalid base_url: {e}"}
+    url = clean_base + "/models"
     headers = {"Accept": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -816,7 +859,7 @@ async def ollama_models(base_url: str = "https://ollama.com/v1", api_key: str = 
         async with httpx.AsyncClient(timeout=8.0) as client:
             r = await client.get(url, headers=headers)
         if r.status_code >= 400:
-            return {"models": [], "error": f"{r.status_code}: {r.text[:200]}"}
+            return {"models": [], "error": f"upstream returned {r.status_code}"}
         data = r.json()
         items = data.get("data") if isinstance(data, dict) else None
         if not isinstance(items, list):
@@ -830,8 +873,8 @@ async def ollama_models(base_url: str = "https://ollama.com/v1", api_key: str = 
                 continue
             models.append({"id": mid, "name": it.get("name") or mid})
         return {"models": models}
-    except Exception as e:  # pragma: no cover
-        return {"models": [], "error": str(e)}
+    except Exception:  # pragma: no cover
+        return {"models": [], "error": "request failed"}
 
 
 # ---------------- Chats ----------------
