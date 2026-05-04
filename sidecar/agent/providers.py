@@ -38,16 +38,50 @@ ZWORK_ROUTER_BASE_URL = "https://api.tryzwork.app/api/v1"
 
 
 def _max_tokens_for(model_id: str) -> int:
-    """Sensible ceiling per model family. Anthropic claude-sonnet-4/4.5 allow 64k."""
+    """Sensible ceiling per model family. Anthropic claude-sonnet-4/4.5 and
+    claude-opus-4 allow 64k output; claude-3-5 / claude-3.x allow 8k."""
     mid = (model_id or "").lower()
     if "claude-sonnet-4" in mid or "claude-opus-4" in mid or "claude-4" in mid:
-        return 32000
+        return 64000
     if "claude-3-5" in mid or "claude-3.5" in mid:
         return 8192
     if "claude" in mid:
         return 8192
     # OpenAI/OpenAI-compatible: not used for `max_tokens` the same way; safe default
     return 16384
+
+
+def _apply_anthropic_cache(
+    system: str, tools: list[dict]
+) -> tuple[list[dict], list[dict]]:
+    """Convert the Anthropic request's system/tools into cache-aware shapes.
+
+    Caches the (typically large + stable) system prompt and tool catalog using
+    `cache_control: {"type": "ephemeral"}`. Subsequent turns hit the same
+    breakpoints and pay the cache-read price (~10% of input) instead of full
+    input cost. Anthropic's docs cap us at 4 cache breakpoints per request;
+    we use 2 (system + tools) and leave room for callers that may want to
+    add their own on conversation history.
+
+    Returns (system_blocks, tools_blocks) where:
+      - system_blocks is a list with one text block carrying cache_control,
+        or empty if `system` is empty.
+      - tools_blocks is a copy of tools with cache_control attached to the
+        last entry; tools=[] returns [].
+    """
+    system_blocks: list[dict] = []
+    if system:
+        system_blocks = [
+            {
+                "type": "text",
+                "text": system,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+    tools_out: list[dict] = [dict(t) for t in tools]
+    if tools_out:
+        tools_out[-1]["cache_control"] = {"type": "ephemeral"}
+    return system_blocks, tools_out
 
 
 # ---------------- Credential resolution ----------------
@@ -250,21 +284,29 @@ async def _anthropic_turn(
         headers["authorization"] = f"Bearer {creds.api_key}"
         headers["x-api-key"] = creds.api_key
 
+    system_blocks, tools_blocks = _apply_anthropic_cache(system, _anthropic_tools())
+
     body: dict = {
         "model": model_id,
         "max_tokens": _max_tokens_for(model_id),
         "stream": True,
         "messages": messages,
-        "tools": _anthropic_tools(),
+        "tools": tools_blocks,
     }
-    if system:
-        body["system"] = system
+    if system_blocks:
+        body["system"] = system_blocks
 
     yield {"type": "status", "text": "Thinking"}
 
     # Track the assistant response assembly
     blocks_by_index: dict[int, dict] = {}  # idx -> partial block
     stop_reason: Optional[str] = None
+    usage: dict[str, int] = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+    }
 
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=20.0)) as client:
@@ -335,10 +377,24 @@ async def _anthropic_turn(
                             except json.JSONDecodeError:
                                 block["input"] = {}
 
+                    elif et == "message_start":
+                        # Initial usage shows cache_creation_input_tokens and
+                        # cache_read_input_tokens — useful for the UI to
+                        # display "X tokens read from cache" on a given turn.
+                        msg = evt.get("message") or {}
+                        u = msg.get("usage") or {}
+                        for k in usage:
+                            if k in u:
+                                usage[k] = u[k]
+
                     elif et == "message_delta":
                         delta = evt.get("delta") or {}
                         if "stop_reason" in delta:
                             stop_reason = delta.get("stop_reason")
+                        u = evt.get("usage") or {}
+                        # output_tokens is cumulative on message_delta events.
+                        if "output_tokens" in u:
+                            usage["output_tokens"] = u["output_tokens"]
 
                     elif et == "message_stop":
                         break
@@ -367,6 +423,8 @@ async def _anthropic_turn(
                 "input": b.get("input", {}),
             })
 
+    # Surface usage so the UI can display per-turn cost / cache behavior.
+    yield {"type": "usage", "usage": dict(usage)}
     yield {"type": "turn_end", "content_blocks": final_blocks, "stop_reason": stop_reason}
 
 
