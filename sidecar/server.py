@@ -557,6 +557,61 @@ def integrations() -> dict:
     return {"integrations": [i.__dict__ for i in detect.detect_all()]}
 
 
+# ---------------- MCP servers ----------------
+
+
+@app.on_event("startup")
+async def _start_mcp_manager() -> None:
+    """Connect to any MCP servers configured in ~/.zwork/mcp.json.
+
+    Failures here are logged but don't block sidecar startup — the rest of
+    zWork should keep working even if a single server is misconfigured.
+    """
+    try:
+        from .agent.mcp import get_manager
+    except ImportError:  # pragma: no cover - PyInstaller fallback
+        from sidecar.agent.mcp import get_manager  # type: ignore[no-redef]
+    try:
+        await get_manager().start()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+@app.on_event("shutdown")
+async def _stop_mcp_manager() -> None:
+    try:
+        from .agent.mcp import get_manager
+    except ImportError:  # pragma: no cover - PyInstaller fallback
+        from sidecar.agent.mcp import get_manager  # type: ignore[no-redef]
+    try:
+        await get_manager().stop()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+@app.get("/api/mcp/servers")
+def mcp_servers() -> dict:
+    """List configured MCP servers and their connection status."""
+    try:
+        from .agent.mcp import get_manager, mcp_config_path
+    except ImportError:  # pragma: no cover
+        from sidecar.agent.mcp import get_manager, mcp_config_path  # type: ignore[no-redef]
+    return {
+        "servers": get_manager().status(),
+        "config_path": str(mcp_config_path()),
+    }
+
+
+@app.get("/api/mcp/tools")
+def mcp_tools() -> dict:
+    """List MCP tools currently registered with the agent's tool catalog."""
+    try:
+        from .agent.mcp import get_manager
+    except ImportError:  # pragma: no cover
+        from sidecar.agent.mcp import get_manager  # type: ignore[no-redef]
+    return {"tools": get_manager().all_tool_schemas()}
+
+
 @app.get("/api/providers")
 def provider_status() -> dict:
     s = settings_mod.load()
