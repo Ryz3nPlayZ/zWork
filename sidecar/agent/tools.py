@@ -179,6 +179,25 @@ def _friendly_error(err: Exception, context: str = "") -> str:
 async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[dict]:
     tool_id = f"tool_{tool_name}_{id(params)}"
 
+    # MCP-prefixed tools (e.g. `mcp__linear__create_issue`) route through the
+    # MCP manager — registered at startup based on `~/.zwork/mcp.json`.
+    if tool_name.startswith("mcp__"):
+        from .mcp import get_manager
+        label = f"MCP: {tool_name}"
+        yield {"type": "activity", "id": tool_id, "label": label, "icon": "tool", "done": False}
+        try:
+            result = await get_manager().call_tool(tool_name, params)
+            ok = not result.get("isError", False)
+            content = result.get("content") or []
+            text_chunks = [c.get("text", "") for c in content if c.get("type") == "text"]
+            message = "\n".join(t for t in text_chunks if t) or json.dumps(result)
+            yield {"type": "activity", "id": tool_id, "label": label, "icon": "tool", "done": True}
+            yield {"type": "tool_result", "tool": tool_name, "ok": ok, "message": message}
+        except Exception as e:  # noqa: BLE001
+            yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "tool", "done": True}
+            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e, "")}
+        return
+
     if tool_name == "write_file":
         path = params.get("path", "")
         content = params.get("content", "")

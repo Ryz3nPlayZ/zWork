@@ -200,7 +200,10 @@ def lookup_model(zwork_model_id: str, s: settings_mod.Settings) -> Optional[dict
 # ---------------- Anthropic tool schemas (from tools module) ----------------
 
 def _anthropic_tools() -> list[dict]:
-    """Convert our generic TOOL_SCHEMAS into Anthropic's input_schema shape."""
+    """Convert our generic TOOL_SCHEMAS into Anthropic's input_schema shape.
+
+    Includes any MCP server tools currently registered with the manager.
+    """
     out = []
     for t in TOOL_SCHEMAS:
         out.append({
@@ -208,6 +211,17 @@ def _anthropic_tools() -> list[dict]:
             "description": t["description"],
             "input_schema": t["parameters"],
         })
+    try:
+        from .mcp import get_manager
+        for t in get_manager().all_tool_schemas():
+            out.append({
+                "name": t["name"],
+                "description": t["description"],
+                "input_schema": t["parameters"],
+            })
+    except Exception:  # noqa: BLE001
+        # MCP is best-effort — never block normal tool calls if it's broken.
+        pass
     return out
 
 
@@ -222,6 +236,19 @@ def _openai_tools() -> list[dict]:
                 "parameters": t["parameters"],
             },
         })
+    try:
+        from .mcp import get_manager
+        for t in get_manager().all_tool_schemas():
+            out.append({
+                "type": "function",
+                "function": {
+                    "name": t["name"],
+                    "description": t["description"],
+                    "parameters": t["parameters"],
+                },
+            })
+    except Exception:  # noqa: BLE001
+        pass
     return out
 
 
