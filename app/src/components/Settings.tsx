@@ -33,6 +33,13 @@ import { useApp } from "../lib/store";
 import { isMacOS } from "../lib/platform";
 import { fallbackAppVersion, resolveAppVersion } from "../lib/appVersion";
 import { fetchAnalyticsSummary, type AnalyticsSummary } from "../lib/cloud";
+import {
+  loadTemplates,
+  saveTemplates,
+  newTemplateId,
+  normalizeTrigger,
+  type PromptTemplate,
+} from "../lib/templates";
 import { IconButton } from "./IconButton";
 import type { Integration } from "../lib/api";
 
@@ -101,6 +108,7 @@ export function SettingsPage() {
   const setView = useApp((s) => s.setView);
 
   const hasModels = (providers?.models ?? []).length > 0;
+  const consumeSettingsSection = useApp((s) => s.consumeSettingsSection);
   const [section, setSection] = useState<Section>("general");
 
   useEffect(() => {
@@ -110,6 +118,11 @@ export function SettingsPage() {
   useEffect(() => {
     if (!hasModels) setSection("models");
   }, [hasModels]);
+
+  useEffect(() => {
+    const pending = consumeSettingsSection();
+    if (pending) setSection(pending as Section);
+  }, [consumeSettingsSection]);
 
   const upsertCustomModel = useApp((s) => s.upsertCustomModel);
   const deleteCustomModel = useApp((s) => s.deleteCustomModel);
@@ -825,7 +838,205 @@ function PersonalizationPanel() {
           </button>
         </div>
       </section>
+
+      <TemplatesSection />
     </div>
+  );
+}
+
+// ---------------- Templates ----------------
+
+function TemplatesSection() {
+  const [templates, setTemplates] = useState<PromptTemplate[]>(() => loadTemplates());
+  const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [trigger, setTrigger] = useState("");
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+
+  const persist = (next: PromptTemplate[]) => {
+    setTemplates(next);
+    saveTemplates(next);
+  };
+
+  const resetForm = () => {
+    setEditId(null);
+    setTrigger("");
+    setTitle("");
+    setBody("");
+    setShowForm(false);
+  };
+
+  const startEdit = (tpl: PromptTemplate) => {
+    setEditId(tpl.id);
+    setTrigger(tpl.trigger);
+    setTitle(tpl.title);
+    setBody(tpl.body);
+    setShowForm(true);
+  };
+
+  const submit = () => {
+    const cleanTrigger = normalizeTrigger(trigger);
+    const cleanTitle = title.trim();
+    if (!cleanTrigger || !cleanTitle || !body) return;
+    const conflict = templates.find(
+      (t) => t.trigger === cleanTrigger && t.id !== editId,
+    );
+    if (conflict) {
+      alert(`A template with the trigger "/${cleanTrigger}" already exists.`);
+      return;
+    }
+    if (editId) {
+      persist(
+        templates.map((t) =>
+          t.id === editId
+            ? { ...t, trigger: cleanTrigger, title: cleanTitle, body }
+            : t,
+        ),
+      );
+    } else {
+      persist([
+        ...templates,
+        { id: newTemplateId(), trigger: cleanTrigger, title: cleanTitle, body },
+      ]);
+    }
+    resetForm();
+  };
+
+  const remove = (id: string) => {
+    persist(templates.filter((t) => t.id !== id));
+    if (editId === id) resetForm();
+  };
+
+  return (
+    <section className="rounded-xl border border-line bg-paper-raised p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-[14px] font-semibold text-ink">Prompt templates</h3>
+          <p className="mt-1 text-[12px] text-ink-muted">
+            Saved prompts you can insert by typing{" "}
+            <code className="font-mono text-[11.5px]">/trigger</code> in the
+            composer.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            if (showForm && !editId) {
+              resetForm();
+            } else {
+              setEditId(null);
+              setTrigger("");
+              setTitle("");
+              setBody("");
+              setShowForm(true);
+            }
+          }}
+          className="press ring-focus inline-flex items-center gap-1.5 rounded-lg border border-line bg-paper px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-paper-sunken"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          New template
+        </button>
+      </div>
+
+      <div className="mt-3 flex flex-col gap-2">
+        {templates.length === 0 && !showForm && (
+          <div className="rounded-lg border border-dashed border-line bg-paper p-4 text-center text-[12.5px] text-ink-muted">
+            No templates yet. Create one to get started.
+          </div>
+        )}
+        {templates.map((tpl) => (
+          <div
+            key={tpl.id}
+            className="rounded-lg border border-line bg-paper px-3 py-2.5"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-[13px] font-medium text-ink">{tpl.title}</span>
+                  <span className="rounded-full border border-line bg-paper-sunken px-1.5 py-px font-mono text-[10.5px] text-ink-muted">
+                    /{tpl.trigger}
+                  </span>
+                </div>
+                <p className="mt-1 truncate text-[11.5px] text-ink-muted">
+                  {tpl.body.replace(/\s+/g, " ").trim().slice(0, 120)}
+                </p>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => startEdit(tpl)}
+                  className="press rounded px-2 py-1 text-[11.5px] text-ink-muted hover:bg-paper-sunken hover:text-ink"
+                >
+                  Edit
+                </button>
+                <IconButton
+                  icon={<Trash2 />}
+                  label="Delete"
+                  size="sm"
+                  onClick={() => remove(tpl.id)}
+                />
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {showForm && (
+        <div className="mt-3 rounded-lg border border-line-strong bg-paper p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <h4 className="text-[12.5px] font-semibold text-ink">
+              {editId ? "Edit template" : "New template"}
+            </h4>
+            <IconButton icon={<X />} label="Cancel" size="sm" onClick={resetForm} />
+          </div>
+          <div className="flex flex-col gap-3">
+            <Field label="Trigger" description="Lowercase, dashes only. Used as /trigger in the composer.">
+              <input
+                value={trigger}
+                onChange={(e) => setTrigger(e.target.value)}
+                placeholder="summarize"
+                className="block w-full rounded-lg border border-line bg-paper-raised px-3 py-2 font-mono text-[12.5px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+              />
+            </Field>
+            <Field label="Title">
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Summarize"
+                className="block w-full rounded-lg border border-line bg-paper-raised px-3 py-2 text-[12.5px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+              />
+            </Field>
+            <Field label="Body" description="The text inserted into the composer when the template is chosen.">
+              <textarea
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                rows={6}
+                placeholder="Summarize the following clearly and concisely…"
+                className="block w-full resize-y rounded-lg border border-line bg-paper-raised px-3 py-2 font-mono text-[12.5px] leading-5 text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+              />
+            </Field>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={resetForm}
+                className="press rounded-lg border border-line bg-paper-raised px-3 py-1.5 text-[12.5px] text-ink hover:bg-paper-sunken"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submit}
+                disabled={!normalizeTrigger(trigger) || !title.trim() || !body}
+                className="press ring-focus inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-paper hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {editId ? "Save" : "Create"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 

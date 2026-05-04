@@ -1,6 +1,7 @@
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ClipboardEvent,
@@ -10,8 +11,18 @@ import { ArrowUp, Globe, Layers3, Paperclip, Square, X, FileText, Image as Image
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
 import { api, type UploadedFile } from "../lib/api";
+import {
+  filterTemplates,
+  findSlashTrigger,
+  loadTemplates,
+  newTemplateId,
+  normalizeTrigger,
+  saveTemplates,
+  type PromptTemplate,
+} from "../lib/templates";
 import { IconButton } from "./IconButton";
 import { ModelPicker } from "./ModelPicker";
+import { SlashMenu } from "./SlashMenu";
 
 interface ComposerAttachment {
   id: string;
@@ -35,6 +46,12 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend }:
   const [artifactMode, setArtifactMode] = useState(false);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [composing, setComposing] = useState(false);
+  const [templates, setTemplates] = useState<PromptTemplate[]>(() => loadTemplates());
+  const [slashState, setSlashState] = useState<
+    { start: number; end: number; query: string } | null
+  >(null);
+  const [slashIndex, setSlashIndex] = useState(0);
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -43,10 +60,17 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend }:
   const webSearch = useApp((s) => s.webSearch);
   const toggleWeb = useApp((s) => s.toggleWeb);
   const focusChatInput = useApp((s) => s.focusChatInput);
+  const openSettings = useApp((s) => s.openSettings);
   const working = useApp((s) => {
     const id = s.activeChatId;
     return id ? (s.chats[id]?.working ?? false) : false;
   });
+
+  const slashMatches = useMemo(
+    () => (slashState ? filterTemplates(templates, slashState.query) : []),
+    [templates, slashState],
+  );
+  const slashOpen = !!slashState && slashMatches.length > 0;
 
   useLayoutEffect(() => {
     const el = areaRef.current;
@@ -62,6 +86,14 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend }:
   useEffect(() => {
     if (focusChatInput > 0) areaRef.current?.focus();
   }, [focusChatInput]);
+
+  // Refresh templates when the window regains focus, so edits made in the
+  // Settings page show up immediately when the user comes back to chat.
+  useEffect(() => {
+    const onFocus = () => setTemplates(loadTemplates());
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
 
   const canSend = value.trim().length > 0 && !working && !uploading;
 
@@ -146,11 +178,78 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend }:
     }
   };
 
+  const refreshSlashState = (next: string, caret: number) => {
+    if (composing) {
+      setSlashState(null);
+      return;
+    }
+    const found = findSlashTrigger(next, caret);
+    setSlashState(found);
+    setSlashIndex(0);
+  };
+
+  const insertTemplate = (tpl: PromptTemplate) => {
+    if (!slashState) return;
+    const before = value.slice(0, slashState.start);
+    const after = value.slice(slashState.end);
+    const next = before + tpl.body + after;
+    setValue(next);
+    setSlashState(null);
+    setSlashIndex(0);
+    const caret = before.length + tpl.body.length;
+    requestAnimationFrame(() => {
+      const el = areaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(caret, caret);
+    });
+  };
+
+  /**
+   * Handle the literal `/save <trigger>` shortcut. The composer body up to
+   * the trailing `/save <trigger>` is persisted as a new template; the
+   * normal send is short-circuited.
+   */
+  const tryHandleSaveCommand = (text: string): boolean => {
+    const match = text.match(/(^|\s)\/save\s+(\S+)\s*$/i);
+    if (!match) return false;
+    const trigger = normalizeTrigger(match[2]);
+    if (!trigger) return false;
+    const body = text.slice(0, match.index! + match[1].length).trimEnd();
+    if (!body) {
+      alert("Type the template body before /save <trigger>.");
+      return true;
+    }
+    const existing = templates.find((t) => t.trigger === trigger);
+    if (existing) {
+      alert(`A template with the trigger "/${trigger}" already exists.`);
+      return true;
+    }
+    const next: PromptTemplate[] = [
+      ...templates,
+      {
+        id: newTemplateId(),
+        trigger,
+        title: trigger.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+        body,
+      },
+    ];
+    setTemplates(next);
+    saveTemplates(next);
+    setValue("");
+    setSlashState(null);
+    return true;
+  };
+
   const submit = () => {
     if (!canSend) return;
     const text = value;
+    if (tryHandleSaveCommand(text)) {
+      return;
+    }
     setValue("");
     setAttachments([]);
+    setSlashState(null);
     onSend?.(text);
     void send(text, {
       artifactMode,
@@ -167,6 +266,29 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend }:
   };
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (slashOpen && !e.nativeEvent.isComposing) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSlashIndex((i) => Math.min(i + 1, slashMatches.length - 1));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSlashIndex((i) => Math.max(i - 1, 0));
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        const tpl = slashMatches[slashIndex];
+        if (tpl) insertTemplate(tpl);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSlashState(null);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       submit();
@@ -221,17 +343,52 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend }:
           ))}
         </div>
       )}
+      {slashOpen && slashState && (
+        <SlashMenu
+          templates={templates}
+          query={slashState.query}
+          activeIndex={slashIndex}
+          onActiveIndexChange={setSlashIndex}
+          onSelect={insertTemplate}
+          onManage={() => {
+            setSlashState(null);
+            openSettings("personalization");
+          }}
+        />
+      )}
       <textarea
         ref={areaRef}
         rows={1}
         value={value}
         placeholder={placeholder}
         disabled={working}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => {
+          const next = e.target.value;
+          setValue(next);
+          refreshSlashState(next, e.target.selectionStart ?? next.length);
+        }}
         onKeyDown={onKey}
+        onKeyUp={(e) => {
+          const el = e.currentTarget;
+          refreshSlashState(el.value, el.selectionStart ?? el.value.length);
+        }}
+        onSelect={(e) => {
+          const el = e.currentTarget;
+          refreshSlashState(el.value, el.selectionStart ?? el.value.length);
+        }}
         onPaste={onPaste}
         onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
+        onBlur={() => {
+          setFocused(false);
+          // Defer so click handlers inside the menu still fire.
+          setTimeout(() => setSlashState(null), 120);
+        }}
+        onCompositionStart={() => setComposing(true)}
+        onCompositionEnd={(e) => {
+          setComposing(false);
+          const el = e.currentTarget;
+          refreshSlashState(el.value, el.selectionStart ?? el.value.length);
+        }}
         className={cn(
           "block w-full resize-none bg-transparent px-5 pt-4 pb-2 text-[14.5px] leading-6 text-ink placeholder:text-ink-faint",
           "focus:outline-none",

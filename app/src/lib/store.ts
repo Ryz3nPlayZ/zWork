@@ -65,6 +65,15 @@ export interface Chat {
 
 export type View = "chat" | "settings" | "projects" | "analytics";
 
+export type SettingsSection =
+  | "account"
+  | "plan"
+  | "general"
+  | "memory"
+  | "personalization"
+  | "models"
+  | "integrations";
+
 export type ChatBucket = "Today" | "This week" | "Earlier";
 
 // ---- Artifacts ----
@@ -228,6 +237,10 @@ interface AppState {
   setSidebarOpen: (v: boolean) => void;
   view: View;
   setView: (v: View) => void;
+  /** Pending settings section to focus when SettingsPage mounts. */
+  settingsSection: SettingsSection | null;
+  openSettings: (section?: SettingsSection) => void;
+  consumeSettingsSection: () => SettingsSection | null;
 
   // Auth
   user: User | null;
@@ -350,6 +363,14 @@ export const useApp = create<AppState>((set, get) => ({
   setSidebarOpen: (v) => set({ sidebarOpen: v }),
   view: "chat",
   setView: (v) => set({ view: v }),
+  settingsSection: null,
+  openSettings: (section) =>
+    set({ view: "settings", settingsSection: section ?? null }),
+  consumeSettingsSection: () => {
+    const pending = get().settingsSection;
+    if (pending) set({ settingsSection: null });
+    return pending;
+  },
 
   user: null,
   isLoadingAuth: false,
