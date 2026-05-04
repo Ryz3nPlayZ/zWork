@@ -13,7 +13,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::Sha256;
 use sqlx::{postgres::PgPoolOptions, PgPool};
+use std::sync::Arc;
 use tokio::net::TcpListener;
+use tower_governor::governor::GovernorConfigBuilder;
+use tower_governor::key_extractor::SmartIpKeyExtractor;
+use tower_governor::GovernorLayer;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info};
 use uuid::Uuid;
@@ -2568,6 +2572,45 @@ async fn main() {
         .allow_methods(Any)
         .allow_headers(Any);
 
+    // Per-IP rate limit applied only to the credential-handling auth endpoints.
+    // 1 token/sec replenish with a burst of 5 covers normal interactive use
+    // (typo + retry, going through the OAuth flow) and shuts down the pace
+    // needed for credential stuffing or signup spam. SmartIpKeyExtractor
+    // looks at X-Forwarded-For first so the layer keys off the real client
+    // IP behind Caddy, not the proxy hop.
+    let auth_governor_conf = Arc::new(
+        GovernorConfigBuilder::default()
+            .per_second(1)
+            .burst_size(5)
+            .key_extractor(SmartIpKeyExtractor)
+            .finish()
+            .expect("valid governor config"),
+    );
+    // Periodically reclaim memory held by the limiter for IPs we haven't
+    // seen recently — without this the map grows unbounded.
+    let auth_governor_limiter = auth_governor_conf.limiter().clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            auth_governor_limiter.retain_recent();
+        }
+    });
+
+    let auth_routes = Router::new()
+        .route(
+            "/api/desktop/auth/email/sign-in",
+            post(desktop_email_sign_in),
+        )
+        .route(
+            "/api/desktop/auth/email/sign-up",
+            post(desktop_email_sign_up),
+        )
+        .route("/api/desktop/auth/exchange", post(desktop_auth_exchange))
+        .layer(GovernorLayer {
+            config: auth_governor_conf,
+        });
+
     let app = Router::new()
         .route("/health", get(health_check))
         .route("/api/session", get(session_me))
@@ -2579,16 +2622,14 @@ async fn main() {
         .route("/api/billing/portal", post(billing_portal))
         .route("/api/dev/redeem-coupon", post(redeem_coupon))
         .route("/api/desktop/auth/start", get(desktop_auth_start))
-        .route("/api/desktop/auth/email/sign-in", post(desktop_email_sign_in))
-        .route("/api/desktop/auth/email/sign-up", post(desktop_email_sign_up))
         .route("/api/auth/desktop/google", get(desktop_google_auth_start))
         .route("/api/auth/callback/google", get(desktop_google_callback))
-        .route("/api/desktop/auth/exchange", post(desktop_auth_exchange))
         .route("/api/desktop/auth/logout", post(desktop_auth_logout))
         .route("/api/analytics/summary", get(analytics_summary))
         .route("/api/users/:google_id", get(get_user_by_google_id))
         .route("/api/users", post(upsert_user))
         .route("/api/users/:google_id/tier", put(update_user_tier))
+        .merge(auth_routes)
         .layer(cors)
         .with_state(state);
 
