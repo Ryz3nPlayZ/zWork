@@ -116,3 +116,17 @@ def project_dir(project_id: str) -> Path:
 
 def skills_dir() -> Path:
     return repo_root() / "zWork-Skills"
+
+
+def is_safe_id(id_str: str | None) -> bool:
+    """
+    Validate that an identifier (like project_id or chat_id) is safe.
+    Only allows alphanumeric characters, underscores, and hyphens.
+    Permits None but rejects empty strings.
+    """
+    if id_str is None:
+        return True
+    if not id_str:
+        return False
+    import re
+    return bool(re.match(r"^[a-zA-Z0-9_-]+$", id_str))

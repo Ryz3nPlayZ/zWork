@@ -35,6 +35,8 @@ ZWORK_ROUTER_MODEL_ID = "zwork-router"
 ZWORK_ROUTER_ZWORK_ID = "zwork-router"
 ZWORK_ROUTER_MODEL_NAME = "zWork Router"
 ZWORK_ROUTER_BASE_URL = "https://api.tryzwork.app/api/v1"
+PREV1_OLLAMA_MODEL_ID = "qwen3.5:cloud"
+PREV1_OLLAMA_ZWORK_ID = "qwen3-5-cloud-ollama"
 
 
 def _max_tokens_for(model_id: str) -> int:
@@ -72,6 +74,30 @@ def _is_local_ollama_base(url: str) -> bool:
         base.startswith("http://localhost:11434")
         or base.startswith("http://127.0.0.1:11434")
     )
+
+
+def is_safe_ollama_url(url: str) -> bool:
+    """
+    Validate that an Ollama base_url is safe to proxy.
+    Allows localhost, private IP ranges (LAN), and official ollama.com domains.
+    """
+    from urllib.parse import urlparse
+    import ipaddress
+    try:
+        p = urlparse(url)
+        if not p.scheme or p.scheme not in ("http", "https"):
+            return False
+        host = (p.hostname or "").lower()
+        if host == "localhost" or host.endswith(".ollama.com") or host == "ollama.com":
+            return True
+        # Allow private IP ranges and loopback
+        try:
+            ip = ipaddress.ip_address(host)
+            return ip.is_private or ip.is_loopback
+        except ValueError:
+            return False
+    except Exception:
+        return False
 
 
 def resolve(credential: str, s: settings_mod.Settings, override_base_url: str = "") -> Optional[Credentials]:

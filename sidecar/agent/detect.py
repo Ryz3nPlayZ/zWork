@@ -6,11 +6,14 @@ Currently supported for credential reuse:
 Detected only (presence/status, no credential reuse yet):
   - OpenAI Codex CLI  (`~/.codex/`)
   - GitHub Copilot    (`~/.config/github-copilot/`)
+  - MLX local runtime (`mlx_lm.server`, Apple Silicon only)
 """
 from __future__ import annotations
 
 import json
 import os
+import platform
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -83,8 +86,44 @@ def _copilot() -> Integration:
     )
 
 
+def _mlx() -> Integration:
+    """MLX is Apple's native ML runtime for Apple Silicon. `mlx_lm.server`
+    exposes an OpenAI-compatible HTTP server, so once it's running the user
+    can point a custom model at `http://localhost:8080/v1`. We don't auto-spawn
+    the server here; we just surface presence so the UI can hint the user.
+    """
+    is_apple_silicon = platform.machine() == "arm64" and platform.system() == "Darwin"
+    binary = shutil.which("mlx_lm.server")
+    if not is_apple_silicon:
+        return Integration(
+            id="mlx",
+            name="MLX (Apple Silicon)",
+            detected=False,
+            can_reuse_credentials=False,
+            detail="Requires Apple Silicon (arm64 macOS)",
+            path="",
+        )
+    if not binary:
+        return Integration(
+            id="mlx",
+            name="MLX (Apple Silicon)",
+            detected=False,
+            can_reuse_credentials=False,
+            detail="Install with: pip install mlx-lm",
+            path="",
+        )
+    return Integration(
+        id="mlx",
+        name="MLX (Apple Silicon)",
+        detected=True,
+        can_reuse_credentials=False,
+        detail="Run `mlx_lm.server --model <id>`, then add a model with base_url http://localhost:8080/v1",
+        path=binary,
+    )
+
+
 def detect_all() -> list[Integration]:
-    return [_claude_code(), _codex(), _copilot()]
+    return [_claude_code(), _codex(), _copilot(), _mlx()]
 
 
 def read_claude_code_env() -> dict[str, str]:

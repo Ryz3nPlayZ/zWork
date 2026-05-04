@@ -129,6 +129,30 @@ TOOL_SCHEMAS: list[dict] = [
         },
     },
     {
+        "name": "extract_document",
+        "description": (
+            "Extract text (and where applicable, tables and metadata) from a document on disk. "
+            "Supports PDF, DOCX, XLSX, PPTX, TXT and Markdown — auto-detected from the file "
+            "extension. Use this before answering questions about the contents of a file the "
+            "user has pointed at; do not try to read these formats with read_file."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Path to the document"},
+                "format": {
+                    "type": "string",
+                    "description": "Output style hint ('markdown' or 'text'); default 'markdown'",
+                },
+                "pages": {
+                    "type": "string",
+                    "description": "Optional 1-based page range for PDFs, e.g. '1-5' or '3'",
+                },
+            },
+            "required": ["path"],
+        },
+    },
+    {
         "name": "dctl",
         "description": (
             "Run the local dctl desktop-control CLI for window/app/browser automation, "
@@ -294,6 +318,23 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
         except Exception as e:
             yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "file", "done": True}
             yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e)}
+        return
+
+    if tool_name == "extract_document":
+        path = params.get("path", "")
+        fmt = params.get("format", "markdown") or "markdown"
+        pages = params.get("pages")
+        label = f"Extract {_short_path(path)}"
+        yield {"type": "activity", "id": tool_id, "label": label, "icon": "file", "done": False}
+        try:
+            result = _extract_document(path, fmt, pages)
+            yield {"type": "activity", "id": tool_id, "label": label, "icon": "file", "done": True}
+            yield {"type": "tool_result", "tool": tool_name, "ok": True,
+                   "message": json.dumps(result, ensure_ascii=False)}
+        except Exception as e:
+            yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "file", "done": True}
+            yield {"type": "tool_result", "tool": tool_name, "ok": False,
+                   "message": _friendly_error(e, "Check the file path and extension. ")}
         return
 
     if tool_name == "dctl":
@@ -492,6 +533,244 @@ def _save_memory(content: str) -> None:
     timestamp = _time.strftime("%Y-%m-%d")
     entry = f"\n- {content}  ({timestamp})"
     p.write_text((existing + entry + "\n"), encoding="utf-8")
+
+
+# ---------------- Document extraction ----------------
+
+# Cap text payload to keep model context sane. Mirrors _read_file's 200k limit.
+_EXTRACT_TEXT_CAP = 200_000
+
+_EXTRACT_SUPPORTED = {".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md"}
+
+
+def _parse_page_range(spec: str, total: int) -> list[int]:
+    """Parse a 1-based page spec like '1-5' or '3' into 0-based indices.
+
+    Out-of-range pages are dropped silently rather than erroring, but a
+    completely empty result (or a malformed spec) raises ValueError so the
+    caller sees something actionable.
+    """
+    s = (spec or "").strip()
+    if not s:
+        raise ValueError("Empty page range")
+    if "-" in s:
+        parts = s.split("-", 1)
+        try:
+            start = int(parts[0])
+            end = int(parts[1])
+        except ValueError as e:
+            raise ValueError(f"Invalid page range '{spec}'") from e
+        if start < 1 or end < start:
+            raise ValueError(f"Invalid page range '{spec}'")
+    else:
+        try:
+            start = end = int(s)
+        except ValueError as e:
+            raise ValueError(f"Invalid page range '{spec}'") from e
+        if start < 1:
+            raise ValueError(f"Invalid page range '{spec}'")
+    indices = [i - 1 for i in range(start, end + 1) if 1 <= i <= total]
+    if not indices:
+        raise ValueError(f"Page range '{spec}' is outside the document (1..{total})")
+    return indices
+
+
+def _cap_text(text: str, metadata: dict[str, Any]) -> str:
+    if len(text) > _EXTRACT_TEXT_CAP:
+        metadata["truncated"] = True
+        return text[:_EXTRACT_TEXT_CAP]
+    return text
+
+
+def _extract_pdf(p: Path, fmt: str, pages: str | None) -> dict[str, Any]:
+    import pypdf
+
+    reader = pypdf.PdfReader(str(p))
+    total = len(reader.pages)
+    indices = _parse_page_range(pages, total) if pages else list(range(total))
+
+    metadata: dict[str, Any] = {}
+    info = reader.metadata or {}
+    for key in ("/Title", "/Author", "/Subject", "/Creator", "/Producer"):
+        val = info.get(key)
+        if val:
+            metadata[key.lstrip("/").lower()] = str(val)
+
+    chunks: list[str] = []
+    for idx in indices:
+        try:
+            page_text = reader.pages[idx].extract_text() or ""
+        except Exception:
+            page_text = ""
+        if page_text.strip():
+            chunks.append(page_text)
+
+    text = "\n\n".join(chunks).strip()
+    if not text:
+        # No extractable text typically means a scanned image PDF. Surface
+        # this rather than silently returning empty so the agent can decide
+        # to fall back to OCR or tell the user.
+        metadata["likely_scanned"] = True
+
+    tables: list[dict[str, Any]] = []
+    # pdfplumber is heavier than pypdf, only spin it up when tables are
+    # actually requested (markdown output) and the doc isn't likely scanned.
+    if fmt == "markdown" and not metadata.get("likely_scanned"):
+        try:
+            import pdfplumber
+
+            with pdfplumber.open(str(p)) as pdf:
+                for idx in indices:
+                    if idx >= len(pdf.pages):
+                        continue
+                    for raw in pdf.pages[idx].extract_tables() or []:
+                        if not raw:
+                            continue
+                        tables.append({
+                            "page": idx + 1,
+                            "rows": [[("" if c is None else str(c)) for c in row] for row in raw],
+                        })
+        except Exception:
+            # Table extraction is best-effort; never fail the whole call
+            # because pdfplumber choked on a malformed table.
+            pass
+
+    text = _cap_text(text, metadata)
+    return {
+        "text": text,
+        "tables": tables,
+        "page_count": total,
+        "metadata": metadata,
+        "format": fmt,
+    }
+
+
+def _extract_docx(p: Path, fmt: str) -> dict[str, Any]:
+    import docx
+
+    doc = docx.Document(str(p))
+    paras = [para.text for para in doc.paragraphs if para.text]
+    text = "\n\n".join(paras).strip()
+
+    metadata: dict[str, Any] = {}
+    core = doc.core_properties
+    if core.title:
+        metadata["title"] = core.title
+    if core.author:
+        metadata["author"] = core.author
+
+    text = _cap_text(text, metadata)
+    return {
+        "text": text,
+        "tables": [],
+        "page_count": 0,  # docx has no fixed page count without rendering
+        "metadata": metadata,
+        "format": fmt,
+    }
+
+
+def _extract_xlsx(p: Path, fmt: str) -> dict[str, Any]:
+    import openpyxl
+
+    wb = openpyxl.load_workbook(str(p), data_only=True, read_only=True)
+    sheet_count = len(wb.sheetnames)
+    text_chunks: list[str] = []
+    tables: list[dict[str, Any]] = []
+    for sheet in wb.worksheets:
+        rows: list[list[str]] = []
+        for row in sheet.iter_rows(values_only=True):
+            rows.append([("" if v is None else str(v)) for v in row])
+        # Strip trailing all-empty rows that openpyxl can leave behind.
+        while rows and not any(c.strip() for c in rows[-1]):
+            rows.pop()
+        if not rows:
+            continue
+        tables.append({"sheet": sheet.title, "rows": rows})
+        text_chunks.append(f"# {sheet.title}\n" + "\n".join("\t".join(r) for r in rows))
+    wb.close()
+
+    metadata: dict[str, Any] = {"sheet_count": sheet_count}
+    text = "\n\n".join(text_chunks).strip()
+    text = _cap_text(text, metadata)
+    return {
+        "text": text,
+        "tables": tables,
+        "page_count": sheet_count,
+        "metadata": metadata,
+        "format": fmt,
+    }
+
+
+def _extract_pptx(p: Path, fmt: str) -> dict[str, Any]:
+    import pptx
+
+    prs = pptx.Presentation(str(p))
+    chunks: list[str] = []
+    for i, slide in enumerate(prs.slides, start=1):
+        slide_lines: list[str] = []
+        for shape in slide.shapes:
+            if not shape.has_text_frame:
+                continue
+            for para in shape.text_frame.paragraphs:
+                line = "".join(run.text for run in para.runs).strip()
+                if line:
+                    slide_lines.append(line)
+        if slide_lines:
+            chunks.append(f"# Slide {i}\n" + "\n".join(slide_lines))
+
+    metadata: dict[str, Any] = {}
+    text = "\n\n".join(chunks).strip()
+    text = _cap_text(text, metadata)
+    return {
+        "text": text,
+        "tables": [],
+        "page_count": len(prs.slides),
+        "metadata": metadata,
+        "format": fmt,
+    }
+
+
+def _extract_plaintext(p: Path, fmt: str) -> dict[str, Any]:
+    raw = p.read_text(encoding="utf-8", errors="replace")
+    metadata: dict[str, Any] = {}
+    text = _cap_text(raw, metadata)
+    return {
+        "text": text,
+        "tables": [],
+        "page_count": 0,
+        "metadata": metadata,
+        "format": fmt,
+    }
+
+
+def _extract_document(path: str, fmt: str, pages: str | None) -> dict[str, Any]:
+    p = Path(path).expanduser()
+    if not p.exists():
+        raise ValueError(f"File not found: {path}")
+    if not p.is_file():
+        raise ValueError(f"Not a file: {path}")
+
+    ext = p.suffix.lower()
+    if ext not in _EXTRACT_SUPPORTED:
+        raise ValueError(
+            f"Unsupported file type '{ext}'. "
+            f"Supported: {', '.join(sorted(_EXTRACT_SUPPORTED))}"
+        )
+
+    if pages and ext != ".pdf":
+        # Other formats don't have a stable page concept here. Better to
+        # tell the caller than to silently ignore the filter.
+        raise ValueError(f"'pages' is only supported for PDF, not {ext}")
+
+    if ext == ".pdf":
+        return _extract_pdf(p, fmt, pages)
+    if ext == ".docx":
+        return _extract_docx(p, fmt)
+    if ext == ".xlsx":
+        return _extract_xlsx(p, fmt)
+    if ext == ".pptx":
+        return _extract_pptx(p, fmt)
+    return _extract_plaintext(p, fmt)
 
 
 def _dctl_env() -> dict[str, str]:
