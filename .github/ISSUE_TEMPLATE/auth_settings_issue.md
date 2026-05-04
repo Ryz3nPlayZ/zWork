@@ -38,4 +38,4 @@ This issue tracks remaining work to complete the authentication flow and add usa
 ## Related
 
 - `docs/AUTH.md` — current auth architecture documentation
-- `cloud/auth/` — Better Auth service implementation
+- `cloud-src/auth/` — Better Auth service implementation
