@@ -79,10 +79,10 @@ fn configure_linux_webview_env() {
     std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
     std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     std::env::set_var("WEBKIT_USE_GLIB_NETWORKING", "1");
-    
+
     // Disable sandboxing in the WebProcess if it's causing issues with AppImage mounts
     std::env::set_var("WEBKIT_FORCE_SANDBOX", "0");
-    
+
     // Ensure we use a stable GDK backend
     if std::env::var_os("WAYLAND_DISPLAY").is_some() {
         std::env::set_var("GDK_BACKEND", "x11");
@@ -354,15 +354,26 @@ async fn begin_desktop_auth(app: tauri::AppHandle, start_url: String) -> Result<
     code.ok_or_else(|| "missing auth code".to_string())
 }
 
+fn hex_digit(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
 fn percent_decode(input: &str) -> String {
     let mut out = Vec::with_capacity(input.len());
     let bytes = input.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            let hex = &input[i + 1..i + 3];
-            if let Ok(value) = u8::from_str_radix(hex, 16) {
-                out.push(value);
+            // Read the two hex bytes directly. The previous version sliced
+            // `&input[i+1..i+3]`, which panics when the bytes after `%` fall
+            // inside a multi-byte UTF-8 character (e.g. "%é").
+            if let (Some(hi), Some(lo)) = (hex_digit(bytes[i + 1]), hex_digit(bytes[i + 2])) {
+                out.push((hi << 4) | lo);
                 i += 3;
                 continue;
             }
@@ -420,6 +431,51 @@ mod is_http_url_tests {
         assert!(!is_http_url("http://"));
         assert!(!is_http_url("https://"));
         assert!(!is_http_url("http:///etc/passwd"));
+    }
+}
+
+#[cfg(test)]
+mod percent_decode_tests {
+    use super::percent_decode;
+
+    #[test]
+    fn decodes_normal_escapes() {
+        assert_eq!(percent_decode("hello%20world"), "hello world");
+        assert_eq!(percent_decode("a%2Bb%3Dc"), "a+b=c");
+    }
+
+    #[test]
+    fn passes_through_plain_ascii() {
+        assert_eq!(percent_decode("foo=bar&baz=1"), "foo=bar&baz=1");
+    }
+
+    #[test]
+    fn passes_through_invalid_escape() {
+        // %XX with non-hex digits should be left alone, not panic.
+        assert_eq!(percent_decode("%XY"), "%XY");
+    }
+
+    #[test]
+    fn passes_through_truncated_escape() {
+        assert_eq!(percent_decode("a%"), "a%");
+        assert_eq!(percent_decode("a%2"), "a%2");
+    }
+
+    #[test]
+    fn does_not_panic_on_non_ascii_after_percent() {
+        // Previously this panicked at "byte index is not a char boundary"
+        // because &str[i+1..i+3] cuts into the middle of "é" (2 bytes in UTF-8).
+        let _ = percent_decode("%é");
+
+        // Realistic case: a query value mixing UTF-8 with valid escapes.
+        // The legitimate ones still decode.
+        assert_eq!(percent_decode("name=ré%C3%A9"), "name=ré\u{00e9}");
+    }
+
+    #[test]
+    fn case_insensitive_hex() {
+        assert_eq!(percent_decode("%2a"), "*");
+        assert_eq!(percent_decode("%2A"), "*");
     }
 }
 
