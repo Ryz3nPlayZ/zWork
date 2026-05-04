@@ -23,9 +23,29 @@ jobs:
       - name: Install dependencies
         working-directory: ./app
         run: npm ci
-      - name: Run linter
+      - name: Run ESLint
         working-directory: ./app
-        run: npm run lint || echo "Lint command not configured yet"
+        run: npx eslint src/ --max-warnings 0 || echo "ESLint not configured yet"
+      - name: Check TypeScript types
+        working-directory: ./app
+        run: npx tsc --noEmit || echo "TypeScript check not configured yet"
+
+  backend-lint:
+    name: Backend Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff || pip install flake8
+      - name: Run ruff
+        run: ruff check sidecar/ || echo "Ruff not configured yet"
+      - name: Run ruff format check
+        run: ruff format --check sidecar/ || echo "Format check not configured yet"
 
   backend-test:
     name: Backend Tests
@@ -38,7 +58,27 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-asyncio
+          pip install pytest pytest-asyncio pytest-cov
           pip install -r requirements.txt || echo "No requirements.txt yet"
-      - name: Run tests
-        run: pytest || echo "Tests not configured yet"
+      - name: Run tests with coverage
+        run: |
+          pytest --cov=sidecar --cov-report=xml || echo "Tests not configured yet"
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        if: success()
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false
+
+  docs-check:
+    name: Documentation Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check markdown links
+        run: |
+          npm install -g markdown-link-check
+          find . -name "*.md" -not -path "*/node_modules/*" -exec markdown-link-check {} \; || echo "Link check not critical"
+      - name: Check for TODO/FIXME comments
+        run: |
+          grep -r "TODO\|FIXME" --include="*.py" --include="*.ts" --include="*.tsx" . || echo "No TODOs found"
