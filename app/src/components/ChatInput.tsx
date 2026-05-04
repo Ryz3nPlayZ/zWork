@@ -42,6 +42,7 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend }:
   const stop = useApp((s) => s.stop);
   const webSearch = useApp((s) => s.webSearch);
   const toggleWeb = useApp((s) => s.toggleWeb);
+  const focusChatInput = useApp((s) => s.focusChatInput);
   const working = useApp((s) => {
     const id = s.activeChatId;
     return id ? (s.chats[id]?.working ?? false) : false;
@@ -57,6 +58,10 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend }:
   useEffect(() => {
     if (autoFocus) areaRef.current?.focus();
   }, [autoFocus]);
+
+  useEffect(() => {
+    if (focusChatInput > 0) areaRef.current?.focus();
+  }, [focusChatInput]);
 
   const canSend = value.trim().length > 0 && !working && !uploading;
 

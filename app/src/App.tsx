@@ -9,6 +9,8 @@ import { recordTelemetry, setTelemetryEnabled, startTelemetrySession, stopTeleme
 import { fallbackAppVersion, resolveAppVersion } from "./lib/appVersion";
 import { fetchCloudSession, onCloudAuthChanged, type CloudUser } from "./lib/cloud";
 import { identifyPostHogUser, resetPostHogUser } from "./lib/posthog";
+import { getPreviewMode } from "./lib/preview";
+import { PreviewAppShell, PreviewAuthShell } from "./components/PreviewShell";
 
 const Onboarding = lazy(() => import("./components/Onboarding").then((m) => ({ default: m.Onboarding })));
 const LoginScreen = lazy(() => import("./components/LoginScreen").then((m) => ({ default: m.LoginScreen })));
@@ -21,6 +23,7 @@ const ArtifactPanel = lazy(() => import("./components/ArtifactPanel").then((m) =
 const AnalyticsPage = lazy(() => import("./components/AnalyticsPage").then((m) => ({ default: m.AnalyticsPage })));
 
 export default function App() {
+  const previewMode = getPreviewMode();
   const [appVersion, setAppVersion] = useState(fallbackAppVersion());
   const bootstrap = useApp((s) => s.bootstrap);
   const view = useApp((s) => s.view);
@@ -32,6 +35,7 @@ export default function App() {
   const toggleSidebar = useApp((s) => s.toggleSidebar);
   const setView = useApp((s) => s.setView);
   const setSearchOpen = useApp((s) => s.setSearchOpen);
+  const triggerFocusChatInput = useApp((s) => s.triggerFocusChatInput);
   const onboardingDone = useApp((s) => s.onboardingDone);
   const [updateCard, setUpdateCard] = useState<UpdateCardState | null>(null);
   const [updateProgress, setUpdateProgress] = useState<UpdateProgress>({ phase: "idle" });
@@ -40,8 +44,15 @@ export default function App() {
     releaseUrl: string;
     notes?: string;
   } | null>(null);
-  const [cloudUser, setCloudUser] = useState<CloudUser | null>(null);
-  const [cloudLoading, setCloudLoading] = useState(true);
+  const [cloudUser, setCloudUser] = useState<CloudUser | null>(previewMode === "app" ? {
+    user_id: "preview-user",
+    email: "preview@zwork.local",
+    name: "Preview",
+    tier: "free",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  } : null);
+  const [cloudLoading, setCloudLoading] = useState(previewMode ? false : true);
   const showLanding = view === "chat" && active === null;
 
   const syncStoreUser = (user: CloudUser | null) => {
@@ -73,6 +84,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (previewMode) return;
     let cancelled = false;
     void fetchCloudSession()
       .then((user) => {
@@ -87,26 +99,29 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [previewMode]);
 
   useEffect(() => {
+    if (previewMode) return;
     return onCloudAuthChanged(() => {
       void fetchCloudSession().then((user) => {
         setCloudUser(user);
         syncStoreUser(user);
       });
     });
-  }, []);
+  }, [previewMode]);
 
   useEffect(() => {
+    if (previewMode) return;
     if (!cloudUser) {
       resetPostHogUser();
       return;
     }
     identifyPostHogUser(cloudUser);
-  }, [cloudUser]);
+  }, [cloudUser, previewMode]);
 
   useEffect(() => {
+    if (previewMode) return;
     const enabled = !!settings?.telemetry_enabled;
     setTelemetryEnabled(enabled);
     if (!enabled) {
@@ -121,24 +136,28 @@ export default function App() {
     return () => {
       stopTelemetrySession("app_unmounted");
     };
-  }, [appVersion, settings?.telemetry_enabled]);
+  }, [appVersion, settings?.telemetry_enabled, previewMode]);
 
   useEffect(() => {
+    if (previewMode) return;
     void loadChatView();
   }, []);
 
   useEffect(() => {
+    if (previewMode) return;
     setRecentUpdateNotice(consumeInstalledUpdateNotice(appVersion));
-  }, [appVersion]);
+  }, [appVersion, previewMode]);
 
   useEffect(() => {
+    if (previewMode) return;
     recordTelemetry("screen_view", {
       screen: showLanding ? "landing" : view,
       has_chat: !!active,
     });
-  }, [showLanding, view, active]);
+  }, [showLanding, view, active, previewMode]);
 
   useEffect(() => {
+    if (previewMode) return;
     let cancelled = false;
 
     async function checkForUpdates() {
@@ -163,7 +182,14 @@ export default function App() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [appVersion]);
+  }, [appVersion, previewMode]);
+
+  if (previewMode === "auth") {
+    return <PreviewAuthShell />;
+  }
+  if (previewMode === "app") {
+    return <PreviewAppShell />;
+  }
 
   const runUpdate = async () => {
     if (!updateCard) return;
@@ -238,11 +264,14 @@ export default function App() {
       } else if (mod && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setSearchOpen(true);
+      } else if (mod && e.key.toLowerCase() === "l") {
+        e.preventDefault();
+        triggerFocusChatInput();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openLanding, toggleSidebar, setView, setSearchOpen]);
+  }, [openLanding, toggleSidebar, setView, setSearchOpen, triggerFocusChatInput]);
 
   const [showLandingOverlay, setShowLandingOverlay] = useState(showLanding);
   const [particlesExiting, setParticlesExiting] = useState(false);

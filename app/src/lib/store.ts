@@ -253,6 +253,8 @@ interface AppState {
   setModel: (m: string) => void;
   webSearch: boolean;
   toggleWeb: () => void;
+  focusChatInput: number;
+  triggerFocusChatInput: () => void;
 
   // Per-chat runtime cache
   chats: Record<string, Chat>;
@@ -391,6 +393,8 @@ export const useApp = create<AppState>((set, get) => ({
   setModel: (m) => set({ model: m }),
   webSearch: false,
   toggleWeb: () => set((s) => ({ webSearch: !s.webSearch })),
+  focusChatInput: 0,
+  triggerFocusChatInput: () => set((s) => ({ focusChatInput: s.focusChatInput + 1 })),
 
   chats: {},
   activeChatId: null,

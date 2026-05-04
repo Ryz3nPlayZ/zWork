@@ -154,6 +154,28 @@ TOOL_SCHEMAS: list[dict] = [
 
 # ---------------- Dispatcher ----------------
 
+def _friendly_error(err: Exception, context: str = "") -> str:
+    """Translate common exceptions into user-actionable messages."""
+    msg = str(err)
+
+    if isinstance(err, FileNotFoundError):
+        return f"File not found: {msg}. Check the path and try again."
+    if isinstance(err, NotADirectoryError):
+        return f"Not a directory: {msg}. Specify a directory path instead."
+    if isinstance(err, IsADirectoryError):
+        return f"Is a directory, not a file: {msg}. Specify a file path instead."
+    if isinstance(err, PermissionError):
+        return f"Permission denied: {msg}. Check file permissions and try again."
+    if isinstance(err, UnicodeDecodeError):
+        return f"Cannot read as text: {msg}. The file may be binary or use an unsupported encoding."
+    if isinstance(err, subprocess.TimeoutExpired):
+        return f"Command timed out after {err.timeout}s. Try breaking the work into smaller steps."
+    if isinstance(err, OSError):
+        return f"System error: {msg}. {context}Check that the path and permissions are correct."
+
+    return f"{msg}. {context}" if context else msg
+
+
 async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[dict]:
     tool_id = f"tool_{tool_name}_{id(params)}"
 
@@ -170,7 +192,7 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                    "message": f"Wrote {len(content)} chars to {path}"}
         except Exception as e:
             yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": icon, "done": True}
-            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": str(e)}
+            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e, "Try a different path. ")}
         return
 
     if tool_name == "read_file":
@@ -184,7 +206,7 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
             yield {"type": "tool_result", "tool": tool_name, "ok": True, "message": text}
         except Exception as e:
             yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": icon, "done": True}
-            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": str(e)}
+            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e, "Try a different path. ")}
         return
 
     if tool_name == "list_dir":
@@ -197,7 +219,7 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
             yield {"type": "tool_result", "tool": tool_name, "ok": True, "message": listing}
         except Exception as e:
             yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "folder", "done": True}
-            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": str(e)}
+            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e, "Check that the path is a directory. ")}
         return
 
     if tool_name == "run_command":
@@ -220,7 +242,7 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                        "message": result["output"] or (f"exit {result['returncode']}")}
         except Exception as e:
             yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "command", "done": True}
-            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": str(e)}
+            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e)}
         return
 
     if tool_name == "read_skill":
@@ -242,7 +264,7 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                 yield {"type": "tool_result", "tool": tool_name, "ok": True, "message": text}
         except Exception as e:
             yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "file", "done": True}
-            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": str(e)}
+            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e, "Check the skill slug spelling. ")}
         return
 
     if tool_name == "deploy_web_app":
@@ -257,7 +279,7 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                    "message": result["message"]}
         except Exception as e:
             yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "deploy", "done": True}
-            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": str(e)}
+            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e)}
         return
 
     if tool_name == "save_memory":
@@ -271,7 +293,7 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                    "message": "Saved to memory."}
         except Exception as e:
             yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "file", "done": True}
-            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": str(e)}
+            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e)}
         return
 
     if tool_name == "dctl":
@@ -292,11 +314,11 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
             }
         except Exception as e:
             yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "window", "done": True}
-            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": str(e)}
+            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e, "Check that dctl is installed and the subcommand is valid. ")}
         return
 
     yield {"type": "tool_result", "tool": tool_name, "ok": False,
-           "message": f"Unknown tool: {tool_name}"}
+           "message": f"Unknown tool: {tool_name}. This tool is not available — try a different approach."}
 
 
 # ---------------- Impls ----------------
@@ -362,14 +384,21 @@ def _list_dir(path: str) -> str:
 
 
 def _run_command(command: str, cwd: str) -> dict[str, Any]:
-    result = subprocess.run(
-        command,
-        shell=True,
-        cwd=Path(cwd).expanduser(),
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            cwd=Path(cwd).expanduser(),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "returncode": -1,
+            "output": f"Command timed out after 120s. Try a shorter command or break the work into smaller steps.",
+        }
     output = result.stdout
     if result.stderr:
         output += ("\n" + result.stderr) if output else result.stderr
@@ -478,14 +507,21 @@ def _run_dctl(subcommand: str, args: list[str], cwd: str) -> dict[str, Any]:
     if not subcommand:
         raise ValueError("dctl requires a subcommand")
     cmd = [sys.executable, "-m", "dctl", subcommand, *args]
-    result = subprocess.run(
-        cmd,
-        cwd=Path(cwd).expanduser(),
-        capture_output=True,
-        text=True,
-        timeout=120,
-        env=_dctl_env(),
-    )
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=Path(cwd).expanduser(),
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=_dctl_env(),
+        )
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "returncode": -1,
+            "output": "dctl command timed out after 120s. Try a simpler operation.",
+        }
     output = result.stdout
     if result.stderr:
         output += ("\n" + result.stderr) if output else result.stderr

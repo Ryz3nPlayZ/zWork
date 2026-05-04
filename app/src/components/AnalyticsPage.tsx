@@ -5,36 +5,33 @@ import { cn } from "../lib/cn";
 function StatBar({
   label,
   percent,
-  color = "emerald",
 }: {
   label: string;
   percent: number;
-  color?: "emerald" | "amber" | "rose";
 }) {
   const clampedPercent = Math.max(0, Math.min(100, percent));
 
-  const colors = {
-    emerald: { bar: "bg-emerald-500 dark:bg-emerald-400/80", text: "text-emerald-600 dark:text-emerald-400" },
-    amber: { bar: "bg-amber-500 dark:bg-amber-400/80", text: "text-amber-600 dark:text-amber-400" },
-    rose: { bar: "bg-rose-500 dark:bg-rose-400/80", text: "text-rose-600 dark:text-rose-400" },
-  }[color];
+  const barOpacity =
+    clampedPercent > 50 ? "bg-ink/70" : clampedPercent > 25 ? "bg-ink/50" : "bg-ink/30";
 
   return (
     <div className="space-y-3 py-2">
       <div className="flex items-baseline justify-between">
         <span className="text-[13px] text-ink-muted">{label}</span>
-        <span className={cn("text-[24px] font-light tracking-tight text-ink", colors.text)}>
+        <span className="text-[22px] font-light tracking-tight text-ink">
           {clampedPercent}% remaining
         </span>
       </div>
       <div className="h-2.5 rounded-full bg-paper-sunken">
-        <div className={cn("h-full rounded-full transition-all duration-500", colors.bar)} style={{ width: `${clampedPercent}%` }} />
+        <div
+          className={cn("h-full rounded-full transition-all duration-500", barOpacity)}
+          style={{ width: `${clampedPercent}%` }}
+        />
       </div>
     </div>
   );
 }
 
-// Generate fake daily activity data
 function generateActivityData(days: number) {
   const data = [];
   const today = new Date();
@@ -43,7 +40,6 @@ function generateActivityData(days: number) {
     date.setDate(date.getDate() - i);
     const dateStr = date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
-    // Random daily values (some days lower, some higher, occasional gaps)
     const value = Math.random() > 0.1 ? Math.floor(Math.random() * 40) + 5 : 0;
 
     data.push({
@@ -55,7 +51,6 @@ function generateActivityData(days: number) {
 }
 
 export function AnalyticsPage() {
-  // Fake data for preview
   const [timeRange, setTimeRange] = useState<"7d" | "30d">("7d");
   const [activityData] = useState({
     "7d": generateActivityData(7),
@@ -64,18 +59,11 @@ export function AnalyticsPage() {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [tooltipPosition, setTooltipPosition] = useState<{ x: number; y: number } | null>(null);
 
-  const fiveHourPercent = 64;
-  const weeklyPercent = 30;
-
-  const fiveHourColor = "emerald";
-  const weeklyColor = "amber";
-
   const currentData = activityData[timeRange];
   const maxValue = Math.max(20, ...currentData.map((d) => d.value));
 
   const handleChartMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    // Account for the Y-axis offset (40px)
     const chartWidth = rect.width - 40;
     const x = e.clientX - rect.left - 40;
     const barCount = currentData.length;
@@ -118,13 +106,11 @@ export function AnalyticsPage() {
           <div className="space-y-5">
             <StatBar
               label="5-hour usage limit"
-              percent={fiveHourPercent}
-              color={fiveHourColor}
+              percent={64}
             />
             <StatBar
               label="Weekly usage limit"
-              percent={weeklyPercent}
-              color={weeklyColor}
+              percent={30}
             />
           </div>
         </section>
@@ -142,7 +128,7 @@ export function AnalyticsPage() {
                   type="button"
                   onClick={() => setTimeRange("7d")}
                   className={cn(
-                    "ring-focus rounded-full px-3 py-1 text-[11.5px] font-medium transition-all",
+                    "ring-focus rounded-full px-3 py-1 text-[12px] font-medium transition-all",
                     timeRange === "7d"
                       ? "bg-ink/90 text-paper shadow-sm"
                       : "text-ink-muted hover:text-ink hover:bg-paper-sunken/50"
@@ -154,7 +140,7 @@ export function AnalyticsPage() {
                   type="button"
                   onClick={() => setTimeRange("30d")}
                   className={cn(
-                    "ring-focus rounded-full px-3 py-1 text-[11.5px] font-medium transition-all",
+                    "ring-focus rounded-full px-3 py-1 text-[12px] font-medium transition-all",
                     timeRange === "30d"
                       ? "bg-ink/90 text-paper shadow-sm"
                       : "text-ink-muted hover:text-ink hover:bg-paper-sunken/50"
@@ -166,7 +152,8 @@ export function AnalyticsPage() {
               <button
                 type="button"
                 className="press ring-focus flex h-8 w-8 items-center justify-center rounded-lg border border-line/50 bg-paper text-ink-faint hover:bg-paper-sunken hover:text-ink"
-                aria-label="More information"
+                aria-label="Activity chart info"
+                title="Daily request count over the selected period"
               >
                 <Info className="h-4 w-4" />
               </button>
@@ -180,7 +167,7 @@ export function AnalyticsPage() {
             onMouseLeave={handleChartMouseLeave}
           >
             {/* Y-axis labels */}
-            <div className="absolute inset-y-0 left-0 flex w-10 flex-col justify-between text-[10.5px] text-ink-faint">
+            <div className="absolute inset-y-0 left-0 flex w-10 flex-col justify-between text-[11px] text-ink-faint">
               <span>{maxValue}</span>
               <span>{Math.round(maxValue * 0.75)}</span>
               <span>{Math.round(maxValue * 0.5)}</span>
@@ -189,23 +176,20 @@ export function AnalyticsPage() {
             </div>
 
             {/* Chart area */}
-            <div className="ml-10">
+            <div className="ml-10 relative" style={{ height: "160px" }}>
               {/* Grid lines */}
-              <div className="absolute inset-0 ml-10 pointer-events-none">
-                {[0, 0.25, 0.5, 0.75].map((_, i) => (
+              <div className="absolute inset-0 pointer-events-none">
+                {[0, 0.25, 0.5, 0.75].map((pos, i) => (
                   <div
                     key={i}
-                    className="border-t border-line/40"
-                    style={{ top: `${i * 25}%` }}
+                    className="absolute left-0 right-0 border-t border-line/40"
+                    style={{ top: `${pos * 100}%` }}
                   />
                 ))}
               </div>
 
               {/* Bars */}
-              <div
-                className="relative flex items-end gap-1"
-                style={{ height: "160px" }}
-              >
+              <div className="relative flex items-end gap-1 h-full">
                 {currentData.map((day, index) => {
                   const isHovered = hoveredIndex === index;
                   const barHeight = day.value > 0 ? Math.max(4, (day.value / maxValue) * 160) : 0;
@@ -215,9 +199,8 @@ export function AnalyticsPage() {
                       key={index}
                       className={cn(
                         "flex-1 rounded-t transition-all duration-200",
-                        isHovered ? "opacity-100" : "opacity-60",
-                        isHovered && "z-10",
-                        day.value === 0 ? "bg-transparent" : "bg-ink/70 dark:bg-white/20"
+                        isHovered ? "bg-ink/80 scale-y-[1.02]" : "bg-ink/60",
+                        day.value === 0 && "bg-transparent"
                       )}
                       style={{
                         height: `${barHeight}px`,
@@ -227,26 +210,26 @@ export function AnalyticsPage() {
                   );
                 })}
               </div>
+            </div>
 
-              {/* X-axis labels */}
-              <div className="mt-2 flex text-[10.5px] text-ink-faint">
-                <span>{currentData[0]?.date}</span>
-                <span className="flex-1 text-center">{currentData[Math.floor(currentData.length / 2)]?.date}</span>
-                <span>{currentData[currentData.length - 1]?.date}</span>
-              </div>
+            {/* X-axis labels */}
+            <div className="ml-10 mt-2 flex text-[11px] text-ink-faint">
+              <span>{currentData[0]?.date}</span>
+              <span className="flex-1 text-center">{currentData[Math.floor(currentData.length / 2)]?.date}</span>
+              <span>{currentData[currentData.length - 1]?.date}</span>
             </div>
           </div>
 
           {/* Tooltip */}
           {hoveredIndex !== null && tooltipPosition && (
             <div
-              className="fixed z-50 rounded-xl border border-line/80 bg-paper-raised px-3 py-2 shadow-lg"
+              className="fixed z-50 rounded-xl border border-line/80 bg-paper-raised px-3 py-2 shadow-pop"
               style={{
                 left: `${tooltipPosition.x + 12}px`,
                 top: `${tooltipPosition.y - 8}px`,
               }}
             >
-              <div className="text-[11.5px] text-ink-muted">{currentData[hoveredIndex]?.date}</div>
+              <div className="text-[12px] text-ink-muted">{currentData[hoveredIndex]?.date}</div>
               <div className="text-[14px] font-semibold text-ink">{currentData[hoveredIndex]?.value} requests</div>
             </div>
           )}
