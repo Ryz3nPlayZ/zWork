@@ -267,12 +267,28 @@ class Shape:
     OPENAI = "openai"
 
 
+# Credentials zWork can use as a model's "credential source".
+# Each one stores its own API key in `Settings.api_keys[credential]` and its
+# own base URL in `Settings.provider_config[credential]["base_url"]`.
+# OpenAI-compatible providers (groq, cerebras, deepseek, zai) all speak the
+# OpenAI shape but get their own slot so users can have multiple keys at once.
+KNOWN_CREDENTIALS: tuple[str, ...] = (
+    "anthropic",
+    "openai",
+    "claude_code",
+    "groq",
+    "cerebras",
+    "deepseek",
+    "zai",
+)
+
+
 @dataclass
 class CustomModel:
     id: str              # zWork-local id (slug)
     name: str            # display name
     shape: str           # "anthropic" | "openai" — how to talk to the API
-    credential: str      # "anthropic" | "openai" | "claude_code"
+    credential: str      # one of KNOWN_CREDENTIALS
     model_id: str        # model id to send in the request
     base_url_override: str = ""  # optional; overrides the credential's base_url
 
@@ -357,8 +373,10 @@ def upsert_custom_model(
 ) -> CustomModel:
     if shape not in (Shape.ANTHROPIC, Shape.OPENAI):
         raise ValueError("shape must be 'anthropic' or 'openai'")
-    if credential not in ("anthropic", "openai", "claude_code"):
-        raise ValueError("credential must be 'anthropic', 'openai', or 'claude_code'")
+    if credential not in KNOWN_CREDENTIALS:
+        raise ValueError(
+            "credential must be one of: " + ", ".join(KNOWN_CREDENTIALS)
+        )
     model = CustomModel(
         id=(id or _slugify(name) or _slugify(model_id)),
         name=name or model_id,

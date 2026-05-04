@@ -96,6 +96,34 @@ class Credentials:
     source: str           # "byok" | "claude_code" | "env"
 
 
+# OpenAI-compatible providers with first-class credential slots.
+# Each entry gets its own API key + base_url under Settings.api_keys[id]
+# and Settings.provider_config[id]. Adding a new provider here makes it
+# selectable in the add-model UI without further code changes here.
+OPENAI_COMPAT_PROVIDERS: dict[str, dict[str, str]] = {
+    "groq": {
+        "label": "Groq",
+        "default_base_url": "https://api.groq.com/openai/v1",
+        "key_env": "GROQ_API_KEY",
+    },
+    "cerebras": {
+        "label": "Cerebras",
+        "default_base_url": "https://api.cerebras.ai/v1",
+        "key_env": "CEREBRAS_API_KEY",
+    },
+    "deepseek": {
+        "label": "DeepSeek",
+        "default_base_url": "https://api.deepseek.com/v1",
+        "key_env": "DEEPSEEK_API_KEY",
+    },
+    "zai": {
+        "label": "z.ai",
+        "default_base_url": "https://api.z.ai/api/paas/v4",
+        "key_env": "ZAI_API_KEY",
+    },
+}
+
+
 def _shape_for_credential(credential: str) -> str:
     if credential == "claude_code" or credential == "anthropic":
         return "anthropic"
@@ -184,13 +212,34 @@ def resolve(credential: str, s: settings_mod.Settings, override_base_url: str = 
             return Credentials("anthropic", tok, base.rstrip("/"), "claude_code")
         return None
 
+    if credential in OPENAI_COMPAT_PROVIDERS:
+        spec = OPENAI_COMPAT_PROVIDERS[credential]
+        configured_base = (
+            s.provider_config.get(credential, {}).get("base_url") or ""
+        ).strip()
+        selected_base = (override_base_url or configured_base).strip()
+        default_base = spec["default_base_url"]
+
+        key = (s.api_keys.get(credential) or "").strip()
+        if key:
+            base = selected_base or default_base
+            return Credentials("openai", key, base.rstrip("/"), "byok")
+
+        env_key = os.environ.get(spec["key_env"])
+        if env_key:
+            base = selected_base or default_base
+            return Credentials("openai", env_key, base.rstrip("/"), "env")
+
+        return None
+
     _ = shape
     return None
 
 
 def credential_status(s: settings_mod.Settings) -> dict:
     out: dict[str, dict] = {}
-    for src in ("anthropic", "openai", "claude_code"):
+    sources = ("anthropic", "openai", "claude_code", *OPENAI_COMPAT_PROVIDERS.keys())
+    for src in sources:
         c = resolve(src, s)
         out[src] = {
             "configured": bool(c),
@@ -240,11 +289,15 @@ def available_models(s: settings_mod.Settings) -> list[dict]:
 
 def _subtitle_for(m: dict, cred: Optional[Credentials]) -> str:
     base = m.get("base_url_override") or (cred.base_url if cred else "")
+    credential = m.get("credential", "")
     cred_label = {
         "anthropic": "Anthropic-compatible",
         "openai": "OpenAI-compatible",
         "claude_code": "via local credentials",
-    }.get(m.get("credential", ""), m.get("credential", ""))
+    }.get(credential)
+    if cred_label is None:
+        spec = OPENAI_COMPAT_PROVIDERS.get(credential)
+        cred_label = spec["label"] if spec else credential
     if base:
         return f"{cred_label} · {base}"
     return cred_label
