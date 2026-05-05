@@ -261,6 +261,8 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend }:
           path: a.uploadedPath,
           mime: a.mime,
           kind: a.kind,
+          size: a.size,
+          previewUrl: a.previewUrl,
         })),
     });
   };

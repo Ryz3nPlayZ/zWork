@@ -25,6 +25,14 @@ const ROUTER_BASE_URL = "https://api.tryzwork.app/api/v1";
 
 export type Role = "user" | "assistant";
 
+export interface MessageAttachment {
+  name: string;
+  mime: string;
+  kind: string;
+  size?: number;
+  previewUrl?: string;
+}
+
 export interface Message {
   id: string;
   role: Role;
@@ -35,6 +43,8 @@ export interface Message {
   upstreamProvider?: string;
   /** Tool calls / steps performed during this assistant turn. */
   activities?: Activity[];
+  /** Files the user attached when sending this message. */
+  attachments?: MessageAttachment[];
 }
 
 export interface Activity {
@@ -330,6 +340,8 @@ interface AppState {
         path: string;
         mime: string;
         kind: string;
+        size?: number;
+        previewUrl?: string;
       }>;
     },
   ) => Promise<void>;
@@ -754,6 +766,15 @@ export const useApp = create<AppState>((set, get) => ({
       role: "user",
       content: userMsgText,
       createdAt: Date.now(),
+      attachments: attachments.length
+        ? attachments.map((a) => ({
+            name: a.name,
+            mime: a.mime,
+            kind: a.kind,
+            size: a.size,
+            previewUrl: a.previewUrl,
+          }))
+        : undefined,
     };
 
     set((s) => {
