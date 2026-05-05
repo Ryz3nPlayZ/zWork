@@ -17,8 +17,10 @@ The harness:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import random
 import re
 import uuid
 from dataclasses import dataclass
@@ -509,6 +511,37 @@ async def _anthropic_turn(
 
 # ---------------- OpenAI streaming turn ----------------
 
+# Retry policy for 429 from OpenAI-compatible providers (Cerebras, Groq, etc.).
+_OPENAI_MAX_ATTEMPTS = 3
+_OPENAI_RETRY_CAP_SECONDS = 15.0
+
+
+def _parse_retry_after_seconds(value: str) -> Optional[float]:
+    """Parse the integer-seconds form of an HTTP Retry-After header.
+
+    Cerebras and most LLM providers send an integer number of seconds.
+    HTTP-date form is rare here and treated as missing.
+    """
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value.strip()))
+    except ValueError:
+        return None
+
+
+def _openai_retry_delay(attempt: int, server_hint: Optional[float]) -> float:
+    """Resolve the delay before the next retry attempt.
+
+    Prefers the server's `Retry-After` hint when present and within the cap;
+    otherwise falls back to exponential backoff with jitter, also capped.
+    """
+    if server_hint is not None:
+        return min(_OPENAI_RETRY_CAP_SECONDS, max(0.5, server_hint))
+    backoff = 1.5 * (2 ** attempt) + random.uniform(0, 0.5)
+    return min(_OPENAI_RETRY_CAP_SECONDS, max(0.5, backoff))
+
+
 async def _openai_turn(
     creds: Credentials,
     messages: list[dict],
@@ -540,81 +573,111 @@ async def _openai_turn(
     finish_reason: Optional[str] = None
     started_text = False
 
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=20.0)) as client:
-            async with client.stream("POST", url, json=body, headers=headers) as resp:
-                if resp.status_code >= 400:
-                    text = (await resp.aread()).decode("utf-8", errors="replace")
-                    detail = text[:500]
-                    if resp.status_code == 401 and "api.tryzwork.app" in creds.base_url.lower():
-                        detail = (
-                            "401 unauthorized from zWork Router. "
-                            "Sign in again or reactivate managed mode from Analytics."
-                        )
-                    elif resp.status_code == 401 and "ollama" in creds.base_url.lower():
-                        detail = (
-                            "401 unauthorized from Ollama endpoint. "
-                            "If using ollama.com cloud, set a valid API key; "
-                            "for local Ollama use http://localhost:11434/v1 with no key."
-                        )
-                    yield {"type": "error", "text": f"{resp.status_code}: {detail}"}
-                    yield {"type": "turn_end", "content_blocks": [], "stop_reason": "error"}
-                    return
-                router_provider = resp.headers.get("x-zwork-router-provider") or ""
-                router_model = resp.headers.get("x-zwork-router-model") or model_id
-                router_label = resp.headers.get("x-zwork-router-label") or ""
-                if router_provider or router_label:
-                    yield {
-                        "type": "meta",
-                        "provider": router_label or router_provider,
-                        "resolved_model": router_model,
-                        "upstream_provider": router_provider or router_label,
-                    }
-                async for line in resp.aiter_lines():
-                    if not line or not line.startswith("data:"):
-                        continue
-                    data = line[5:].strip()
-                    if data == "[DONE]":
-                        break
-                    try:
-                        evt = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-                    choices = evt.get("choices") or []
-                    if not choices:
-                        continue
-                    ch = choices[0]
-                    delta = ch.get("delta") or {}
-                    piece = delta.get("content")
-                    if piece:
-                        collected_text += piece
-                        if not started_text:
-                            yield {"type": "status", "text": "Drafting"}
-                            started_text = True
-                        yield {"type": "delta", "text": piece}
-                    for tc in (delta.get("tool_calls") or []):
-                        idx = tc.get("index", 0)
-                        slot = tool_calls.setdefault(idx, {"id": "", "name": "", "args_buf": ""})
-                        if tc.get("id"):
-                            slot["id"] = tc["id"]
-                        fn = tc.get("function") or {}
-                        if fn.get("name"):
-                            slot["name"] = fn["name"]
+    for attempt in range(_OPENAI_MAX_ATTEMPTS):
+        is_last_attempt = attempt >= _OPENAI_MAX_ATTEMPTS - 1
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=20.0)) as client:
+                async with client.stream("POST", url, json=body, headers=headers) as resp:
+                    if resp.status_code == 429 and not is_last_attempt:
+                        server_hint = _parse_retry_after_seconds(resp.headers.get("retry-after", ""))
+                        if server_hint is not None and server_hint > _OPENAI_RETRY_CAP_SECONDS:
+                            await resp.aread()
                             yield {
-                                "type": "activity",
-                                "id": slot["id"] or f"tc_{idx}",
-                                "label": f"Preparing {slot['name']}…",
-                                "icon": "tool",
-                                "done": False,
+                                "type": "error",
+                                "text": (
+                                    f"Provider is rate-limited and asked us to wait "
+                                    f"{int(server_hint)}s. Try again in a minute, "
+                                    f"or switch provider in Settings."
+                                ),
                             }
-                        if fn.get("arguments"):
-                            slot["args_buf"] += fn["arguments"]
-                    if ch.get("finish_reason"):
-                        finish_reason = ch["finish_reason"]
-    except httpx.HTTPError as e:
-        yield {"type": "error", "text": f"network error: could not reach {creds.base_url} ({e})"}
-        yield {"type": "turn_end", "content_blocks": [], "stop_reason": "error"}
-        return
+                            yield {"type": "turn_end", "content_blocks": [], "stop_reason": "error"}
+                            return
+                        delay = _openai_retry_delay(attempt, server_hint)
+                        await resp.aread()
+                        yield {
+                            "type": "status",
+                            "text": f"Provider is busy. Retrying in {max(1, int(round(delay)))}s…",
+                        }
+                        await asyncio.sleep(delay)
+                        continue
+                    if resp.status_code >= 400:
+                        text = (await resp.aread()).decode("utf-8", errors="replace")
+                        detail = text[:500]
+                        if resp.status_code == 429:
+                            detail = (
+                                "Provider is rate-limited (queue_exceeded). "
+                                "Try again in a minute, or switch provider in Settings."
+                            )
+                        elif resp.status_code == 401 and "api.tryzwork.app" in creds.base_url.lower():
+                            detail = (
+                                "401 unauthorized from zWork Router. "
+                                "Sign in again or reactivate managed mode from Analytics."
+                            )
+                        elif resp.status_code == 401 and "ollama" in creds.base_url.lower():
+                            detail = (
+                                "401 unauthorized from Ollama endpoint. "
+                                "If using ollama.com cloud, set a valid API key; "
+                                "for local Ollama use http://localhost:11434/v1 with no key."
+                            )
+                        yield {"type": "error", "text": f"{resp.status_code}: {detail}"}
+                        yield {"type": "turn_end", "content_blocks": [], "stop_reason": "error"}
+                        return
+                    router_provider = resp.headers.get("x-zwork-router-provider") or ""
+                    router_model = resp.headers.get("x-zwork-router-model") or model_id
+                    router_label = resp.headers.get("x-zwork-router-label") or ""
+                    if router_provider or router_label:
+                        yield {
+                            "type": "meta",
+                            "provider": router_label or router_provider,
+                            "resolved_model": router_model,
+                            "upstream_provider": router_provider or router_label,
+                        }
+                    async for line in resp.aiter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+                        data = line[5:].strip()
+                        if data == "[DONE]":
+                            break
+                        try:
+                            evt = json.loads(data)
+                        except json.JSONDecodeError:
+                            continue
+                        choices = evt.get("choices") or []
+                        if not choices:
+                            continue
+                        ch = choices[0]
+                        delta = ch.get("delta") or {}
+                        piece = delta.get("content")
+                        if piece:
+                            collected_text += piece
+                            if not started_text:
+                                yield {"type": "status", "text": "Drafting"}
+                                started_text = True
+                            yield {"type": "delta", "text": piece}
+                        for tc in (delta.get("tool_calls") or []):
+                            idx = tc.get("index", 0)
+                            slot = tool_calls.setdefault(idx, {"id": "", "name": "", "args_buf": ""})
+                            if tc.get("id"):
+                                slot["id"] = tc["id"]
+                            fn = tc.get("function") or {}
+                            if fn.get("name"):
+                                slot["name"] = fn["name"]
+                                yield {
+                                    "type": "activity",
+                                    "id": slot["id"] or f"tc_{idx}",
+                                    "label": f"Preparing {slot['name']}…",
+                                    "icon": "tool",
+                                    "done": False,
+                                }
+                            if fn.get("arguments"):
+                                slot["args_buf"] += fn["arguments"]
+                        if ch.get("finish_reason"):
+                            finish_reason = ch["finish_reason"]
+            break
+        except httpx.HTTPError as e:
+            yield {"type": "error", "text": f"network error: could not reach {creds.base_url} ({e})"}
+            yield {"type": "turn_end", "content_blocks": [], "stop_reason": "error"}
+            return
 
     final_blocks: list[dict] = []
     if collected_text:
