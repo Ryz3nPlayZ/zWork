@@ -129,4 +129,4 @@ def is_safe_id(id_str: str | None) -> bool:
     if not id_str:
         return False
     import re
-    return bool(re.match(r"^[a-zA-Z0-9_-]+$", id_str))
+    return bool(re.fullmatch(r"[a-zA-Z0-9_-]+", id_str))

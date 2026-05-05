@@ -66,6 +66,14 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    return response
+
+
 # ---------------- Schemas ----------------
 
 class SettingsPatch(BaseModel):
@@ -507,9 +515,12 @@ async def onboard_complete(body: OnboardBody) -> dict:
         if base_url:
             s.provider_config.setdefault(credkey, {})["base_url"] = base_url
         if model_id:
+            custom_id = providers.ZWORK_ROUTER_ZWORK_ID if model_id == providers.ZWORK_ROUTER_MODEL_ID else None
+            if custom_id and not home_mod.is_safe_id(custom_id):
+                raise HTTPException(400, "invalid model_id")
             m = settings_mod.upsert_custom_model(
                 s,
-                id=providers.ZWORK_ROUTER_ZWORK_ID if model_id == providers.ZWORK_ROUTER_MODEL_ID else None,
+                id=custom_id,
                 name=model_name,
                 shape=shape,
                 credential=credkey,
@@ -639,6 +650,8 @@ def list_custom_models() -> dict:
 
 @app.post("/api/custom-models")
 def upsert_custom_model(body: CustomModelBody) -> dict:
+    if not home_mod.is_safe_id(body.id):
+        raise HTTPException(400, "invalid model_id")
     s = settings_mod.load()
     try:
         m = settings_mod.upsert_custom_model(
@@ -658,6 +671,8 @@ def upsert_custom_model(body: CustomModelBody) -> dict:
 
 @app.delete("/api/custom-models/{model_id}")
 def delete_custom_model(model_id: str) -> dict:
+    if not home_mod.is_safe_id(model_id):
+        raise HTTPException(400, "invalid model_id")
     s = settings_mod.load()
     ok = settings_mod.remove_custom_model(s, model_id)
     if not ok:
