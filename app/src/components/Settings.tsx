@@ -83,6 +83,31 @@ const SECTION_META: Record<Section, { title: string; description: string; icon: 
   },
 };
 
+// Known native credentials whose default base URL the user might paste into
+// the per-model "Base URL override" field. When that happens, steer them at
+// the dedicated credential slot so we don't end up with one model's URL
+// shoved into a different credential.
+const NATIVE_PRESET_HINTS: Array<{ id: string; label: string; matcher: RegExp }> = [
+  { id: "groq", label: "Groq", matcher: /\bapi\.groq\.com\b/i },
+  { id: "cerebras", label: "Cerebras", matcher: /\bapi\.cerebras\.ai\b/i },
+  { id: "deepseek", label: "DeepSeek", matcher: /\bapi\.deepseek\.com\b/i },
+  { id: "zai", label: "z.ai", matcher: /\bapi\.z\.ai\b/i },
+];
+
+function detectPresetCredentialHint(
+  url: string,
+  currentCredential: string,
+): { id: string; label: string } | null {
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  for (const preset of NATIVE_PRESET_HINTS) {
+    if (preset.matcher.test(trimmed) && currentCredential !== preset.id) {
+      return { id: preset.id, label: preset.label };
+    }
+  }
+  return null;
+}
+
 const CREDENTIAL_PLACEHOLDERS: Record<string, { keyPlaceholder: string; baseUrlPlaceholder: string }> = {
   anthropic: {
     keyPlaceholder: "sk-ant-…",
@@ -246,7 +271,6 @@ function ModelsPanel({
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_MODEL);
   const [apiKey, setApiKey] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
   const [revealKey, setRevealKey] = useState(false);
   const [busy, setBusy] = useState(false);
   const [editId, setEditId] = useState<string | undefined>();
@@ -254,14 +278,13 @@ function ModelsPanel({
   const credMeta = CREDENTIAL_PLACEHOLDERS[form.credential] || CREDENTIAL_PLACEHOLDERS.openai;
   const credStatus = providers?.credentials?.[form.credential];
   const maskedKey = settings?.api_keys?.[form.credential] || "";
-  const savedBaseUrl = settings?.provider_config?.[form.credential]?.base_url ?? "";
   const isKeyless = form.credential === "claude_code";
+  const presetHint = detectPresetCredentialHint(form.base_url_override, form.credential);
 
-  // Prefill credential fields when the selected credential changes.
+  // Clear the API-key field when the user switches credentials.
   useEffect(() => {
-    setBaseUrl(savedBaseUrl);
     setApiKey("");
-  }, [form.credential, savedBaseUrl]);
+  }, [form.credential]);
 
   const startEdit = (id: string) => {
     const m = customModels.find((cm) => cm.id === id);
@@ -281,18 +304,16 @@ function ModelsPanel({
     if (!form.name.trim() || !form.model_id.trim()) return;
     setBusy(true);
     try {
-      // Save credentials alongside the model upsert.
-      const patch: {
-        api_keys?: Record<string, string>;
-        provider_config?: Record<string, Record<string, string>>;
-      } = {};
+      // Only the per-credential API key is saved here. The per-model
+      // base URL lives on custom_models[].base_url_override and is
+      // round-tripped through onUpsert. Writing to
+      // provider_config[credential].base_url from this flow would
+      // affect every other model on the same credential.
+      const patch: { api_keys?: Record<string, string> } = {};
       if (!isKeyless && apiKey.trim()) {
         patch.api_keys = { [form.credential]: apiKey.trim() };
       }
-      if (!isKeyless && baseUrl.trim() && baseUrl.trim() !== savedBaseUrl) {
-        patch.provider_config = { [form.credential]: { base_url: baseUrl.trim() } };
-      }
-      if (patch.api_keys || patch.provider_config) {
+      if (patch.api_keys) {
         await onSaveSettings(patch);
       }
       await onUpsert({ ...form, id: editId });
@@ -300,7 +321,6 @@ function ModelsPanel({
       setEditId(undefined);
       setForm(EMPTY_MODEL);
       setApiKey("");
-      setBaseUrl("");
     } finally {
       setBusy(false);
     }
@@ -468,15 +488,6 @@ function ModelsPanel({
                   </div>
                 </Field>
 
-                <Field label="Base URL (optional)" description="Override the provider's default endpoint (e.g. a proxy).">
-                  <input
-                    type="text"
-                    value={baseUrl}
-                    onChange={(e) => setBaseUrl(e.target.value)}
-                    placeholder={credMeta.baseUrlPlaceholder}
-                    className="block w-full rounded-lg border border-line bg-paper px-3 py-2 font-mono text-[12.5px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
-                  />
-                </Field>
               </>
             )}
 
@@ -488,13 +499,28 @@ function ModelsPanel({
                 onChange={(e) => setForm((f) => ({ ...f, model_id: e.target.value }))}
               />
             </Field>
-            <Field label="Base URL override (optional)" description="Override the credential's base URL. Useful for multi-provider gateways.">
+            <Field label="Base URL override (optional)" description="Per-model URL override. Use this for OpenAI-compatible gateways. Doesn't change the credential's saved base URL.">
               <input
                 className="block w-full rounded-lg border border-line bg-paper px-3 py-2 font-mono text-[12.5px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
                 placeholder="https://openrouter.ai/api/v1"
                 value={form.base_url_override}
                 onChange={(e) => setForm((f) => ({ ...f, base_url_override: e.target.value }))}
               />
+              {presetHint && (
+                <p className="mt-1 text-[12px] leading-5 text-amber-700">
+                  This URL looks like {presetHint.label}.{" "}
+                  <button
+                    type="button"
+                    className="underline underline-offset-2 hover:text-amber-900"
+                    onClick={() =>
+                      setForm((f) => ({ ...f, credential: presetHint.id, base_url_override: "" }))
+                    }
+                  >
+                    Use the {presetHint.label} credential instead
+                  </button>{" "}
+                  — it has its own API key slot and default endpoint.
+                </p>
+              )}
             </Field>
             <div className="flex justify-end pt-1">
               <button
