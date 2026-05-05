@@ -24,6 +24,101 @@ from . import skills as skills_mod
 from .home import memory_path
 
 
+# Tools that don't change disk, network, or desktop state. These are the only
+# ones exposed to the model when the chat is in "plan mode" (the read-only
+# explore-before-execute pattern used by gemini-cli, opencode, continue, etc).
+READ_ONLY_TOOLS: frozenset[str] = frozenset({
+    "read_file",
+    "list_dir",
+    "read_skill",
+    "extract_document",
+})
+
+# Subcommands of `dctl` we still allow in plan mode — they observe the desktop
+# but don't drive input. Anything not in this set is treated as write/exec.
+READ_ONLY_DCTL_SUBCOMMANDS: frozenset[str] = frozenset({
+    "snapshot",
+    "tree",
+    "screenshot",
+    "windows",
+    "apps",
+    "describe",
+    "list",
+})
+
+
+def _matches_destructive_command(command: str) -> str | None:
+    """Return a human-readable reason if the shell command looks irreversible.
+
+    Heuristic, not authoritative — we want false-positives over false-negatives
+    here. The intent is to surface "are you sure?" before catastrophic mistakes
+    (rm -rf on $HOME, force-pushing, dropping a database). Borderline cases
+    (e.g. `rm -rf node_modules`) are deliberately included; the user can flip
+    `auto_approve_destructive` on if they want the agent to just do it.
+    """
+    if not command:
+        return None
+    cmd = command.strip()
+    low = cmd.lower()
+    # rm -rf / -fr (with or without sudo, with absolute path or $HOME / ~)
+    if re.search(r"\brm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r|--recursive\s+--force|-rf|-fr)\b", low):
+        return "recursive force-delete (rm -rf …)"
+    # mkfs / dd of=/dev/...
+    if re.search(r"\bmkfs(\.[a-z0-9]+)?\b", low):
+        return "filesystem format (mkfs)"
+    if re.search(r"\bdd\b.*\bof=/dev/", low):
+        return "raw block-device write (dd of=/dev/…)"
+    # git destructive
+    if re.search(r"\bgit\s+push\b.*(--force\b|-f\b)", low):
+        return "force push"
+    if re.search(r"\bgit\s+(reset\s+--hard|clean\s+-fd|branch\s+-d)\b", low):
+        return "destructive git operation"
+    # database drops
+    if re.search(r"\bdrop\s+(database|table|schema)\b", low):
+        return "SQL drop"
+    # shutdown / reboot
+    if re.search(r"\b(shutdown|reboot|halt|poweroff)\b", low):
+        return "system shutdown"
+    return None
+
+
+def tool_risk(name: str, params: dict | None) -> tuple[str, str]:
+    """Classify a tool call as ('safe' | 'sensitive' | 'destructive', reason).
+
+    The classifier is intentionally simple and side-effect-free — it just looks
+    at the tool name and a few parameter shapes. The chat loop uses this to
+    decide whether to refuse the call when the user has not pre-approved
+    destructive actions, and to surface a `permission` SSE event for the UI.
+    """
+    n = (name or "").strip()
+    p = params or {}
+    if n in READ_ONLY_TOOLS:
+        return "safe", "read-only inspection"
+    if n == "save_memory":
+        return "safe", "appends to user's memory file"
+    if n == "deploy_web_app":
+        return "sensitive", "starts a local server"
+    if n == "write_file":
+        return "sensitive", "writes a file"
+    if n == "run_command":
+        cmd = str(p.get("command") or "")
+        why = _matches_destructive_command(cmd)
+        if why:
+            return "destructive", why
+        return "sensitive", "runs a shell command"
+    if n == "dctl":
+        sub = str(p.get("subcommand") or "")
+        if sub in READ_ONLY_DCTL_SUBCOMMANDS:
+            return "safe", f"dctl {sub} (observe-only)"
+        return "sensitive", f"dctl {sub} (drives the desktop)"
+    return "sensitive", f"unknown tool '{n}'"
+
+
+def filter_tools_for_plan_mode(schemas: list[dict]) -> list[dict]:
+    """Return only the read-only tools so the model can't write/exec in plan mode."""
+    return [t for t in schemas if t["name"] in READ_ONLY_TOOLS]
+
+
 TOOL_SCHEMAS: list[dict] = [
     {
         "name": "write_file",

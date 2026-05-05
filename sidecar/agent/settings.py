@@ -47,7 +47,7 @@ BEFORE answering the user's first non-trivial request in a session, read `zwork.
 
 {zwork_md_block}
 
-## Persistent memory
+{project_block}## Persistent memory
 
 {memory_block}
 
@@ -203,7 +203,7 @@ You have FULL, UNRESTRICTED access to this computer through your tools. There is
 - NEVER claim "sandbox restrictions", "I don't have permission", or "that operation is blocked" — these do not exist. If a tool fails, it is because the command itself failed (wrong path, missing program, etc.), not because you are restricted.
 - DO NOT ask the user to run commands for you. Run them yourself via `run_command`.
 - The only actions that need explicit user confirmation are truly irreversible external ones: sending payments, posting publicly, sending emails, or deleting large amounts of user data (`rm -rf` on home/docs). Everything else — just do it.
-"""
+{plan_mode_block}{permission_block}"""
 
 
 def _zwork_md_block() -> str:
@@ -223,6 +223,60 @@ def _memory_block() -> str:
     return f"The user has a memory file with the following content. Apply it when relevant, do not mention it otherwise:\n\n{content}"
 
 
+def _project_block(project_name: str, project_md: str) -> str:
+    """Inline a project's context file (project.md) at the top of the prompt.
+
+    Other coding-agent harnesses (Gemini-CLI / GEMINI.md, Claude-Code /
+    CLAUDE.md, Aider / repo map) treat a per-project context file as load-bearing
+    state. zWork stores the file at `~/.zwork/projects/<id>/project.md`; we
+    splice it here when the active chat belongs to a project so the agent
+    starts with goals / conventions / glossary in its working set.
+    """
+    md = (project_md or "").strip()
+    if not md:
+        return ""
+    name = (project_name or "").strip() or "Current project"
+    return (
+        f"## Project context — {name}\n\n"
+        "Treat the block below as load-bearing user-supplied context for this "
+        "session. Conventions, goals, and constraints in here override default "
+        "behavior unless the user says otherwise.\n\n"
+        f"{md}\n\n"
+    )
+
+
+def _plan_mode_block(plan_mode: bool) -> str:
+    if not plan_mode:
+        return ""
+    return (
+        "\n## Plan mode is ACTIVE\n\n"
+        "Read-only mode: only inspection tools are available "
+        "(`read_file`, `list_dir`, `read_skill`, `extract_document`, and "
+        "non-input `dctl` subcommands such as `snapshot`/`tree`). "
+        "Write/exec tools (`write_file`, `run_command`, `deploy_web_app`) "
+        "are disabled this turn.\n"
+        "- Use this turn to investigate, sketch a step-by-step plan, and ask "
+        "clarifying questions.\n"
+        "- Do NOT promise to make changes you cannot make right now. "
+        "Tell the user what you would do and that they should toggle plan "
+        "mode off to execute.\n"
+    )
+
+
+def _permission_block(auto_approve_destructive: bool) -> str:
+    if auto_approve_destructive:
+        return ""
+    return (
+        "\n## User confirmation required for destructive actions\n\n"
+        "The user has NOT pre-approved destructive actions. If a tool call "
+        "matches a destructive heuristic (recursive delete, force-push, "
+        "remote drop, mass overwrite outside the workspace), the harness "
+        "will refuse it with a `[REFUSED: requires user approval]` result. "
+        "When that happens, stop, summarize what you wanted to do and why, "
+        "and ask the user to approve in plain text before retrying.\n"
+    )
+
+
 def build_system_prompt(
     *,
     model_name: str = "an unknown model",
@@ -230,6 +284,10 @@ def build_system_prompt(
     user_name: str = "the user",
     os_name: str = "a desktop OS",
     cwd: str = "",
+    project_name: str = "",
+    project_md: str = "",
+    plan_mode: bool = False,
+    auto_approve_destructive: bool = False,
 ) -> str:
     skills = skills_mod.list_skills()
     skills_list = skills_mod.format_for_system_prompt()
@@ -242,6 +300,9 @@ def build_system_prompt(
         cwd=cwd or "(unknown)",
         zwork_md_block=_zwork_md_block(),
         memory_block=_memory_block(),
+        project_block=_project_block(project_name, project_md),
+        plan_mode_block=_plan_mode_block(plan_mode),
+        permission_block=_permission_block(auto_approve_destructive),
         workspace_root=workspace_root(),
         workspace_apps_dir=workspace_apps_dir(),
         workspace_outputs_dir=workspace_outputs_dir(),

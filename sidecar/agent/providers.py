@@ -29,7 +29,13 @@ from typing import Any, AsyncIterator, Optional
 import httpx
 
 from . import detect, settings as settings_mod
-from .tools import TOOL_SCHEMAS, execute_tool, parse_tool_calls
+from .tools import (
+    TOOL_SCHEMAS,
+    execute_tool,
+    filter_tools_for_plan_mode,
+    parse_tool_calls,
+    tool_risk,
+)
 
 
 MAX_TURNS = 24
@@ -314,10 +320,14 @@ def lookup_model(zwork_model_id: str, s: settings_mod.Settings) -> Optional[dict
 
 # ---------------- Anthropic tool schemas (from tools module) ----------------
 
-def _anthropic_tools() -> list[dict]:
+def _active_tool_schemas(plan_mode: bool) -> list[dict]:
+    return filter_tools_for_plan_mode(TOOL_SCHEMAS) if plan_mode else TOOL_SCHEMAS
+
+
+def _anthropic_tools(plan_mode: bool = False) -> list[dict]:
     """Convert our generic TOOL_SCHEMAS into Anthropic's input_schema shape."""
     out = []
-    for t in TOOL_SCHEMAS:
+    for t in _active_tool_schemas(plan_mode):
         out.append({
             "name": t["name"],
             "description": t["description"],
@@ -326,9 +336,9 @@ def _anthropic_tools() -> list[dict]:
     return out
 
 
-def _openai_tools() -> list[dict]:
+def _openai_tools(plan_mode: bool = False) -> list[dict]:
     out = []
-    for t in TOOL_SCHEMAS:
+    for t in _active_tool_schemas(plan_mode):
         out.append({
             "type": "function",
             "function": {
@@ -347,6 +357,7 @@ async def _anthropic_turn(
     messages: list[dict],
     model_id: str,
     system: str,
+    plan_mode: bool = False,
 ) -> AsyncIterator[dict]:
     """Run one Anthropic turn. Yields UI events and finally a 'turn_end' event
     with {content_blocks: [...], stop_reason: str | None}.
@@ -365,7 +376,7 @@ async def _anthropic_turn(
         headers["authorization"] = f"Bearer {creds.api_key}"
         headers["x-api-key"] = creds.api_key
 
-    system_blocks, tools_blocks = _apply_anthropic_cache(system, _anthropic_tools())
+    system_blocks, tools_blocks = _apply_anthropic_cache(system, _anthropic_tools(plan_mode))
 
     body: dict = {
         "model": model_id,
@@ -547,6 +558,7 @@ async def _openai_turn(
     messages: list[dict],
     model_id: str,
     extra_headers: Optional[dict[str, str]] = None,
+    plan_mode: bool = False,
 ) -> AsyncIterator[dict]:
     """One OpenAI-compatible turn with tool use.
 
@@ -563,7 +575,7 @@ async def _openai_turn(
         "model": model_id,
         "stream": True,
         "messages": messages,
-        "tools": _openai_tools(),
+        "tools": _openai_tools(plan_mode),
     }
 
     yield {"type": "status", "text": "Thinking"}
@@ -713,9 +725,21 @@ def _anthropic_convert_input_messages(messages: list[dict]) -> tuple[str, list[d
 
 
 async def stream_chat(
-    messages: list[dict], zwork_model_id: str, s: settings_mod.Settings
+    messages: list[dict],
+    zwork_model_id: str,
+    s: settings_mod.Settings,
+    *,
+    plan_mode: bool = False,
+    auto_approve_destructive: bool = False,
 ) -> AsyncIterator[dict]:
-    """Top-level chat stream. Handles the multi-turn tool loop."""
+    """Top-level chat stream. Handles the multi-turn tool loop.
+
+    plan_mode: when True, the model is given only the read-only tool schema and
+    cannot write/exec — used for inspection passes.
+    auto_approve_destructive: when False, tool calls classified as destructive
+    (rm -rf, force-push, mkfs, dd to /dev/, drop database, …) are short-circuited
+    with a refusal so the model has to ask the user first.
+    """
     model = lookup_model(zwork_model_id, s)
     if model is None:
         yield {
@@ -747,12 +771,59 @@ async def stream_chat(
 
     if model["shape"] == "anthropic":
         system, convo = _anthropic_convert_input_messages(messages)
-        async for evt in _run_anthropic_loop(creds, convo, system, real_model_id):
+        async for evt in _run_anthropic_loop(
+            creds, convo, system, real_model_id,
+            plan_mode=plan_mode,
+            auto_approve_destructive=auto_approve_destructive,
+        ):
             yield evt
     else:
         # OpenAI: messages already in correct shape (role=system/user/assistant)
-        async for evt in _run_openai_loop(creds, list(messages), real_model_id):
+        async for evt in _run_openai_loop(
+            creds, list(messages), real_model_id,
+            plan_mode=plan_mode,
+            auto_approve_destructive=auto_approve_destructive,
+        ):
             yield evt
+
+
+async def _gated_execute_tool(
+    name: str,
+    params: dict,
+    *,
+    auto_approve_destructive: bool,
+) -> AsyncIterator[dict]:
+    """Wrap tools.execute_tool with a permission gate.
+
+    Yields a `permission` SSE event for the UI on every call, and short-circuits
+    with a synthetic `tool_result` (ok=False) when a destructive call needs
+    user approval the user hasn't given. Falls through to the real executor
+    in every other case.
+    """
+    risk, reason = tool_risk(name, params)
+    yield {
+        "type": "permission",
+        "tool": name,
+        "risk": risk,
+        "reason": reason,
+        "blocked": risk == "destructive" and not auto_approve_destructive,
+    }
+    if risk == "destructive" and not auto_approve_destructive:
+        msg = (
+            f"[REFUSED: requires user approval — {reason}]. "
+            "Stop and ask the user to approve in plain text before retrying."
+        )
+        yield {
+            "type": "activity",
+            "id": f"perm_{name}",
+            "label": f"Refused {name}: {reason}",
+            "icon": "shield",
+            "done": True,
+        }
+        yield {"type": "tool_result", "tool": name, "ok": False, "message": msg}
+        return
+    async for tev in execute_tool(name, params):
+        yield tev
 
 
 async def _run_anthropic_loop(
@@ -760,13 +831,16 @@ async def _run_anthropic_loop(
     convo: list[dict],
     system: str,
     model_id: str,
+    *,
+    plan_mode: bool = False,
+    auto_approve_destructive: bool = False,
 ) -> AsyncIterator[dict]:
     """Multi-turn tool loop for Anthropic-shape APIs."""
     for turn in range(MAX_TURNS):
         content_blocks: list[dict] = []
         stop_reason: Optional[str] = None
 
-        async for evt in _anthropic_turn(creds, convo, model_id, system):
+        async for evt in _anthropic_turn(creds, convo, model_id, system, plan_mode=plan_mode):
             t = evt.get("type")
             if t == "turn_end":
                 content_blocks = evt.get("content_blocks") or []
@@ -807,10 +881,11 @@ async def _run_anthropic_loop(
             params = b["input"] or {}
             result_text = ""
             ok = True
-            async for tev in execute_tool(name, params):
+            async for tev in _gated_execute_tool(
+                name, params, auto_approve_destructive=auto_approve_destructive,
+            ):
                 tt = tev.get("type")
-                if tt == "activity":
-                    # Override the "Preparing..." activity with the live one
+                if tt in ("activity", "permission"):
                     yield tev
                 elif tt == "tool_result":
                     ok = tev.get("ok", False)
@@ -829,9 +904,11 @@ async def _run_anthropic_loop(
             name = call["tool"]
             params = call["params"]
             msg = ""
-            async for tev in execute_tool(name, params):
+            async for tev in _gated_execute_tool(
+                name, params, auto_approve_destructive=auto_approve_destructive,
+            ):
                 tt = tev.get("type")
-                if tt in ("activity", "tool_result"):
+                if tt in ("activity", "tool_result", "permission"):
                     yield tev
                 if tt == "tool_result":
                     msg = tev.get("message", "")
@@ -856,6 +933,9 @@ async def _run_openai_loop(
     creds: Credentials,
     messages: list[dict],
     model_id: str,
+    *,
+    plan_mode: bool = False,
+    auto_approve_destructive: bool = False,
 ) -> AsyncIterator[dict]:
     """Multi-turn tool loop for OpenAI-shape APIs."""
     run_id = str(uuid.uuid4())
@@ -870,6 +950,7 @@ async def _run_openai_loop(
                 "x-zwork-run-id": run_id,
                 "x-zwork-request-kind": request_kind,
             },
+            plan_mode=plan_mode,
         ):
             t = evt.get("type")
             if t == "turn_end":
@@ -908,9 +989,11 @@ async def _run_openai_loop(
             name = tu["name"]
             params = tu["input"] or {}
             result_text = ""
-            async for tev in execute_tool(name, params):
+            async for tev in _gated_execute_tool(
+                name, params, auto_approve_destructive=auto_approve_destructive,
+            ):
                 tt = tev.get("type")
-                if tt in ("activity", "tool_result"):
+                if tt in ("activity", "tool_result", "permission"):
                     yield tev
                 if tt == "tool_result":
                     result_text = tev.get("message", "")
@@ -926,9 +1009,11 @@ async def _run_openai_loop(
             name = call["tool"]
             params = call["params"]
             msg = ""
-            async for tev in execute_tool(name, params):
+            async for tev in _gated_execute_tool(
+                name, params, auto_approve_destructive=auto_approve_destructive,
+            ):
                 tt = tev.get("type")
-                if tt in ("activity", "tool_result"):
+                if tt in ("activity", "tool_result", "permission"):
                     yield tev
                 if tt == "tool_result":
                     msg = tev.get("message", "")

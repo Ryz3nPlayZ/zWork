@@ -370,7 +370,20 @@ export type StreamEvent =
   | { type: "error"; text: string }
   | { type: "needs_setup" }
   | { type: "activity"; id: string; label: string; icon?: string; done?: boolean }
-  | { type: "tool_result"; tool: string; ok: boolean; message: string };
+  | { type: "tool_result"; tool: string; ok: boolean; message: string }
+  | {
+      type: "permission";
+      tool: string;
+      risk: "safe" | "sensitive" | "destructive";
+      reason: string;
+      blocked: boolean;
+    }
+  | {
+      type: "compaction";
+      summarized_messages: number;
+      kept_recent: number;
+      summary_chars: number;
+    };
 
 export async function streamChat(
   body: {
@@ -385,6 +398,9 @@ export async function streamChat(
       mime: string;
       kind: string;
     }>;
+    project_id?: string;
+    plan_mode?: boolean;
+    auto_approve_destructive?: boolean;
   },
   onEvent: (evt: StreamEvent) => void,
   signal?: AbortSignal,

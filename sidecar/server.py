@@ -26,14 +26,14 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 try:
-    from .agent import chatstore, detect, providers, skills as skills_mod
+    from .agent import chatstore, compaction, detect, providers, skills as skills_mod
     from .agent import settings as settings_mod
     from .agent import home as home_mod
     from .agent import projects as projects_mod
     from .agent.env_loader import load_dotenv
     from .core.util import new_id
 except ImportError:  # pragma: no cover - PyInstaller/script entrypoint fallback
-    from sidecar.agent import chatstore, detect, providers, skills as skills_mod
+    from sidecar.agent import chatstore, compaction, detect, providers, skills as skills_mod
     from sidecar.agent import settings as settings_mod
     from sidecar.agent import home as home_mod
     from sidecar.agent import projects as projects_mod
@@ -88,6 +88,7 @@ class CustomModelBody(BaseModel):
 class ChatCreate(BaseModel):
     title: str = "New chat"
     model: str = ""
+    project_id: str = ""
 
 
 class ChatRename(BaseModel):
@@ -101,6 +102,9 @@ class StreamRequest(BaseModel):
     new_chat_title: str | None = None
     artifact_mode: bool = True
     attachments: list[UploadItem] | None = None
+    project_id: str | None = None
+    plan_mode: bool = False
+    auto_approve_destructive: bool = False
 
 
 class ProjectCreate(BaseModel):
@@ -899,7 +903,10 @@ def list_chats() -> dict:
 
 @app.post("/api/chats")
 def create_chat(body: ChatCreate) -> dict:
-    c = chatstore.create(title=body.title, model=body.model)
+    pid = body.project_id or ""
+    if pid and not home_mod.is_safe_id(pid):
+        raise HTTPException(400, "invalid project_id")
+    c = chatstore.create(title=body.title, model=body.model, project_id=pid)
     return _chat_public(c)
 
 
@@ -940,6 +947,9 @@ def _chat_public(c: chatstore.Chat) -> dict[str, Any]:
         "created_at": c.created_at,
         "updated_at": c.updated_at,
         "model": c.model,
+        "project_id": c.project_id,
+        "compacted_summary": c.compacted_summary,
+        "compaction_cursor": c.compaction_cursor,
         "messages": [m.__dict__ for m in c.messages],
     }
 
@@ -956,10 +966,95 @@ def _resolve_model_id(requested: str | None, s: settings_mod.Settings) -> str | 
     return avail[0]["id"] if avail else None
 
 
+async def _maybe_compact_history(
+    *,
+    chat: chatstore.Chat,
+    raw_history: list[dict],
+    model_id: str,
+    settings: settings_mod.Settings,
+) -> tuple[list[dict], dict | None]:
+    """Apply (and persist, if needed) compaction for this chat.
+
+    Returns the history that should actually be sent to the model and an
+    optional SSE event payload describing what we did, so the UI can show
+    "compacted N earlier turns".
+    """
+    # If we already compacted earlier, drop those messages and prepend the
+    # stored summary on every turn from now on.
+    cursor = max(0, min(chat.compaction_cursor, len(raw_history)))
+    if chat.compacted_summary and cursor > 0:
+        kept = raw_history[cursor:]
+        history: list[dict] = [
+            compaction.render_summary_message(chat.compacted_summary),
+            *kept,
+        ]
+    else:
+        history = list(raw_history)
+
+    if not compaction.should_compact(history):
+        return history, None
+
+    # We need credentials to summarize; if none, skip silently rather than
+    # blocking the user's turn. The thresholds are conservative enough that
+    # truncated context is still usable on most models.
+    model_meta = providers.lookup_model(model_id, settings) or {}
+    creds = providers.resolve(
+        model_meta.get("credential", ""),
+        settings,
+        model_meta.get("base_url_override", ""),
+    )
+    if creds is None:
+        return history, None
+    real_model_id = model_meta.get("model_id") or ""
+    if real_model_id == "(default)":
+        real_model_id = "claude-sonnet-4-5-20250929"
+    if not real_model_id:
+        return history, None
+
+    plan = compaction.plan_compaction(history)
+    if not plan.middle:
+        return history, None
+
+    summary = await compaction.summarize(
+        plan.middle,
+        creds=creds,
+        model_id=real_model_id,
+        shape=model_meta.get("shape") or "anthropic",
+    )
+    if not summary or summary.startswith("[compaction failed"):
+        # Don't poison the saved state with a failure marker; just send the
+        # uncompacted history this turn. We'll try again on the next turn.
+        return history, None
+
+    new_history = [
+        compaction.render_summary_message(summary),
+        *plan.keep_tail,
+    ]
+
+    # Persist the compaction so future turns reuse the summary.
+    # `compaction_cursor` indexes into chat.messages (the on-disk list),
+    # NOT into `history` (which may have a synthetic summary at index 0).
+    # When this compaction subsumes a previous summary, we count it as
+    # zero original messages absorbed.
+    prev_summary_in_middle = 1 if chat.compacted_summary else 0
+    newly_absorbed = len(plan.middle) - prev_summary_in_middle
+    new_cursor = chat.compaction_cursor + max(0, newly_absorbed)
+    chatstore.set_compaction(chat.id, summary, new_cursor)
+
+    return new_history, {
+        "type": "compaction",
+        "summarized_messages": len(plan.middle),
+        "kept_recent": len(plan.keep_tail),
+        "summary_chars": len(summary),
+    }
+
+
 @app.post("/api/chat/stream")
 async def chat_stream(req: StreamRequest):
     if not home_mod.is_safe_id(req.chat_id):
         raise HTTPException(400, "invalid chat_id")
+    if req.project_id and not home_mod.is_safe_id(req.project_id):
+        raise HTTPException(400, "invalid project_id")
     s = settings_mod.load()
     model_id = _resolve_model_id(req.model, s)
     started_at = time.time()
@@ -968,7 +1063,14 @@ async def chat_stream(req: StreamRequest):
     # setup error back — never 400 hard.
     chat = chatstore.get(req.chat_id) if req.chat_id else None
     if chat is None:
-        chat = chatstore.create(title=req.new_chat_title or "New chat", model=model_id or "")
+        chat = chatstore.create(
+            title=req.new_chat_title or "New chat",
+            model=model_id or "",
+            project_id=req.project_id or "",
+        )
+    elif req.project_id and req.project_id != chat.project_id:
+        # Persist the user's project switch so refreshes keep it.
+        chatstore.set_project(chat.id, req.project_id)
     chatstore.append_message(chat.id, "user", req.message)
     chat = chatstore.get(chat.id)
     assert chat is not None
@@ -1012,6 +1114,18 @@ async def chat_stream(req: StreamRequest):
             )
         return StreamingResponse(no_model_sse(), media_type="text/event-stream")
 
+    # Pull project context (project.md) so the agent starts with the user's
+    # goals/conventions for this project rather than a blank slate. Mirrors
+    # the GEMINI.md / CLAUDE.md / repo-map pattern other harnesses use.
+    project_name = ""
+    project_md = ""
+    active_project_id = chat.project_id or (req.project_id or "")
+    if active_project_id and home_mod.is_safe_id(active_project_id):
+        proj = projects_mod.get(active_project_id)
+        if proj is not None:
+            project_name = proj.name
+            project_md = projects_mod.get_context(active_project_id) or ""
+
     # Build a system prompt with live model identity
     model_meta = providers.lookup_model(model_id, s) or {}
     prompt = settings_mod.build_system_prompt(
@@ -1023,6 +1137,10 @@ async def chat_stream(req: StreamRequest):
         user_name=_display_name(),
         os_name=_os_pretty(),
         cwd=str(Path.cwd()),
+        project_name=project_name,
+        project_md=project_md,
+        plan_mode=req.plan_mode,
+        auto_approve_destructive=req.auto_approve_destructive,
     )
 
     attachment_block = ""
@@ -1041,16 +1159,26 @@ async def chat_stream(req: StreamRequest):
         ])
     prompt = f"{prompt}\n\n{attachment_block}\n\n## Artifact intent hint\n{_artifact_hint(req.message)}"
 
-    history = [{"role": m.role, "content": m.content} for m in chat.messages]
+    raw_history = [{"role": m.role, "content": m.content} for m in chat.messages]
+    history, compaction_evt = await _maybe_compact_history(
+        chat=chat,
+        raw_history=raw_history,
+        model_id=model_id,
+        settings=s,
+    )
 
     async def sse() -> Any:
         yield _sse({"type": "chat", "id": chat.id, "title": chat.title})
+        if compaction_evt is not None:
+            yield _sse(compaction_evt)
         full_text = ""
         try:
             async for evt in _heartbeat_stream(providers.stream_chat(
                 [{"role": "system", "content": prompt}, *history],
                 model_id,
                 s,
+                plan_mode=req.plan_mode,
+                auto_approve_destructive=req.auto_approve_destructive,
             )):
                 if evt.get("type") == "delta":
                     full_text += evt.get("text", "")
