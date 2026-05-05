@@ -18,6 +18,7 @@ import {
   BarChart3,
   Globe,
   GitCompare,
+  Image as ImageIcon,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { ActivityBlocks } from "./ActivityBlocks";
@@ -224,9 +225,34 @@ export function Message({
   }
 
   if (isUser) {
+    const attachments = message.attachments ?? [];
     return (
       <div className="group flex w-full animate-fade-in justify-end">
         <div className="max-w-[85%] min-w-0">
+          {attachments.length > 0 && (
+            <div className="mb-1.5 flex flex-wrap justify-end gap-1.5">
+              {attachments.map((a, i) => (
+                <div
+                  key={`${message.id}-att-${i}`}
+                  className="flex items-center gap-2 rounded-full border border-line bg-paper px-2.5 py-1 text-[11.5px] text-ink-muted"
+                  title={a.name}
+                >
+                  {a.kind === "image" && a.previewUrl ? (
+                    <img
+                      src={a.previewUrl}
+                      alt=""
+                      className="h-4 w-4 rounded object-cover"
+                    />
+                  ) : a.kind === "image" ? (
+                    <ImageIcon className="h-3.5 w-3.5" />
+                  ) : (
+                    <FileText className="h-3.5 w-3.5" />
+                  )}
+                  <span className="max-w-[180px] truncate">{a.name}</span>
+                </div>
+              ))}
+            </div>
+          )}
           <div className="rounded-2xl rounded-br-md bg-paper-raised border border-line px-3.5 py-2.5 text-[14px] leading-6 text-ink break-words whitespace-pre-wrap">
             {message.content}
           </div>
