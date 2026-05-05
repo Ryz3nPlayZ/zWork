@@ -34,15 +34,28 @@ class Chat:
     updated_at: int
     messages: list[ChatMessage] = field(default_factory=list)
     model: str = ""
+    project_id: str = ""
+    # When earlier turns have been compacted, this holds the compact summary
+    # that replaces them. The first `compaction_cursor` messages are the ones
+    # that were rolled into the summary and should not be sent to the model.
+    compacted_summary: str = ""
+    compaction_cursor: int = 0
 
 
 def _path(chat_id: str):
     return chats_dir() / f"{chat_id}.json"
 
 
-def create(title: str = "New chat", model: str = "") -> Chat:
+def create(title: str = "New chat", model: str = "", project_id: str = "") -> Chat:
     now = _now_ms()
-    c = Chat(id=_uid(), title=title, created_at=now, updated_at=now, model=model)
+    c = Chat(
+        id=_uid(),
+        title=title,
+        created_at=now,
+        updated_at=now,
+        model=model,
+        project_id=project_id,
+    )
     save(c)
     return c
 
@@ -79,6 +92,9 @@ def get(chat_id: str) -> Chat | None:
         updated_at=d.get("updated_at", 0),
         messages=msgs,
         model=d.get("model", ""),
+        project_id=d.get("project_id", ""),
+        compacted_summary=d.get("compacted_summary", ""),
+        compaction_cursor=int(d.get("compaction_cursor", 0)),
     )
 
 
@@ -117,3 +133,28 @@ def append_message(chat_id: str, role: str, content: str) -> ChatMessage | None:
         c.title = (content.strip().splitlines()[0])[:64] or "New chat"
     save(c)
     return msg
+
+
+def set_compaction(chat_id: str, summary: str, cursor: int) -> Chat | None:
+    """Persist a rolling summary that replaces messages [0:cursor] when the
+    chat is loaded for inference. Stored on disk so the same chat keeps its
+    compacted view across restarts and follow-up turns.
+    """
+    c = get(chat_id)
+    if not c:
+        return None
+    c.compacted_summary = summary
+    c.compaction_cursor = max(0, min(cursor, len(c.messages)))
+    c.updated_at = _now_ms()
+    save(c)
+    return c
+
+
+def set_project(chat_id: str, project_id: str) -> Chat | None:
+    c = get(chat_id)
+    if not c:
+        return None
+    c.project_id = project_id
+    c.updated_at = _now_ms()
+    save(c)
+    return c
