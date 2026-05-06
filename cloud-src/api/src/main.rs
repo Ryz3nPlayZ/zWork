@@ -67,6 +67,13 @@ struct GatewayProvider {
     api_key: String,
     primary_model: String,
     fallback_model: String,
+    protocol: GatewayProtocol,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum GatewayProtocol {
+    OpenAi,
+    Anthropic,
 }
 
 fn env_or(key: &str, default: &str) -> String {
@@ -81,42 +88,20 @@ fn env_bool(key: &str, default: bool) -> bool {
 }
 
 fn load_gateway_providers() -> Vec<GatewayProvider> {
-    let order = std::env::var("ROUTER_PROVIDER_ORDER")
-        .unwrap_or_else(|_| "groq,cerebras,mistral".to_string());
-    let mut providers = Vec::new();
+    let provider = GatewayProvider {
+        name: "DeepSeek".to_string(),
+        base_url: env_or("DEEPSEEK_BASE_URL", "https://api.deepseek.com/anthropic"),
+        api_key: std::env::var("DEEPSEEK_API_KEY").unwrap_or_default(),
+        primary_model: env_or("DEEPSEEK_MODEL_PRIMARY", "deepseek-v4-flash"),
+        fallback_model: String::new(),
+        protocol: GatewayProtocol::Anthropic,
+    };
 
-    for name in order.split(',').map(|item| item.trim().to_ascii_lowercase()) {
-        let provider = match name.as_str() {
-            "groq" => GatewayProvider {
-                name: "Groq".to_string(),
-                base_url: env_or("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
-                api_key: std::env::var("GROQ_API_KEY").unwrap_or_default(),
-                primary_model: env_or("GROQ_MODEL_PRIMARY", "openai/gpt-oss-120b"),
-                fallback_model: env_or("GROQ_MODEL_FALLBACK", "openai/gpt-oss-20b"),
-            },
-            "cerebras" => GatewayProvider {
-                name: "Cerebras".to_string(),
-                base_url: env_or("CEREBRAS_BASE_URL", "https://api.cerebras.ai/v1"),
-                api_key: std::env::var("CEREBRAS_API_KEY").unwrap_or_default(),
-                primary_model: env_or("CEREBRAS_MODEL_PRIMARY", "qwen-3-235b-a22b-instruct-2507"),
-                fallback_model: env_or("CEREBRAS_MODEL_FALLBACK", "llama3.1-8b"),
-            },
-            "mistral" => GatewayProvider {
-                name: "Mistral".to_string(),
-                base_url: env_or("MISTRAL_BASE_URL", "https://api.mistral.ai/v1"),
-                api_key: std::env::var("MISTRAL_API_KEY").unwrap_or_default(),
-                primary_model: env_or("MISTRAL_MODEL_PRIMARY", "mistral-medium-3.5"),
-                fallback_model: env_or("MISTRAL_MODEL_FALLBACK", "devstral-2512"),
-            },
-            _ => continue,
-        };
-
-        if !provider.api_key.trim().is_empty() {
-            providers.push(provider);
-        }
+    if provider.api_key.trim().is_empty() {
+        Vec::new()
+    } else {
+        vec![provider]
     }
-
-    providers
 }
 
 #[derive(Deserialize)]
@@ -1230,12 +1215,15 @@ async fn ai_proxy(
     let body_bytes = axum::body::to_bytes(req.into_body(), 1024 * 1024 * 10)
         .await
         .map_err(|_| (StatusCode::BAD_REQUEST, "request_body_too_large".to_string()))?;
-    let mut body_json: Value =
+    let body_json: Value =
         serde_json::from_slice(&body_bytes).map_err(|_| (StatusCode::BAD_REQUEST, "invalid_chat_payload".to_string()))?;
 
     let mut failures: Vec<String> = Vec::new();
 
     for provider in &state.gateway.providers {
+        if provider.protocol != GatewayProtocol::OpenAi {
+            continue;
+        }
         let models = if provider.fallback_model.trim().is_empty()
             || provider.fallback_model.trim() == provider.primary_model.trim()
         {
@@ -1251,7 +1239,7 @@ async fn ai_proxy(
             }
 
             let endpoint = format!("{}/chat/completions", provider.base_url.trim_end_matches('/'));
-            let mut builder = state
+            let builder = state
                 .http_client
                 .post(endpoint)
                 .header("Content-Type", "application/json")
@@ -1339,6 +1327,166 @@ async fn ai_proxy(
             );
             return Ok(response);
         }
+    }
+
+    if let Some(request_id) = request_id {
+        finish_gateway_request(&state, request_id, Some(StatusCode::BAD_GATEWAY.as_u16() as i32)).await;
+    }
+
+    Err((
+        StatusCode::BAD_GATEWAY,
+        format!("router_upstreams_failed: {}", failures.join(" | ")),
+    ))
+}
+
+async fn ai_proxy_anthropic(
+    State(state): State<AppState>,
+    req: Request<axum::body::Body>,
+) -> Result<Response<axum::body::Body>, (StatusCode, String)> {
+    if !state.features.hosted_gateway {
+        return Err((StatusCode::NOT_FOUND, "hosted_gateway_disabled".to_string()));
+    }
+
+    let headers = req.headers().clone();
+    let access = ensure_gateway_access(&state, &headers)
+        .await
+        .map_err(|status| (status, "gateway_access_denied".to_string()))?;
+    let run_id = run_id_from_headers(&headers);
+    let request_kind = request_kind_from_headers(&headers);
+    let app_user = resolve_app_user(&state, access)
+        .await
+        .map_err(|status| (status, "gateway_user_resolution_failed".to_string()))?;
+
+    if let (Some(user), RequestKind::Root) = (&app_user, request_kind) {
+        enforce_root_rate_limit(&state, &user.user_id)
+            .await
+            .map_err(|status| {
+                let message = match status {
+                    StatusCode::TOO_MANY_REQUESTS => "root_request_quota_exceeded".to_string(),
+                    StatusCode::CONFLICT => "too_many_active_runs".to_string(),
+                    _ => "gateway_rate_limit_failed".to_string(),
+                };
+                (status, message)
+            })?;
+    }
+
+    let request_id = if let Some(user) = &app_user {
+        Some(
+            insert_gateway_request(&state, &user.user_id, &run_id, request_kind)
+                .await
+                .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "gateway_request_log_failed".to_string()))?,
+        )
+    } else {
+        None
+    };
+
+    if state.gateway.providers.is_empty() {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "hosted_gateway_not_configured".to_string(),
+        ));
+    }
+
+    let body_bytes = axum::body::to_bytes(req.into_body(), 1024 * 1024 * 10)
+        .await
+        .map_err(|_| (StatusCode::BAD_REQUEST, "request_body_too_large".to_string()))?;
+    let mut body_json: Value =
+        serde_json::from_slice(&body_bytes).map_err(|_| (StatusCode::BAD_REQUEST, "invalid_messages_payload".to_string()))?;
+
+    let mut failures: Vec<String> = Vec::new();
+
+    for provider in &state.gateway.providers {
+        if provider.protocol != GatewayProtocol::Anthropic {
+            continue;
+        }
+
+        if let Some(obj) = body_json.as_object_mut() {
+            obj.insert("model".to_string(), Value::String(provider.primary_model.clone()));
+            obj.insert("stream".to_string(), Value::Bool(true));
+        }
+
+        let endpoint = format!("{}/v1/messages", provider.base_url.trim_end_matches('/'));
+        let resp = match state
+            .http_client
+            .post(endpoint)
+            .header("Content-Type", "application/json")
+            .header("x-api-key", provider.api_key.clone())
+            .header("anthropic-version", "2023-06-01")
+            .json(&body_json)
+            .send()
+            .await
+        {
+            Ok(resp) => resp,
+            Err(_) => {
+                failures.push(format!("{}:{} unreachable", provider.name, provider.primary_model));
+                continue;
+            }
+        };
+
+        let status = resp.status();
+        let upstream_headers = resp.headers().clone();
+        if !status.is_success() {
+            let detail = resp
+                .text()
+                .await
+                .unwrap_or_default()
+                .chars()
+                .take(180)
+                .collect::<String>();
+            failures.push(format!("{}:{} {} {}", provider.name, provider.primary_model, status.as_u16(), detail));
+            continue;
+        }
+
+        let response_bytes = match resp.bytes().await {
+            Ok(bytes) => bytes.to_vec(),
+            Err(_) => {
+                failures.push(format!("{}:{} response_read_failed", provider.name, provider.primary_model));
+                continue;
+            }
+        };
+
+        if let Some(request_id) = request_id {
+            mark_gateway_request_upstream(
+                &state,
+                request_id,
+                &provider.name,
+                &provider.primary_model,
+                None,
+                None,
+                None,
+            )
+            .await;
+            finish_gateway_request(&state, request_id, Some(status.as_u16() as i32)).await;
+        }
+        upsert_provider_snapshot(
+            &state,
+            &provider.name,
+            &provider.primary_model,
+            status.as_u16() as i32,
+            &upstream_headers,
+        )
+        .await;
+
+        let body = axum::body::Body::from(response_bytes);
+        let mut response = Response::new(body);
+        *response.status_mut() = status;
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/event-stream; charset=utf-8"),
+        );
+        response.headers_mut().insert(
+            HeaderName::from_static("x-zwork-router-provider"),
+            HeaderValue::from_str(&provider.name).unwrap_or_else(|_| HeaderValue::from_static("zwork-router")),
+        );
+        response.headers_mut().insert(
+            HeaderName::from_static("x-zwork-router-model"),
+            HeaderValue::from_str(&provider.primary_model).unwrap_or_else(|_| HeaderValue::from_static("unknown")),
+        );
+        response.headers_mut().insert(
+            HeaderName::from_static("x-zwork-router-label"),
+            HeaderValue::from_str(&state.gateway.router_label).unwrap_or_else(|_| HeaderValue::from_static("zWork Router")),
+        );
+        return Ok(response);
     }
 
     if let Some(request_id) = request_id {
@@ -2380,7 +2528,18 @@ async fn analytics_summary(
             .gateway
             .providers
             .iter()
-            .map(|provider| format!("{} ({}, fallback {})", provider.name, provider.primary_model, provider.fallback_model))
+            .map(|provider| {
+                if provider.fallback_model.trim().is_empty()
+                    || provider.fallback_model.trim() == provider.primary_model.trim()
+                {
+                    format!("{} ({})", provider.name, provider.primary_model)
+                } else {
+                    format!(
+                        "{} ({}, fallback {})",
+                        provider.name, provider.primary_model, provider.fallback_model
+                    )
+                }
+            })
             .collect::<Vec<_>>()
             .join(" · ");
         format!("{} is ready via {}", state.gateway.router_label, provider_list)
@@ -2617,6 +2776,7 @@ async fn main() {
         .route("/api/telemetry/event", post(ingest_telemetry))
         .route("/api/chat/stream", post(ai_proxy))
         .route("/api/v1/chat/completions", post(ai_proxy))
+        .route("/api/v1/messages", post(ai_proxy_anthropic))
         .route("/api/webhooks/stripe", post(stripe_webhook))
         .route("/api/billing/checkout", post(billing_checkout))
         .route("/api/billing/portal", post(billing_portal))

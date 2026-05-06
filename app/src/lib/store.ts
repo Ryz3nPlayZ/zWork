@@ -21,7 +21,8 @@ const LEGACY_MANAGED_MODEL_IDS = new Set([
 ]);
 const ROUTER_MODEL_ID = "zwork-router";
 const ROUTER_MODEL_NAME = "zWork Router";
-const ROUTER_BASE_URL = "https://api.tryzwork.app/api/v1";
+const ROUTER_BASE_URL = "https://api.tryzwork.app/api";
+const ROUTER_TARGET_MODEL_ID = "deepseek-v4-flash";
 
 export type Role = "user" | "assistant";
 
@@ -198,17 +199,29 @@ function stripArtifactJunk(text: string): string {
 }
 
 function needsManagedRouterMigration(settings: SettingsPublic): boolean {
-  const baseUrl = settings.provider_config?.openai?.base_url || "";
   const defaultModel = settings.default_model || "";
   const customModels = settings.custom_models || [];
+  const routerModel = customModels.find((model) => model.id === ROUTER_MODEL_ID);
   const hasLegacyCustomModel = customModels.some((model) => LEGACY_MANAGED_MODEL_IDS.has(model.id) || LEGACY_MANAGED_MODEL_IDS.has(model.model_id));
-  return LEGACY_MANAGED_BASE_URLS.has(baseUrl) || LEGACY_MANAGED_MODEL_IDS.has(defaultModel) || hasLegacyCustomModel;
+  const routerNeedsUpgrade = !!routerModel && (
+    routerModel.credential !== "zwork_router" ||
+    routerModel.shape !== "anthropic" ||
+    routerModel.model_id !== ROUTER_TARGET_MODEL_ID ||
+    routerModel.base_url_override !== ROUTER_BASE_URL
+  );
+  return (
+    LEGACY_MANAGED_BASE_URLS.has(settings.provider_config?.openai?.base_url || "") ||
+    LEGACY_MANAGED_BASE_URLS.has(settings.provider_config?.zwork_router?.base_url || "") ||
+    LEGACY_MANAGED_MODEL_IDS.has(defaultModel) ||
+    hasLegacyCustomModel ||
+    routerNeedsUpgrade
+  );
 }
 
 async function migrateManagedRouterSettings(settings: SettingsPublic): Promise<SettingsPublic> {
   await api.putSettings({
     provider_config: {
-      openai: { base_url: ROUTER_BASE_URL },
+      zwork_router: { base_url: ROUTER_BASE_URL },
     },
     default_model: ROUTER_MODEL_ID,
   });
@@ -222,9 +235,9 @@ async function migrateManagedRouterSettings(settings: SettingsPublic): Promise<S
   await api.upsertCustomModel({
     id: ROUTER_MODEL_ID,
     name: ROUTER_MODEL_NAME,
-    shape: "openai",
-    credential: "openai",
-    model_id: ROUTER_MODEL_ID,
+    shape: "anthropic",
+    credential: "zwork_router",
+    model_id: ROUTER_TARGET_MODEL_ID,
     base_url_override: ROUTER_BASE_URL,
   });
 

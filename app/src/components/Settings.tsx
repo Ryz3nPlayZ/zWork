@@ -88,8 +88,6 @@ const SECTION_META: Record<Section, { title: string; description: string; icon: 
 // the dedicated credential slot so we don't end up with one model's URL
 // shoved into a different credential.
 const NATIVE_PRESET_HINTS: Array<{ id: string; label: string; matcher: RegExp }> = [
-  { id: "groq", label: "Groq", matcher: /\bapi\.groq\.com\b/i },
-  { id: "cerebras", label: "Cerebras", matcher: /\bapi\.cerebras\.ai\b/i },
   { id: "deepseek", label: "DeepSeek", matcher: /\bapi\.deepseek\.com\b/i },
   { id: "zai", label: "z.ai", matcher: /\bapi\.z\.ai\b/i },
 ];
@@ -120,14 +118,6 @@ const CREDENTIAL_PLACEHOLDERS: Record<string, { keyPlaceholder: string; baseUrlP
   claude_code: {
     keyPlaceholder: "(reuses local credentials — no key needed)",
     baseUrlPlaceholder: "",
-  },
-  groq: {
-    keyPlaceholder: "gsk_…",
-    baseUrlPlaceholder: "https://api.groq.com/openai/v1",
-  },
-  cerebras: {
-    keyPlaceholder: "csk-…",
-    baseUrlPlaceholder: "https://api.cerebras.ai/v1",
   },
   deepseek: {
     keyPlaceholder: "sk-…",
@@ -280,6 +270,14 @@ function ModelsPanel({
   const maskedKey = settings?.api_keys?.[form.credential] || "";
   const isKeyless = form.credential === "claude_code";
   const presetHint = detectPresetCredentialHint(form.base_url_override, form.credential);
+  const deprecatedCredentialLabel =
+    form.credential === "groq"
+      ? "Groq"
+      : form.credential === "cerebras"
+        ? "Cerebras"
+        : form.credential === "zwork_router"
+          ? "zWork Router"
+        : null;
 
   // Clear the API-key field when the user switches credentials.
   useEffect(() => {
@@ -431,20 +429,30 @@ function ModelsPanel({
                 value={form.credential}
                 onChange={(e) => {
                   const cred = e.target.value;
-                  const shape = cred === "anthropic" || cred === "claude_code" ? "anthropic" : "openai";
+                  const shape = cred === "anthropic" || cred === "claude_code" || cred === "zwork_router" ? "anthropic" : "openai";
                   setForm((f) => ({ ...f, credential: cred, shape }));
                 }}
                 className="block w-full rounded-lg border border-line bg-paper px-3 py-2 text-[12.5px] text-ink focus:border-line-strong focus:outline-none"
                 >
+                  {deprecatedCredentialLabel && (
+                    <option value={form.credential}>
+                      {form.credential === "zwork_router" ? `${deprecatedCredentialLabel} (Managed)` : `${deprecatedCredentialLabel} (Deprecated)`}
+                    </option>
+                  )}
                   <option value="anthropic">Anthropic (BYOK)</option>
                   <option value="openai">OpenAI-compatible (BYOK)</option>
-                  <option value="groq">Groq (BYOK)</option>
-                  <option value="cerebras">Cerebras (BYOK)</option>
                   <option value="deepseek">DeepSeek (BYOK)</option>
                   <option value="zai">z.ai (BYOK)</option>
                   <option value="claude_code">Local config (reuse credentials)</option>
                 </select>
             </Field>
+            {deprecatedCredentialLabel && (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] leading-5 text-amber-800">
+                {form.credential === "zwork_router"
+                  ? `${deprecatedCredentialLabel} is managed by zWork and pinned to DeepSeek V4 Flash.`
+                  : `${deprecatedCredentialLabel} is deprecated and hidden for new setups. Migrate this model to a stronger provider.`}
+              </p>
+            )}
 
             {/* Credential status + inline key + base URL */}
             {isKeyless ? (

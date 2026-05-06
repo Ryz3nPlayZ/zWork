@@ -82,19 +82,10 @@ STRIPE_WEBHOOK_SECRET=...
 STRIPE_PRICE_PRO_MONTHLY=price_...
 STRIPE_PRICE_PRO_ANNUAL=price_...
 
-ROUTER_PROVIDER_ORDER=groq,cerebras,mistral
-GROQ_API_KEY=...
-GROQ_BASE_URL=https://api.groq.com/openai/v1
-GROQ_MODEL_PRIMARY=openai/gpt-oss-120b
-GROQ_MODEL_FALLBACK=openai/gpt-oss-20b
-CEREBRAS_API_KEY=...
-CEREBRAS_BASE_URL=https://api.cerebras.ai/v1
-CEREBRAS_MODEL_PRIMARY=qwen-3-235b-a22b-instruct-2507
-CEREBRAS_MODEL_FALLBACK=llama3.1-8b
-MISTRAL_API_KEY=...
-MISTRAL_BASE_URL=https://api.mistral.ai/v1
-MISTRAL_MODEL_PRIMARY=mistral-medium-3.5
-MISTRAL_MODEL_FALLBACK=devstral-2512
+DEEPSEEK_API_KEY=...
+DEEPSEEK_BASE_URL=https://api.deepseek.com/anthropic
+DEEPSEEK_MODEL_PRIMARY=deepseek-v4-flash
+DEEPSEEK_MODEL_FALLBACK=
 
 AUTH_INTERNAL_BASE=http://better_auth:3000/api/auth
 AUTH_SESSION_URL=http://better_auth:3000/api/auth/get-session

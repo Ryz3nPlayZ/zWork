@@ -510,12 +510,16 @@ async def onboard_complete(body: OnboardBody) -> dict:
         model_id = cred.get("model_id", "")
         model_name = cred.get("model_name", model_id)
 
-        if credkey in ("anthropic", "openai") and api_key:
+        if api_key:
             s.api_keys[credkey] = api_key
         if base_url:
             s.provider_config.setdefault(credkey, {})["base_url"] = base_url
         if model_id:
-            custom_id = providers.ZWORK_ROUTER_ZWORK_ID if model_id == providers.ZWORK_ROUTER_MODEL_ID else None
+            custom_id = (
+                providers.ZWORK_ROUTER_ZWORK_ID
+                if credkey == "zwork_router" or model_id == providers.ZWORK_ROUTER_MODEL_ID
+                else None
+            )
             if custom_id and not home_mod.is_safe_id(custom_id):
                 raise HTTPException(400, "invalid model_id")
             m = settings_mod.upsert_custom_model(
@@ -525,7 +529,7 @@ async def onboard_complete(body: OnboardBody) -> dict:
                 shape=shape,
                 credential=credkey,
                 model_id=model_id,
-                base_url_override=base_url if credkey == "openai" else "",
+                base_url_override=base_url if credkey in ("openai", "anthropic", "zwork_router") else "",
             )
             s.default_model = m.id
         if body.telemetry_enabled is not None:

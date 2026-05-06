@@ -36,7 +36,9 @@ MAX_TURNS = 24
 ZWORK_ROUTER_MODEL_ID = "zwork-router"
 ZWORK_ROUTER_ZWORK_ID = "zwork-router"
 ZWORK_ROUTER_MODEL_NAME = "zWork Router"
-ZWORK_ROUTER_BASE_URL = "https://api.tryzwork.app/api/v1"
+ZWORK_ROUTER_BASE_URL = "https://api.tryzwork.app/api"
+ZWORK_ROUTER_TARGET_MODEL_ID = "deepseek-v4-flash"
+DEEPSEEK_ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic"
 PREV1_OLLAMA_MODEL_ID = "qwen3.5:cloud"
 PREV1_OLLAMA_ZWORK_ID = "qwen3-5-cloud-ollama"
 
@@ -51,6 +53,8 @@ def _max_tokens_for(model_id: str) -> int:
         return 8192
     if "claude" in mid:
         return 8192
+    if "deepseek-v4-flash" in mid:
+        return 65536
     # OpenAI/OpenAI-compatible: not used for `max_tokens` the same way; safe default
     return 16384
 
@@ -86,6 +90,10 @@ def _apply_anthropic_cache(
     if tools_out:
         tools_out[-1]["cache_control"] = {"type": "ephemeral"}
     return system_blocks, tools_out
+
+
+def _supports_anthropic_cache(base_url: str) -> bool:
+    return "api.anthropic.com" in (base_url or "").lower()
 
 
 # ---------------- Credential resolution ----------------
@@ -127,7 +135,7 @@ OPENAI_COMPAT_PROVIDERS: dict[str, dict[str, str]] = {
 
 
 def _shape_for_credential(credential: str) -> str:
-    if credential == "claude_code" or credential == "anthropic":
+    if credential in ("claude_code", "anthropic", "zwork_router"):
         return "anthropic"
     return "openai"
 
@@ -214,6 +222,20 @@ def resolve(credential: str, s: settings_mod.Settings, override_base_url: str = 
             return Credentials("anthropic", tok, base.rstrip("/"), "claude_code")
         return None
 
+    if credential == "zwork_router":
+        token = (s.api_keys.get("zwork_router") or s.api_keys.get("openai") or "").strip()
+        if not token:
+            token = (os.environ.get("ZWORK_GATEWAY_TOKEN") or "").strip()
+        if token:
+            base = (
+                override_base_url
+                or (s.provider_config.get("zwork_router", {}).get("base_url") or "")
+                or (s.provider_config.get("openai", {}).get("base_url") or "")
+                or ZWORK_ROUTER_BASE_URL
+            )
+            return Credentials("anthropic", token, base.rstrip("/"), "byok")
+        return None
+
     if credential in OPENAI_COMPAT_PROVIDERS:
         spec = OPENAI_COMPAT_PROVIDERS[credential]
         configured_base = (
@@ -240,7 +262,7 @@ def resolve(credential: str, s: settings_mod.Settings, override_base_url: str = 
 
 def credential_status(s: settings_mod.Settings) -> dict:
     out: dict[str, dict] = {}
-    sources = ("anthropic", "openai", "claude_code", *OPENAI_COMPAT_PROVIDERS.keys())
+    sources = ("anthropic", "openai", "claude_code", "zwork_router", *OPENAI_COMPAT_PROVIDERS.keys())
     for src in sources:
         c = resolve(src, s)
         out[src] = {
@@ -296,6 +318,7 @@ def _subtitle_for(m: dict, cred: Optional[Credentials]) -> str:
         "anthropic": "Anthropic-compatible",
         "openai": "OpenAI-compatible",
         "claude_code": "via local credentials",
+        "zwork_router": "Managed via zWork Router",
     }.get(credential)
     if cred_label is None:
         spec = OPENAI_COMPAT_PROVIDERS.get(credential)
@@ -347,6 +370,7 @@ async def _anthropic_turn(
     messages: list[dict],
     model_id: str,
     system: str,
+    extra_headers: Optional[dict[str, str]] = None,
 ) -> AsyncIterator[dict]:
     """Run one Anthropic turn. Yields UI events and finally a 'turn_end' event
     with {content_blocks: [...], stop_reason: str | None}.
@@ -364,8 +388,14 @@ async def _anthropic_turn(
     else:
         headers["authorization"] = f"Bearer {creds.api_key}"
         headers["x-api-key"] = creds.api_key
+    if extra_headers:
+        headers.update(extra_headers)
 
-    system_blocks, tools_blocks = _apply_anthropic_cache(system, _anthropic_tools())
+    if _supports_anthropic_cache(creds.base_url):
+        system_blocks, tools_blocks = _apply_anthropic_cache(system, _anthropic_tools())
+    else:
+        system_blocks = [{"type": "text", "text": system}] if system else []
+        tools_blocks = _anthropic_tools()
 
     body: dict = {
         "model": model_id,
@@ -397,6 +427,16 @@ async def _anthropic_turn(
                     yield {"type": "error", "text": f"{resp.status_code}: {text[:500]}"}
                     yield {"type": "turn_end", "content_blocks": [], "stop_reason": "error"}
                     return
+                router_provider = resp.headers.get("x-zwork-router-provider") or ""
+                router_model = resp.headers.get("x-zwork-router-model") or model_id
+                router_label = resp.headers.get("x-zwork-router-label") or ""
+                if router_provider or router_label:
+                    yield {
+                        "type": "meta",
+                        "provider": router_label or router_provider,
+                        "resolved_model": router_model,
+                        "upstream_provider": router_provider or router_label,
+                    }
 
                 started_text = False
                 async for line in resp.aiter_lines():
@@ -762,11 +802,22 @@ async def _run_anthropic_loop(
     model_id: str,
 ) -> AsyncIterator[dict]:
     """Multi-turn tool loop for Anthropic-shape APIs."""
+    run_id = str(uuid.uuid4())
     for turn in range(MAX_TURNS):
         content_blocks: list[dict] = []
         stop_reason: Optional[str] = None
+        request_kind = "root" if turn == 0 else "continuation"
 
-        async for evt in _anthropic_turn(creds, convo, model_id, system):
+        async for evt in _anthropic_turn(
+            creds,
+            convo,
+            model_id,
+            system,
+            extra_headers={
+                "x-zwork-run-id": run_id,
+                "x-zwork-request-kind": request_kind,
+            },
+        ):
             t = evt.get("type")
             if t == "turn_end":
                 content_blocks = evt.get("content_blocks") or []

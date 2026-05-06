@@ -11,6 +11,7 @@ import { api, type OnboardingAnswer, type OnboardingCredential } from "../lib/ap
 import LightRays from "./LightRays";
 
 const ZWORK_ROUTER_MODEL_ID = "zwork-router";
+const ZWORK_ROUTER_TARGET_MODEL_ID = "deepseek-v4-flash";
 
 /* ------------------------------------------------------------------ *
  *  Question model
@@ -186,7 +187,7 @@ interface CredentialPreset {
   label: string;
   subtitle: string;
   shape: "anthropic" | "openai";
-  credential: "anthropic" | "openai" | "claude_code";
+  credential: "anthropic" | "openai" | "claude_code" | "zwork_router";
   defaultBaseUrl: string;
   defaultModelId: string;
   keyless?: boolean;
@@ -198,11 +199,11 @@ const PRESETS: CredentialPreset[] = [
   {
     id: "zwork_managed",
     label: "zWork Router",
-    subtitle: "Use the hosted zWork router with your signed-in account",
-    shape: "openai",
-    credential: "openai",
-    defaultBaseUrl: "https://api.tryzwork.app/api/v1",
-    defaultModelId: ZWORK_ROUTER_MODEL_ID,
+    subtitle: "Use the hosted zWork router pinned to DeepSeek V4 Flash",
+    shape: "anthropic",
+    credential: "zwork_router",
+    defaultBaseUrl: "https://api.tryzwork.app/api",
+    defaultModelId: ZWORK_ROUTER_TARGET_MODEL_ID,
     keyless: true,
     managed: true,
     recommended: true,
@@ -256,7 +257,7 @@ export const MODEL_CATALOG: Record<CredentialPreset["id"], ModelChoice[]> = {
     {
       id: ZWORK_ROUTER_MODEL_ID,
       label: "zWork Router",
-      description: "Hosted through the zWork router with automatic provider fallback.",
+      description: "Hosted through the zWork router and pinned to DeepSeek V4 Flash.",
       cost: "Managed by zWork",
     },
   ],

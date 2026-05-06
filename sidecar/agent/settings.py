@@ -1,13 +1,13 @@
 """zWork settings store.
 
 Two credential "shapes":
-  - anthropic  (Anthropic-compatible API — Anthropic itself, z.ai, etc.)
+  - anthropic  (Anthropic-compatible API — Anthropic or Anthropic-style endpoints)
   - openai     (OpenAI-compatible API — OpenAI, OpenRouter, Ollama, ...)
 
 Each has a single API key + optional base URL in zWork settings.
 
 Models are user-defined `CustomModel` entries, each pointing at a credential
-source (`anthropic` | `openai` | `claude_code`), a real `model_id` to send
+source (`anthropic` | `openai` | `claude_code` | `zwork_router`), a real `model_id` to send
 to that API, and an optional per-model base URL override.
 """
 from __future__ import annotations
@@ -270,12 +270,14 @@ class Shape:
 # Credentials zWork can use as a model's "credential source".
 # Each one stores its own API key in `Settings.api_keys[credential]` and its
 # own base URL in `Settings.provider_config[credential]["base_url"]`.
+# `zwork_router` is a managed Anthropic-compatible slot used for hosted routing.
 # OpenAI-compatible providers (groq, cerebras, deepseek, zai) all speak the
 # OpenAI shape but get their own slot so users can have multiple keys at once.
 KNOWN_CREDENTIALS: tuple[str, ...] = (
     "anthropic",
     "openai",
     "claude_code",
+    "zwork_router",
     "groq",
     "cerebras",
     "deepseek",

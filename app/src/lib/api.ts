@@ -138,7 +138,7 @@ export interface OnboardingAnswer {
 
 export interface OnboardingCredential {
   shape: "anthropic" | "openai";
-  credential: "anthropic" | "openai" | "claude_code";
+  credential: "anthropic" | "openai" | "claude_code" | "zwork_router";
   api_key: string;
   base_url: string;
   model_id: string;
