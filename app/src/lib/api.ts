@@ -389,7 +389,9 @@ export type StreamEvent =
   | { type: "error"; text: string }
   | { type: "needs_setup" }
   | { type: "activity"; id: string; label: string; icon?: string; done?: boolean }
-  | { type: "tool_result"; tool: string; ok: boolean; message: string };
+  | { type: "tool_result"; tool: string; ok: boolean; message: string }
+  | { type: "permission"; tool: string; risk: "safe" | "sensitive" | "destructive"; reason: string; blocked: boolean }
+  | { type: "compaction"; summarized_messages: number; kept_recent: number; summary_chars?: number; status: "summarizing" | "done" | "failed"; error?: string };
 
 export async function streamChat(
   body: {
@@ -397,6 +399,9 @@ export async function streamChat(
     message: string;
     model?: string;
     artifact_mode?: boolean;
+    project_id?: string;
+    plan_mode?: boolean;
+    auto_approve_destructive?: boolean;
     attachments?: Array<{
       client_id?: string | null;
       name: string;

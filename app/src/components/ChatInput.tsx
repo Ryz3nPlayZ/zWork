@@ -7,7 +7,20 @@ import {
   type ClipboardEvent,
   type KeyboardEvent,
 } from "react";
-import { ArrowUp, Globe, Layers3, Paperclip, Square, X, FileText, Image as ImageIcon } from "lucide-react";
+import {
+  ArrowUp,
+  Eye,
+  EyeOff,
+  Globe,
+  Layers3,
+  Paperclip,
+  Shield,
+  ShieldAlert,
+  Square,
+  X,
+  FileText,
+  Image as ImageIcon,
+} from "lucide-react";
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
 import { api, type UploadedFile } from "../lib/api";
@@ -61,6 +74,10 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend }:
   const toggleWeb = useApp((s) => s.toggleWeb);
   const focusChatInput = useApp((s) => s.focusChatInput);
   const openSettings = useApp((s) => s.openSettings);
+  const planMode = useApp((s) => s.planMode);
+  const setPlanMode = useApp((s) => s.setPlanMode);
+  const autoApproveDestructive = useApp((s) => s.autoApproveDestructive);
+  const setAutoApproveDestructive = useApp((s) => s.setAutoApproveDestructive);
   const working = useApp((s) => {
     const id = s.activeChatId;
     return id ? (s.chats[id]?.working ?? false) : false;
@@ -253,6 +270,8 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend }:
     onSend?.(text);
     void send(text, {
       artifactMode,
+      planMode,
+      autoApproveDestructive,
       attachments: attachments
         .filter((a): a is ComposerAttachment & { uploadedPath: string } => !!a.uploadedPath)
         .map((a) => ({
@@ -407,24 +426,42 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend }:
             onClick={() => fileInputRef.current?.click()}
           />
           <IconButton
-          icon={<Layers3 />}
-          label={artifactMode ? "Artifacts: on" : "Artifacts: off"}
-          tooltipSide="top"
-          variant="ghost"
-          size="md"
-          active={artifactMode}
-          onClick={() => setArtifactMode((v) => !v)}
-        />
-        <IconButton
-          icon={<Globe />}
-          label={webSearch ? "Web search: on" : "Web search"}
-          tooltipSide="top"
-          variant="ghost"
-          size="md"
-          active={webSearch}
-          onClick={toggleWeb}
-        />
-      </div>
+            icon={<Layers3 />}
+            label={artifactMode ? "Artifacts: on" : "Artifacts: off"}
+            tooltipSide="top"
+            variant="ghost"
+            size="md"
+            active={artifactMode}
+            onClick={() => setArtifactMode((v) => !v)}
+          />
+          <IconButton
+            icon={<Globe />}
+            label={webSearch ? "Web search: on" : "Web search"}
+            tooltipSide="top"
+            variant="ghost"
+            size="md"
+            active={webSearch}
+            onClick={toggleWeb}
+          />
+          <IconButton
+            icon={planMode ? <Eye /> : <EyeOff />}
+            label={planMode ? "Plan mode: on (read-only)" : "Plan mode: off"}
+            tooltipSide="top"
+            variant="ghost"
+            size="md"
+            active={planMode}
+            onClick={() => setPlanMode(!planMode)}
+          />
+          <IconButton
+            icon={autoApproveDestructive ? <ShieldAlert /> : <Shield />}
+            label={autoApproveDestructive ? "Auto-approve destructive: on" : "Auto-approve destructive: off"}
+            tooltipSide="top"
+            variant="ghost"
+            size="md"
+            active={autoApproveDestructive}
+            onClick={() => setAutoApproveDestructive(!autoApproveDestructive)}
+          />
+        </div>
       <div className="flex items-center gap-2">
         <ModelPicker />
           <button

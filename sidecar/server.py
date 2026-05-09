@@ -1251,6 +1251,7 @@ async def chat_stream(req: StreamRequest):
                 model_id,
                 s,
                 run_ctx,
+                project_id=req.project_id,
                 plan_mode=req.plan_mode,
                 auto_approve_destructive=req.auto_approve_destructive,
             )):

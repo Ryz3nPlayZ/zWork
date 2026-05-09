@@ -1437,13 +1437,9 @@ async fn ai_proxy_anthropic(
             continue;
         }
 
-        let response_bytes = match resp.bytes().await {
-            Ok(bytes) => bytes.to_vec(),
-            Err(_) => {
-                failures.push(format!("{}:{} response_read_failed", provider.name, provider.primary_model));
-                continue;
-            }
-        };
+        // Stream the response instead of reading it all into memory
+        let upstream_body = resp.bytes_stream();
+        let body = axum::body::Body::from_stream(upstream_body);
 
         if let Some(request_id) = request_id {
             mark_gateway_request_upstream(
@@ -1466,8 +1462,6 @@ async fn ai_proxy_anthropic(
             &upstream_headers,
         )
         .await;
-
-        let body = axum::body::Body::from(response_bytes);
         let mut response = Response::new(body);
         *response.status_mut() = status;
         response.headers_mut().insert(

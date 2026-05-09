@@ -2,10 +2,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import httpx
 
-from . import providers
+if TYPE_CHECKING:
+    from . import providers
+
+# For runtime, we'll use Any for the type hints to avoid circular import
+from typing import Any
 
 
 _CHARS_PER_TOKEN = 4
@@ -93,7 +98,7 @@ SUMMARIZE_PROMPT = (
 async def summarize(
     middle_messages: list[dict],
     *,
-    creds: providers.Credentials,
+    creds: Any,  # providers.Credentials - use Any to avoid circular import
     model_id: str,
     shape: str,
     timeout: float = 90.0,

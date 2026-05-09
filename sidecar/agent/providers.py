@@ -29,6 +29,14 @@ from typing import Any, AsyncIterator, Optional
 import httpx
 
 from . import detect, settings as settings_mod
+from .compaction import (
+    estimate_chars,
+    plan_compaction,
+    render_summary_message,
+    should_compact,
+    summarize,
+)
+from .projects import get as project_get
 from .runtime import RunContext, run_scope
 from .tools import TOOL_SCHEMAS, execute_tool, filter_tools_for_plan_mode, parse_tool_calls, tool_risk
 
@@ -756,6 +764,41 @@ async def _openai_turn(
 
 # ---------------- Agentic harness ----------------
 
+def _build_system_prompt(
+    base_system: str,
+    *,
+    project_id: str | None = None,
+    project_context: str | None = None,
+    plan_mode: bool = False,
+    auto_approve_destructive: bool = False,
+) -> str:
+    """Build the full system prompt with optional blocks for project context, plan mode, and permissions."""
+    parts = [base_system] if base_system else []
+
+    if project_context and project_context.strip():
+        parts.append(f"## Project context\n\n{project_context.strip()}")
+
+    if plan_mode:
+        parts.append(
+            "## Plan mode is ACTIVE\n\n"
+            "You are in PLAN MODE — a read-only exploration mode. You have access to read-only "
+            "tools (read_file, list_dir, read_skill, extract_document, web_search) but NO write "
+            "or execute tools. Your job is to investigate the codebase, understand the problem, "
+            "and propose a solution — NOT to make changes. Explain your findings and outline "
+            "the steps you would take if the user exits plan mode."
+        )
+
+    if not auto_approve_destructive:
+        parts.append(
+            "## Permission gate\n\n"
+            "Destructive operations (recursive delete, force push, disk formatting, database "
+            "drops, system shutdown, etc.) require user approval. When you need to perform such "
+            "an action, stop and ask the user explicitly — do NOT attempt to execute it."
+        )
+
+    return "\n\n".join(parts)
+
+
 def _anthropic_convert_input_messages(messages: list[dict]) -> tuple[str, list[dict]]:
     """Pull out the system prompt and convert role=user/assistant to Anthropic shape.
     For the first turn, messages are simple {role, content} text entries.
@@ -774,10 +817,21 @@ async def stream_chat(
     s: settings_mod.Settings,
     run_ctx: RunContext | None = None,
     *,
+    project_id: str | None = None,
     plan_mode: bool = False,
     auto_approve_destructive: bool = False,
 ) -> AsyncIterator[dict]:
-    """Top-level chat stream. Handles the multi-turn tool loop."""
+    """Top-level chat stream. Handles the multi-turn tool loop.
+
+    Args:
+        messages: Chat history as {role, content} dicts
+        zwork_model_id: Model selector from providers.lookup_model
+        s: Settings for credential resolution
+        run_ctx: Optional RunContext for logging/telemetry
+        project_id: If set, injects project.md context into system prompt
+        plan_mode: When True, only read-only tools are exposed
+        auto_approve_destructive: When False, destructive tools are refused
+    """
     model = lookup_model(zwork_model_id, s)
     if model is None:
         yield {
@@ -810,13 +864,67 @@ async def stream_chat(
     ctx = run_ctx or RunContext(run_id=str(uuid.uuid4()), chat_id="", requested_model_id=zwork_model_id)
     ctx.resolved_model_id = real_model_id
 
+    # ---- Compaction: summarize long conversations ----
+    if should_compact(messages):
+        plan = plan_compaction(messages)
+        yield {
+            "type": "compaction",
+            "summarized_messages": len(plan.middle),
+            "kept_recent": len(plan.keep_tail),
+            "status": "summarizing",
+        }
+        try:
+            summary = await summarize(
+                plan.middle,
+                creds=creds,
+                model_id=real_model_id,
+                shape=model["shape"],
+            )
+            messages = [
+                *plan.keep_head,
+                render_summary_message(summary),
+                *plan.keep_tail,
+            ]
+            yield {
+                "type": "compaction",
+                "summarized_messages": len(plan.middle),
+                "kept_recent": len(plan.keep_tail),
+                "summary_chars": len(summary),
+                "status": "done",
+            }
+        except Exception as e:
+            yield {
+                "type": "compaction",
+                "summarized_messages": 0,
+                "kept_recent": len(messages),
+                "status": "failed",
+                "error": str(e),
+            }
+
+    # ---- Project context: load project.md if project_id is set ----
+    project_context = None
+    if project_id:
+        try:
+            p = project_get(project_id)
+            if p:
+                project_context = p.get("context") or p.get("md") or None
+        except Exception:
+            pass  # Project loading failures are non-fatal
+
     async with run_scope(ctx):
         ctx.provider_base_url = creds.base_url
         ctx.provider_source = creds.source
         ctx.log("provider_resolved", credential=model["credential"], shape=model["shape"])
 
         if model["shape"] == "anthropic":
-            system, convo = _anthropic_convert_input_messages(messages)
+            base_system, convo = _anthropic_convert_input_messages(messages)
+            system = _build_system_prompt(
+                base_system,
+                project_id=project_id,
+                project_context=project_context,
+                plan_mode=plan_mode,
+                auto_approve_destructive=auto_approve_destructive,
+            )
             async for evt in _run_anthropic_loop(
                 creds,
                 convo,
@@ -830,9 +938,25 @@ async def stream_chat(
                 yield evt
         else:
             # OpenAI: messages already in correct shape (role=system/user/assistant)
+            # Build system prompt with project context and harness blocks
+            openai_messages = []
+            for m in messages:
+                if m.get("role") == "system":
+                    # Replace with enhanced system prompt
+                    base_system = m.get("content", "")
+                    enhanced = _build_system_prompt(
+                        base_system,
+                        project_id=project_id,
+                        project_context=project_context,
+                        plan_mode=plan_mode,
+                        auto_approve_destructive=auto_approve_destructive,
+                    )
+                    openai_messages.append({"role": "system", "content": enhanced})
+                else:
+                    openai_messages.append(m)
             async for evt in _run_openai_loop(
                 creds,
-                list(messages),
+                openai_messages,
                 real_model_id,
                 ctx,
                 plan_mode=plan_mode,

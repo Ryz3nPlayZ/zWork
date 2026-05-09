@@ -330,6 +330,12 @@ interface AppState {
   artifactMode: boolean;
   setArtifactMode: (v: boolean) => void;
 
+  // Chat harness options
+  planMode: boolean;
+  setPlanMode: (v: boolean) => void;
+  autoApproveDestructive: boolean;
+  setAutoApproveDestructive: (v: boolean) => void;
+
   // Actions
   bootstrap: () => Promise<void>;
   refreshChats: () => Promise<void>;
@@ -347,6 +353,8 @@ interface AppState {
     text: string,
     options?: {
       artifactMode?: boolean;
+      planMode?: boolean;
+      autoApproveDestructive?: boolean;
       attachments?: Array<{
         client_id?: string | null;
         name: string;
@@ -506,6 +514,12 @@ export const useApp = create<AppState>((set, get) => ({
   userMdContent: "",
   artifactMode: false,
   setArtifactMode: (v) => set({ artifactMode: v }),
+
+  // Chat harness options
+  planMode: false,
+  setPlanMode: (v) => set({ planMode: v }),
+  autoApproveDestructive: false,
+  setAutoApproveDestructive: (v) => set({ autoApproveDestructive: v }),
 
   refreshProjects: async () => {
     try {
@@ -769,7 +783,10 @@ export const useApp = create<AppState>((set, get) => ({
     const model = pickAvailableModel(get().providers, get().model);
     const inferredArtifactKind = inferArtifactKind(trimmed);
     const artifactMode = (options?.artifactMode ?? get().artifactMode) || !!inferredArtifactKind;
+    const planMode = options?.planMode ?? get().planMode;
+    const autoApproveDestructive = options?.autoApproveDestructive ?? get().autoApproveDestructive;
     const attachments = options?.attachments ?? [];
+    const activeProjectId = get().activeProjectId;
 
     // Optimistically place the user message into a local chat.
     // If there's no active chat yet, create a provisional client-side one; the
@@ -858,6 +875,9 @@ export const useApp = create<AppState>((set, get) => ({
           message: trimmed,
           model,
           artifact_mode: artifactMode,
+          project_id: activeProjectId ?? undefined,
+          plan_mode: planMode,
+          auto_approve_destructive: autoApproveDestructive,
           attachments,
         },
         (evt) => {
@@ -973,6 +993,38 @@ export const useApp = create<AppState>((set, get) => ({
                 },
               };
             });
+          } else if (evt.type === "permission") {
+            // Permission gate event - could be used to show a warning in UI
+            set((s) => {
+              const c = s.chats[localId];
+              if (!c) return s;
+              const permissionActivity: Activity = {
+                id: `perm_${evt.tool}_${Date.now()}`,
+                label: `${evt.blocked ? "Blocked" : "Allowed"} ${evt.tool} (${evt.risk})`,
+                icon: evt.risk === "destructive" ? "shield-alert" : evt.risk === "sensitive" ? "shield" : "check",
+                done: true,
+              };
+              return {
+                chats: {
+                  ...s.chats,
+                  [localId]: { ...c, activities: [...c.activities, permissionActivity] },
+                },
+              };
+            });
+          } else if (evt.type === "compaction") {
+            // Compaction event - summarization happening
+            if (evt.status === "summarizing") {
+              set((s) => {
+                const c = s.chats[localId];
+                if (!c) return s;
+                return {
+                  chats: {
+                    ...s.chats,
+                    [localId]: { ...c, status: "Compacting conversation..." },
+                  },
+                };
+              });
+            }
           } else if (evt.type === "heartbeat") {
             return;
           } else if (evt.type === "done" || evt.type === "end") {
