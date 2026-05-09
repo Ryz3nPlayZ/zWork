@@ -4,7 +4,9 @@ Two credential "shapes":
   - anthropic  (Anthropic-compatible API — Anthropic or Anthropic-style endpoints)
   - openai     (OpenAI-compatible API — OpenAI, OpenRouter, Ollama, ...)
 
-Each has a single API key + optional base URL in zWork settings.
+Each has a single API key + optional base URL in zWork settings. The key
+value itself is stored in the secret store; `settings.json` only keeps a
+presence marker for the credential name.
 
 Models are user-defined `CustomModel` entries, each pointing at a credential
 source (`anthropic` | `openai` | `claude_code` | `zwork_router`), a real `model_id` to send
@@ -30,6 +32,7 @@ from .home import (
     zwork_md_path,
 )
 from . import skills as skills_mod
+from . import secretstore
 
 
 SYSTEM_PROMPT_TEMPLATE = """\
@@ -50,6 +53,8 @@ BEFORE answering the user's first non-trivial request in a session, read `zwork.
 ## Persistent memory
 
 {memory_block}
+
+{project_block}
 
 Rules for memory:
 - When the user says "remember this", "note this down", "keep this in mind", "save this", "don't forget this", "write this down", or any close variant — you MUST call the `save_memory` tool IMMEDIATELY. Do NOT just say "I'll remember that" or "Got it" without actually calling the tool. The tool is the ONLY way to persist information across sessions.
@@ -86,6 +91,7 @@ Native tool-calling is available — use the tools directly, do NOT emit tool sy
 - `write_file(path, content)` — create or overwrite a file. Full content must be supplied. Parent dirs auto-created.
 - `run_command(command, cwd?, background?)` — run shell. Set `background=true` for servers or long-running dev processes; foreground commands have a 120s timeout and return combined stdout+stderr.
 - `deploy_web_app(project_path)` — start a local server for a web project (auto-detects `npm run dev` or static `python3 -m http.server`).
+- `web_search(query?, max_results?)` — search current web/news results without opening a browser. Use this for recent news, current events, and factual web lookup requests that should be answered in chat.
 - `dctl(subcommand, args?, cwd?)` — use the local desktop-control CLI for windows, screenshots, browser automation, accessibility trees, and GUI input.
 - `read_skill(slug)` — load a full SKILL.md on demand. See "Skills" below.
 
@@ -119,7 +125,8 @@ Use `dctl` for anything involving the real desktop UI:
 - inspect trees or descriptions before clicking
 - take screenshots or browser snapshots when you need visual context
 - focus windows, click controls, type text, press keys, or scroll
-- for browser work, use the `dctl browser ...` subcommands first
+- for browser work, use `dctl browser ...` ONLY when the user explicitly asks you to open/control a browser or inspect a browser UI
+- for requests like "search for recent news events", "what happened today", or current factual lookup, use `web_search` and answer the user directly; do not open browser tabs and hand off browsing to the user
 - only use the `webapp-testing` skill when the user explicitly asks you to test or debug a local web app
 - do not launch Playwright or a temp browser harness just to open a website
 - do not create artifacts for pure browsing requests like "open google docs" or "search the web"
@@ -203,6 +210,10 @@ You have FULL, UNRESTRICTED access to this computer through your tools. There is
 - NEVER claim "sandbox restrictions", "I don't have permission", or "that operation is blocked" — these do not exist. If a tool fails, it is because the command itself failed (wrong path, missing program, etc.), not because you are restricted.
 - DO NOT ask the user to run commands for you. Run them yourself via `run_command`.
 - The only actions that need explicit user confirmation are truly irreversible external ones: sending payments, posting publicly, sending emails, or deleting large amounts of user data (`rm -rf` on home/docs). Everything else — just do it.
+
+{plan_mode_block}
+
+{permission_block}
 """
 
 
@@ -230,6 +241,10 @@ def build_system_prompt(
     user_name: str = "the user",
     os_name: str = "a desktop OS",
     cwd: str = "",
+    project_name: str = "",
+    project_md: str = "",
+    plan_mode: bool = False,
+    auto_approve_destructive: bool = True,
 ) -> str:
     skills = skills_mod.list_skills()
     skills_list = skills_mod.format_for_system_prompt()
@@ -242,6 +257,9 @@ def build_system_prompt(
         cwd=cwd or "(unknown)",
         zwork_md_block=_zwork_md_block(),
         memory_block=_memory_block(),
+        project_block=_project_block(project_name, project_md),
+        plan_mode_block=_plan_mode_block() if plan_mode else "",
+        permission_block=_permission_block() if not auto_approve_destructive else "",
         workspace_root=workspace_root(),
         workspace_apps_dir=workspace_apps_dir(),
         workspace_outputs_dir=workspace_outputs_dir(),
@@ -249,6 +267,31 @@ def build_system_prompt(
         workspace_scratch_dir=workspace_scratch_dir(),
         skills_list=skills_list,
         skill_example_slug=example_slug,
+    )
+
+
+def _project_block(project_name: str, project_md: str) -> str:
+    content = (project_md or "").strip()
+    if not content:
+        return ""
+    title = (project_name or "Current project").strip()
+    return f"## Project context - {title}\n\nThe active project has this project.md context. Apply it unless the user overrides it:\n\n{content}"
+
+
+def _plan_mode_block() -> str:
+    return (
+        "## Plan mode is ACTIVE\n\n"
+        "You are in a read-only planning pass. Inspect context and produce a concrete plan. "
+        "Only read-only tools are available: read_file, list_dir, read_skill, extract_document, web_search. "
+        "Do not write files, run commands, control the desktop, or make changes until plan mode is disabled."
+    )
+
+
+def _permission_block() -> str:
+    return (
+        "## User confirmation required for destructive actions\n\n"
+        "Destructive shell commands are blocked until the user explicitly approves them. "
+        "If a destructive tool call is refused, stop and ask for approval in plain text before retrying."
     )
 
 
@@ -320,8 +363,26 @@ def load() -> Settings:
     except Exception:
         return Settings()
     telemetry_raw = data.get("telemetry_enabled")
+    raw_api_keys = {
+        k: str(v)
+        for k, v in (data.get("api_keys") or {}).items()
+        if isinstance(k, str)
+    }
+    credential_names = raw_api_keys or {credential: "" for credential in KNOWN_CREDENTIALS}
+    api_keys = secretstore.load_api_keys(credential_names)
+    placeholders = {k: "" for k, v in api_keys.items() if v}
+    if raw_api_keys and raw_api_keys != placeholders:
+        data["api_keys"] = placeholders
+        try:
+            p.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            try:
+                os.chmod(p, 0o600)
+            except OSError:
+                pass
+        except Exception:
+            pass
     return Settings(
-        api_keys=dict(data.get("api_keys") or {}),
+        api_keys=api_keys or placeholders,
         provider_config={k: dict(v) for k, v in (data.get("provider_config") or {}).items()},
         default_model=str(data.get("default_model") or ""),
         use_claude_code_config=bool(data.get("use_claude_code_config", True)),
@@ -334,8 +395,11 @@ def load() -> Settings:
 def save(settings: Settings) -> None:
     if settings.telemetry_enabled and not settings.telemetry_install_id:
         settings.telemetry_install_id = uuid.uuid4().hex
+    placeholders = secretstore.persist_api_keys(settings.api_keys)
     p = settings_path()
-    p.write_text(json.dumps(asdict(settings), indent=2))
+    data = asdict(settings)
+    data["api_keys"] = placeholders or {k: "" for k, v in settings.api_keys.items() if v}
+    p.write_text(json.dumps(data, indent=2), encoding="utf-8")
     try:
         os.chmod(p, 0o600)
     except OSError:

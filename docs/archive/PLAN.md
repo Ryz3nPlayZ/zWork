@@ -334,7 +334,7 @@ Package the experience into concrete demos that a non-technical user can underst
 
 Likely files to add or change:
 
-- `PLAN.md`
+- `docs/archive/PLAN.md`
 - `sidecar/core/models.py`
 - `sidecar/core/artifacts.py`
 - `sidecar/server.py`

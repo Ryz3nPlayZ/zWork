@@ -1,0 +1,100 @@
+```mermaid
+graph TB
+    subgraph "CLIENT LAYER"
+        Desktop["📱 Tauri Desktop<br/>Rust + React"]
+        Web["🌐 Web UI<br/>React"]
+        Mobile["📲 Mobile<br/>Flutter"]
+    end
+
+    subgraph "TAURI FRONTEND"
+        App["App.tsx"]
+        Store["store.ts (Zustand)"]
+        API["api.ts (HTTP Client)"]
+    end
+
+    subgraph "TAURI BACKEND"
+        Rust["main.rs"]
+        Spawn["Spawn/Manage<br/>Python Process"]
+    end
+
+    subgraph "PYTHON SIDECAR"
+        FastAPI["server.py<br/>FastAPI"]
+        SSE["SSE Streams"]
+    end
+
+    subgraph "AGENT CORE"
+        Orchestrator["🎯 orchestrator.py<br/>Plan Builder"]
+        Executor["⚡ executor.py<br/>Step Runner"]
+        PermMgr["🔒 permission_manager.py<br/>Safety Gate"]
+    end
+
+    subgraph "AGENT SERVICES"
+        Providers["🤖 providers.py<br/>LLM Abstraction"]
+        Tools["🔧 tools.py<br/>Tool Registry"]
+        ChatStore["💾 chatstore.py<br/>History"]
+        Skills["📚 skills.py<br/>Skills"]
+        Settings["⚙️ settings.py<br/>Config"]
+        Secrets["🔐 secretstore.py<br/>Vault"]
+    end
+
+    subgraph "DATA LAYER"
+        SQLite["SQLite DB"]
+        Files["File System"]
+    end
+
+    subgraph "EXTERNAL"
+        Claude["Anthropic Claude"]
+        GPT["OpenAI GPT"]
+        Ollama["Ollama (local)"]
+        Cloud["Supabase Cloud"]
+    end
+
+    %% Connections
+    Desktop --> App
+    Web -.HTTP.-> FastAPI
+    Mobile -.HTTP.-> FastAPI
+
+    App --> Store
+    App --> API
+
+    API -.Tauri IPC.-> Rust
+    Rust --> Spawn
+    Spawn --> FastAPI
+
+    API -.HTTP localhost.-> FastAPI
+    FastAPI -.SSE.-> App
+
+    FastAPI --> Orchestrator
+    FastAPI --> Executor
+
+    Orchestrator --> Providers
+    Orchestrator --> ChatStore
+    Orchestrator --> Skills
+
+    Executor --> PermMgr
+    Executor --> Tools
+    Executor --> Providers
+
+    Providers --> Claude
+    Providers --> GPT
+    Providers --> Ollama
+
+    ChatStore --> SQLite
+    Tools --> Files
+
+    Settings -.Sync.-> Cloud
+    Secrets --> Files
+
+    %% Legend
+    classDef client fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
+    classDef tauri fill:#f3e5f5,stroke:#6a1b9a,stroke-width:2px
+    classDef python fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px
+    classDef data fill:#fff3e0,stroke:#ef6c00,stroke-width:2px
+    classDef external fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+
+    class Desktop,Web,Mobile client
+    class App,Store,API,Rust,Spawn tauri
+    class FastAPI,SSE,Orchestrator,Executor,PermMgr,Providers,Tools,ChatStore,Skills,Settings,Secrets python
+    class SQLite,Files data
+    class Claude,GPT,Ollama,Cloud external
+```

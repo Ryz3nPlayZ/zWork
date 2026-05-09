@@ -19,11 +19,15 @@ This is the quickest entry point for understanding the codebase, product directi
 ## Product framing
 
 - [Use Cases](USE_CASES.md) — Product positioning and target workflows
-- [Roadmap](../ROADMAP.md) — High-level product direction
-- [Technical Roadmap](../ROADMAP2.md) — Implementation priorities and milestones
-- [Future features brainstorm](../FUTURE_FEATURES.MD) — Ideas under exploration
+- [Product Documentation](PRODUCT.md) — Product goals, workflows, and UX principles
+- [Roadmap](ROADMAP.md) — High-level product direction
+- [Technical Roadmap](TECHNICAL_ROADMAP.md) — Implementation priorities and milestones
+- [Design System](DESIGN.md) — Visual system and design direction
+- [Harness Notes](HARNESS.md) — Agent harness architecture and implementation notes
 
 ## Operational notes
 
 - [Quality and security review](QUALITY.md) — Testing and security practices
 - [Telemetry Setup](TELEMETRY_SETUP.md) — Analytics and monitoring configuration
+- [Benchmarks](BENCHMARKS.md) — Regression tasks and evaluation prompts
+- [Archived planning notes](archive/) — Older plans, backlog, PRD, and brainstorm docs

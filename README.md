@@ -11,7 +11,7 @@
 [![License](https://img.shields.io/github/license/Ryz3nPlayZ/zWork?style=flat-square&color=171716&labelColor=2a2a2a)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/Ryz3nPlayZ/zWork?style=flat-square&color=171716&labelColor=2a2a2a)](https://github.com/Ryz3nPlayZ/zWork/stargazers)
 
-[**Download**](https://github.com/Ryz3nPlayZ/zWork/releases/latest) &nbsp;·&nbsp; [Docs](docs/WIKI.md) &nbsp;·&nbsp; [Roadmap](ROADMAP.md) &nbsp;·&nbsp; [Contributing](CONTRIBUTING.md)
+[**Download**](https://github.com/Ryz3nPlayZ/zWork/releases/latest) &nbsp;·&nbsp; [Docs](docs/WIKI.md) &nbsp;·&nbsp; [Roadmap](docs/ROADMAP.md) &nbsp;·&nbsp; [Contributing](CONTRIBUTING.md)
 
 </div>
 
@@ -140,7 +140,7 @@ The app updates itself between releases.
 
 The next version turns chat into a workspace. The output of a job — a document, a spreadsheet, a chart, a small to-do list — sits next to the conversation that produced it, where you can edit and keep it.
 
-See the [roadmap](ROADMAP.md) for the order of work.
+See the [roadmap](docs/ROADMAP.md) for the order of work.
 
 ---
 

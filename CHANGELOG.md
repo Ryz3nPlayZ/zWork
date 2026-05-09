@@ -2,6 +2,28 @@
 
 All notable changes to zWork are documented here.
 
+## Unreleased
+
+- Nothing yet.
+
+## v0.3.18-beta.6
+
+**Harness hardening, DeepSeek router release, and updater readiness.**
+
+- moved provider API keys out of `settings.json` into a keyring-backed secret store
+- kept a file fallback for environments without a usable OS keychain backend
+- added migration logic so legacy plaintext keys are rewritten out of the settings file
+- added regression coverage for secret storage and provider enumeration
+- pinned the managed zWork Router path to DeepSeek V4 Flash
+- added MCP client support with stdio server startup, tool registration, status APIs, and tests
+- added project context injection, plan-mode read-only tool filtering, destructive command gating, and chat compaction
+- added `web_search` for current news/research requests so the agent can answer in chat without opening browser tabs
+- blocked commands that target and kill the local backend on port `8787`
+- hardened desktop backend readiness by adding Tauri ensure/restart commands and longer onboarding health checks
+- added release checklist coverage for rar-files PR intent and updater smoke tests
+- consolidated root-level planning docs under `docs/` and `docs/archive/`
+- bumped release metadata for the next signed desktop build
+
 ## v0.3.18-beta.5
 
 **Release fallback so users can still install the latest build when the native updater is flaky.**
@@ -35,19 +57,6 @@ All notable changes to zWork are documented here.
 - simplified "how limits work" explanation for regular users
 - improved visual hierarchy across all auth and settings screens
 - temporarily disabled non-gpt-oss-120B models on hosted server (20b, llama, mistral)
-
-## Unreleased
-
-**Documentation and developer experience improvements.**
-
-- Added product vision document (docs/VISION.md) articulating design principles
-- Added technical roadmap (ROADMAP2.md) with quarterly implementation priorities
-- Expanded CONTRIBUTING.md with comprehensive development setup and guidelines
-- Added VSCode workspace configuration for consistent development experience
-- Added CI workflow for automated frontend linting and backend testing
-- Enhanced README with project badges for better visibility
-- Improved release documentation with troubleshooting section
-- Updated wiki index for better documentation discoverability
 
 ## v0.3.18-beta.2
 

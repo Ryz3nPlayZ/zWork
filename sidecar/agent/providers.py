@@ -29,7 +29,8 @@ from typing import Any, AsyncIterator, Optional
 import httpx
 
 from . import detect, settings as settings_mod
-from .tools import TOOL_SCHEMAS, execute_tool, parse_tool_calls
+from .runtime import RunContext, run_scope
+from .tools import TOOL_SCHEMAS, execute_tool, filter_tools_for_plan_mode, parse_tool_calls, tool_risk
 
 
 MAX_TURNS = 24
@@ -337,10 +338,23 @@ def lookup_model(zwork_model_id: str, s: settings_mod.Settings) -> Optional[dict
 
 # ---------------- Anthropic tool schemas (from tools module) ----------------
 
-def _anthropic_tools() -> list[dict]:
+def _active_tool_schemas(plan_mode: bool) -> list[dict]:
+    schemas = filter_tools_for_plan_mode(TOOL_SCHEMAS) if plan_mode else list(TOOL_SCHEMAS)
+    if plan_mode:
+        return schemas
+    try:
+        from .mcp import get_manager
+
+        schemas.extend(get_manager().all_tool_schemas())
+    except Exception:
+        pass
+    return schemas
+
+
+def _anthropic_tools(plan_mode: bool = False) -> list[dict]:
     """Convert our generic TOOL_SCHEMAS into Anthropic's input_schema shape."""
     out = []
-    for t in TOOL_SCHEMAS:
+    for t in _active_tool_schemas(plan_mode):
         out.append({
             "name": t["name"],
             "description": t["description"],
@@ -349,9 +363,9 @@ def _anthropic_tools() -> list[dict]:
     return out
 
 
-def _openai_tools() -> list[dict]:
+def _openai_tools(plan_mode: bool = False) -> list[dict]:
     out = []
-    for t in TOOL_SCHEMAS:
+    for t in _active_tool_schemas(plan_mode):
         out.append({
             "type": "function",
             "function": {
@@ -371,6 +385,7 @@ async def _anthropic_turn(
     model_id: str,
     system: str,
     extra_headers: Optional[dict[str, str]] = None,
+    plan_mode: bool = False,
 ) -> AsyncIterator[dict]:
     """Run one Anthropic turn. Yields UI events and finally a 'turn_end' event
     with {content_blocks: [...], stop_reason: str | None}.
@@ -392,10 +407,10 @@ async def _anthropic_turn(
         headers.update(extra_headers)
 
     if _supports_anthropic_cache(creds.base_url):
-        system_blocks, tools_blocks = _apply_anthropic_cache(system, _anthropic_tools())
+        system_blocks, tools_blocks = _apply_anthropic_cache(system, _anthropic_tools(plan_mode))
     else:
         system_blocks = [{"type": "text", "text": system}] if system else []
-        tools_blocks = _anthropic_tools()
+        tools_blocks = _anthropic_tools(plan_mode)
 
     body: dict = {
         "model": model_id,
@@ -587,6 +602,7 @@ async def _openai_turn(
     messages: list[dict],
     model_id: str,
     extra_headers: Optional[dict[str, str]] = None,
+    plan_mode: bool = False,
 ) -> AsyncIterator[dict]:
     """One OpenAI-compatible turn with tool use.
 
@@ -603,7 +619,7 @@ async def _openai_turn(
         "model": model_id,
         "stream": True,
         "messages": messages,
-        "tools": _openai_tools(),
+        "tools": _openai_tools(plan_mode),
     }
 
     yield {"type": "status", "text": "Thinking"}
@@ -753,7 +769,13 @@ def _anthropic_convert_input_messages(messages: list[dict]) -> tuple[str, list[d
 
 
 async def stream_chat(
-    messages: list[dict], zwork_model_id: str, s: settings_mod.Settings
+    messages: list[dict],
+    zwork_model_id: str,
+    s: settings_mod.Settings,
+    run_ctx: RunContext | None = None,
+    *,
+    plan_mode: bool = False,
+    auto_approve_destructive: bool = False,
 ) -> AsyncIterator[dict]:
     """Top-level chat stream. Handles the multi-turn tool loop."""
     model = lookup_model(zwork_model_id, s)
@@ -785,14 +807,71 @@ async def stream_chat(
         yield {"type": "done"}
         return
 
-    if model["shape"] == "anthropic":
-        system, convo = _anthropic_convert_input_messages(messages)
-        async for evt in _run_anthropic_loop(creds, convo, system, real_model_id):
-            yield evt
-    else:
-        # OpenAI: messages already in correct shape (role=system/user/assistant)
-        async for evt in _run_openai_loop(creds, list(messages), real_model_id):
-            yield evt
+    ctx = run_ctx or RunContext(run_id=str(uuid.uuid4()), chat_id="", requested_model_id=zwork_model_id)
+    ctx.resolved_model_id = real_model_id
+
+    async with run_scope(ctx):
+        ctx.provider_base_url = creds.base_url
+        ctx.provider_source = creds.source
+        ctx.log("provider_resolved", credential=model["credential"], shape=model["shape"])
+
+        if model["shape"] == "anthropic":
+            system, convo = _anthropic_convert_input_messages(messages)
+            async for evt in _run_anthropic_loop(
+                creds,
+                convo,
+                system,
+                real_model_id,
+                ctx,
+                plan_mode=plan_mode,
+                auto_approve_destructive=auto_approve_destructive,
+            ):
+                ctx.last_event_type = str(evt.get("type", ""))
+                yield evt
+        else:
+            # OpenAI: messages already in correct shape (role=system/user/assistant)
+            async for evt in _run_openai_loop(
+                creds,
+                list(messages),
+                real_model_id,
+                ctx,
+                plan_mode=plan_mode,
+                auto_approve_destructive=auto_approve_destructive,
+            ):
+                ctx.last_event_type = str(evt.get("type", ""))
+                yield evt
+
+
+async def _gated_execute_tool(
+    name: str,
+    params: dict,
+    *,
+    auto_approve_destructive: bool,
+) -> AsyncIterator[dict]:
+    risk, reason = tool_risk(name, params)
+    yield {
+        "type": "permission",
+        "tool": name,
+        "risk": risk,
+        "reason": reason,
+        "blocked": risk == "destructive" and not auto_approve_destructive,
+    }
+    if risk == "destructive" and not auto_approve_destructive:
+        msg = (
+            f"[REFUSED: requires user approval - {reason}]. "
+            "Stop and ask the user to approve in plain text before retrying."
+        )
+        yield {
+            "type": "activity",
+            "id": f"perm_{name}",
+            "label": f"Refused {name}: {reason}",
+            "icon": "shield",
+            "done": True,
+        }
+        yield {"type": "tool_result", "tool": name, "ok": False, "message": msg}
+        return
+    async for tev in execute_tool(name, params):
+        yield tev
 
 
 async def _run_anthropic_loop(
@@ -800,31 +879,54 @@ async def _run_anthropic_loop(
     convo: list[dict],
     system: str,
     model_id: str,
+    run_ctx: RunContext,
+    *,
+    plan_mode: bool = False,
+    auto_approve_destructive: bool = False,
 ) -> AsyncIterator[dict]:
     """Multi-turn tool loop for Anthropic-shape APIs."""
-    run_id = str(uuid.uuid4())
     for turn in range(MAX_TURNS):
         content_blocks: list[dict] = []
         stop_reason: Optional[str] = None
         request_kind = "root" if turn == 0 else "continuation"
-
-        async for evt in _anthropic_turn(
-            creds,
-            convo,
-            model_id,
-            system,
-            extra_headers={
-                "x-zwork-run-id": run_id,
-                "x-zwork-request-kind": request_kind,
-            },
-        ):
-            t = evt.get("type")
-            if t == "turn_end":
-                content_blocks = evt.get("content_blocks") or []
-                stop_reason = evt.get("stop_reason")
-                continue
-            # Forward UI events
-            yield evt
+        run_ctx.turn_index = turn
+        run_ctx.log("provider_turn_started", request_kind=request_kind, provider_shape="anthropic")
+        try:
+            async with asyncio.timeout(min(run_ctx.turn_timeout_seconds, run_ctx.remaining_run_seconds())):
+                async for evt in _anthropic_turn(
+                    creds,
+                    convo,
+                    model_id,
+                    system,
+                    extra_headers={
+                        "x-zwork-run-id": run_ctx.run_id,
+                        "x-zwork-request-kind": request_kind,
+                    },
+                    plan_mode=plan_mode,
+                ):
+                    t = evt.get("type")
+                    if t == "turn_end":
+                        content_blocks = evt.get("content_blocks") or []
+                        stop_reason = evt.get("stop_reason")
+                        continue
+                    # Forward UI events
+                    yield evt
+        except TimeoutError:
+            run_ctx.last_error = "Provider turn timed out."
+            run_ctx.log("provider_turn_failed", request_kind=request_kind, error=run_ctx.last_error)
+            yield {"type": "error", "text": run_ctx.last_error}
+            yield {"type": "done"}
+            return
+        except asyncio.CancelledError:
+            run_ctx.last_error = "Provider turn cancelled."
+            run_ctx.log("provider_turn_failed", request_kind=request_kind, error=run_ctx.last_error)
+            raise
+        except Exception as e:
+            run_ctx.last_error = f"Provider turn failed: {e}"
+            run_ctx.log("provider_turn_failed", request_kind=request_kind, error=run_ctx.last_error)
+            yield {"type": "error", "text": run_ctx.last_error}
+            yield {"type": "done"}
+            return
 
         # Also scan text for legacy <<TOOL>> blocks as a fallback
         all_text = "".join(b.get("text", "") for b in content_blocks if b.get("type") == "text")
@@ -833,6 +935,7 @@ async def _run_anthropic_loop(
         tool_use_blocks = [b for b in content_blocks if b.get("type") == "tool_use"]
 
         if not tool_use_blocks and not legacy_calls:
+            run_ctx.log("provider_turn_finished", request_kind=request_kind, stop_reason=stop_reason or "end", tool_calls=0)
             yield {"type": "done"}
             return
 
@@ -858,15 +961,24 @@ async def _run_anthropic_loop(
             params = b["input"] or {}
             result_text = ""
             ok = True
-            async for tev in execute_tool(name, params):
-                tt = tev.get("type")
-                if tt == "activity":
-                    # Override the "Preparing..." activity with the live one
-                    yield tev
-                elif tt == "tool_result":
-                    ok = tev.get("ok", False)
-                    result_text = tev.get("message", "")
-                    yield tev
+            try:
+                async for tev in _gated_execute_tool(
+                    name,
+                    params,
+                    auto_approve_destructive=auto_approve_destructive,
+                ):
+                    tt = tev.get("type")
+                    if tt in ("activity", "permission"):
+                        # Override the "Preparing..." activity with the live one
+                        yield tev
+                    elif tt == "tool_result":
+                        ok = tev.get("ok", False)
+                        result_text = tev.get("message", "")
+                        yield tev
+            except Exception as e:
+                ok = False
+                result_text = f"Tool '{name}' failed: {e}"
+                yield {"type": "error", "text": result_text}
             tool_result_content.append({
                 "type": "tool_result",
                 "tool_use_id": b["id"],
@@ -880,12 +992,20 @@ async def _run_anthropic_loop(
             name = call["tool"]
             params = call["params"]
             msg = ""
-            async for tev in execute_tool(name, params):
-                tt = tev.get("type")
-                if tt in ("activity", "tool_result"):
-                    yield tev
-                if tt == "tool_result":
-                    msg = tev.get("message", "")
+            try:
+                async for tev in _gated_execute_tool(
+                    name,
+                    params,
+                    auto_approve_destructive=auto_approve_destructive,
+                ):
+                    tt = tev.get("type")
+                    if tt in ("activity", "tool_result", "permission"):
+                        yield tev
+                    if tt == "tool_result":
+                        msg = tev.get("message", "")
+            except Exception as e:
+                msg = f"Tool '{name}' failed: {e}"
+                yield {"type": "error", "text": msg}
             legacy_results.append(f"Tool '{name}' result: {msg}")
 
         # Build the next user turn (tool results)
@@ -894,6 +1014,12 @@ async def _run_anthropic_loop(
             next_user_parts.append({"type": "text", "text": "\n\n".join(legacy_results)})
         if next_user_parts:
             convo.append({"role": "user", "content": next_user_parts})
+        run_ctx.log(
+            "provider_turn_finished",
+            request_kind=request_kind,
+            stop_reason=stop_reason or "tool_loop",
+            tool_calls=len(tool_use_blocks) + len(legacy_calls),
+        )
 
         # If the model stopped with end_turn AND we had no tools, we're done (handled above)
         if stop_reason == "end_turn" and not tool_use_blocks and not legacy_calls:
@@ -907,32 +1033,57 @@ async def _run_openai_loop(
     creds: Credentials,
     messages: list[dict],
     model_id: str,
+    run_ctx: RunContext,
+    *,
+    plan_mode: bool = False,
+    auto_approve_destructive: bool = False,
 ) -> AsyncIterator[dict]:
     """Multi-turn tool loop for OpenAI-shape APIs."""
-    run_id = str(uuid.uuid4())
     for turn in range(MAX_TURNS):
         content_blocks: list[dict] = []
         request_kind = "root" if turn == 0 else "continuation"
-        async for evt in _openai_turn(
-            creds,
-            messages,
-            model_id,
-            extra_headers={
-                "x-zwork-run-id": run_id,
-                "x-zwork-request-kind": request_kind,
-            },
-        ):
-            t = evt.get("type")
-            if t == "turn_end":
-                content_blocks = evt.get("content_blocks") or []
-                continue
-            yield evt
+        run_ctx.turn_index = turn
+        run_ctx.log("provider_turn_started", request_kind=request_kind, provider_shape="openai")
+        try:
+            async with asyncio.timeout(min(run_ctx.turn_timeout_seconds, run_ctx.remaining_run_seconds())):
+                async for evt in _openai_turn(
+                    creds,
+                    messages,
+                    model_id,
+                    extra_headers={
+                        "x-zwork-run-id": run_ctx.run_id,
+                        "x-zwork-request-kind": request_kind,
+                    },
+                    plan_mode=plan_mode,
+                ):
+                    t = evt.get("type")
+                    if t == "turn_end":
+                        content_blocks = evt.get("content_blocks") or []
+                        continue
+                    yield evt
+        except TimeoutError:
+            run_ctx.last_error = "Provider turn timed out."
+            run_ctx.log("provider_turn_failed", request_kind=request_kind, error=run_ctx.last_error)
+            yield {"type": "error", "text": run_ctx.last_error}
+            yield {"type": "done"}
+            return
+        except asyncio.CancelledError:
+            run_ctx.last_error = "Provider turn cancelled."
+            run_ctx.log("provider_turn_failed", request_kind=request_kind, error=run_ctx.last_error)
+            raise
+        except Exception as e:
+            run_ctx.last_error = f"Provider turn failed: {e}"
+            run_ctx.log("provider_turn_failed", request_kind=request_kind, error=run_ctx.last_error)
+            yield {"type": "error", "text": run_ctx.last_error}
+            yield {"type": "done"}
+            return
 
         tool_uses = [b for b in content_blocks if b["type"] == "tool_use"]
         text = "".join(b.get("text", "") for b in content_blocks if b["type"] == "text")
         legacy_calls = parse_tool_calls(text) if text else []
 
         if not tool_uses and not legacy_calls:
+            run_ctx.log("provider_turn_finished", request_kind=request_kind, stop_reason="end", tool_calls=0)
             yield {"type": "done"}
             return
 
@@ -959,12 +1110,20 @@ async def _run_openai_loop(
             name = tu["name"]
             params = tu["input"] or {}
             result_text = ""
-            async for tev in execute_tool(name, params):
-                tt = tev.get("type")
-                if tt in ("activity", "tool_result"):
-                    yield tev
-                if tt == "tool_result":
-                    result_text = tev.get("message", "")
+            try:
+                async for tev in _gated_execute_tool(
+                    name,
+                    params,
+                    auto_approve_destructive=auto_approve_destructive,
+                ):
+                    tt = tev.get("type")
+                    if tt in ("activity", "tool_result", "permission"):
+                        yield tev
+                    if tt == "tool_result":
+                        result_text = tev.get("message", "")
+            except Exception as e:
+                result_text = f"Tool '{name}' failed: {e}"
+                yield {"type": "error", "text": result_text}
             messages.append({
                 "role": "tool",
                 "tool_call_id": tu["id"],
@@ -977,14 +1136,28 @@ async def _run_openai_loop(
             name = call["tool"]
             params = call["params"]
             msg = ""
-            async for tev in execute_tool(name, params):
-                tt = tev.get("type")
-                if tt in ("activity", "tool_result"):
-                    yield tev
-                if tt == "tool_result":
-                    msg = tev.get("message", "")
+            try:
+                async for tev in _gated_execute_tool(
+                    name,
+                    params,
+                    auto_approve_destructive=auto_approve_destructive,
+                ):
+                    tt = tev.get("type")
+                    if tt in ("activity", "tool_result", "permission"):
+                        yield tev
+                    if tt == "tool_result":
+                        msg = tev.get("message", "")
+            except Exception as e:
+                msg = f"Tool '{name}' failed: {e}"
+                yield {"type": "error", "text": msg}
             legacy_results.append(f"Tool '{name}' result: {msg}")
         if legacy_results:
             messages.append({"role": "user", "content": "\n\n".join(legacy_results)})
+        run_ctx.log(
+            "provider_turn_finished",
+            request_kind=request_kind,
+            stop_reason="tool_loop",
+            tool_calls=len(tool_uses) + len(legacy_calls),
+        )
 
     yield {"type": "done"}

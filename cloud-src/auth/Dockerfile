@@ -8,7 +8,7 @@ RUN apt-get update \
 COPY package.json ./
 RUN bun install
 
-COPY . .
+COPY index.ts config.ts entrypoint.sh ./
 RUN chmod +x /app/entrypoint.sh
 
 EXPOSE 3000

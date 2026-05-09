@@ -24,6 +24,7 @@ class ChatMessage:
     role: str  # "user" | "assistant" | "system"
     content: str
     created_at: int
+    activities: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -34,15 +35,25 @@ class Chat:
     updated_at: int
     messages: list[ChatMessage] = field(default_factory=list)
     model: str = ""
+    project_id: str = ""
+    compacted_summary: str = ""
+    compaction_cursor: int = 0
 
 
 def _path(chat_id: str):
     return chats_dir() / f"{chat_id}.json"
 
 
-def create(title: str = "New chat", model: str = "") -> Chat:
+def create(title: str = "New chat", model: str = "", project_id: str = "") -> Chat:
     now = _now_ms()
-    c = Chat(id=_uid(), title=title, created_at=now, updated_at=now, model=model)
+    c = Chat(
+        id=_uid(),
+        title=title,
+        created_at=now,
+        updated_at=now,
+        model=model,
+        project_id=project_id,
+    )
     save(c)
     return c
 
@@ -59,6 +70,7 @@ def list_all() -> list[dict[str, Any]]:
                 "updated_at": d.get("updated_at", 0),
                 "message_count": len(d.get("messages") or []),
                 "model": d.get("model", ""),
+                "project_id": d.get("project_id", ""),
             })
         except Exception:
             continue
@@ -79,6 +91,9 @@ def get(chat_id: str) -> Chat | None:
         updated_at=d.get("updated_at", 0),
         messages=msgs,
         model=d.get("model", ""),
+        project_id=d.get("project_id", ""),
+        compacted_summary=d.get("compacted_summary", ""),
+        compaction_cursor=int(d.get("compaction_cursor", 0) or 0),
     )
 
 
@@ -117,3 +132,51 @@ def append_message(chat_id: str, role: str, content: str) -> ChatMessage | None:
         c.title = (content.strip().splitlines()[0])[:64] or "New chat"
     save(c)
     return msg
+
+
+def update_message(
+    chat_id: str,
+    message_id: str,
+    *,
+    content: str | None = None,
+    activities: list[dict[str, Any]] | None = None,
+) -> ChatMessage | None:
+    c = get(chat_id)
+    if not c:
+        return None
+    updated: ChatMessage | None = None
+    for msg in c.messages:
+        if msg.id != message_id:
+            continue
+        if content is not None:
+            msg.content = content
+        if activities is not None:
+            msg.activities = list(activities)
+        updated = msg
+        break
+    if updated is None:
+        return None
+    c.updated_at = _now_ms()
+    save(c)
+    return updated
+
+
+def set_project(chat_id: str, project_id: str) -> Chat | None:
+    c = get(chat_id)
+    if not c:
+        return None
+    c.project_id = project_id
+    c.updated_at = _now_ms()
+    save(c)
+    return c
+
+
+def set_compaction(chat_id: str, summary: str, cursor: int) -> Chat | None:
+    c = get(chat_id)
+    if not c:
+        return None
+    c.compacted_summary = summary
+    c.compaction_cursor = max(0, int(cursor))
+    c.updated_at = _now_ms()
+    save(c)
+    return c

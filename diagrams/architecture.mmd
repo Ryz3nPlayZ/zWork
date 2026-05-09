@@ -1,0 +1,324 @@
+```mermaid
+graph TB
+    subgraph "Client Layer"
+        Tauri[Tauri Desktop App<br/>Rust]
+        Web[Web UI<br/>React + TypeScript]
+        Mobile[Mobile App<br/>Flutter]
+    end
+
+    subgraph "Tauri Frontend"
+        AppTsx["App.tsx<br/>Main Entry"]
+        Components["components/<br/>UI Components"]
+        Store["store.ts<br/>State Management<br/>Zustand"]
+        ApiLib["api.ts<br/>HTTP Client"]
+        CloudLib["cloud.ts<br/>Cloud Sync"]
+        Telemetry["telemetry.ts<br/>PostHog Analytics"]
+    end
+
+    subgraph "Tauri Backend (Rust)"
+        MainRs["main.rs<br/>Process Manager"]
+        SidecarMgr["Sidecar Lifecycle<br/>Spawn/Shutdown"]
+        FsBridge["File System<br/>IPC Bridge"]
+        Updater["Auto-Update<br/>Plugin"]
+    end
+
+    subgraph "Python Sidecar (FastAPI)"
+        ServerPy["server.py<br/>FastAPI Server"]
+        Router["API Router<br/>/api/* endpoints"]
+        SSE["SSE Streams<br/>Real-time updates"]
+    end
+
+    subgraph "Agent Core"
+        Orchestrator["orchestrator.py<br/>Plan Builder"]
+        Executor["executor.py<br/>Step Execution"]
+        PermMgr["permission_manager.py<br/>Safety Checks"]
+        Models["models.py<br/>Plan/Step Schema"]
+        Workflows["workflows.py<br/>Step Handlers"]
+    end
+
+    subgraph "Agent Services"
+        ChatStore["chatstore.py<br/>Conversation History"]
+        Providers["providers.py<br/>LLM Provider<br/>Abstraction"]
+        Skills["skills.py<br/>Skill Registry"]
+        Tools["tools.py<br/>Tool Execution"]
+        Detect["detect.py<br/>Intent Detection"]
+        Settings["settings.py<br/>Config Management"]
+        Projects["projects.py<br/>Project State"]
+        Runtime["runtime.py<br/>Execution Context"]
+        Secrets["secretstore.py<br/>Secure Storage"]
+    end
+
+    subgraph "Data Layer"
+        SQLite["SQLite<br/>Local DB"]
+        FileSys["File System<br/>Projects, Artifacts"]
+        Logs["Activity Log<br/>JSON Lines"]
+    end
+
+    subgraph "External Services"
+        Anthropic["Anthropic API<br/>Claude"]
+        OpenAI["OpenAI API<br/>GPT"]
+        Ollama["Ollama<br/>Local LLMs"]
+        Cloud["Cloud Backend<br/>Supabase"]
+    end
+
+    %% Client to Tauri
+    Tauri --> AppTsx
+    Web -.HTTP.-> ServerPy
+    Mobile -.HTTP.-> ServerPy
+
+    %% Tauri Frontend Structure
+    AppTsx --> Components
+    AppTsx --> Store
+    AppTsx --> ApiLib
+    AppTsx --> CloudLib
+    AppTsx --> Telemetry
+
+    %% Tauri IPC
+    ApiLib -.Tauri Invoke.-> MainRs
+    MainRs --> SidecarMgr
+    MainRs --> FsBridge
+    MainRs --> Updater
+
+    %% Sidecar Communication
+    SidecarMgr -->|Spawn Process| ServerPy
+    ApiLib -.HTTP localhost.-> ServerPy
+    ServerPy -.SSE.-> AppTsx
+
+    %% FastAPI Routing
+    ServerPy --> Router
+    Router --> SSE
+
+    %% Agent Core Flow
+    Router -->|/chat| Orchestrator
+    Router -->|/execute| Executor
+    Router -->|/tools| Tools
+    Router -->|/skills| Skills
+
+    Orchestrator --> Models
+    Orchestrator --> Detect
+    Orchestrator --> Runtime
+
+    Executor --> PermMgr
+    Executor --> Workflows
+    Executor --> Runtime
+
+    %% Agent Services
+    Runtime --> Settings
+    Runtime --> Secrets
+    Runtime --> Projects
+    Runtime --> ChatStore
+
+    Providers --> Anthropic
+    Providers --> OpenAI
+    Providers --> Ollama
+
+    Detect --> ChatStore
+    Tools --> Providers
+
+    %% Data Layer
+    ChatStore --> SQLite
+    Projects --> FileSys
+    Projects --> Logs
+
+    %% Cloud Sync
+    CloudLib -.HTTP.-> Cloud
+
+    %% Styling
+    classDef client fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef tauri fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef python fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    classDef data fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef external fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+
+    class Tauri,Web,Mobile client
+    class AppTsx,Components,Store,ApiLib,CloudLib,Telemetry,MainRs,SidecarMgr,FsBridge,Updater tauri
+    class ServerPy,Router,SSE,Orchestrator,Executor,PermMgr,Models,Workflows,ChatStore,Providers,Skills,Tools,Detect,Settings,Projects,Runtime,Secrets python
+    class SQLite,FileSys,Logs data
+    class Anthropic,OpenAI,Ollama,Cloud external
+```
+
+%% Data Flow Diagram
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI as Tauri UI
+    participant Rust as Tauri Backend
+    participant Python as FastAPI Sidecar
+    participant Agent as Agent Core
+    participant LLM as LLM Provider
+
+    User->>UI: User sends message
+    UI->>Rust: Tauri invoke (spawn sidecar)
+    Rust->>Python: Start process if not running
+    UI->>Python: HTTP POST /chat
+    Python->>Agent: orchestrator.build_plan()
+    Agent->>Python: detect.intent()
+    Agent->>LLM: Classify intent
+    LLM-->>Agent: Intent + tool selection
+    Agent->>UI: SSE: plan preview
+    UI->>User: Show plan, confirm?
+    User->>UI: Approve
+    UI->>Python: POST /execute
+    Python->>Agent: executor.run_steps()
+    Agent->>LLM: Execute with tools
+    LLM-->>Agent: Tool use requests
+    Agent->>Agent: permission_manager.check()
+    Agent->>Python: tools.execute()
+    Python-->>Agent: Tool results
+    Agent->>LLM: Continue with tool results
+    LLM-->>Agent: Final response
+    Agent-->>UI: SSE: response chunks
+    UI-->>User: Display response
+    Agent->>Agent: chatstore.save()
+```
+
+%% Module Dependency Graph
+
+```mermaid
+graph LR
+    subgraph "Core Modules"
+        Server["server.py<br/>Entry Point"]
+        Orchestrator["orchestrator.py"]
+        Executor["executor.py"]
+        Providers["providers.py"]
+        Tools["tools.py"]
+        ChatStore["chatstore.py"]
+        Settings["settings.py"]
+    end
+
+    subgraph "Supporting Modules"
+        Detect["detect.py"]
+        Skills["skills.py"]
+        Projects["projects.py"]
+        Runtime["runtime.py"]
+        Secrets["secretstore.py"]
+        Home["home.py"]
+    end
+
+    subgraph "Internal Core"
+        PermMgr["permission_manager.py"]
+        Models["models.py"]
+        Workflows["workflows.py"]
+        ActivityLog["activity_log.py"]
+        Artifacts["artifacts.py"]
+        Util["util.py"]
+    end
+
+    Server --> Orchestrator
+    Server --> Executor
+    Server --> Tools
+    Server --> ChatStore
+    Server --> Settings
+
+    Orchestrator --> Detect
+    Orchestrator --> Models
+    Orchestrator --> Runtime
+
+    Executor --> PermMgr
+    Executor --> Workflows
+    Executor --> Runtime
+    Executor --> Providers
+
+    Providers --> Secrets
+    Providers --> Settings
+
+    Tools --> Providers
+    Tools --> Runtime
+
+    ChatStore --> Projects
+    ChatStore --> ActivityLog
+
+    Runtime --> Settings
+    Runtime --> Projects
+    Runtime --> Secrets
+
+    Detect --> ChatStore
+
+    %% Styling
+    classDef core fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    classDef support fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef internal fill:#fff3e0,stroke:#e65100,stroke-width:2px
+
+    class Server,Orchestrator,Executor,Providers,Tools,ChatStore,Settings core
+    class Detect,Skills,Projects,Runtime,Secrets,Home support
+    class PermMgr,Models,Workflows,ActivityLog,Artifacts,Util internal
+```
+
+%% Provider Architecture
+
+```mermaid
+graph TB
+    subgraph "Provider Abstraction"
+        ProviderMgr["Provider Manager<br/>providers.py"]
+    end
+
+    subgraph "LLM Providers"
+        AnthropicProvider["Anthropic Provider<br/>Claude Models"]
+        OpenAIProvider["OpenAI Provider<br/>GPT Models"]
+        OllamaProvider["Ollama Provider<br/>Local Models"]
+    end
+
+    subgraph "Configuration"
+        SettingsMgr["Settings Manager<br/>settings.py"]
+        EnvLoader["Environment Loader<br/>.env files"]
+        SecretStore["Secret Store<br/>secretstore.py"]
+    end
+
+    subgraph "Chat History"
+        ChatStore["Chat Store<br/>chatstore.py"]
+        ProjectState["Project State<br/>projects.py"]
+    end
+
+    ProviderMgr --> AnthropicProvider
+    ProviderMgr --> OpenAIProvider
+    ProviderMgr --> OllamaProvider
+
+    AnthropicProvider --> SettingsMgr
+    OpenAIProvider --> SettingsMgr
+    OllamaProvider --> SettingsMgr
+
+    SettingsMgr --> EnvLoader
+    SettingsMgr --> SecretStore
+
+    ProviderMgr --> ChatStore
+    ProviderMgr --> ProjectState
+
+    %% Styling
+    classDef provider fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef llm fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    classDef config fill:#fff3e0,stroke:#e65100,stroke-width:2px
+    classDef storage fill:#fce4ec,stroke:#880e4f,stroke-width:2px
+
+    class ProviderMgr provider
+    class AnthropicProvider,OpenAIProvider,OllamaProvider llm
+    class SettingsMgr,EnvLoader,SecretStore config
+    class ChatStore,ProjectState storage
+```
+
+%% Execution Flow (Plan → Execute)
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle: Start
+    Idle --> Detect: User Input
+    Detect --> Classify: Analyze Intent
+    Classify --> PlanPreview: Build Plan
+    Classify --> DirectChat: Simple Query
+    PlanPreview --> WaitingApproval: Show Plan
+    WaitingApproval --> Approved: User Approves
+    WaitingApproval --> Rejected: User Rejects
+    Rejected --> Idle
+    Approved --> Executing: Execute Steps
+    DirectChat --> Executing: Skip Planning
+    Executing --> StepExecute: Each Step
+    StepExecute --> PermissionCheck: Tool Use
+    PermissionCheck --> ToolExecution: Approved
+    PermissionCheck --> WaitingApproval: Denied
+    ToolExecution --> StepComplete: Tool Result
+    StepComplete --> Executing: More Steps?
+    Executing --> Streaming: All Steps Done
+    Streaming --> Idle: Complete
+    Streaming --> Error: Exception
+    Error --> Idle: Recover
+```

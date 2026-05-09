@@ -6,6 +6,7 @@
  * rewrite `/api/*` to an absolute `http://127.0.0.1:8787/api/*`. The Tauri
  * Rust side launches the backend on that port at app startup.
  */
+import { invoke } from "@tauri-apps/api/core";
 
 const IS_TAURI =
   typeof window !== "undefined" &&
@@ -26,6 +27,12 @@ export interface ApiMessage {
   role: "user" | "assistant" | "system";
   content: string;
   created_at: number;
+  activities?: Array<{
+    id: string;
+    label: string;
+    icon?: string;
+    done: boolean;
+  }>;
 }
 
 export interface ApiChat {
@@ -110,6 +117,16 @@ function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+async function invokeBackendCommand(command: "ensure_backend" | "restart_backend") {
+  if (!IS_TAURI) return;
+  try {
+    await invoke(command);
+  } catch {
+    // The HTTP health check below is authoritative; ignore invoke failures in
+    // browser/dev contexts where the command may not exist yet.
+  }
+}
+
 export interface MeResponse {
   name: string;
   os: string;
@@ -173,14 +190,16 @@ export interface UploadedFile {
 export const api = {
   health: () => fetch(u("/api/health")).then((r) => j<{ ok: boolean }>(r)),
 
-  waitForBackend: async (attempts = 18) => {
+  waitForBackend: async (attempts = 60) => {
     let lastError: unknown = null;
     for (let i = 0; i < attempts; i += 1) {
       try {
+        if (i === 0) await invokeBackendCommand("ensure_backend");
+        if (IS_TAURI && i === 15) await invokeBackendCommand("restart_backend");
         return await api.health();
       } catch (err) {
         lastError = err;
-        await sleep(i < 4 ? 250 : 600);
+        await sleep(i < 6 ? 250 : 900);
       }
     }
     throw lastError instanceof Error
@@ -390,6 +409,8 @@ export async function streamChat(
   signal?: AbortSignal,
 ): Promise<void> {
   let sawEvent = false;
+  let sawTerminal = false;
+  let sawServerError = false;
   const parseFrame = (frame: string) => {
     for (const line of frame.split("\n")) {
       if (!line.startsWith("data:")) continue;
@@ -398,6 +419,12 @@ export async function streamChat(
       try {
         const evt = JSON.parse(data) as StreamEvent;
         sawEvent = true;
+        if (evt.type === "done" || evt.type === "end") {
+          sawTerminal = true;
+        }
+        if (evt.type === "error") {
+          sawServerError = true;
+        }
         onEvent(evt);
       } catch {
         /* ignore malformed partial event */
@@ -435,11 +462,21 @@ export async function streamChat(
     if (buf.trim()) {
       parseFrame(buf);
     }
+    if (sawEvent && !sawTerminal && !sawServerError) {
+      onEvent({
+        type: "error",
+        text: "The local backend ended this response without a terminal event. Partial progress is preserved above.",
+      });
+      onEvent({ type: "end" });
+    }
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
       throw error;
     }
-    if (sawEvent) {
+    if (sawTerminal) {
+      return;
+    }
+    if (sawEvent && !sawServerError) {
       onEvent({
         type: "error",
         text: "The local backend ended this response unexpectedly. Partial progress is preserved above.",

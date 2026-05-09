@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>zWork Architecture Diagrams</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 {
+            text-align: center;
+            color: #4fc3f7;
+            margin-bottom: 5px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 20px;
+            font-size: 13px;
+        }
+        .note {
+            text-align: center;
+            color: #ffab40;
+            background: #2d2d2d;
+            padding: 10px;
+            border-radius: 6px;
+            margin: 15px auto 20px;
+            max-width: 600px;
+            font-size: 13px;
+        }
+        .diagram-container {
+            background: #2d2d2d;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px auto;
+            max-width: 98vw;
+            overflow: auto;
+        }
+        h2 {
+            color: #81c784;
+            border-bottom: 1px solid #444;
+            padding-bottom: 10px;
+            margin-top: 0;
+            font-size: 18px;
+        }
+        .mermaid {
+            display: flex;
+            justify-content: center;
+            background: #262626;
+            border-radius: 6px;
+            padding: 10px;
+        }
+        .tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 15px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .tab {
+            background: #444;
+            border: none;
+            color: #e0e0e0;
+            padding: 10px 18px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 13px;
+        }
+        .tab:hover { background: #555; }
+        .tab.active {
+            background: #4fc3f7;
+            color: #1a1a1a;
+            font-weight: 500;
+        }
+        .diagram-content { display: none; }
+        .diagram-content.active { display: block; }
+        .error {
+            color: #ef5350;
+            text-align: center;
+            padding: 15px;
+            background: #2d2d2d;
+            border-radius: 6px;
+            margin: 20px auto;
+            max-width: 600px;
+        }
+        .legend {
+            background: #262626;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 20px auto;
+            max-width: 600px;
+            font-size: 12px;
+        }
+        .legend h3 {
+            margin: 0 0 10px 0;
+            color: #4fc3f7;
+            font-size: 14px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+        }
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+            margin-right: 8px;
+        }
+        .unused {
+            opacity: 0.5;
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <h1>🚀 zWork Architecture Diagrams</h1>
+    <p class="subtitle">Updated to reflect actual implementation • http://localhost:8080</p>
+
+    <div class="note">
+        ⚠️ <strong>Corrected Architecture:</strong> Previous diagrams showed unused skeleton code.
+        The actual implementation is much simpler — see the "Actual Implementation" tab.
+    </div>
+
+    <div class="tabs">
+        <button class="tab active" onclick="showTab('actual')">Actual Implementation</button>
+        <button class="tab" onclick="showTab('flow')">Data Flow Sequence</button>
+        <button class="tab" onclick="showTab('code')">Code Structure</button>
+        <button class="tab" onclick="showTab('tools')">Tool System</button>
+        <button class="tab" onclick="showTab('unused')">Unused Skeleton</button>
+    </div>
+
+    <div id="error-box" class="error" style="display:none;"></div>
+
+    <!-- Actual Implementation -->
+    <div id="actual" class="diagram-content active">
+        <div class="diagram-container">
+            <h2>Actual Implementation (What Really Runs)</h2>
+            <pre class="mermaid">
+graph TB
+    subgraph CLIENT["Client Layer"]
+        Tauri["Tauri Desktop<br/>main.rs"]
+        React["React UI<br/>App.tsx + store.ts"]
+    end
+
+    subgraph PYTHON["Python Sidecar"]
+        Server["server.py<br/>FastAPI"]
+    end
+
+    subgraph AGENT["Agent Module (sidecar/agent/)"]
+        Stream["stream_chat()<br/>providers.py"]
+        Tools["execute_tool()<br/>tools.py"]
+        Store["chatstore.py<br/>projects.py"]
+        Settings["settings.py"]
+        Detect["detect.py"]
+        Skills["skills.py"]
+    end
+
+    subgraph SKELETON["core/ (NOT USED IN PROD)"]
+        Orch["orchestrator.py"]
+        Exec["executor.py"]
+        Perm["permission_manager.py"]
+        Work["workflows.py"]
+    end
+
+    subgraph EXTERNAL["External Services"]
+        Claude["Claude API"]
+        OpenAI["OpenAI API"]
+        Ollama["Ollama"]
+        Cloud["Supabase"]
+    end
+
+    subgraph DATA["Data Layer"]
+        DB[(SQLite)]
+        FS[(Files)]
+    end
+
+    Tauri --> Server
+    React -.HTTP/SSE.-> Server
+    Server --> Stream
+    Stream --> Tools
+    Stream --> Store
+    Stream --> Settings
+    Stream --> Detect
+    Stream --> Skills
+    Tools --> Claude
+    Tools --> OpenAI
+    Tools --> Ollama
+    Store --> DB
+    Projects["projects.py"] --> FS
+
+    classDef actual fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    classDef unused fill:#424242,stroke:#666,stroke-width:1px,stroke-dasharray: 5 5
+
+    class Tauri,React,Server,Stream,Tools,Store,Settings,Detect,Skills,Projects,Claude,OpenAI,Ollama,DB,FS actual
+    class Orch,Exec,Perm,Work unused
+            </pre>
+        </div>
+
+        <div class="legend">
+            <h3>📌 Key Points</h3>
+            <div class="legend-item"><span class="legend-color" style="background:#e8f5e9"></span>Active code used in production</div>
+            <div class="legend-item"><span class="legend-color" style="background:#424242;border:1px dashed #666"></span>Skeleton code (not wired to chat endpoint)</div>
+            <ul style="margin: 10px 0 0 20px; padding: 0;">
+                <li>The <strong>entire agentic loop</strong> is in <code>providers.py::stream_chat()</code></li>
+                <li>Multi-turn tool loop (max 24 turns) happens <strong>inside</strong> stream_chat()</li>
+                <li><code>core/</code> directory exists but is <strong>not called</strong> by /api/chat/stream</li>
+                <li>Tools are defined in <code>tools.py</code> (same dir as providers.py)</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Data Flow Sequence -->
+    <div id="flow" class="diagram-content">
+        <div class="diagram-container">
+            <h2>Data Flow Sequence (Actual)</h2>
+            <pre class="mermaid">
+sequenceDiagram
+    participant U as User
+    participant R as React UI
+    participant S as server.py
+    participant P as providers.py
+    participant T as tools.py
+    participant L as LLM API
+
+    U->>R: Send message
+    R->>S: POST /api/chat/stream
+    S->>P: stream_chat(messages, model)
+    P->>P: lookup_model(), resolve_creds()
+
+    loop Multi-turn tool loop (max 24)
+        P->>L: POST /messages (with tools)
+        L-->>P: SSE stream (text + tool_use)
+
+        loop Each tool_use block
+            P->>T: execute_tool(name, params)
+            T->>P: activity events (UI updates)
+            T->>P: tool_result event
+            P->>R: SSE: activity + result
+            R->>U: Show tool progress
+        end
+
+        P->>P: Append tool_result to messages
+    end
+
+    P->>S: yield "done" event
+    S->>R: SSE close
+    R->>U: Display final response
+    P->>P: chatstore.save()
+            </pre>
+        </div>
+    </div>
+
+    <!-- Code Structure -->
+    <div id="code" class="diagram-content">
+        <div class="diagram-container">
+            <h2>Code Structure (Actual Files)</h2>
+            <pre class="mermaid">
+graph LR
+    subgraph sidecar["sidecar/"]
+        server["server.py<br/>FastAPI app"]
+        agent["agent/<br/>ACTIVE CODE"]
+        core["core/<br/>SKELETON (unused)"]
+    end
+
+    subgraph agent_files["agent/ (USED)"]
+        prov["providers.py<br/>stream_chat()<br/>Multi-turn loop"]
+        tls["tools.py<br/>TOOL_SCHEMAS<br/>execute_tool()"]
+        chat["chatstore.py<br/>Conversation DB"]
+        proj["projects.py<br/>Project state"]
+        setg["settings.py<br/>Config"]
+        det["detect.py<br/>Intent detect"]
+        skl["skills.py<br/>Skill loader"]
+        rt["runtime.py<br/>RunContext"]
+        sec["secretstore.py<br/>Credentials"]
+    end
+
+    subgraph core_files["core/ (NOT USED)"]
+        orch["orchestrator.py"]
+        exec["executor.py"]
+        prm["permission_manager.py"]
+        wrk["workflows.py"]
+        mod["models.py"]
+        utl["util.py"]
+    end
+
+    server --> agent
+    agent --> prov
+    agent --> tls
+    agent --> chat
+    agent --> proj
+    agent --> setg
+    agent --> det
+    agent --> skl
+    agent --> rt
+    agent --> sec
+
+    server -.not called.-> core
+    orch -.not used.-> exec
+    exec -.not used.-> prm
+
+    classDef active fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    classDef unused fill:#424242,stroke:#666,stroke-width:1px,stroke-dasharray: 5 5
+
+    class server,prov,tls,chat,proj,setg,det,skl,rt,sec active
+    class orch,exec,prm,wrk,mod,utl unused
+            </pre>
+        </div>
+    </div>
+
+    <!-- Tool System -->
+    <div id="tools" class="diagram-content">
+        <div class="diagram-container">
+            <h2>Tool System (Actual)</h2>
+            <pre class="mermaid">
+graph TB
+    subgraph providers_py["providers.py"]
+        stream["stream_chat()<br/>Main agent loop"]
+        loop["Multi-turn loop<br/>MAX_TURNS = 24"]
+        resolve["resolve_creds()<br/>Get API keys"]
+    end
+
+    subgraph tools_py["tools.py"]
+        schemas["TOOL_SCHEMAS<br/>JSON Schema for LLM"]
+        execute["execute_tool()<br/>Tool dispatcher"]
+        wf["write_file"]
+        rf["read_file"]
+        ld["list_dir"]
+        rc["run_command"]
+        rs["read_skill"]
+        search["search"]
+        think["think_tool"]
+    end
+
+    subgraph execution["Tool Execution"]
+        asyncExec["Async execution"]
+        events["Yield events:<br/>- activity (UI)<br/>- tool_result"]
+    end
+
+    subgraph storage["Data"]
+        mem["memory/<br/>zWork.md"]
+        skills["zWork-Skills/<br/>Skill repos"]
+    end
+
+    stream --> loop
+    loop --> resolve
+    loop --> schemas
+    loop --> execute
+
+    execute --> wf
+    execute --> rf
+    execute --> ld
+    execute --> rc
+    execute --> rs
+    execute --> search
+    execute --> think
+
+    wf --> asyncExec
+    rf --> asyncExec
+    ld --> asyncExec
+    rc --> asyncExec
+    rs --> skills
+    think --> events
+
+    asyncExec --> events
+    events --> stream
+            </pre>
+        </div>
+
+        <div class="legend">
+            <h3>📌 Tool Facts</h3>
+            <ul style="margin: 10px 0 0 20px; padding: 0;">
+                <li><code>TOOL_SCHEMAS</code> is defined in <code>tools.py</code> (not imported from elsewhere)</li>
+                <li>Providers imports: <code>from .tools import TOOL_SCHEMAS, execute_tool</code></li>
+                <li>Tools are NOT in the <code>core/</code> directory — they're in <code>agent/</code></li>
+                <li>No permission gate — tools execute directly when LLM calls them</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Unused Skeleton -->
+    <div id="unused" class="diagram-content">
+        <div class="diagram-container">
+            <h2>Unused Skeleton Code (core/)</h2>
+            <pre class="mermaid">
+graph TB
+    subgraph core_module["core/ (NOT WIRED TO PRODUCTION)"]
+        Orchestrator["orchestrator.py<br/>build_plan()<br/>Hardcoded plans for:<br/>- file cleanup<br/>- tab summarization<br/>- form filling"]
+        Executor["executor.py<br/>run_steps()<br/>Step execution engine"]
+        PermMgr["permission_manager.py<br/>Safety checks"]
+        Models["models.py<br/>Plan/PlanStep schema"]
+        Workflows["workflows.py<br/>Step handlers"]
+    end
+
+    subgraph why_not_used["Why It's Not Used"]
+        server["server.py /api/chat/stream<br/>NEVER calls orchestrator"]
+        direct["Direct call to providers.stream_chat()"]
+        plan["No plan-preview step in UI"]
+        approval["No approval workflow"]
+    end
+
+    Orchestrator -.would be called.-> server
+    Executor -.would be called.-> Orchestrator
+    PermMgr -.would gate.-> Executor
+
+    server --> direct
+    direct -.bypasses.-> Orchestrator
+
+    classDef unused fill:#424242,stroke:#666,stroke-width:1px,stroke-dasharray: 5 5
+    classDef actual fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+
+    class Orchestrator,Executor,PermMgr,Models,Workflows unused
+    class server,direct actual
+            </pre>
+        </div>
+
+        <div class="legend">
+            <h3>📌 What This Means</h3>
+            <p style="margin: 10px 0; color: #aaa;">
+                The <code>core/</code> directory contains a more sophisticated architecture with:
+                planning phases, permission gates, and step-by-step execution.
+                However, <strong>none of this is wired to the actual chat endpoint</strong>.
+                The production path goes straight from <code>server.py</code> to <code>providers.stream_chat()</code>.
+            </p>
+        </div>
+    </div>
+
+    <script>
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'dark',
+            logLevel: 'error',
+            securityLevel: 'loose',
+            themeVariables: {
+                primaryColor: '#4fc3f7',
+                primaryTextColor: '#1a1a1a',
+                primaryBorderColor: '#81d4fa',
+                lineColor: '#b0bec5',
+                secondaryColor: '#81c784',
+                tertiaryColor: '#fff176',
+                background: '#2d2d2d',
+                mainBkg: '#37474f',
+                nodeBorder: '#546e7a',
+                clusterBkg: '#455a64',
+                titleColor: '#e0e0e0',
+                edgeLabelBackground: '#37474f',
+                fontSize: '13px'
+            }
+        });
+
+        function showTab(tabId) {
+            document.querySelectorAll('.diagram-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+            document.getElementById(tabId).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        setTimeout(function() {
+            const mermaidDivs = document.querySelectorAll('.mermaid');
+            let hasSvg = false;
+            mermaidDivs.forEach(function(d) {
+                if (d.innerHTML.includes('svg')) hasSvg = true;
+            });
+            if (!hasSvg) {
+                document.getElementById('error-box').style.display = 'block';
+                document.getElementById('error-box').innerHTML =
+                    '⚠️ Diagrams not rendering. Try: <br>1. Hard refresh (Ctrl+Shift+R)<br>' +
+                    '2. Open file directly: /Users/ll/zwork/diagrams/index.html<br>3. Check browser console (F12)';
+            }
+        }, 3000);
+    </script>
+</body>
+</html>
+```

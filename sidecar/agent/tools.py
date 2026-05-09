@@ -8,20 +8,107 @@ Each tool is:
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import os
 import re
 import sys
 import subprocess
 import shlex
+import signal
+import urllib.parse
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, AsyncIterator
+
+import httpx
 
 
 # ---------------- Tool schemas (provider-neutral) ----------------
 
 from . import skills as skills_mod
 from .home import memory_path
+from .runtime import current_run
+
+
+READ_ONLY_TOOLS = frozenset({"read_file", "list_dir", "read_skill", "extract_document", "web_search"})
+
+READ_ONLY_DCTL_SUBCOMMANDS = frozenset({
+    "snapshot",
+    "tree",
+    "screenshot",
+    "windows",
+    "apps",
+    "describe",
+    "list",
+})
+
+DESTRUCTIVE_COMMAND_PATTERNS = (
+    (re.compile(r"\brm\s+-[a-z]*r[a-z]*\b", re.I), "recursive delete"),
+    (re.compile(r"\bmkfs(?:\.\w+)?\b", re.I), "format disk/filesystem"),
+    (re.compile(r"\bdd\s+[^;&|]*\bof=/dev/", re.I), "raw disk write"),
+    (re.compile(r"\bgit\s+push\b[^;&|]*(?:--force|-f)\b", re.I), "force push"),
+    (re.compile(r"\bgit\s+reset\b[^;&|]*--hard\b", re.I), "hard reset"),
+    (re.compile(r"\bgit\s+clean\b[^;&|]*-[a-z]*[fd][a-z]*", re.I), "destructive git clean"),
+    (re.compile(r"\bgit\s+branch\b[^;&|]*\s-D\b", re.I), "delete branch"),
+    (re.compile(r"\bdrop\s+(?:table|database)\b", re.I), "database drop"),
+    (re.compile(r"\b(?:shutdown|reboot|halt|poweroff)\b", re.I), "system shutdown"),
+)
+
+
+def _normalized_command(command: str) -> str:
+    return " ".join(str(command or "").strip().split())
+
+
+def _targets_zwork_backend(command: str) -> bool:
+    c = _normalized_command(command).lower()
+    if "8787" not in c:
+        return False
+    return bool(
+        re.search(r"\blsof\b[^;&|]*(?::8787|-i\s*:8787)", c)
+        and re.search(r"\b(?:xargs\s+)?kill(?:all)?\b", c)
+    ) or bool(re.search(r"\b(?:kill|pkill|killall)\b[^;&|]*8787", c))
+
+
+def _matches_destructive_command(command: str) -> tuple[bool, str]:
+    if _targets_zwork_backend(command):
+        return True, "kills the zWork local backend on port 8787"
+    for pattern, reason in DESTRUCTIVE_COMMAND_PATTERNS:
+        if pattern.search(command or ""):
+            return True, reason
+    return False, ""
+
+
+def tool_risk(tool_name: str, params: dict[str, Any]) -> tuple[str, str]:
+    if tool_name in READ_ONLY_TOOLS:
+        return "safe", "read-only tool"
+    if tool_name == "run_command":
+        command = str(params.get("command") or "")
+        destructive, reason = _matches_destructive_command(command)
+        if destructive:
+            return "destructive", reason
+        return "sensitive", "runs a shell command"
+    if tool_name == "write_file":
+        return "sensitive", "writes or overwrites a file"
+    if tool_name == "deploy_web_app":
+        return "sensitive", "starts a local server"
+    if tool_name == "save_memory":
+        return "sensitive", "persists memory"
+    if tool_name == "dctl":
+        sub = str(params.get("subcommand") or "").strip().lower()
+        args = [str(a).strip().lower() for a in (params.get("args") or [])]
+        effective = args[0] if sub == "browser" and args else sub
+        if effective in READ_ONLY_DCTL_SUBCOMMANDS:
+            return "safe", "read-only desktop inspection"
+        return "sensitive", "controls the desktop UI"
+    if tool_name.startswith("mcp__"):
+        return "sensitive", "calls an external MCP tool"
+    return "sensitive", "tool changes or accesses external state"
+
+
+def filter_tools_for_plan_mode(schemas: list[dict]) -> list[dict]:
+    return [t for t in schemas if t.get("name") in READ_ONLY_TOOLS]
 
 
 TOOL_SCHEMAS: list[dict] = [
@@ -153,6 +240,21 @@ TOOL_SCHEMAS: list[dict] = [
         },
     },
     {
+        "name": "web_search",
+        "description": (
+            "Search the web/news without opening a browser. Use this for current events, "
+            "recent news, or factual web lookup requests when the user wants the answer in chat."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query. Leave empty for top current headlines."},
+                "max_results": {"type": "integer", "description": "Maximum results to return (default 6, max 10)"},
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "dctl",
         "description": (
             "Run the local dctl desktop-control CLI for window/app/browser automation, "
@@ -194,6 +296,10 @@ def _friendly_error(err: Exception, context: str = "") -> str:
         return f"Cannot read as text: {msg}. The file may be binary or use an unsupported encoding."
     if isinstance(err, subprocess.TimeoutExpired):
         return f"Command timed out after {err.timeout}s. Try breaking the work into smaller steps."
+    if isinstance(err, asyncio.TimeoutError):
+        return "Command timed out. Try breaking the work into smaller steps."
+    if isinstance(err, asyncio.CancelledError):
+        return "Operation cancelled."
     if isinstance(err, OSError):
         return f"System error: {msg}. {context}Check that the path and permissions are correct."
 
@@ -202,6 +308,30 @@ def _friendly_error(err: Exception, context: str = "") -> str:
 
 async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[dict]:
     tool_id = f"tool_{tool_name}_{id(params)}"
+    run = current_run()
+    if run is not None:
+        run.next_tool_call()
+        run.log("tool_started", tool_name=tool_name, params=params)
+
+    if tool_name.startswith("mcp__"):
+        label = f"MCP {tool_name}"
+        yield {"type": "activity", "id": tool_id, "label": label, "icon": "tool", "done": False}
+        try:
+            from .mcp import get_manager
+
+            result = await get_manager().call_tool(tool_name, params)
+            text = _format_mcp_result(result)
+            ok = not bool(result.get("isError"))
+            yield {"type": "activity", "id": tool_id, "label": label, "icon": "tool", "done": True}
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=ok, output=text)
+            yield {"type": "tool_result", "tool": tool_name, "ok": ok, "message": text}
+        except Exception as e:
+            yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "tool", "done": True}
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=False, output=_friendly_error(e))
+            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e)}
+        return
 
     if tool_name == "write_file":
         path = params.get("path", "")
@@ -210,12 +340,16 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
         icon = _icon_for_path(path)
         yield {"type": "activity", "id": tool_id, "label": label, "icon": icon, "done": False}
         try:
-            _write_file(path, content)
+            await asyncio.to_thread(_write_file, path, content)
             yield {"type": "activity", "id": tool_id, "label": label, "icon": icon, "done": True}
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=True, output=f"Wrote {len(content)} chars to {path}")
             yield {"type": "tool_result", "tool": tool_name, "ok": True,
                    "message": f"Wrote {len(content)} chars to {path}"}
         except Exception as e:
             yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": icon, "done": True}
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=False, output=_friendly_error(e, "Try a different path. "))
             yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e, "Try a different path. ")}
         return
 
@@ -225,11 +359,15 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
         icon = _icon_for_path(path)
         yield {"type": "activity", "id": tool_id, "label": label, "icon": icon, "done": False}
         try:
-            text = _read_file(path)
+            text = await asyncio.to_thread(_read_file, path)
             yield {"type": "activity", "id": tool_id, "label": label, "icon": icon, "done": True}
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=True, output=f"Read {len(text)} chars from {path}")
             yield {"type": "tool_result", "tool": tool_name, "ok": True, "message": text}
         except Exception as e:
             yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": icon, "done": True}
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=False, output=_friendly_error(e, "Try a different path. "))
             yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e, "Try a different path. ")}
         return
 
@@ -238,11 +376,15 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
         label = f"List {_short_path(path)}"
         yield {"type": "activity", "id": tool_id, "label": label, "icon": "folder", "done": False}
         try:
-            listing = _list_dir(path)
+            listing = await asyncio.to_thread(_list_dir, path)
             yield {"type": "activity", "id": tool_id, "label": label, "icon": "folder", "done": True}
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=True, output=f"Listed {path}")
             yield {"type": "tool_result", "tool": tool_name, "ok": True, "message": listing}
         except Exception as e:
             yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "folder", "done": True}
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=False, output=_friendly_error(e, "Check that the path is a directory. "))
             yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e, "Check that the path is a directory. ")}
         return
 
@@ -254,18 +396,44 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
         label = f"Run: {short}" + (" (bg)" if background else "")
         yield {"type": "activity", "id": tool_id, "label": label, "icon": "command", "done": False}
         try:
+            _ensure_command_allowed(command)
             if background:
-                pid = _run_background(command, cwd)
+                pid = await asyncio.to_thread(_run_background, command, cwd)
                 yield {"type": "activity", "id": tool_id, "label": label, "icon": "command", "done": True}
+                if run is not None:
+                    run.log("tool_finished", tool_name=tool_name, ok=True, output=f"Started background process (pid={pid})")
                 yield {"type": "tool_result", "tool": tool_name, "ok": True,
                        "message": f"Started background process (pid={pid})"}
             else:
-                result = _run_command(command, cwd)
+                yield {"type": "status", "text": f"Running command: {short}"}
+                result = await _run_command(command, cwd)
                 yield {"type": "activity", "id": tool_id, "label": label, "icon": "command", "done": True}
+                if run is not None:
+                    run.log("tool_finished", tool_name=tool_name, ok=result["ok"], output=result["output"] or f"exit {result['returncode']}")
                 yield {"type": "tool_result", "tool": tool_name, "ok": result["ok"],
                        "message": result["output"] or (f"exit {result['returncode']}")}
         except Exception as e:
             yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "command", "done": True}
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=False, output=_friendly_error(e))
+            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e)}
+        return
+
+    if tool_name == "web_search":
+        query = str(params.get("query") or "").strip()
+        max_results = int(params.get("max_results") or 6)
+        label = f"Search web: {query[:50]}" if query else "Search current headlines"
+        yield {"type": "activity", "id": tool_id, "label": label, "icon": "search", "done": False}
+        try:
+            text = await asyncio.to_thread(_web_search, query, max_results)
+            yield {"type": "activity", "id": tool_id, "label": label, "icon": "search", "done": True}
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=True, output=text[:1000])
+            yield {"type": "tool_result", "tool": tool_name, "ok": True, "message": text}
+        except Exception as e:
+            yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "search", "done": True}
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=False, output=_friendly_error(e))
             yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e)}
         return
 
@@ -274,20 +442,26 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
         label = f"Read skill {slug}"
         yield {"type": "activity", "id": tool_id, "label": label, "icon": "file", "done": False}
         try:
-            text = skills_mod.read_skill(slug)
+            text = await asyncio.to_thread(skills_mod.read_skill, slug)
             if text is None:
                 available = ", ".join(s.slug for s in skills_mod.list_skills()[:10])
                 msg = f"No skill named '{slug}'. Try one of: {available}"
                 yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "file", "done": True}
+                if run is not None:
+                    run.log("tool_finished", tool_name=tool_name, ok=False, output=msg)
                 yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": msg}
             else:
                 # Cap to keep context sane.
                 if len(text) > 80_000:
                     text = text[:80_000] + "\n…[truncated]"
                 yield {"type": "activity", "id": tool_id, "label": label, "icon": "file", "done": True}
+                if run is not None:
+                    run.log("tool_finished", tool_name=tool_name, ok=True, output=f"Loaded skill {slug}")
                 yield {"type": "tool_result", "tool": tool_name, "ok": True, "message": text}
         except Exception as e:
             yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "file", "done": True}
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=False, output=_friendly_error(e, "Check the skill slug spelling. "))
             yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e, "Check the skill slug spelling. ")}
         return
 
@@ -297,12 +471,16 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
         label = f"Serve {_short_path(project_path)}"
         yield {"type": "activity", "id": tool_id, "label": label, "icon": "deploy", "done": False}
         try:
-            result = _deploy_web_app(project_path, framework)
+            result = await asyncio.to_thread(_deploy_web_app, project_path, framework)
             yield {"type": "activity", "id": tool_id, "label": label, "icon": "deploy", "done": True}
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=result["ok"], output=result["message"])
             yield {"type": "tool_result", "tool": tool_name, "ok": result["ok"],
                    "message": result["message"]}
         except Exception as e:
             yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "deploy", "done": True}
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=False, output=_friendly_error(e))
             yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e)}
         return
 
@@ -311,12 +489,16 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
         label = "Save memory"
         yield {"type": "activity", "id": tool_id, "label": label, "icon": "file", "done": False}
         try:
-            _save_memory(content)
+            await asyncio.to_thread(_save_memory, content)
             yield {"type": "activity", "id": tool_id, "label": label, "icon": "file", "done": True}
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=True, output="Saved to memory.")
             yield {"type": "tool_result", "tool": tool_name, "ok": True,
                    "message": "Saved to memory."}
         except Exception as e:
             yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "file", "done": True}
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=False, output=_friendly_error(e))
             yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e)}
         return
 
@@ -327,12 +509,16 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
         label = f"Extract {_short_path(path)}"
         yield {"type": "activity", "id": tool_id, "label": label, "icon": "file", "done": False}
         try:
-            result = _extract_document(path, fmt, pages)
+            result = await asyncio.to_thread(_extract_document, path, fmt, pages)
             yield {"type": "activity", "id": tool_id, "label": label, "icon": "file", "done": True}
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=True, output=f"Extracted document {path}")
             yield {"type": "tool_result", "tool": tool_name, "ok": True,
                    "message": json.dumps(result, ensure_ascii=False)}
         except Exception as e:
             yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "file", "done": True}
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=False, output=_friendly_error(e, "Check the file path and extension. "))
             yield {"type": "tool_result", "tool": tool_name, "ok": False,
                    "message": _friendly_error(e, "Check the file path and extension. ")}
         return
@@ -345,8 +531,10 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
         label = f"dctl {full}" if full else "dctl"
         yield {"type": "activity", "id": tool_id, "label": label, "icon": "window", "done": False}
         try:
-            result = _run_dctl(subcommand, args, cwd)
+            result = await _run_dctl(subcommand, args, cwd)
             yield {"type": "activity", "id": tool_id, "label": label, "icon": "window", "done": True}
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=result["ok"], output=result["output"] or (f"exit {result['returncode']}" if not result["ok"] else "ok"))
             yield {
                 "type": "tool_result",
                 "tool": tool_name,
@@ -355,9 +543,13 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
             }
         except Exception as e:
             yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "window", "done": True}
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=False, output=_friendly_error(e, "Check that dctl is installed and the subcommand is valid. "))
             yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e, "Check that dctl is installed and the subcommand is valid. ")}
         return
 
+    if run is not None:
+        run.log("tool_finished", tool_name=tool_name, ok=False, output=f"Unknown tool: {tool_name}")
     yield {"type": "tool_result", "tool": tool_name, "ok": False,
            "message": f"Unknown tool: {tool_name}. This tool is not available — try a different approach."}
 
@@ -424,37 +616,111 @@ def _list_dir(path: str) -> str:
     return "\n".join(entries) if entries else "(empty)"
 
 
-def _run_command(command: str, cwd: str) -> dict[str, Any]:
-    try:
-        result = subprocess.run(
-            command,
-            shell=True,
-            cwd=Path(cwd).expanduser(),
-            capture_output=True,
-            text=True,
-            timeout=120,
+def _format_mcp_result(result: dict) -> str:
+    parts: list[str] = []
+    for item in result.get("content") or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "text":
+            parts.append(str(item.get("text") or ""))
+        else:
+            parts.append(json.dumps(item, ensure_ascii=False))
+    text = "\n".join(p for p in parts if p).strip()
+    return text or ("error" if result.get("isError") else "ok")
+
+
+def _web_search(query: str, max_results: int = 6) -> str:
+    max_results = max(1, min(int(max_results or 6), 10))
+    base = "https://news.google.com/rss"
+    params = {"hl": "en-US", "gl": "US", "ceid": "US:en"}
+    if query:
+        base += "/search"
+        params["q"] = query
+    url = base + "?" + urllib.parse.urlencode(params)
+    with httpx.Client(timeout=12.0, follow_redirects=True) as client:
+        resp = client.get(
+            url,
+            headers={
+                "User-Agent": "zWork/1.0 (+https://tryzwork.app)",
+                "Accept": "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
+            },
         )
-    except subprocess.TimeoutExpired:
+        resp.raise_for_status()
+        data = resp.content[:2_000_000]
+    root = ET.fromstring(data)
+    rows: list[str] = []
+    for item in root.findall("./channel/item")[:max_results]:
+        title = (item.findtext("title") or "").strip()
+        link = (item.findtext("link") or "").strip()
+        pub_date = (item.findtext("pubDate") or "").strip()
+        source = ""
+        for child in list(item):
+            if child.tag.endswith("source"):
+                source = (child.text or "").strip()
+                break
+        if not title:
+            continue
+        meta = " | ".join(p for p in (source, pub_date) if p)
+        if meta:
+            rows.append(f"- {title}\n  {meta}\n  {link}")
+        else:
+            rows.append(f"- {title}\n  {link}")
+    if not rows:
+        return "No web/news results found."
+    heading = f"Results for: {query}" if query else "Top current headlines"
+    return heading + "\n\n" + "\n".join(rows)
+
+
+async def _run_command(command: str, cwd: str) -> dict[str, Any]:
+    _ensure_command_allowed(command)
+    run = current_run()
+    timeout_seconds = run.command_timeout_seconds if run is not None else 120
+    output_cap = run.command_output_cap if run is not None else 20_000
+    proc = await asyncio.create_subprocess_shell(
+        command,
+        cwd=str(Path(cwd).expanduser()),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        start_new_session=True,
+    )
+    if run is not None:
+        run.register_process(proc.pid)
+        run.log("process_spawned", pid=proc.pid, command=command, cwd=str(Path(cwd).expanduser()))
+    try:
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
+        except asyncio.TimeoutError:
+            _terminate_process_tree(proc.pid)
+            await proc.wait()
+            return {
+                "ok": False,
+                "returncode": -1,
+                "output": f"Command timed out after {int(timeout_seconds)}s. Try a shorter command or break the work into smaller steps.",
+            }
+        output = (stdout or b"").decode("utf-8", errors="replace")
+        stderr_text = (stderr or b"").decode("utf-8", errors="replace")
+        if stderr_text:
+            output += ("\n" + stderr_text) if output else stderr_text
+        if len(output) > output_cap:
+            output = output[:output_cap] + "\n…[truncated]"
         return {
-            "ok": False,
-            "returncode": -1,
-            "output": f"Command timed out after 120s. Try a shorter command or break the work into smaller steps.",
+            "ok": proc.returncode == 0,
+            "returncode": proc.returncode,
+            "output": output.strip(),
         }
-    output = result.stdout
-    if result.stderr:
-        output += ("\n" + result.stderr) if output else result.stderr
-    # Cap output
-    if len(output) > 20_000:
-        output = output[:20_000] + "\n…[truncated]"
-    return {
-        "ok": result.returncode == 0,
-        "returncode": result.returncode,
-        "output": output.strip(),
-    }
+    except asyncio.CancelledError:
+        _terminate_process_tree(proc.pid)
+        with contextlib.suppress(ProcessLookupError):
+            await proc.wait()
+        raise
+    finally:
+        if run is not None:
+            run.unregister_process(proc.pid)
 
 
 def _run_background(command: str, cwd: str) -> int:
     """Start a detached background process. Returns PID."""
+    _ensure_command_allowed(command)
     proc = subprocess.Popen(
         command,
         shell=True,
@@ -465,6 +731,21 @@ def _run_background(command: str, cwd: str) -> int:
         start_new_session=True,
     )
     return proc.pid
+
+
+def _ensure_command_allowed(command: str) -> None:
+    if _targets_zwork_backend(command):
+        raise PermissionError(
+            "Refusing to run a command that kills the zWork local backend on port 8787. "
+            "Restart or inspect the backend instead of killing the app's own service."
+        )
+
+
+def _terminate_process_tree(pid: int) -> None:
+    if pid <= 0:
+        return
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(pid, signal.SIGTERM)
 
 
 def _pick_free_port(preferred: list[int]) -> int:
@@ -782,33 +1063,52 @@ def _dctl_env() -> dict[str, str]:
     return env
 
 
-def _run_dctl(subcommand: str, args: list[str], cwd: str) -> dict[str, Any]:
+async def _run_dctl(subcommand: str, args: list[str], cwd: str) -> dict[str, Any]:
     if not subcommand:
         raise ValueError("dctl requires a subcommand")
     cmd = [sys.executable, "-m", "dctl", subcommand, *args]
+    run = current_run()
+    timeout_seconds = run.command_timeout_seconds if run is not None else 120
+    output_cap = run.command_output_cap if run is not None else 20_000
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        cwd=str(Path(cwd).expanduser()),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=_dctl_env(),
+        start_new_session=True,
+    )
+    if run is not None:
+        run.register_process(proc.pid)
+        run.log("process_spawned", pid=proc.pid, command=" ".join(cmd), cwd=str(Path(cwd).expanduser()))
     try:
-        result = subprocess.run(
-            cmd,
-            cwd=Path(cwd).expanduser(),
-            capture_output=True,
-            text=True,
-            timeout=120,
-            env=_dctl_env(),
-        )
-    except subprocess.TimeoutExpired:
-        return {
-            "ok": False,
-            "returncode": -1,
-            "output": "dctl command timed out after 120s. Try a simpler operation.",
-        }
-    output = result.stdout
-    if result.stderr:
-        output += ("\n" + result.stderr) if output else result.stderr
-    if len(output) > 20_000:
-        output = output[:20_000] + "\n…[truncated]"
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
+        except asyncio.TimeoutError:
+            _terminate_process_tree(proc.pid)
+            await proc.wait()
+            return {
+                "ok": False,
+                "returncode": -1,
+                "output": f"dctl command timed out after {int(timeout_seconds)}s. Try a simpler operation.",
+            }
+    except asyncio.CancelledError:
+        _terminate_process_tree(proc.pid)
+        with contextlib.suppress(ProcessLookupError):
+            await proc.wait()
+        raise
+    finally:
+        if run is not None:
+            run.unregister_process(proc.pid)
+    output = (stdout or b"").decode("utf-8", errors="replace")
+    stderr_text = (stderr or b"").decode("utf-8", errors="replace")
+    if stderr_text:
+        output += ("\n" + stderr_text) if output else stderr_text
+    if len(output) > output_cap:
+        output = output[:output_cap] + "\n…[truncated]"
     return {
-        "ok": result.returncode == 0,
-        "returncode": result.returncode,
+        "ok": proc.returncode == 0,
+        "returncode": proc.returncode,
         "output": output.strip(),
     }
 

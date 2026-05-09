@@ -22,6 +22,12 @@ def chats_dir() -> Path:
     return d
 
 
+def runs_dir() -> Path:
+    d = zwork_home() / "runs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def onboarding_path() -> Path:
     """File that marks whether onboarding has been completed."""
     return zwork_home() / "onboarding.json"

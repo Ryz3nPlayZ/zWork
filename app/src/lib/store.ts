@@ -649,7 +649,9 @@ export const useApp = create<AppState>((set, get) => ({
             role: m.role as Role,
             content: m.content,
             createdAt: m.created_at,
+            activities: m.activities || [],
           }));
+        const latestActivities = [...messages].reverse().find((m) => m.role === "assistant" && (m.activities || []).length > 0)?.activities || [];
         set((s) => ({
           chats: {
             ...s.chats,
@@ -658,7 +660,7 @@ export const useApp = create<AppState>((set, get) => ({
               title: full.title,
               updatedAt: full.updated_at,
               messages,
-              activities: [],
+              activities: latestActivities,
               artifactPanelOpen: false,
               activeArtifactId: null,
             },

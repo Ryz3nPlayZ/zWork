@@ -9,6 +9,7 @@ class TestPrev1OllamaModel(unittest.TestCase):
         settings = Settings(
             api_keys={"openai": "ollama-test-key"},
             provider_config={"openai": {"base_url": "https://ollama.com/v1"}},
+            use_claude_code_config=False,
             default_model="qwen3-5-cloud-ollama",
             custom_models=[
                 {

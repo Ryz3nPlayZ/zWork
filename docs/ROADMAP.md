@@ -1,6 +1,6 @@
 # zWork Roadmap
 
-This document tracks the high-level direction of zWork. For implementation details, see [PLAN.md](PLAN.md). For a brainstorm of possible future features, see [FUTURE_FEATURES.MD](FUTURE_FEATURES.MD).
+This document tracks the high-level direction of zWork. For archived implementation notes, see [PLAN.md](archive/PLAN.md). For a brainstorm of possible future features, see [FUTURE_FEATURES.md](archive/FUTURE_FEATURES.md).
 
 ---
 
@@ -32,7 +32,7 @@ Cross-platform desktop AI assistant with chat, file operations, web research, an
 
 **Key principle:** Chat is the entry point, artifacts are the outputs, tasks and calendar are the follow-through.
 
-See [PLAN.md](PLAN.md) for full phase breakdown, acceptance criteria, and implementation targets.
+See [PLAN.md](archive/PLAN.md) for full phase breakdown, acceptance criteria, and implementation targets.
 
 ---
 
@@ -74,4 +74,4 @@ Areas under exploration. Not committed to a timeline.
 - **Safety & Governance** — permission scopes, risk classification, audit trails, dry-run mode
 - **Observability** — step traces, reproducible run reports, action explanations
 
-See [FUTURE_FEATURES.MD](FUTURE_FEATURES.MD) for the full brainstorm.
+See [FUTURE_FEATURES.md](archive/FUTURE_FEATURES.md) for the full brainstorm.

@@ -294,6 +294,31 @@ fn open_external(app: tauri::AppHandle, url: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn ensure_backend(app: tauri::AppHandle, backend: tauri::State<Backend>) -> Result<bool, String> {
+    let mut guard = backend
+        .0
+        .lock()
+        .map_err(|_| "backend state lock poisoned".to_string())?;
+    if guard.is_none() {
+        *guard = spawn_backend(&app);
+    }
+    Ok(guard.is_some())
+}
+
+#[tauri::command]
+fn restart_backend(app: tauri::AppHandle, backend: tauri::State<Backend>) -> Result<bool, String> {
+    let mut guard = backend
+        .0
+        .lock()
+        .map_err(|_| "backend state lock poisoned".to_string())?;
+    if let Some(child) = guard.take() {
+        child.shutdown();
+    }
+    *guard = spawn_backend(&app);
+    Ok(guard.is_some())
+}
+
+#[tauri::command]
 async fn begin_desktop_auth(app: tauri::AppHandle, start_url: String) -> Result<String, String> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -503,7 +528,12 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(process_init())
         .plugin(UpdaterBuilder::new().build())
-        .invoke_handler(tauri::generate_handler![open_external, begin_desktop_auth])
+        .invoke_handler(tauri::generate_handler![
+            open_external,
+            ensure_backend,
+            restart_backend,
+            begin_desktop_auth
+        ])
         .manage(Backend(Mutex::new(None)))
         .build(tauri::generate_context!())
         .expect("error while building zWork");

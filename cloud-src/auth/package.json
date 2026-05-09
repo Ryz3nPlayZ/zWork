@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@better-auth/cli": "1.4.22",
+    "@better-auth/core": "1.4.22",
     "better-auth": "1.4.22",
     "hono": "^4.7.0",
     "kysely": "^0.28.14",
