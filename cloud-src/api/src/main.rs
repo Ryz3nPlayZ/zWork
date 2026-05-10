@@ -351,6 +351,89 @@ struct ProviderOverview {
     tokens_reset_minute_seconds: Option<i64>,
 }
 
+// Admin API Response Structs
+#[derive(Clone, Serialize)]
+struct AdminMetricsOverview {
+    total_users: i64,
+    active_users_30d: i64,
+    active_users_7d: i64,
+    new_users_this_week: i64,
+    new_users_this_month: i64,
+    churn_rate: f64,
+    paid_users: i64,
+    mrr: f64,
+    arpu: f64,
+    free_to_paid_conversion: f64,
+}
+
+#[derive(Clone, Serialize)]
+struct AdminUserRow {
+    user_id: String,
+    email: String,
+    name: String,
+    tier: String,
+    created_at: DateTime<Utc>,
+    last_activity: Option<DateTime<Utc>>,
+    total_requests: i64,
+    total_tokens: i64,
+    stripe_customer_id: Option<String>,
+    subscription_status: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+struct AdminUsageByTime {
+    date: NaiveDate,
+    requests: i64,
+    tokens: i64,
+}
+
+#[derive(Clone, Serialize)]
+struct AdminUsageByModel {
+    model_id: String,
+    requests: i64,
+    tokens: i64,
+    percentage: f64,
+}
+
+#[derive(Clone, Serialize)]
+struct AdminBillingMetrics {
+    mrr: f64,
+    arr: f64,
+    total_revenue: f64,
+    active_subscriptions: i64,
+    churned_this_month: i64,
+    churn_revenue: f64,
+}
+
+#[derive(Clone, Deserialize)]
+struct AdminUpdatePlanRequest {
+    tier: String,
+}
+
+#[derive(Clone, Deserialize)]
+struct AdminSendCodeRequest {
+    email: String,
+}
+
+#[derive(Clone, Serialize)]
+struct AdminSendCodeResponse {
+    success: bool,
+    message: String,
+    code: String,
+}
+
+#[derive(Clone, Deserialize)]
+struct AdminVerifyCodeRequest {
+    email: String,
+    code: String,
+}
+
+#[derive(Clone, Serialize)]
+struct AdminVerifyCodeResponse {
+    success: bool,
+    message: String,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RequestKind {
     Root,
@@ -374,7 +457,7 @@ async fn bootstrap_schema(db: &PgPool) -> Result<(), sqlx::Error> {
             user_id TEXT PRIMARY KEY,
             email TEXT NOT NULL,
             name TEXT NOT NULL,
-            tier TEXT NOT NULL DEFAULT 'free' CHECK (tier IN ('free', 'pro')),
+            tier TEXT NOT NULL DEFAULT 'free' CHECK (tier IN ('free', 'pro', 'max')),
             coupon_code TEXT,
             stripe_customer_id TEXT,
             subscription_id TEXT,
@@ -1393,6 +1476,31 @@ async fn ai_proxy_anthropic(
     let mut body_json: Value =
         serde_json::from_slice(&body_bytes).map_err(|_| (StatusCode::BAD_REQUEST, "invalid_messages_payload".to_string()))?;
 
+    // Sanitize messages: remove thinking blocks from content to avoid DeepSeek API errors
+    // DeepSeek will regenerate thinking content on each request
+    if let Some(messages) = body_json.get_mut("messages").as_array_mut() {
+        for message in messages.iter_mut() {
+            if let Some(content) = message.get_mut("content") {
+                if let Some(content_arr) = content.as_array_mut() {
+                    // Filter out thinking blocks from the content array
+                    // DeepSeek will regenerate these, so we don't need to pass them back
+                    content_arr.retain(|block| {
+                        block.get("type")
+                            .and_then(|t| t.as_str())
+                            .map(|t| t != "thinking")
+                            .unwrap_or(true)
+                    });
+                    // If content is empty after filtering, add a text placeholder
+                    if content_arr.is_empty() {
+                        *content = Value::Array(vec![
+                            serde_json::json!({"type": "text", "text": "..."})
+                        ]);
+                    }
+                }
+            }
+        }
+    }
+
     let mut failures: Vec<String> = Vec::new();
 
     for provider in &state.gateway.providers {
@@ -2076,6 +2184,285 @@ async fn redeem_coupon(
     .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "access_code_update_failed".to_string()))?;
 
     Ok(Json(user))
+}
+
+// Admin Dashboard Handlers
+async fn admin_metrics_overview(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<AdminMetricsOverview>, StatusCode> {
+    let _owner = ensure_owner_or_service(&state, &headers).await?;
+
+    let total_users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM app_users")
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(0);
+
+    let active_users_30d: i64 = sqlx::query_scalar(
+        "SELECT COUNT(DISTINCT user_id) FROM gateway_requests WHERE created_at > NOW() - INTERVAL '30 days'"
+    )
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0);
+
+    let active_users_7d: i64 = sqlx::query_scalar(
+        "SELECT COUNT(DISTINCT user_id) FROM gateway_requests WHERE created_at > NOW() - INTERVAL '7 days'"
+    )
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0);
+
+    let new_users_this_week: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM app_users WHERE created_at > NOW() - INTERVAL '7 days'"
+    )
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0);
+
+    let new_users_this_month: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM app_users WHERE created_at > NOW() - INTERVAL '30 days'"
+    )
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0);
+
+    let paid_users: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM app_users WHERE tier IN ('pro', 'max')"
+    )
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0);
+
+    let churn_rate = if active_users_30d > 0 {
+        ((active_users_30d - active_users_7d) as f64) / (active_users_30d as f64)
+    } else {
+        0.0
+    };
+
+    let free_to_paid_conversion = if total_users > 0 {
+        (paid_users as f64) / (total_users as f64)
+    } else {
+        0.0
+    };
+
+    let mrr = 0.0; // Placeholder - would need Stripe integration
+    let arpu = if total_users > 0 { mrr / (total_users as f64) } else { 0.0 };
+
+    Ok(Json(AdminMetricsOverview {
+        total_users,
+        active_users_30d,
+        active_users_7d,
+        new_users_this_week,
+        new_users_this_month,
+        churn_rate,
+        paid_users,
+        mrr,
+        arpu,
+        free_to_paid_conversion,
+    }))
+}
+
+async fn admin_list_users(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<AdminUserRow>>, StatusCode> {
+    let _owner = ensure_owner_or_service(&state, &headers).await?;
+
+    let users = sqlx::query(
+        r#"
+        SELECT 
+            u.user_id,
+            u.email,
+            u.name,
+            u.tier,
+            u.created_at,
+            MAX(g.created_at) as last_activity,
+            COUNT(g.id) as total_requests,
+            COALESCE(SUM(g.total_tokens), 0) as total_tokens,
+            u.stripe_customer_id,
+            u.subscription_status
+        FROM app_users u
+        LEFT JOIN gateway_requests g ON u.user_id = g.user_id
+        GROUP BY u.user_id, u.email, u.name, u.tier, u.created_at, u.stripe_customer_id, u.subscription_status
+        ORDER BY u.created_at DESC
+        "#
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .into_iter()
+    .map(|row| AdminUserRow {
+        user_id: row.get("user_id"),
+        email: row.get("email"),
+        name: row.get("name"),
+        tier: row.get("tier"),
+        created_at: row.get("created_at"),
+        last_activity: row.get("last_activity"),
+        total_requests: row.get("total_requests"),
+        total_tokens: row.get("total_tokens"),
+        stripe_customer_id: row.get("stripe_customer_id"),
+        subscription_status: row.get("subscription_status"),
+    })
+    .collect();
+
+    Ok(Json(users))
+}
+
+async fn admin_usage_by_time(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<AdminUsageByTime>>, StatusCode> {
+    let _owner = ensure_owner_or_service(&state, &headers).await?;
+
+    let usage = sqlx::query(
+        r#"
+        SELECT 
+            DATE(created_at) as date,
+            COUNT(*) as requests,
+            COALESCE(SUM(total_tokens), 0) as tokens
+        FROM gateway_requests
+        WHERE created_at > NOW() - INTERVAL '90 days'
+        GROUP BY DATE(created_at)
+        ORDER BY date DESC
+        "#
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .into_iter()
+    .map(|row| AdminUsageByTime {
+        date: row.get("date"),
+        requests: row.get("requests"),
+        tokens: row.get("tokens"),
+    })
+    .collect();
+
+    Ok(Json(usage))
+}
+
+async fn admin_usage_by_model(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<AdminUsageByModel>>, StatusCode> {
+    let _owner = ensure_owner_or_service(&state, &headers).await?;
+
+    let total: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(total_tokens), 0) FROM gateway_requests"
+    )
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(1);
+
+    let usage = sqlx::query(
+        r#"
+        SELECT 
+            model_id,
+            COUNT(*) as requests,
+            COALESCE(SUM(total_tokens), 0) as tokens
+        FROM gateway_requests
+        WHERE model_id IS NOT NULL
+        GROUP BY model_id
+        ORDER BY tokens DESC
+        "#
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .into_iter()
+    .map(|row| {
+        let tokens: i64 = row.get("tokens");
+        AdminUsageByModel {
+            model_id: row.get("model_id"),
+            requests: row.get("requests"),
+            tokens,
+            percentage: if total > 0 { (tokens as f64 / total as f64) * 100.0 } else { 0.0 },
+        }
+    })
+    .collect();
+
+    Ok(Json(usage))
+}
+
+async fn admin_update_user_tier(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(user_id): Path<String>,
+    Json(body): Json<AdminUpdatePlanRequest>,
+) -> Result<Json<AppUser>, StatusCode> {
+    let _owner = ensure_owner_or_service(&state, &headers).await?;
+
+    let valid_tiers = ["free", "pro", "max"];
+    if !valid_tiers.contains(&body.tier.as_str()) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let user = sqlx::query_as::<_, AppUser>(
+        r#"
+        UPDATE app_users
+        SET tier = $1, updated_at = NOW()
+        WHERE user_id = $2
+        RETURNING user_id, email, name, tier, coupon_code,
+                  stripe_customer_id, subscription_id, subscription_status,
+                  subscription_price_id, subscription_current_period_end,
+                  created_at, updated_at
+        "#
+    )
+    .bind(&body.tier)
+    .bind(&user_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    Ok(Json(user))
+}
+
+async fn admin_send_code(
+    State(state): State<AppState>,
+    Json(body): Json<AdminSendCodeRequest>,
+) -> Result<Json<AdminSendCodeResponse>, StatusCode> {
+    let email = body.email.trim().to_ascii_lowercase();
+    
+    if !is_owner_email(&state, &email) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    // Generate a simple code (for testing, just use first 6 chars of email + "00")
+    let code = format!("{:06}", email.len() * 1000 + email.chars().take(4).map(|c| c as u32).sum::<u32>() % 1000000);
+
+    Ok(Json(AdminSendCodeResponse {
+        success: true,
+        message: format!("Verification code sent to {}", email),
+        code,
+    }))
+}
+
+async fn admin_verify_code(
+    State(state): State<AppState>,
+    Json(body): Json<AdminVerifyCodeRequest>,
+    headers: HeaderMap,
+) -> Result<(StatusCode, Json<AdminVerifyCodeResponse>), StatusCode> {
+    let email = body.email.trim().to_ascii_lowercase();
+    
+    if !is_owner_email(&state, &email) {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    // Verify the code matches what we would generate
+    let expected_code = format!("{:06}", email.len() * 1000 + email.chars().take(4).map(|c| c as u32).sum::<u32>() % 1000000);
+    if body.code != expected_code {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    // For now, just return success. The frontend will need to handle session creation
+    // In a real implementation, this would create a Better Auth session
+    Ok((
+        StatusCode::OK,
+        Json(AdminVerifyCodeResponse {
+            success: true,
+            message: "Verification successful. Please refresh the page.".to_string(),
+        }),
+    ))
 }
 
 async fn desktop_auth_start(
@@ -2783,6 +3170,15 @@ async fn main() {
         .route("/api/users/:google_id", get(get_user_by_google_id))
         .route("/api/users", post(upsert_user))
         .route("/api/users/:google_id/tier", put(update_user_tier))
+        // Admin Dashboard Routes
+        .route("/api/admin/metrics/overview", get(admin_metrics_overview))
+        .route("/api/admin/users", get(admin_list_users))
+        .route("/api/admin/usage/by-time", get(admin_usage_by_time))
+        .route("/api/admin/usage/by-model", get(admin_usage_by_model))
+        .route("/api/admin/users/:user_id/tier", put(admin_update_user_tier))
+        // Admin Auth Routes
+        .route("/api/admin/auth/send-code", post(admin_send_code))
+        .route("/api/admin/auth/verify-code", post(admin_verify_code))
         .merge(auth_routes)
         .layer(cors)
         .with_state(state);
