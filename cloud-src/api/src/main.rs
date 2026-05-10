@@ -82,19 +82,34 @@ fn env_or(key: &str, default: &str) -> String {
 
 fn env_bool(key: &str, default: bool) -> bool {
     match std::env::var(key) {
-        Ok(value) => matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"),
+        Ok(value) => matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ),
         Err(_) => default,
     }
 }
 
 fn load_gateway_providers() -> Vec<GatewayProvider> {
+    let base_url = env_or("DEEPSEEK_BASE_URL", "https://api.deepseek.com/anthropic");
+    let protocol = match std::env::var("DEEPSEEK_PROTOCOL")
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "openai" => GatewayProtocol::OpenAi,
+        "anthropic" => GatewayProtocol::Anthropic,
+        _ if base_url.trim_end_matches('/').ends_with("/anthropic") => GatewayProtocol::Anthropic,
+        _ => GatewayProtocol::OpenAi,
+    };
     let provider = GatewayProvider {
         name: "DeepSeek".to_string(),
-        base_url: env_or("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+        base_url,
         api_key: std::env::var("DEEPSEEK_API_KEY").unwrap_or_default(),
         primary_model: env_or("DEEPSEEK_MODEL_PRIMARY", "deepseek-v4-flash"),
         fallback_model: String::new(),
-        protocol: GatewayProtocol::OpenAi,
+        protocol,
     };
 
     if provider.api_key.trim().is_empty() {
@@ -732,7 +747,10 @@ async fn app_user_from_desktop_token(state: &AppState, token: &str) -> Option<Ap
     Some(user)
 }
 
-async fn ensure_gateway_access(state: &AppState, headers: &HeaderMap) -> Result<GatewayAccess, StatusCode> {
+async fn ensure_gateway_access(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<GatewayAccess, StatusCode> {
     if let Some(token) = read_bearer_token(headers) {
         if !state.gateway.bearer_token.is_empty() && token == state.gateway.bearer_token {
             return Ok(GatewayAccess::ServiceToken);
@@ -772,7 +790,10 @@ fn run_id_from_headers(headers: &HeaderMap) -> String {
         .unwrap_or_else(|| Uuid::new_v4().to_string())
 }
 
-async fn upsert_app_user(state: &AppState, auth_user: &BetterAuthUser) -> Result<AppUser, StatusCode> {
+async fn upsert_app_user(
+    state: &AppState,
+    auth_user: &BetterAuthUser,
+) -> Result<AppUser, StatusCode> {
     let email = auth_user.email.clone().unwrap_or_default();
     let name = auth_user
         .name
@@ -807,7 +828,10 @@ fn is_owner_email(state: &AppState, email: &str) -> bool {
     !email.is_empty() && state.owner_emails.iter().any(|item| item == &email)
 }
 
-async fn resolve_app_user(state: &AppState, access: GatewayAccess) -> Result<Option<AppUser>, StatusCode> {
+async fn resolve_app_user(
+    state: &AppState,
+    access: GatewayAccess,
+) -> Result<Option<AppUser>, StatusCode> {
     match access {
         GatewayAccess::ServiceToken => Ok(None),
         GatewayAccess::CookieSession(user) => upsert_app_user(state, &user).await.map(Some),
@@ -880,7 +904,10 @@ async fn better_auth_sign_in_email(
 ) -> Result<BetterAuthUser, (StatusCode, String)> {
     let response = state
         .http_client
-        .post(format!("{}/sign-in/email", state.auth_internal_base.trim_end_matches('/')))
+        .post(format!(
+            "{}/sign-in/email",
+            state.auth_internal_base.trim_end_matches('/')
+        ))
         .json(&serde_json::json!({
             "email": email,
             "password": password,
@@ -888,10 +915,16 @@ async fn better_auth_sign_in_email(
         }))
         .send()
         .await
-        .map_err(|_| (StatusCode::BAD_GATEWAY, "auth_service_unreachable".to_string()))?;
+        .map_err(|_| {
+            (
+                StatusCode::BAD_GATEWAY,
+                "auth_service_unreachable".to_string(),
+            )
+        })?;
 
     if !response.status().is_success() {
-        let status = StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+        let status =
+            StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
         let body = response.text().await.unwrap_or_default();
         return Err((status, body));
     }
@@ -907,17 +940,27 @@ async fn better_auth_sign_in_email(
         .header(reqwest::header::COOKIE, cookie)
         .send()
         .await
-        .map_err(|_| (StatusCode::BAD_GATEWAY, "auth_session_lookup_failed".to_string()))?;
+        .map_err(|_| {
+            (
+                StatusCode::BAD_GATEWAY,
+                "auth_session_lookup_failed".to_string(),
+            )
+        })?;
 
     if !session_response.status().is_success() {
-        let status = StatusCode::from_u16(session_response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+        let status = StatusCode::from_u16(session_response.status().as_u16())
+            .unwrap_or(StatusCode::BAD_GATEWAY);
         let body = session_response.text().await.unwrap_or_default();
         return Err((status, body));
     }
 
     let body = session_response.text().await.unwrap_or_default();
-    let session = serde_json::from_str::<BetterAuthSession>(&body)
-        .map_err(|_| (StatusCode::BAD_GATEWAY, "invalid_auth_session_payload".to_string()))?;
+    let session = serde_json::from_str::<BetterAuthSession>(&body).map_err(|_| {
+        (
+            StatusCode::BAD_GATEWAY,
+            "invalid_auth_session_payload".to_string(),
+        )
+    })?;
     Ok(session.user)
 }
 
@@ -939,16 +982,25 @@ async fn better_auth_sign_up_email(
 
     let response = state
         .http_client
-        .post(format!("{}/sign-up/email", state.auth_internal_base.trim_end_matches('/')))
+        .post(format!(
+            "{}/sign-up/email",
+            state.auth_internal_base.trim_end_matches('/')
+        ))
         .json(&payload)
         .send()
         .await
-        .map_err(|_| (StatusCode::BAD_GATEWAY, "auth_service_unreachable".to_string()))?;
+        .map_err(|_| {
+            (
+                StatusCode::BAD_GATEWAY,
+                "auth_service_unreachable".to_string(),
+            )
+        })?;
 
     if response.status().is_success() {
         Ok(())
     } else {
-        let status = StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+        let status =
+            StatusCode::from_u16(response.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
         let body = response.text().await.unwrap_or_default();
         Err((status, body))
     }
@@ -973,7 +1025,8 @@ async fn enforce_root_rate_limit(state: &AppState, user_id: &str) -> Result<(), 
         return Err(StatusCode::TOO_MANY_REQUESTS);
     }
 
-    let weekly_limit = state.gateway.root_requests_per_5h * state.gateway.weekly_limit_multiplier.max(1);
+    let weekly_limit =
+        state.gateway.root_requests_per_5h * state.gateway.weekly_limit_multiplier.max(1);
     let used_last_7d: i64 = sqlx::query_scalar(
         r#"
         SELECT COUNT(*)
@@ -1137,10 +1190,16 @@ async fn upsert_provider_snapshot(
     .bind(model_id)
     .bind(status)
     .bind(parse_i64_header(headers, "x-ratelimit-limit-requests-day"))
-    .bind(parse_i64_header(headers, "x-ratelimit-remaining-requests-day"))
+    .bind(parse_i64_header(
+        headers,
+        "x-ratelimit-remaining-requests-day",
+    ))
     .bind(parse_i64_header(headers, "x-ratelimit-reset-requests-day"))
     .bind(parse_i64_header(headers, "x-ratelimit-limit-tokens-minute"))
-    .bind(parse_i64_header(headers, "x-ratelimit-remaining-tokens-minute"))
+    .bind(parse_i64_header(
+        headers,
+        "x-ratelimit-remaining-tokens-minute",
+    ))
     .bind(parse_i64_header(headers, "x-ratelimit-reset-tokens-minute"))
     .execute(&state.db)
     .await;
@@ -1219,7 +1278,11 @@ async fn ingest_telemetry(
         Ok(_) => (StatusCode::OK, "Telemetry tracked").into_response(),
         Err(e) => {
             error!("Failed to track telemetry: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to track telemetry").into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to track telemetry",
+            )
+                .into_response()
         }
     }
 }
@@ -1259,7 +1322,12 @@ async fn ai_proxy(
         Some(
             insert_gateway_request(&state, &user.user_id, &run_id, request_kind)
                 .await
-                .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "gateway_request_log_failed".to_string()))?,
+                .map_err(|_| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "gateway_request_log_failed".to_string(),
+                    )
+                })?,
         )
     } else {
         None
@@ -1273,9 +1341,14 @@ async fn ai_proxy(
     }
     let body_bytes = axum::body::to_bytes(req.into_body(), 1024 * 1024 * 10)
         .await
-        .map_err(|_| (StatusCode::BAD_REQUEST, "request_body_too_large".to_string()))?;
-    let body_json: Value =
-        serde_json::from_slice(&body_bytes).map_err(|_| (StatusCode::BAD_REQUEST, "invalid_chat_payload".to_string()))?;
+        .map_err(|_| {
+            (
+                StatusCode::BAD_REQUEST,
+                "request_body_too_large".to_string(),
+            )
+        })?;
+    let body_json: Value = serde_json::from_slice(&body_bytes)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "invalid_chat_payload".to_string()))?;
 
     let mut failures: Vec<String> = Vec::new();
 
@@ -1288,18 +1361,22 @@ async fn ai_proxy(
         {
             vec![provider.primary_model.clone()]
         } else {
-            vec![provider.primary_model.clone(), provider.fallback_model.clone()]
+            vec![
+                provider.primary_model.clone(),
+                provider.fallback_model.clone(),
+            ]
         };
 
         for model_name in models {
             let mut attempt_body = body_json.clone();
             if let Some(obj) = attempt_body.as_object_mut() {
                 obj.insert("model".to_string(), Value::String(model_name.clone()));
-                // Disable DeepSeek thinking mode to avoid reasoning_content issues
-                obj.insert("thinking".to_string(), serde_json::json!({"type": "disabled"}));
             }
 
-            let endpoint = format!("{}/chat/completions", provider.base_url.trim_end_matches('/'));
+            let endpoint = format!(
+                "{}/chat/completions",
+                provider.base_url.trim_end_matches('/')
+            );
             let builder = state
                 .http_client
                 .post(endpoint)
@@ -1325,14 +1402,23 @@ async fn ai_proxy(
                     .chars()
                     .take(180)
                     .collect::<String>();
-                failures.push(format!("{}:{} {} {}", provider.name, model_name, status.as_u16(), detail));
+                failures.push(format!(
+                    "{}:{} {} {}",
+                    provider.name,
+                    model_name,
+                    status.as_u16(),
+                    detail
+                ));
                 continue;
             }
 
             let body_bytes = match resp.bytes().await {
                 Ok(bytes) => bytes,
                 Err(_) => {
-                    failures.push(format!("{}:{} response_read_failed", provider.name, model_name));
+                    failures.push(format!(
+                        "{}:{} response_read_failed",
+                        provider.name, model_name
+                    ));
                     continue;
                 }
             };
@@ -1376,22 +1462,30 @@ async fn ai_proxy(
             );
             response.headers_mut().insert(
                 HeaderName::from_static("x-zwork-router-provider"),
-                HeaderValue::from_str(&provider.name).unwrap_or_else(|_| HeaderValue::from_static("zwork-router")),
+                HeaderValue::from_str(&provider.name)
+                    .unwrap_or_else(|_| HeaderValue::from_static("zwork-router")),
             );
             response.headers_mut().insert(
                 HeaderName::from_static("x-zwork-router-model"),
-                HeaderValue::from_str(&model_name).unwrap_or_else(|_| HeaderValue::from_static("unknown")),
+                HeaderValue::from_str(&model_name)
+                    .unwrap_or_else(|_| HeaderValue::from_static("unknown")),
             );
             response.headers_mut().insert(
                 HeaderName::from_static("x-zwork-router-label"),
-                HeaderValue::from_str(&state.gateway.router_label).unwrap_or_else(|_| HeaderValue::from_static("zWork Router")),
+                HeaderValue::from_str(&state.gateway.router_label)
+                    .unwrap_or_else(|_| HeaderValue::from_static("zWork Router")),
             );
             return Ok(response);
         }
     }
 
     if let Some(request_id) = request_id {
-        finish_gateway_request(&state, request_id, Some(StatusCode::BAD_GATEWAY.as_u16() as i32)).await;
+        finish_gateway_request(
+            &state,
+            request_id,
+            Some(StatusCode::BAD_GATEWAY.as_u16() as i32),
+        )
+        .await;
     }
 
     Err((
@@ -1435,7 +1529,12 @@ async fn ai_proxy_anthropic(
         Some(
             insert_gateway_request(&state, &user.user_id, &run_id, request_kind)
                 .await
-                .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "gateway_request_log_failed".to_string()))?,
+                .map_err(|_| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "gateway_request_log_failed".to_string(),
+                    )
+                })?,
         )
     } else {
         None
@@ -1450,34 +1549,18 @@ async fn ai_proxy_anthropic(
 
     let body_bytes = axum::body::to_bytes(req.into_body(), 1024 * 1024 * 10)
         .await
-        .map_err(|_| (StatusCode::BAD_REQUEST, "request_body_too_large".to_string()))?;
-    let mut body_json: Value =
-        serde_json::from_slice(&body_bytes).map_err(|_| (StatusCode::BAD_REQUEST, "invalid_messages_payload".to_string()))?;
-
-    // Sanitize messages: remove thinking blocks from content to avoid DeepSeek API errors
-    // DeepSeek will regenerate thinking content on each request
-    if let Some(messages) = body_json.get_mut("messages").and_then(|v| v.as_array_mut()) {
-        for message in messages.iter_mut() {
-            if let Some(content) = message.get_mut("content") {
-                if let Some(content_arr) = content.as_array_mut() {
-                    // Filter out thinking blocks from the content array
-                    // DeepSeek will regenerate these, so we don't need to pass them back
-                    content_arr.retain(|block| {
-                        block.get("type")
-                            .and_then(|t| t.as_str())
-                            .map(|t| t != "thinking")
-                            .unwrap_or(true)
-                    });
-                    // If content is empty after filtering, add a text placeholder
-                    if content_arr.is_empty() {
-                        *content = Value::Array(vec![
-                            serde_json::json!({"type": "text", "text": "..."})
-                        ]);
-                    }
-                }
-            }
-        }
-    }
+        .map_err(|_| {
+            (
+                StatusCode::BAD_REQUEST,
+                "request_body_too_large".to_string(),
+            )
+        })?;
+    let mut body_json: Value = serde_json::from_slice(&body_bytes).map_err(|_| {
+        (
+            StatusCode::BAD_REQUEST,
+            "invalid_messages_payload".to_string(),
+        )
+    })?;
 
     let mut failures: Vec<String> = Vec::new();
 
@@ -1487,10 +1570,11 @@ async fn ai_proxy_anthropic(
         }
 
         if let Some(obj) = body_json.as_object_mut() {
-            obj.insert("model".to_string(), Value::String(provider.primary_model.clone()));
+            obj.insert(
+                "model".to_string(),
+                Value::String(provider.primary_model.clone()),
+            );
             obj.insert("stream".to_string(), Value::Bool(true));
-            // Disable DeepSeek thinking mode to avoid reasoning_content issues
-            // For Anthropic-format API, pass thinking config in extra_headers or omit it
         }
 
         let endpoint = format!("{}/v1/messages", provider.base_url.trim_end_matches('/'));
@@ -1506,7 +1590,10 @@ async fn ai_proxy_anthropic(
         {
             Ok(resp) => resp,
             Err(_) => {
-                failures.push(format!("{}:{} unreachable", provider.name, provider.primary_model));
+                failures.push(format!(
+                    "{}:{} unreachable",
+                    provider.name, provider.primary_model
+                ));
                 continue;
             }
         };
@@ -1521,7 +1608,13 @@ async fn ai_proxy_anthropic(
                 .chars()
                 .take(180)
                 .collect::<String>();
-            failures.push(format!("{}:{} {} {}", provider.name, provider.primary_model, status.as_u16(), detail));
+            failures.push(format!(
+                "{}:{} {} {}",
+                provider.name,
+                provider.primary_model,
+                status.as_u16(),
+                detail
+            ));
             continue;
         }
 
@@ -1558,21 +1651,29 @@ async fn ai_proxy_anthropic(
         );
         response.headers_mut().insert(
             HeaderName::from_static("x-zwork-router-provider"),
-            HeaderValue::from_str(&provider.name).unwrap_or_else(|_| HeaderValue::from_static("zwork-router")),
+            HeaderValue::from_str(&provider.name)
+                .unwrap_or_else(|_| HeaderValue::from_static("zwork-router")),
         );
         response.headers_mut().insert(
             HeaderName::from_static("x-zwork-router-model"),
-            HeaderValue::from_str(&provider.primary_model).unwrap_or_else(|_| HeaderValue::from_static("unknown")),
+            HeaderValue::from_str(&provider.primary_model)
+                .unwrap_or_else(|_| HeaderValue::from_static("unknown")),
         );
         response.headers_mut().insert(
             HeaderName::from_static("x-zwork-router-label"),
-            HeaderValue::from_str(&state.gateway.router_label).unwrap_or_else(|_| HeaderValue::from_static("zWork Router")),
+            HeaderValue::from_str(&state.gateway.router_label)
+                .unwrap_or_else(|_| HeaderValue::from_static("zWork Router")),
         );
         return Ok(response);
     }
 
     if let Some(request_id) = request_id {
-        finish_gateway_request(&state, request_id, Some(StatusCode::BAD_GATEWAY.as_u16() as i32)).await;
+        finish_gateway_request(
+            &state,
+            request_id,
+            Some(StatusCode::BAD_GATEWAY.as_u16() as i32),
+        )
+        .await;
     }
 
     Err((
@@ -1606,7 +1707,10 @@ fn cors_allowed_origins() -> Vec<HeaderValue> {
 fn stripe_billing_ready(state: &AppState) -> bool {
     state.features.billing
         && !state.stripe_secret_key.trim().is_empty()
-        && !std::env::var("STRIPE_PRICE_PRO_MONTHLY").unwrap_or_default().trim().is_empty()
+        && !std::env::var("STRIPE_PRICE_PRO_MONTHLY")
+            .unwrap_or_default()
+            .trim()
+            .is_empty()
 }
 
 fn stripe_price_id(annual: bool) -> Option<String> {
@@ -1625,7 +1729,10 @@ fn stripe_price_id(annual: bool) -> Option<String> {
     }
 }
 
-async fn ensure_stripe_customer(state: &AppState, user: &AppUser) -> Result<String, (StatusCode, String)> {
+async fn ensure_stripe_customer(
+    state: &AppState,
+    user: &AppUser,
+) -> Result<String, (StatusCode, String)> {
     if let Some(customer_id) = user
         .stripe_customer_id
         .as_ref()
@@ -1647,17 +1754,24 @@ async fn ensure_stripe_customer(state: &AppState, user: &AppUser) -> Result<Stri
         .form(&params)
         .send()
         .await
-        .map_err(|_| (StatusCode::BAD_GATEWAY, "stripe_customer_create_failed".to_string()))?;
+        .map_err(|_| {
+            (
+                StatusCode::BAD_GATEWAY,
+                "stripe_customer_create_failed".to_string(),
+            )
+        })?;
 
     if !response.status().is_success() {
         let detail = response.text().await.unwrap_or_default();
         return Err((StatusCode::BAD_GATEWAY, detail));
     }
 
-    let payload: Value = response
-        .json()
-        .await
-        .map_err(|_| (StatusCode::BAD_GATEWAY, "stripe_customer_payload_invalid".to_string()))?;
+    let payload: Value = response.json().await.map_err(|_| {
+        (
+            StatusCode::BAD_GATEWAY,
+            "stripe_customer_payload_invalid".to_string(),
+        )
+    })?;
     let customer_id = payload
         .get("id")
         .and_then(|value| value.as_str())
@@ -1666,7 +1780,10 @@ async fn ensure_stripe_customer(state: &AppState, user: &AppUser) -> Result<Stri
         .to_string();
 
     if customer_id.is_empty() {
-        return Err((StatusCode::BAD_GATEWAY, "stripe_customer_id_missing".to_string()));
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            "stripe_customer_id_missing".to_string(),
+        ));
     }
 
     sqlx::query(
@@ -1681,7 +1798,12 @@ async fn ensure_stripe_customer(state: &AppState, user: &AppUser) -> Result<Stri
     .bind(&customer_id)
     .execute(&state.db)
     .await
-    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "stripe_customer_persist_failed".to_string()))?;
+    .map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "stripe_customer_persist_failed".to_string(),
+        )
+    })?;
 
     Ok(customer_id)
 }
@@ -1750,11 +1872,17 @@ async fn billing_checkout(
     }
 
     if !stripe_billing_ready(&state) {
-        return Err((StatusCode::SERVICE_UNAVAILABLE, "stripe_billing_not_configured".to_string()));
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "stripe_billing_not_configured".to_string(),
+        ));
     }
 
     if body.success_url.trim().is_empty() || body.cancel_url.trim().is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "success_and_cancel_urls_required".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "success_and_cancel_urls_required".to_string(),
+        ));
     }
 
     let access = ensure_gateway_access(&state, &headers)
@@ -1765,19 +1893,27 @@ async fn billing_checkout(
         .map_err(|status| (status, "user_lookup_failed".to_string()))?
         .ok_or((StatusCode::UNAUTHORIZED, "not_signed_in".to_string()))?;
     let customer_id = ensure_stripe_customer(&state, &user).await?;
-    let price_id = stripe_price_id(body.annual.unwrap_or(false))
-        .ok_or((StatusCode::SERVICE_UNAVAILABLE, "stripe_price_not_configured".to_string()))?;
+    let price_id = stripe_price_id(body.annual.unwrap_or(false)).ok_or((
+        StatusCode::SERVICE_UNAVAILABLE,
+        "stripe_price_not_configured".to_string(),
+    ))?;
 
     let params = vec![
         ("mode".to_string(), "subscription".to_string()),
         ("customer".to_string(), customer_id),
         ("client_reference_id".to_string(), user.user_id.clone()),
-        ("success_url".to_string(), body.success_url.trim().to_string()),
+        (
+            "success_url".to_string(),
+            body.success_url.trim().to_string(),
+        ),
         ("cancel_url".to_string(), body.cancel_url.trim().to_string()),
         ("line_items[0][price]".to_string(), price_id),
         ("line_items[0][quantity]".to_string(), "1".to_string()),
         ("metadata[user_id]".to_string(), user.user_id.clone()),
-        ("subscription_data[metadata][user_id]".to_string(), user.user_id.clone()),
+        (
+            "subscription_data[metadata][user_id]".to_string(),
+            user.user_id.clone(),
+        ),
         ("allow_promotion_codes".to_string(), "true".to_string()),
     ];
 
@@ -1788,17 +1924,24 @@ async fn billing_checkout(
         .form(&params)
         .send()
         .await
-        .map_err(|_| (StatusCode::BAD_GATEWAY, "stripe_checkout_create_failed".to_string()))?;
+        .map_err(|_| {
+            (
+                StatusCode::BAD_GATEWAY,
+                "stripe_checkout_create_failed".to_string(),
+            )
+        })?;
 
     if !response.status().is_success() {
         let detail = response.text().await.unwrap_or_default();
         return Err((StatusCode::BAD_GATEWAY, detail));
     }
 
-    let payload: Value = response
-        .json()
-        .await
-        .map_err(|_| (StatusCode::BAD_GATEWAY, "stripe_checkout_payload_invalid".to_string()))?;
+    let payload: Value = response.json().await.map_err(|_| {
+        (
+            StatusCode::BAD_GATEWAY,
+            "stripe_checkout_payload_invalid".to_string(),
+        )
+    })?;
     let url = payload
         .get("url")
         .and_then(|value| value.as_str())
@@ -1807,7 +1950,10 @@ async fn billing_checkout(
         .to_string();
 
     if url.is_empty() {
-        return Err((StatusCode::BAD_GATEWAY, "stripe_checkout_url_missing".to_string()));
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            "stripe_checkout_url_missing".to_string(),
+        ));
     }
 
     Ok(Json(BillingSessionResponse { url }))
@@ -1823,7 +1969,10 @@ async fn billing_portal(
     }
 
     if !stripe_billing_ready(&state) {
-        return Err((StatusCode::SERVICE_UNAVAILABLE, "stripe_billing_not_configured".to_string()));
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "stripe_billing_not_configured".to_string(),
+        ));
     }
 
     if body.return_url.trim().is_empty() {
@@ -1850,17 +1999,24 @@ async fn billing_portal(
         .form(&params)
         .send()
         .await
-        .map_err(|_| (StatusCode::BAD_GATEWAY, "stripe_portal_create_failed".to_string()))?;
+        .map_err(|_| {
+            (
+                StatusCode::BAD_GATEWAY,
+                "stripe_portal_create_failed".to_string(),
+            )
+        })?;
 
     if !response.status().is_success() {
         let detail = response.text().await.unwrap_or_default();
         return Err((StatusCode::BAD_GATEWAY, detail));
     }
 
-    let payload: Value = response
-        .json()
-        .await
-        .map_err(|_| (StatusCode::BAD_GATEWAY, "stripe_portal_payload_invalid".to_string()))?;
+    let payload: Value = response.json().await.map_err(|_| {
+        (
+            StatusCode::BAD_GATEWAY,
+            "stripe_portal_payload_invalid".to_string(),
+        )
+    })?;
     let url = payload
         .get("url")
         .and_then(|value| value.as_str())
@@ -1869,7 +2025,10 @@ async fn billing_portal(
         .to_string();
 
     if url.is_empty() {
-        return Err((StatusCode::BAD_GATEWAY, "stripe_portal_url_missing".to_string()));
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            "stripe_portal_url_missing".to_string(),
+        ));
     }
 
     Ok(Json(BillingSessionResponse { url }))
@@ -1902,7 +2061,10 @@ async fn stripe_webhook(
         Err(_) => return (StatusCode::BAD_REQUEST, "Invalid Stripe payload").into_response(),
     };
 
-    let event_type = event.get("type").and_then(|value| value.as_str()).unwrap_or("");
+    let event_type = event
+        .get("type")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
     let object = event
         .get("data")
         .and_then(|value| value.get("object"))
@@ -1911,8 +2073,14 @@ async fn stripe_webhook(
 
     match event_type {
         "checkout.session.completed" => {
-            let customer_id = object.get("customer").and_then(|value| value.as_str()).unwrap_or("");
-            let subscription_id = object.get("subscription").and_then(|value| value.as_str()).unwrap_or("");
+            let customer_id = object
+                .get("customer")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            let subscription_id = object
+                .get("subscription")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
             let user_id = object
                 .get("client_reference_id")
                 .and_then(|value| value.as_str())
@@ -1941,10 +2109,21 @@ async fn stripe_webhook(
                 .await;
             }
         }
-        "customer.subscription.created" | "customer.subscription.updated" | "customer.subscription.deleted" => {
-            let customer_id = object.get("customer").and_then(|value| value.as_str()).unwrap_or("");
-            let subscription_id = object.get("id").and_then(|value| value.as_str()).unwrap_or("");
-            let status = object.get("status").and_then(|value| value.as_str()).unwrap_or("");
+        "customer.subscription.created"
+        | "customer.subscription.updated"
+        | "customer.subscription.deleted" => {
+            let customer_id = object
+                .get("customer")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            let subscription_id = object
+                .get("id")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
+            let status = object
+                .get("status")
+                .and_then(|value| value.as_str())
+                .unwrap_or("");
             let user_id = object
                 .get("metadata")
                 .and_then(|value| value.get("user_id"))
@@ -1967,7 +2146,9 @@ async fn stripe_webhook(
                 .and_then(|value| value.as_str())
                 .map(|value| value.to_string());
             let current_period_end = stripe_timestamp_to_datetime(
-                object.get("current_period_end").and_then(|value| value.as_i64()),
+                object
+                    .get("current_period_end")
+                    .and_then(|value| value.as_i64()),
             );
 
             if let Some(user_id) = user_id {
@@ -2161,7 +2342,12 @@ async fn redeem_coupon(
     .bind(code)
     .fetch_one(&state.db)
     .await
-    .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "access_code_update_failed".to_string()))?;
+    .map_err(|_| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "access_code_update_failed".to_string(),
+        )
+    })?;
 
     Ok(Json(user))
 }
@@ -2194,25 +2380,24 @@ async fn admin_metrics_overview(
     .unwrap_or(0);
 
     let new_users_this_week: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM app_users WHERE created_at > NOW() - INTERVAL '7 days'"
+        "SELECT COUNT(*) FROM app_users WHERE created_at > NOW() - INTERVAL '7 days'",
     )
     .fetch_one(&state.db)
     .await
     .unwrap_or(0);
 
     let new_users_this_month: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM app_users WHERE created_at > NOW() - INTERVAL '30 days'"
+        "SELECT COUNT(*) FROM app_users WHERE created_at > NOW() - INTERVAL '30 days'",
     )
     .fetch_one(&state.db)
     .await
     .unwrap_or(0);
 
-    let paid_users: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM app_users WHERE tier IN ('pro', 'max')"
-    )
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(0);
+    let paid_users: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM app_users WHERE tier IN ('pro', 'max')")
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or(0);
 
     let churn_rate = if active_users_30d > 0 {
         ((active_users_30d - active_users_7d) as f64) / (active_users_30d as f64)
@@ -2227,7 +2412,11 @@ async fn admin_metrics_overview(
     };
 
     let mrr = 0.0; // Placeholder - would need Stripe integration
-    let arpu = if total_users > 0 { mrr / (total_users as f64) } else { 0.0 };
+    let arpu = if total_users > 0 {
+        mrr / (total_users as f64)
+    } else {
+        0.0
+    };
 
     Ok(Json(AdminMetricsOverview {
         total_users,
@@ -2307,7 +2496,7 @@ async fn admin_usage_by_time(
         WHERE created_at > NOW() - INTERVAL '90 days'
         GROUP BY DATE(created_at)
         ORDER BY date DESC
-        "#
+        "#,
     )
     .fetch_all(&state.db)
     .await
@@ -2330,12 +2519,11 @@ async fn admin_usage_by_model(
     // TODO: Add proper owner auth
     // let _owner = ensure_owner_or_service(&state, &headers).await?;
 
-    let total: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(SUM(total_tokens), 0) FROM gateway_requests"
-    )
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(1);
+    let total: i64 =
+        sqlx::query_scalar("SELECT COALESCE(SUM(total_tokens), 0) FROM gateway_requests")
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or(1);
 
     let usage = sqlx::query(
         r#"
@@ -2347,7 +2535,7 @@ async fn admin_usage_by_model(
         WHERE model_id IS NOT NULL
         GROUP BY model_id
         ORDER BY tokens DESC
-        "#
+        "#,
     )
     .fetch_all(&state.db)
     .await
@@ -2359,7 +2547,11 @@ async fn admin_usage_by_model(
             model_id: row.get("model_id"),
             requests: row.get("requests"),
             tokens,
-            percentage: if total > 0 { (tokens as f64 / total as f64) * 100.0 } else { 0.0 },
+            percentage: if total > 0 {
+                (tokens as f64 / total as f64) * 100.0
+            } else {
+                0.0
+            },
         }
     })
     .collect();
@@ -2390,7 +2582,7 @@ async fn admin_update_user_tier(
                   stripe_customer_id, subscription_id, subscription_status,
                   subscription_price_id, subscription_current_period_end,
                   created_at, updated_at
-        "#
+        "#,
     )
     .bind(&body.tier)
     .bind(&user_id)
@@ -2439,7 +2631,11 @@ async fn desktop_google_auth_start(
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
 
-    let state_value = format!("oauth_{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let state_value = format!(
+        "oauth_{}{}",
+        Uuid::new_v4().simple(),
+        Uuid::new_v4().simple()
+    );
     let expires_at = Utc::now() + Duration::minutes(10);
 
     sqlx::query(
@@ -2457,7 +2653,10 @@ async fn desktop_google_auth_start(
 
     let params = [
         ("client_id", state.google_client_id.as_str()),
-        ("redirect_uri", "https://api.tryzwork.app/api/auth/callback/google"),
+        (
+            "redirect_uri",
+            "https://api.tryzwork.app/api/auth/callback/google",
+        ),
         ("response_type", "code"),
         ("scope", "openid email profile"),
         ("access_type", "offline"),
@@ -2465,11 +2664,9 @@ async fn desktop_google_auth_start(
         ("state", state_value.as_str()),
     ];
 
-    let oauth_url = reqwest::Url::parse_with_params(
-        "https://accounts.google.com/o/oauth2/v2/auth",
-        params,
-    )
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let oauth_url =
+        reqwest::Url::parse_with_params("https://accounts.google.com/o/oauth2/v2/auth", params)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Redirect::temporary(oauth_url.as_ref()))
 }
@@ -2512,7 +2709,10 @@ async fn desktop_google_callback(
             ("code", code),
             ("client_id", state.google_client_id.as_str()),
             ("client_secret", state.google_client_secret.as_str()),
-            ("redirect_uri", "https://api.tryzwork.app/api/auth/callback/google"),
+            (
+                "redirect_uri",
+                "https://api.tryzwork.app/api/auth/callback/google",
+            ),
             ("grant_type", "authorization_code"),
         ])
         .send()
@@ -2520,7 +2720,11 @@ async fn desktop_google_callback(
         .map_err(|_| StatusCode::BAD_GATEWAY)?;
 
     if !token_response.status().is_success() {
-        return Ok(localhost_auth_redirect(port, "error", "google_token_exchange_failed"));
+        return Ok(localhost_auth_redirect(
+            port,
+            "error",
+            "google_token_exchange_failed",
+        ));
     }
 
     let token_payload = token_response
@@ -2537,7 +2741,11 @@ async fn desktop_google_callback(
         .map_err(|_| StatusCode::BAD_GATEWAY)?;
 
     if !userinfo_response.status().is_success() {
-        return Ok(localhost_auth_redirect(port, "error", "google_userinfo_failed"));
+        return Ok(localhost_auth_redirect(
+            port,
+            "error",
+            "google_userinfo_failed",
+        ));
     }
 
     let google_user = userinfo_response
@@ -2643,7 +2851,10 @@ async fn desktop_email_sign_in(
     let password = body.password.trim();
 
     if email.is_empty() || password.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "email_and_password_required".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "email_and_password_required".to_string(),
+        ));
     }
 
     let auth_user = better_auth_sign_in_email(&state, email, password).await?;
@@ -2669,7 +2880,10 @@ async fn desktop_email_sign_up(
     let password = body.password.trim();
 
     if name.is_empty() || email.is_empty() || password.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "name_email_password_required".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "name_email_password_required".to_string(),
+        ));
     }
 
     better_auth_sign_up_email(&state, name, email, password, body.callback_url.as_deref()).await?;
@@ -2840,7 +3054,8 @@ async fn analytics_summary(
         })
         .collect();
 
-    let managed_gateway_ready = state.features.hosted_gateway && !state.gateway.providers.is_empty();
+    let managed_gateway_ready =
+        state.features.hosted_gateway && !state.gateway.providers.is_empty();
     let managed_gateway_status = if managed_gateway_ready {
         let provider_list = state
             .gateway
@@ -2860,11 +3075,15 @@ async fn analytics_summary(
             })
             .collect::<Vec<_>>()
             .join(" · ");
-        format!("{} is ready via {}", state.gateway.router_label, provider_list)
+        format!(
+            "{} is ready via {}",
+            state.gateway.router_label, provider_list
+        )
     } else if !state.features.hosted_gateway {
         "Hosted gateway is disabled on this server.".to_string()
     } else {
-        "Hosted gateway is not configured yet. Add at least one provider API key on the server.".to_string()
+        "Hosted gateway is not configured yet. Add at least one provider API key on the server."
+            .to_string()
     };
 
     let billing_enabled = state.features.billing && stripe_billing_ready(&state);
@@ -2877,7 +3096,8 @@ async fn analytics_summary(
     };
 
     let five_hour_limit = state.gateway.root_requests_per_5h;
-    let weekly_limit = state.gateway.root_requests_per_5h * state.gateway.weekly_limit_multiplier.max(1);
+    let weekly_limit =
+        state.gateway.root_requests_per_5h * state.gateway.weekly_limit_multiplier.max(1);
     let mut owner_provider_overview = Vec::new();
 
     if is_owner_email(&state, &user.email) {
@@ -2944,7 +3164,8 @@ async fn analytics_summary(
                 requests_reset_day_seconds: snapshot.and_then(|row| row.requests_reset_day_seconds),
                 tokens_limit_minute: snapshot.and_then(|row| row.tokens_limit_minute),
                 tokens_remaining_minute: snapshot.and_then(|row| row.tokens_remaining_minute),
-                tokens_reset_minute_seconds: snapshot.and_then(|row| row.tokens_reset_minute_seconds),
+                tokens_reset_minute_seconds: snapshot
+                    .and_then(|row| row.tokens_reset_minute_seconds),
             });
         }
     }
@@ -3046,9 +3267,17 @@ async fn main() {
 
     let cors = CorsLayer::new()
         .allow_origin(cors_allowed_origins())
-        .allow_methods(Any)
-        .allow_headers(Any)
-        .allow_credentials(true);
+        .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::PUT, axum::http::Method::DELETE, axum::http::Method::OPTIONS])
+        .allow_credentials(true)
+        .allow_headers([
+            header::ACCEPT,
+            header::AUTHORIZATION,
+            header::CONTENT_TYPE,
+            HeaderName::from_static("x-api-key"),
+            HeaderName::from_static("x-request-id"),
+            HeaderName::from_static("x-zwork-run-id"),
+            HeaderName::from_static("x-zwork-request-kind"),
+        ]);
 
     // Per-IP rate limit applied only to the credential-handling auth endpoints.
     // 1 token/sec replenish with a burst of 5 covers normal interactive use
@@ -3113,7 +3342,10 @@ async fn main() {
         .route("/api/admin/users", get(admin_list_users))
         .route("/api/admin/usage/by-time", get(admin_usage_by_time))
         .route("/api/admin/usage/by-model", get(admin_usage_by_model))
-        .route("/api/admin/users/:user_id/tier", put(admin_update_user_tier))
+        .route(
+            "/api/admin/users/:user_id/tier",
+            put(admin_update_user_tier),
+        )
         .merge(auth_routes)
         .layer(cors)
         .with_state(state);
