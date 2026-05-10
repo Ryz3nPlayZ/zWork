@@ -410,30 +410,6 @@ struct AdminUpdatePlanRequest {
     tier: String,
 }
 
-#[derive(Clone, Deserialize)]
-struct AdminSendCodeRequest {
-    email: String,
-}
-
-#[derive(Clone, Serialize)]
-struct AdminSendCodeResponse {
-    success: bool,
-    message: String,
-    code: String,
-}
-
-#[derive(Clone, Deserialize)]
-struct AdminVerifyCodeRequest {
-    email: String,
-    code: String,
-}
-
-#[derive(Clone, Serialize)]
-struct AdminVerifyCodeResponse {
-    success: bool,
-    message: String,
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RequestKind {
     Root,
@@ -2417,54 +2393,6 @@ async fn admin_update_user_tier(
     Ok(Json(user))
 }
 
-async fn admin_send_code(
-    State(state): State<AppState>,
-    Json(body): Json<AdminSendCodeRequest>,
-) -> Result<Json<AdminSendCodeResponse>, StatusCode> {
-    let email = body.email.trim().to_ascii_lowercase();
-    
-    if !is_owner_email(&state, &email) {
-        return Err(StatusCode::FORBIDDEN);
-    }
-
-    // Generate a simple deterministic code based on email
-    let char_sum = email.chars().take(4).map(|c| c as u32).sum::<u32>();
-    let code_num = ((email.len() as u32 * 1000 + char_sum) % 1000000) as u32;
-    let code = format!("{:06}", code_num);
-
-    Ok(Json(AdminSendCodeResponse {
-        success: true,
-        message: format!("Verification code sent to {}", email),
-        code,
-    }))
-}
-
-async fn admin_verify_code(
-    State(state): State<AppState>,
-    Json(body): Json<AdminVerifyCodeRequest>,
-) -> Result<Json<AdminVerifyCodeResponse>, StatusCode> {
-    let email = body.email.trim().to_ascii_lowercase();
-    
-    if !is_owner_email(&state, &email) {
-        return Err(StatusCode::FORBIDDEN);
-    }
-
-    // Generate the expected code using the same logic
-    let char_sum = email.chars().take(4).map(|c| c as u32).sum::<u32>();
-    let code_num = ((email.len() as u32 * 1000 + char_sum) % 1000000) as u32;
-    let expected_code = format!("{:06}", code_num);
-    
-    if body.code != expected_code {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-
-    // Verification successful
-    Ok(Json(AdminVerifyCodeResponse {
-        success: true,
-        message: "Verification successful. Please refresh the page.".to_string(),
-    }))
-}
-
 async fn desktop_auth_start(
     Query(query): Query<DesktopAuthStartQuery>,
 ) -> Result<Redirect, StatusCode> {
@@ -3176,9 +3104,6 @@ async fn main() {
         .route("/api/admin/usage/by-time", get(admin_usage_by_time))
         .route("/api/admin/usage/by-model", get(admin_usage_by_model))
         .route("/api/admin/users/:user_id/tier", put(admin_update_user_tier))
-        // Admin Auth Routes
-        .route("/api/admin/auth/send-code", post(admin_send_code))
-        .route("/api/admin/auth/verify-code", post(admin_verify_code))
         .merge(auth_routes)
         .layer(cors)
         .with_state(state);
