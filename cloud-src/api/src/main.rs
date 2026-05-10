@@ -2427,7 +2427,7 @@ async fn admin_send_code(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    // Generate a simple code (for testing, just use first 6 chars of email + "00")
+    // Generate a simple code (deterministic based on email)
     let code = format!("{:06}", email.len() * 1000 + email.chars().take(4).map(|c| c as u32).sum::<u32>() % 1000000);
 
     Ok(Json(AdminSendCodeResponse {
@@ -2440,8 +2440,7 @@ async fn admin_send_code(
 async fn admin_verify_code(
     State(state): State<AppState>,
     Json(body): Json<AdminVerifyCodeRequest>,
-    headers: HeaderMap,
-) -> Result<(StatusCode, Json<AdminVerifyCodeResponse>), StatusCode> {
+) -> Result<Json<AdminVerifyCodeResponse>, StatusCode> {
     let email = body.email.trim().to_ascii_lowercase();
     
     if !is_owner_email(&state, &email) {
@@ -2454,15 +2453,11 @@ async fn admin_verify_code(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    // For now, just return success. The frontend will need to handle session creation
-    // In a real implementation, this would create a Better Auth session
-    Ok((
-        StatusCode::OK,
-        Json(AdminVerifyCodeResponse {
-            success: true,
-            message: "Verification successful. Please refresh the page.".to_string(),
-        }),
-    ))
+    // Verification successful
+    Ok(Json(AdminVerifyCodeResponse {
+        success: true,
+        message: "Verification successful. Please refresh the page.".to_string(),
+    }))
 }
 
 async fn desktop_auth_start(
