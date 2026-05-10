@@ -2427,8 +2427,10 @@ async fn admin_send_code(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    // Generate a simple code (deterministic based on email)
-    let code = format!("{:06}", email.len() * 1000 + email.chars().take(4).map(|c| c as u32).sum::<u32>() % 1000000);
+    // Generate a simple deterministic code based on email
+    let char_sum = email.chars().take(4).map(|c| c as u32).sum::<u32>();
+    let code_num = ((email.len() as u32 * 1000 + char_sum) % 1000000) as u32;
+    let code = format!("{:06}", code_num);
 
     Ok(Json(AdminSendCodeResponse {
         success: true,
@@ -2447,8 +2449,11 @@ async fn admin_verify_code(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    // Verify the code matches what we would generate
-    let expected_code = format!("{:06}", email.len() * 1000 + email.chars().take(4).map(|c| c as u32).sum::<u32>() % 1000000);
+    // Generate the expected code using the same logic
+    let char_sum = email.chars().take(4).map(|c| c as u32).sum::<u32>();
+    let code_num = ((email.len() as u32 * 1000 + char_sum) % 1000000) as u32;
+    let expected_code = format!("{:06}", code_num);
+    
     if body.code != expected_code {
         return Err(StatusCode::UNAUTHORIZED);
     }
