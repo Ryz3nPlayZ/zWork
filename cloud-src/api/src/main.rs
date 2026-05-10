@@ -1454,7 +1454,7 @@ async fn ai_proxy_anthropic(
 
     // Sanitize messages: remove thinking blocks from content to avoid DeepSeek API errors
     // DeepSeek will regenerate thinking content on each request
-    if let Some(messages) = body_json.get_mut("messages").as_array_mut() {
+    if let Some(messages) = body_json.get_mut("messages").and_then(|v| v.as_array_mut()) {
         for message in messages.iter_mut() {
             if let Some(content) = message.get_mut("content") {
                 if let Some(content_arr) = content.as_array_mut() {
