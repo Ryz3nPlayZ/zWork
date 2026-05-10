@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   Eye,
@@ -145,8 +145,8 @@ export function SettingsPage() {
   const consumeSettingsSection = useApp((s) => s.consumeSettingsSection);
   const [section, setSection] = useState<Section>("general");
 
-  useEffect(() => {
-    void api.waitForBackend(20).catch(() => {}).then(() =>
+  const refreshSettingsPage = useCallback(() => {
+    return api.waitForBackend(20).catch(() => {}).then(() =>
       Promise.all([
         refreshProviders(),
         refreshSettings(),
@@ -155,6 +155,10 @@ export function SettingsPage() {
       ]),
     );
   }, [refreshProviders, refreshSettings, refreshIntegrations, refreshMe]);
+
+  useEffect(() => {
+    void refreshSettingsPage();
+  }, [refreshSettingsPage]);
 
   useEffect(() => {
     if (!hasModels) setSection("models");
@@ -226,7 +230,7 @@ export function SettingsPage() {
               />
             )}
             {section === "integrations" && (
-              <IntegrationsPanel integrations={integrations} onRefresh={bootstrap} />
+              <IntegrationsPanel integrations={integrations} onRefresh={refreshSettingsPage} />
             )}
             {section === "general" && (
               <GeneralPanel settings={settings} onSave={saveSettings} />
