@@ -84,6 +84,7 @@ STRIPE_PRICE_PRO_ANNUAL=price_...
 
 DEEPSEEK_API_KEY=...
 DEEPSEEK_BASE_URL=https://api.deepseek.com/anthropic
+DEEPSEEK_PROTOCOL=anthropic
 DEEPSEEK_MODEL_PRIMARY=deepseek-v4-flash
 DEEPSEEK_MODEL_FALLBACK=
 

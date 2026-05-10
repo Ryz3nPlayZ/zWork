@@ -13,6 +13,18 @@ All notable changes to zWork are documented here.
 - added permission and compaction SSE events for UI feedback
 - fixed circular import between providers.py and compaction.py
 
+## v0.3.18-beta.8
+
+**Backend supervision and DeepSeek router hardening.**
+
+- changed the desktop backend manager to verify local backend health instead of trusting stale child-process handles
+- added a lightweight backend watchdog and broader local API readiness checks so the app can recover when the sidecar exits
+- preserved onboarding completion locally and stopped Settings from re-triggering onboarding during backend outages
+- stopped transient cloud session failures from clearing the desktop token
+- resynced the managed zWork Router token from the active desktop session
+- preserved DeepSeek thinking/reasoning payloads through Anthropic and OpenAI-compatible tool loops
+- kept the hosted router on DeepSeek's Anthropic-compatible endpoint and documented the required server protocol flag
+
 ## v0.3.18-beta.7
 
 **Hotfix for local backend streaming and real usage surfaces.**

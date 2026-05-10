@@ -1131,6 +1131,10 @@ fn wrap_json_completion_as_sse(body_json: &Value) -> Option<Vec<u8>> {
         delta.insert("content".to_string(), content);
     }
 
+    if let Some(reasoning_content) = message.get("reasoning_content").cloned() {
+        delta.insert("reasoning_content".to_string(), reasoning_content);
+    }
+
     if let Some(tool_calls) = message.get("tool_calls").cloned() {
         delta.insert("tool_calls".to_string(), tool_calls);
     }
@@ -3262,7 +3266,13 @@ async fn main() {
 
     let cors = CorsLayer::new()
         .allow_origin(cors_allowed_origins())
-        .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::PUT, axum::http::Method::DELETE, axum::http::Method::OPTIONS])
+        .allow_methods([
+            axum::http::Method::GET,
+            axum::http::Method::POST,
+            axum::http::Method::PUT,
+            axum::http::Method::DELETE,
+            axum::http::Method::OPTIONS,
+        ])
         .allow_headers([
             header::ACCEPT,
             header::AUTHORIZATION,

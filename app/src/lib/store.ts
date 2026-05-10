@@ -10,7 +10,7 @@ import {
   type MeResponse,
   type Project,
 } from "./api";
-import { fetchCloudSession, logoutCloudSession, startDesktopGoogleSignIn } from "./cloud";
+import { fetchCloudSession, getCloudToken, logoutCloudSession, startDesktopGoogleSignIn } from "./cloud";
 import { setTelemetryEnabled, trackError, trackArtifactCreated } from "./telemetry";
 
 const LEGACY_MANAGED_BASE_URLS = new Set(["https://ollama.com/v1"]);
@@ -23,6 +23,19 @@ const ROUTER_MODEL_ID = "zwork-router";
 const ROUTER_MODEL_NAME = "zWork Router";
 const ROUTER_BASE_URL = "https://api.tryzwork.app/api";
 const ROUTER_TARGET_MODEL_ID = "deepseek-v4-flash";
+const ONBOARDING_DONE_KEY = "zwork:onboarding-completed";
+
+function hasCompletedOnboardingLocally(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(ONBOARDING_DONE_KEY) === "true";
+}
+
+function rememberOnboardingDone(done: boolean) {
+  if (typeof window === "undefined") return;
+  if (done) {
+    window.localStorage.setItem(ONBOARDING_DONE_KEY, "true");
+  }
+}
 
 export type Role = "user" | "assistant";
 
@@ -219,7 +232,9 @@ function needsManagedRouterMigration(settings: SettingsPublic): boolean {
 }
 
 async function migrateManagedRouterSettings(settings: SettingsPublic): Promise<SettingsPublic> {
+  const cloudToken = getCloudToken().trim();
   await api.putSettings({
+    ...(cloudToken ? { api_keys: { zwork_router: cloudToken } } : {}),
     provider_config: {
       zwork_router: { base_url: ROUTER_BASE_URL },
     },
@@ -242,6 +257,17 @@ async function migrateManagedRouterSettings(settings: SettingsPublic): Promise<S
   });
 
   return await api.getSettings();
+}
+
+async function syncManagedRouterToken() {
+  const cloudToken = getCloudToken().trim();
+  if (!cloudToken) return;
+  await api.putSettings({
+    api_keys: { zwork_router: cloudToken },
+    provider_config: {
+      zwork_router: { base_url: ROUTER_BASE_URL },
+    },
+  });
 }
 
 export interface User {
@@ -414,6 +440,7 @@ export const useApp = create<AppState>((set, get) => ({
     set({ isLoadingAuth: true });
     try {
       const cloudUser = await startDesktopGoogleSignIn();
+      await syncManagedRouterToken().catch(() => {});
       set({
         user: {
           id: cloudUser.user_id,
@@ -443,8 +470,11 @@ export const useApp = create<AppState>((set, get) => ({
   searchOpen: false,
   setSearchOpen: (v) => set({ searchOpen: v }),
 
-  onboardingDone: null,
-  setOnboardingDone: (v) => set({ onboardingDone: v }),
+  onboardingDone: hasCompletedOnboardingLocally() ? true : null,
+  setOnboardingDone: (v) => {
+    rememberOnboardingDone(v);
+    set({ onboardingDone: v });
+  },
 
   model: "",
   setModel: (m) => set({ model: m }),
@@ -568,9 +598,12 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   bootstrap: async () => {
+    await api.waitForBackend(20).catch(() => {});
+
     try {
       const cloudUser = await fetchCloudSession();
       if (cloudUser) {
+        await syncManagedRouterToken().catch(() => {});
         set({
           user: {
             id: cloudUser.user_id,
@@ -592,8 +625,16 @@ export const useApp = create<AppState>((set, get) => ({
       get().refreshProjects(),
       api
         .onboardStatus()
-        .then((st) => set({ onboardingDone: !!st.completed }))
-        .catch(() => set({ onboardingDone: false })),
+        .then((st) => {
+          const completed = !!st.completed || hasCompletedOnboardingLocally();
+          rememberOnboardingDone(completed);
+          set({ onboardingDone: completed });
+        })
+        .catch(() => {
+          if (hasCompletedOnboardingLocally()) {
+            set({ onboardingDone: true });
+          }
+        }),
     ]);
     const fallback = pickAvailableModel(get().providers, get().model);
     if (fallback !== get().model) set({ model: fallback });

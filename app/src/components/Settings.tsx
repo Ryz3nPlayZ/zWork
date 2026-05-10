@@ -41,7 +41,7 @@ import {
   type PromptTemplate,
 } from "../lib/templates";
 import { IconButton } from "./IconButton";
-import type { Integration } from "../lib/api";
+import { api, type Integration } from "../lib/api";
 
 type Section = "account" | "plan" | "general" | "memory" | "personalization" | "models" | "integrations";
 
@@ -134,7 +134,10 @@ export function SettingsPage() {
   const settings = useApp((s) => s.settings);
   const providers = useApp((s) => s.providers);
   const integrations = useApp((s) => s.integrations);
-  const bootstrap = useApp((s) => s.bootstrap);
+  const refreshProviders = useApp((s) => s.refreshProviders);
+  const refreshSettings = useApp((s) => s.refreshSettings);
+  const refreshIntegrations = useApp((s) => s.refreshIntegrations);
+  const refreshMe = useApp((s) => s.refreshMe);
   const saveSettings = useApp((s) => s.saveSettings);
   const setView = useApp((s) => s.setView);
 
@@ -143,8 +146,15 @@ export function SettingsPage() {
   const [section, setSection] = useState<Section>("general");
 
   useEffect(() => {
-    void bootstrap();
-  }, [bootstrap]);
+    void api.waitForBackend(20).catch(() => {}).then(() =>
+      Promise.all([
+        refreshProviders(),
+        refreshSettings(),
+        refreshIntegrations(),
+        refreshMe(),
+      ]),
+    );
+  }, [refreshProviders, refreshSettings, refreshIntegrations, refreshMe]);
 
   useEffect(() => {
     if (!hasModels) setSection("models");

@@ -5,6 +5,16 @@ const TOKEN_KEY = "zwork:cloud-token";
 const MANAGED_BACKUP_KEY = "zwork:managed-backup";
 const AUTH_CHANGED_EVENT = "zwork:cloud-auth-changed";
 
+class CloudFetchError extends Error {
+  status: number;
+
+  constructor(status: number, statusText: string, body: string) {
+    super(friendlyCloudError(status, statusText, body));
+    this.name = "CloudFetchError";
+    this.status = status;
+  }
+}
+
 export interface CloudUser {
   user_id: string;
   email: string;
@@ -117,6 +127,10 @@ function getToken() {
   return window.localStorage.getItem(TOKEN_KEY) || "";
 }
 
+export function getCloudToken() {
+  return getToken();
+}
+
 function setToken(token: string) {
   window.localStorage.setItem(TOKEN_KEY, token);
   window.dispatchEvent(new CustomEvent(AUTH_CHANGED_EVENT));
@@ -172,7 +186,7 @@ async function cloudFetch<T>(path: string, init?: RequestInit, token = getToken(
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(friendlyCloudError(response.status, response.statusText, text));
+    throw new CloudFetchError(response.status, response.statusText, text);
   }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
@@ -220,8 +234,10 @@ export async function fetchCloudSession(): Promise<CloudUser | null> {
   if (!token) return null;
   try {
     return await cloudFetch<CloudUser>("/api/session");
-  } catch {
-    clearCloudToken();
+  } catch (error) {
+    if (error instanceof CloudFetchError && (error.status === 401 || error.status === 403)) {
+      clearCloudToken();
+    }
     return null;
   }
 }

@@ -127,6 +127,34 @@ async function invokeBackendCommand(command: "ensure_backend" | "restart_backend
   }
 }
 
+async function healthFetch() {
+  return fetch(u("/api/health")).then((r) => j<{ ok: boolean }>(r));
+}
+
+async function waitForBackendReady(attempts = 60) {
+  let lastError: unknown = null;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      if (i === 0) await invokeBackendCommand("ensure_backend");
+      if (IS_TAURI && i === 15) await invokeBackendCommand("restart_backend");
+      return await healthFetch();
+    } catch (err) {
+      lastError = err;
+      await sleep(i < 6 ? 250 : 900);
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Backend did not become ready.");
+}
+
+async function localFetch(path: string, init?: RequestInit) {
+  if (IS_TAURI) {
+    await waitForBackendReady(20);
+  }
+  return fetch(u(path), init);
+}
+
 export interface MeResponse {
   name: string;
   os: string;
@@ -188,37 +216,22 @@ export interface UploadedFile {
 }
 
 export const api = {
-  health: () => fetch(u("/api/health")).then((r) => j<{ ok: boolean }>(r)),
+  health: healthFetch,
 
-  waitForBackend: async (attempts = 60) => {
-    let lastError: unknown = null;
-    for (let i = 0; i < attempts; i += 1) {
-      try {
-        if (i === 0) await invokeBackendCommand("ensure_backend");
-        if (IS_TAURI && i === 15) await invokeBackendCommand("restart_backend");
-        return await api.health();
-      } catch (err) {
-        lastError = err;
-        await sleep(i < 6 ? 250 : 900);
-      }
-    }
-    throw lastError instanceof Error
-      ? lastError
-      : new Error("Backend did not become ready.");
-  },
+  waitForBackend: waitForBackendReady,
 
-  me: () => fetch(u("/api/me")).then((r) => j<MeResponse>(r)),
+  me: () => localFetch("/api/me").then((r) => j<MeResponse>(r)),
 
   integrations: () =>
-    fetch(u("/api/integrations")).then((r) =>
+    localFetch("/api/integrations").then((r) =>
       j<{ integrations: Integration[] }>(r),
     ),
 
   providers: () =>
-    fetch(u("/api/providers")).then((r) => j<ProvidersResponse>(r)),
+    localFetch("/api/providers").then((r) => j<ProvidersResponse>(r)),
 
   getSettings: () =>
-    fetch(u("/api/settings")).then((r) => j<SettingsPublic>(r)),
+    localFetch("/api/settings").then((r) => j<SettingsPublic>(r)),
 
   putSettings: (patch: Partial<{
     api_keys: Record<string, string>;
@@ -227,7 +240,7 @@ export const api = {
     use_claude_code_config: boolean;
     telemetry_enabled: boolean;
   }>) =>
-    fetch(u("/api/settings"), {
+    localFetch("/api/settings", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(patch),
@@ -239,7 +252,7 @@ export const api = {
     properties?: Record<string, unknown>;
     ts?: number;
   }) =>
-    fetch(u("/api/telemetry/event"), {
+    localFetch("/api/telemetry/event", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -247,30 +260,30 @@ export const api = {
     }).then((r) => j<{ ok: boolean }>(r)),
 
   upsertCustomModel: (body: Omit<CustomModel, "id"> & { id?: string }) =>
-    fetch(u("/api/custom-models"), {
+    localFetch("/api/custom-models", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     }).then((r) => j<{ custom_models: CustomModel[]; id: string }>(r)),
 
   deleteCustomModel: (id: string) =>
-    fetch(u(`/api/custom-models/${id}`), { method: "DELETE" }).then((r) =>
+    localFetch(`/api/custom-models/${id}`, { method: "DELETE" }).then((r) =>
       j<{ custom_models: CustomModel[] }>(r),
     ),
 
   listChats: () =>
-    fetch(u("/api/chats")).then((r) => j<{ chats: ApiChatSummary[] }>(r)),
+    localFetch("/api/chats").then((r) => j<{ chats: ApiChatSummary[] }>(r)),
 
   getChat: (id: string) =>
-    fetch(u(`/api/chats/${id}`)).then((r) => j<ApiChat>(r)),
+    localFetch(`/api/chats/${id}`).then((r) => j<ApiChat>(r)),
 
   deleteChat: (id: string) =>
-    fetch(u(`/api/chats/${id}`), { method: "DELETE" }).then((r) =>
+    localFetch(`/api/chats/${id}`, { method: "DELETE" }).then((r) =>
       j<{ ok: boolean }>(r),
     ),
 
   renameChat: (id: string, title: string) =>
-    fetch(u(`/api/chats/${id}`), {
+    localFetch(`/api/chats/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title }),
@@ -278,18 +291,18 @@ export const api = {
 
   // ---- Skills + onboarding ----
   skills: () =>
-    fetch(u("/api/skills")).then((r) => j<{ skills: SkillMeta[] }>(r)),
+    localFetch("/api/skills").then((r) => j<{ skills: SkillMeta[] }>(r)),
 
   onboardStatus: () =>
-    fetch(u("/api/onboard/status")).then((r) => j<OnboardingStatus>(r)),
+    localFetch("/api/onboard/status").then((r) => j<OnboardingStatus>(r)),
 
   onboardSkip: () =>
-    fetch(u("/api/onboard/skip"), { method: "POST" }).then((r) =>
+    localFetch("/api/onboard/skip", { method: "POST" }).then((r) =>
       j<{ ok: boolean }>(r),
     ),
 
   onboardComplete: (body: OnboardingPayload) =>
-    fetch(u("/api/onboard/complete"), {
+    localFetch("/api/onboard/complete", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -299,10 +312,10 @@ export const api = {
 
   // ---- Memory ----
   getMemory: () =>
-    fetch(u("/api/memory")).then((r) => j<{ content: string }>(r)),
+    localFetch("/api/memory").then((r) => j<{ content: string }>(r)),
 
   putMemory: (content: string) =>
-    fetch(u("/api/memory"), {
+    localFetch("/api/memory", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ content }),
@@ -310,10 +323,10 @@ export const api = {
 
   // ---- User MD (zwork.md) ----
   getUserMd: () =>
-    fetch(u("/api/user-md")).then((r) => j<{ content: string }>(r)),
+    localFetch("/api/user-md").then((r) => j<{ content: string }>(r)),
 
   putUserMd: (content: string) =>
-    fetch(u("/api/user-md"), {
+    localFetch("/api/user-md", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ content }),
@@ -327,7 +340,7 @@ export const api = {
     text_content?: string | null;
     data_url?: string | null;
   }>) =>
-    fetch(u("/api/uploads"), {
+    localFetch("/api/uploads", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ files }),
@@ -335,41 +348,41 @@ export const api = {
 
   // ---- Projects ----
   listProjects: () =>
-    fetch(u("/api/projects")).then((r) => j<{ projects: Project[] }>(r)),
+    localFetch("/api/projects").then((r) => j<{ projects: Project[] }>(r)),
 
   createProject: (name: string, description?: string) =>
-    fetch(u("/api/projects"), {
+    localFetch("/api/projects", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name, description: description || "" }),
     }).then((r) => j<{ project: Project }>(r)),
 
   updateProject: (id: string, data: { name?: string; description?: string }) =>
-    fetch(u(`/api/projects/${id}`), {
+    localFetch(`/api/projects/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(data),
     }).then((r) => j<{ project: Project }>(r)),
 
   deleteProject: (id: string) =>
-    fetch(u(`/api/projects/${id}`), { method: "DELETE" }).then((r) =>
+    localFetch(`/api/projects/${id}`, { method: "DELETE" }).then((r) =>
       j<{ ok: boolean }>(r),
     ),
 
   getProjectContext: (id: string) =>
-    fetch(u(`/api/projects/${id}/context`)).then((r) =>
+    localFetch(`/api/projects/${id}/context`).then((r) =>
       j<{ content: string }>(r),
     ),
 
   ollamaModels: (base_url: string, api_key: string) => {
     const qs = new URLSearchParams({ base_url, api_key });
-    return fetch(u(`/api/ollama/models?${qs.toString()}`)).then((r) =>
+    return localFetch(`/api/ollama/models?${qs.toString()}`).then((r) =>
       j<{ models: { id: string; name: string }[]; error?: string }>(r),
     );
   },
 
   putProjectContext: (id: string, content: string) =>
-    fetch(u(`/api/projects/${id}/context`), {
+    localFetch(`/api/projects/${id}/context`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ content }),

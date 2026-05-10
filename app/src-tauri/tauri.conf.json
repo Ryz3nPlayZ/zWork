@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "zWork",
-  "version": "0.3.18-beta.7",
+  "version": "0.3.18-beta.8",
   "identifier": "com.zwork.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",

@@ -480,6 +480,12 @@ async def _anthropic_turn(
                         btype = block.get("type")
                         if btype == "text":
                             blocks_by_index[idx] = {"type": "text", "text": ""}
+                        elif btype == "thinking":
+                            blocks_by_index[idx] = {
+                                "type": "thinking",
+                                "thinking": block.get("thinking", ""),
+                                "signature": block.get("signature", ""),
+                            }
                         elif btype == "tool_use":
                             blocks_by_index[idx] = {
                                 "type": "tool_use",
@@ -509,6 +515,10 @@ async def _anthropic_turn(
                                 yield {"type": "status", "text": "Drafting"}
                                 started_text = True
                             yield {"type": "delta", "text": piece}
+                        elif dtype == "thinking_delta" and block["type"] == "thinking":
+                            block["thinking"] += delta.get("thinking", "")
+                        elif dtype == "signature_delta" and block["type"] == "thinking":
+                            block["signature"] += delta.get("signature", "")
                         elif dtype == "input_json_delta" and block["type"] == "tool_use":
                             block["input_buf"] += delta.get("partial_json", "")
 
@@ -559,6 +569,11 @@ async def _anthropic_turn(
     for b in ordered:
         if b["type"] == "text":
             final_blocks.append({"type": "text", "text": b.get("text", "")})
+        elif b["type"] == "thinking":
+            thinking_block = {"type": "thinking", "thinking": b.get("thinking", "")}
+            if b.get("signature"):
+                thinking_block["signature"] = b["signature"]
+            final_blocks.append(thinking_block)
         elif b["type"] == "tool_use":
             final_blocks.append({
                 "type": "tool_use",
@@ -633,6 +648,7 @@ async def _openai_turn(
     yield {"type": "status", "text": "Thinking"}
 
     collected_text = ""
+    reasoning_content = ""
     tool_calls: dict[int, dict] = {}  # index -> {id, name, args_buf}
     finish_reason: Optional[str] = None
     started_text = False
@@ -711,6 +727,9 @@ async def _openai_turn(
                             continue
                         ch = choices[0]
                         delta = ch.get("delta") or {}
+                        thinking_piece = delta.get("reasoning_content") or delta.get("reasoning")
+                        if thinking_piece:
+                            reasoning_content += thinking_piece
                         piece = delta.get("content")
                         if piece:
                             collected_text += piece
@@ -744,6 +763,8 @@ async def _openai_turn(
             return
 
     final_blocks: list[dict] = []
+    if reasoning_content:
+        final_blocks.append({"type": "reasoning_content", "reasoning_content": reasoning_content})
     if collected_text:
         final_blocks.append({"type": "text", "text": collected_text})
     for idx in sorted(tool_calls.keys()):
@@ -1066,6 +1087,11 @@ async def _run_anthropic_loop(
         # Append the assistant turn (with tool_use blocks) to the conversation
         assistant_content = []
         for b in content_blocks:
+            if b["type"] == "thinking" and b.get("thinking"):
+                thinking_block = {"type": "thinking", "thinking": b["thinking"]}
+                if b.get("signature"):
+                    thinking_block["signature"] = b["signature"]
+                assistant_content.append(thinking_block)
             if b["type"] == "text" and b.get("text"):
                 assistant_content.append({"type": "text", "text": b["text"]})
             elif b["type"] == "tool_use":
@@ -1212,6 +1238,11 @@ async def _run_openai_loop(
             return
 
         # Append assistant message (with tool_calls) per OpenAI shape
+        reasoning_content = "".join(
+            b.get("reasoning_content", "")
+            for b in content_blocks
+            if b.get("type") == "reasoning_content"
+        )
         openai_tool_calls = [
             {
                 "id": tu["id"],
@@ -1226,6 +1257,7 @@ async def _run_openai_loop(
         messages.append({
             "role": "assistant",
             "content": text or "",
+            **({"reasoning_content": reasoning_content} if reasoning_content else {}),
             **({"tool_calls": openai_tool_calls} if openai_tool_calls else {}),
         })
 

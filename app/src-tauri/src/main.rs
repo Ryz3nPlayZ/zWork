@@ -1,10 +1,12 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::io::{Read, Write};
+use std::net::{Shutdown, TcpStream};
 use std::path::PathBuf;
-use std::time::Duration;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
+use std::time::Duration;
 use tauri::{Manager, RunEvent};
 use tauri_plugin_process::init as process_init;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
@@ -17,6 +19,13 @@ enum BackendChild {
 }
 
 impl BackendChild {
+    fn pid(&self) -> u32 {
+        match self {
+            BackendChild::Packaged(child) => child.pid(),
+            BackendChild::Dev(child) => child.id(),
+        }
+    }
+
     fn shutdown(self) {
         match self {
             BackendChild::Packaged(child) => {
@@ -60,6 +69,35 @@ fn append_log(msg: &str) {
     {
         let _ = writeln!(f, "[{}] {}", timestamp(), msg);
     }
+}
+
+fn backend_http_healthy() -> bool {
+    let addr = "127.0.0.1:8787";
+    let timeout = Duration::from_millis(600);
+    let mut stream =
+        match TcpStream::connect_timeout(&addr.parse().expect("valid backend addr"), timeout) {
+            Ok(stream) => stream,
+            Err(_) => return false,
+        };
+    let _ = stream.set_read_timeout(Some(timeout));
+    let _ = stream.set_write_timeout(Some(timeout));
+
+    if stream
+        .write_all(b"GET /api/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .is_err()
+    {
+        return false;
+    }
+    let _ = stream.shutdown(Shutdown::Write);
+
+    let mut buf = [0_u8; 128];
+    let n = match stream.read(&mut buf) {
+        Ok(n) => n,
+        Err(_) => return false,
+    };
+    std::str::from_utf8(&buf[..n])
+        .map(|head| head.starts_with("HTTP/1.1 200") || head.starts_with("HTTP/1.0 200"))
+        .unwrap_or(false)
 }
 
 fn timestamp() -> String {
@@ -188,6 +226,8 @@ fn start_packaged_backend(app: &tauri::AppHandle) -> Option<BackendChild> {
     match sidecar.spawn() {
         Ok((mut rx, child)) => {
             append_log("Spawning packaged backend");
+            let pid = child.pid();
+            let app_handle = app.clone();
             tauri::async_runtime::spawn(async move {
                 while let Some(event) = rx.recv().await {
                     match event {
@@ -204,6 +244,14 @@ fn start_packaged_backend(app: &tauri::AppHandle) -> Option<BackendChild> {
                             ));
                         }
                         _ => {}
+                    }
+                }
+                append_log(&format!("Packaged backend output stream closed pid={pid}"));
+                if let Some(backend) = app_handle.try_state::<Backend>() {
+                    if let Ok(mut guard) = backend.0.lock() {
+                        if guard.as_ref().map(|child| child.pid()) == Some(pid) {
+                            *guard = None;
+                        }
                     }
                 }
             });
@@ -258,9 +306,19 @@ fn start_dev_backend() -> Option<BackendChild> {
     ));
 
     match cmd.spawn() {
-        Ok(child) => {
+        Ok(mut child) => {
             append_log(&format!("Dev backend spawned pid={}", child.id()));
-            Some(BackendChild::Dev(child))
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    append_log(&format!("Dev backend exited immediately: {status}"));
+                    None
+                }
+                Ok(None) => Some(BackendChild::Dev(child)),
+                Err(err) => {
+                    append_log(&format!("Dev backend liveness check failed: {err}"));
+                    Some(BackendChild::Dev(child))
+                }
+            }
         }
         Err(err) => {
             append_log(&format!("Dev backend spawn failed: {err}"));
@@ -274,6 +332,38 @@ fn spawn_backend(app: &tauri::AppHandle) -> Option<BackendChild> {
         return Some(child);
     }
     start_dev_backend()
+}
+
+fn ensure_backend_running(app: &tauri::AppHandle, backend: &Backend) -> Result<bool, String> {
+    if backend_http_healthy() {
+        return Ok(true);
+    }
+
+    let mut guard = backend
+        .0
+        .lock()
+        .map_err(|_| "backend state lock poisoned".to_string())?;
+    if let Some(child) = guard.take() {
+        append_log(&format!(
+            "Backend health check failed; stopping stale pid={}",
+            child.pid()
+        ));
+        child.shutdown();
+    }
+    *guard = spawn_backend(app);
+    Ok(guard.is_some())
+}
+
+fn start_backend_watchdog(app: tauri::AppHandle) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(10));
+        if let Some(backend) = app.try_state::<Backend>() {
+            if !backend_http_healthy() {
+                append_log("Backend watchdog detected unhealthy backend");
+                let _ = ensure_backend_running(&app, &backend);
+            }
+        }
+    });
 }
 
 fn is_http_url(url: &str) -> bool {
@@ -295,14 +385,7 @@ fn open_external(app: tauri::AppHandle, url: String) -> Result<(), String> {
 
 #[tauri::command]
 fn ensure_backend(app: tauri::AppHandle, backend: tauri::State<Backend>) -> Result<bool, String> {
-    let mut guard = backend
-        .0
-        .lock()
-        .map_err(|_| "backend state lock poisoned".to_string())?;
-    if guard.is_none() {
-        *guard = spawn_backend(&app);
-    }
-    Ok(guard.is_some())
+    ensure_backend_running(&app, &backend)
 }
 
 #[tauri::command]
@@ -544,6 +627,7 @@ fn main() {
             *guard = spawn_backend(&app_handle);
         }
     }
+    start_backend_watchdog(app_handle.clone());
 
     app.run(|app_handle, event| {
         if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
