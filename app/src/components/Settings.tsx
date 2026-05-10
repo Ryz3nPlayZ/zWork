@@ -145,15 +145,14 @@ export function SettingsPage() {
   const consumeSettingsSection = useApp((s) => s.consumeSettingsSection);
   const [section, setSection] = useState<Section>("general");
 
-  const refreshSettingsPage = useCallback(() => {
-    return api.waitForBackend(20).catch(() => {}).then(() =>
-      Promise.all([
-        refreshProviders(),
-        refreshSettings(),
-        refreshIntegrations(),
-        refreshMe(),
-      ]),
-    );
+  const refreshSettingsPage = useCallback(async () => {
+    await api.waitForBackend(20).catch(() => {});
+    await Promise.all([
+      refreshProviders(),
+      refreshSettings(),
+      refreshIntegrations(),
+      refreshMe(),
+    ]);
   }, [refreshProviders, refreshSettings, refreshIntegrations, refreshMe]);
 
   useEffect(() => {
