@@ -2593,6 +2593,44 @@ async fn admin_update_user_tier(
     Ok(Json(user))
 }
 
+#[derive(Deserialize)]
+struct AdminPasswordRequest {
+    password: String,
+}
+
+#[derive(Serialize)]
+struct AdminPasswordResponse {
+    token: String,
+    email: String,
+}
+
+async fn admin_verify_password(
+    State(state): State<AppState>,
+    Json(body): Json<AdminPasswordRequest>,
+) -> Result<Json<AdminPasswordResponse>, StatusCode> {
+    let admin_password = std::env::var("ADMIN_PASSWORD")
+        .unwrap_or_else(|_| "zworkisthebest".to_string());
+
+    if body.password != admin_password {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let email = state
+        .owner_emails
+        .first()
+        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?
+        .clone();
+
+    let token = format!(
+        "admin_{}_{}_{}",
+        uuid::Uuid::new_v4(),
+        email,
+        Utc::now().timestamp()
+    );
+
+    Ok(Json(AdminPasswordResponse { token, email }))
+}
+
 async fn desktop_auth_start(
     Query(query): Query<DesktopAuthStartQuery>,
 ) -> Result<Redirect, StatusCode> {
@@ -3342,6 +3380,7 @@ async fn main() {
         .route("/api/users", post(upsert_user))
         .route("/api/users/:google_id/tier", put(update_user_tier))
         // Admin Dashboard Routes
+        .route("/api/admin/verify-password", post(admin_verify_password))
         .route("/api/admin/metrics/overview", get(admin_metrics_overview))
         .route("/api/admin/users", get(admin_list_users))
         .route("/api/admin/usage/by-time", get(admin_usage_by_time))
