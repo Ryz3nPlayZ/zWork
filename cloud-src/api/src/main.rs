@@ -2355,10 +2355,9 @@ async fn redeem_coupon(
 // Admin Dashboard Handlers
 async fn admin_metrics_overview(
     State(state): State<AppState>,
-    _headers: HeaderMap,
+    headers: HeaderMap,
 ) -> Result<Json<AdminMetricsOverview>, StatusCode> {
-    // TODO: Add proper owner auth
-    // let _owner = ensure_owner_or_service(&state, &headers).await?;
+    let _owner = ensure_owner_or_service(&state, &headers).await?;
 
     let total_users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM app_users")
         .fetch_one(&state.db)
@@ -2434,10 +2433,9 @@ async fn admin_metrics_overview(
 
 async fn admin_list_users(
     State(state): State<AppState>,
-    _headers: HeaderMap,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<AdminUserRow>>, StatusCode> {
-    // TODO: Add proper owner auth
-    // let _owner = ensure_owner_or_service(&state, &headers).await?;
+    let _owner = ensure_owner_or_service(&state, &headers).await?;
 
     let users: Vec<AdminUserRow> = sqlx::query(
         r#"
@@ -2481,10 +2479,9 @@ async fn admin_list_users(
 
 async fn admin_usage_by_time(
     State(state): State<AppState>,
-    _headers: HeaderMap,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<AdminUsageByTime>>, StatusCode> {
-    // TODO: Add proper owner auth
-    // let _owner = ensure_owner_or_service(&state, &headers).await?;
+    let _owner = ensure_owner_or_service(&state, &headers).await?;
 
     let usage: Vec<AdminUsageByTime> = sqlx::query(
         r#"
@@ -2514,10 +2511,9 @@ async fn admin_usage_by_time(
 
 async fn admin_usage_by_model(
     State(state): State<AppState>,
-    _headers: HeaderMap,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<AdminUsageByModel>>, StatusCode> {
-    // TODO: Add proper owner auth
-    // let _owner = ensure_owner_or_service(&state, &headers).await?;
+    let _owner = ensure_owner_or_service(&state, &headers).await?;
 
     let total: i64 =
         sqlx::query_scalar("SELECT COALESCE(SUM(total_tokens), 0) FROM gateway_requests")
@@ -2561,12 +2557,11 @@ async fn admin_usage_by_model(
 
 async fn admin_update_user_tier(
     State(state): State<AppState>,
-    _headers: HeaderMap,
+    headers: HeaderMap,
     Path(user_id): Path<String>,
     Json(body): Json<AdminUpdatePlanRequest>,
 ) -> Result<Json<AppUser>, StatusCode> {
-    // TODO: Add proper owner auth
-    // let _owner = ensure_owner_or_service(&state, &headers).await?;
+    let _owner = ensure_owner_or_service(&state, &headers).await?;
 
     let valid_tiers = ["free", "pro", "max"];
     if !valid_tiers.contains(&body.tier.as_str()) {
