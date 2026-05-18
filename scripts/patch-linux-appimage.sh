@@ -42,6 +42,8 @@ else
     TOOL="$WORK_DIR/appimagetool"
 fi
 
+export APPIMAGE_EXTRACT_AND_RUN=1
+
 # Extract
 chmod +x "$APPIMAGE"
 (cd "$WORK_DIR" && "$APPIMAGE" --appimage-extract >/dev/null 2>&1)

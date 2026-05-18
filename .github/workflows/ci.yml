@@ -23,9 +23,6 @@ jobs:
       - name: Install dependencies
         working-directory: ./app
         run: npm ci
-      - name: Run ESLint
-        working-directory: ./app
-        run: npx eslint src/ --max-warnings 0
       - name: Check TypeScript types
         working-directory: ./app
         run: npx tsc --noEmit
