@@ -6,6 +6,7 @@ Each tool is:
       yields `activity` events (for the UI)
       yields exactly one `tool_result` event at the end
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -13,9 +14,9 @@ import contextlib
 import json
 import os
 import re
-import sys
-import subprocess
 import signal
+import subprocess
+import sys
 import urllib.parse
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -23,25 +24,35 @@ from typing import Any, AsyncIterator
 
 import httpx
 
-
 # ---------------- Tool schemas (provider-neutral) ----------------
-
+from . import academic as academic_mod
 from . import skills as skills_mod
 from .home import memory_path
 from .runtime import current_run
 
+READ_ONLY_TOOLS = frozenset(
+    {
+        "read_file",
+        "list_dir",
+        "read_skill",
+        "extract_document",
+        "web_search",
+        "search_papers",
+        "format_citation",
+    }
+)
 
-READ_ONLY_TOOLS = frozenset({"read_file", "list_dir", "read_skill", "extract_document", "web_search"})
-
-READ_ONLY_DCTL_SUBCOMMANDS = frozenset({
-    "snapshot",
-    "tree",
-    "screenshot",
-    "windows",
-    "apps",
-    "describe",
-    "list",
-})
+READ_ONLY_DCTL_SUBCOMMANDS = frozenset(
+    {
+        "snapshot",
+        "tree",
+        "screenshot",
+        "windows",
+        "apps",
+        "describe",
+        "list",
+    }
+)
 
 DESTRUCTIVE_COMMAND_PATTERNS = (
     (re.compile(r"\brm\s+-[a-z]*r[a-z]*\b", re.I), "recursive delete"),
@@ -49,7 +60,10 @@ DESTRUCTIVE_COMMAND_PATTERNS = (
     (re.compile(r"\bdd\s+[^;&|]*\bof=/dev/", re.I), "raw disk write"),
     (re.compile(r"\bgit\s+push\b[^;&|]*(?:--force|-f)\b", re.I), "force push"),
     (re.compile(r"\bgit\s+reset\b[^;&|]*--hard\b", re.I), "hard reset"),
-    (re.compile(r"\bgit\s+clean\b[^;&|]*-[a-z]*[fd][a-z]*", re.I), "destructive git clean"),
+    (
+        re.compile(r"\bgit\s+clean\b[^;&|]*-[a-z]*[fd][a-z]*", re.I),
+        "destructive git clean",
+    ),
     (re.compile(r"\bgit\s+branch\b[^;&|]*\s-D\b", re.I), "delete branch"),
     (re.compile(r"\bdrop\s+(?:table|database)\b", re.I), "database drop"),
     (re.compile(r"\b(?:shutdown|reboot|halt|poweroff)\b", re.I), "system shutdown"),
@@ -82,6 +96,8 @@ def _matches_destructive_command(command: str) -> tuple[bool, str]:
 def tool_risk(tool_name: str, params: dict[str, Any]) -> tuple[str, str]:
     if tool_name in READ_ONLY_TOOLS:
         return "safe", "read-only tool"
+    if tool_name == "search_papers":
+        return "safe", "searches academic databases"
     if tool_name == "spawn_agent":
         return "safe", "spawns a subagent which follows its own permission checks"
     if tool_name == "run_command":
@@ -122,8 +138,14 @@ TOOL_SCHEMAS: list[dict] = [
         "parameters": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "Relative or absolute file path"},
-                "content": {"type": "string", "description": "Full UTF-8 content of the file"},
+                "path": {
+                    "type": "string",
+                    "description": "Relative or absolute file path",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Full UTF-8 content of the file",
+                },
             },
             "required": ["path", "content"],
         },
@@ -137,7 +159,10 @@ TOOL_SCHEMAS: list[dict] = [
         "parameters": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "Relative or absolute file path"},
+                "path": {
+                    "type": "string",
+                    "description": "Relative or absolute file path",
+                },
             },
             "required": ["path"],
         },
@@ -148,7 +173,10 @@ TOOL_SCHEMAS: list[dict] = [
         "parameters": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "Directory path (default: '.')"},
+                "path": {
+                    "type": "string",
+                    "description": "Directory path (default: '.')",
+                },
             },
             "required": [],
         },
@@ -163,9 +191,18 @@ TOOL_SCHEMAS: list[dict] = [
         "parameters": {
             "type": "object",
             "properties": {
-                "command": {"type": "string", "description": "Shell command to execute"},
-                "cwd": {"type": "string", "description": "Working directory (default: '.')"},
-                "background": {"type": "boolean", "description": "Run detached (for servers)"},
+                "command": {
+                    "type": "string",
+                    "description": "Shell command to execute",
+                },
+                "cwd": {
+                    "type": "string",
+                    "description": "Working directory (default: '.')",
+                },
+                "background": {
+                    "type": "boolean",
+                    "description": "Run detached (for servers)",
+                },
             },
             "required": ["command"],
         },
@@ -180,7 +217,10 @@ TOOL_SCHEMAS: list[dict] = [
         "parameters": {
             "type": "object",
             "properties": {
-                "slug": {"type": "string", "description": "Skill slug or leaf folder name"},
+                "slug": {
+                    "type": "string",
+                    "description": "Skill slug or leaf folder name",
+                },
             },
             "required": ["slug"],
         },
@@ -195,8 +235,14 @@ TOOL_SCHEMAS: list[dict] = [
         "parameters": {
             "type": "object",
             "properties": {
-                "project_path": {"type": "string", "description": "Path to the project root"},
-                "framework": {"type": "string", "description": "Framework hint (optional)"},
+                "project_path": {
+                    "type": "string",
+                    "description": "Path to the project root",
+                },
+                "framework": {
+                    "type": "string",
+                    "description": "Framework hint (optional)",
+                },
             },
             "required": ["project_path"],
         },
@@ -211,7 +257,10 @@ TOOL_SCHEMAS: list[dict] = [
         "parameters": {
             "type": "object",
             "properties": {
-                "content": {"type": "string", "description": "The fact or note to remember"},
+                "content": {
+                    "type": "string",
+                    "description": "The fact or note to remember",
+                },
             },
             "required": ["content"],
         },
@@ -249,8 +298,14 @@ TOOL_SCHEMAS: list[dict] = [
         "parameters": {
             "type": "object",
             "properties": {
-                "query": {"type": "string", "description": "Search query. Leave empty for top current headlines."},
-                "max_results": {"type": "integer", "description": "Maximum results to return (default 6, max 10)"},
+                "query": {
+                    "type": "string",
+                    "description": "Search query. Leave empty for top current headlines.",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum results to return (default 6, max 10)",
+                },
             },
             "required": [],
         },
@@ -265,13 +320,19 @@ TOOL_SCHEMAS: list[dict] = [
         "parameters": {
             "type": "object",
             "properties": {
-                "subcommand": {"type": "string", "description": "dctl subcommand to run"},
+                "subcommand": {
+                    "type": "string",
+                    "description": "dctl subcommand to run",
+                },
                 "args": {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Arguments passed to the dctl subcommand",
                 },
-                "cwd": {"type": "string", "description": "Working directory for the command"},
+                "cwd": {
+                    "type": "string",
+                    "description": "Working directory for the command",
+                },
             },
             "required": ["subcommand"],
         },
@@ -289,7 +350,10 @@ TOOL_SCHEMAS: list[dict] = [
         "parameters": {
             "type": "object",
             "properties": {
-                "task": {"type": "string", "description": "Clear description of what the subagent should do"},
+                "task": {
+                    "type": "string",
+                    "description": "Clear description of what the subagent should do",
+                },
                 "context": {
                     "type": "string",
                     "description": "Additional context or instructions for the subagent (optional)",
@@ -298,10 +362,65 @@ TOOL_SCHEMAS: list[dict] = [
             "required": ["task"],
         },
     },
+    {
+        "name": "search_papers",
+        "description": (
+            "Search academic literature across Semantic Scholar, arXiv, OpenAlex, and CrossRef. "
+            "Returns ranked, de-duplicated papers with titles, authors, abstracts, years, "
+            "citation counts, DOIs, journal names, and open-access PDF links. "
+            "Use this when the user asks about academic research, scientific papers, "
+            "literature reviews, or wants to find scholarly sources on a topic."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Research query (e.g. 'transformer attention mechanisms')",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum results (default 20, max 50)",
+                },
+                "year_min": {
+                    "type": "integer",
+                    "description": "Earliest publication year (optional, e.g. 2020)",
+                },
+                "year_max": {
+                    "type": "integer",
+                    "description": "Latest publication year (optional, e.g. 2024)",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "format_citation",
+        "description": (
+            "Format a paper into a properly formatted citation string. "
+            "Use this after search_papers to produce clean citations for papers the user wants to reference. "
+            "Supports APA, MLA, and Chicago styles."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "paper": {
+                    "type": "object",
+                    "description": "A paper object from search_papers results (with title, authors, year, doi, journal)",
+                },
+                "style": {
+                    "type": "string",
+                    "description": "Citation style: apa, mla, or chicago (default: apa)",
+                },
+            },
+            "required": ["paper"],
+        },
+    },
 ]
 
 
 # ---------------- Dispatcher ----------------
+
 
 def _friendly_error(err: Exception, context: str = "") -> str:
     """Translate common exceptions into user-actionable messages."""
@@ -338,22 +457,50 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
 
     if tool_name.startswith("mcp__"):
         label = f"MCP {tool_name}"
-        yield {"type": "activity", "id": tool_id, "label": label, "icon": "tool", "done": False}
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": label,
+            "icon": "tool",
+            "done": False,
+        }
         try:
             from .mcp import get_manager
 
             result = await get_manager().call_tool(tool_name, params)
             text = _format_mcp_result(result)
             ok = not bool(result.get("isError"))
-            yield {"type": "activity", "id": tool_id, "label": label, "icon": "tool", "done": True}
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": label,
+                "icon": "tool",
+                "done": True,
+            }
             if run is not None:
                 run.log("tool_finished", tool_name=tool_name, ok=ok, output=text)
             yield {"type": "tool_result", "tool": tool_name, "ok": ok, "message": text}
         except Exception as e:
-            yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "tool", "done": True}
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": f"Failed: {label}",
+                "icon": "tool",
+                "done": True,
+            }
             if run is not None:
-                run.log("tool_finished", tool_name=tool_name, ok=False, output=_friendly_error(e))
-            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e)}
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=False,
+                    output=_friendly_error(e),
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": False,
+                "message": _friendly_error(e),
+            }
         return
 
     if tool_name == "write_file":
@@ -361,54 +508,167 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
         content = params.get("content", "")
         label = f"Write {_short_path(path)}"
         icon = _icon_for_path(path)
-        yield {"type": "activity", "id": tool_id, "label": label, "icon": icon, "done": False}
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": label,
+            "icon": icon,
+            "done": False,
+        }
         try:
             await asyncio.to_thread(_write_file, path, content)
-            yield {"type": "activity", "id": tool_id, "label": label, "icon": icon, "done": True}
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": label,
+                "icon": icon,
+                "done": True,
+            }
             if run is not None:
-                run.log("tool_finished", tool_name=tool_name, ok=True, output=f"Wrote {len(content)} chars to {path}")
-            yield {"type": "tool_result", "tool": tool_name, "ok": True,
-                   "message": f"Wrote {len(content)} chars to {path}"}
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=True,
+                    output=f"Wrote {len(content)} chars to {path}",
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": True,
+                "message": f"Wrote {len(content)} chars to {path}",
+            }
         except Exception as e:
-            yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": icon, "done": True}
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": f"Failed: {label}",
+                "icon": icon,
+                "done": True,
+            }
             if run is not None:
-                run.log("tool_finished", tool_name=tool_name, ok=False, output=_friendly_error(e, "Try a different path. "))
-            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e, "Try a different path. ")}
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=False,
+                    output=_friendly_error(e, "Try a different path. "),
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": False,
+                "message": _friendly_error(e, "Try a different path. "),
+            }
         return
 
     if tool_name == "read_file":
         path = params.get("path", "")
         label = f"Read {_short_path(path)}"
         icon = _icon_for_path(path)
-        yield {"type": "activity", "id": tool_id, "label": label, "icon": icon, "done": False}
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": label,
+            "icon": icon,
+            "done": False,
+        }
         try:
             text = await asyncio.to_thread(_read_file, path)
-            yield {"type": "activity", "id": tool_id, "label": label, "icon": icon, "done": True}
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": label,
+                "icon": icon,
+                "done": True,
+            }
             if run is not None:
-                run.log("tool_finished", tool_name=tool_name, ok=True, output=f"Read {len(text)} chars from {path}")
-            yield {"type": "tool_result", "tool": tool_name, "ok": True, "message": text}
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=True,
+                    output=f"Read {len(text)} chars from {path}",
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": True,
+                "message": text,
+            }
         except Exception as e:
-            yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": icon, "done": True}
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": f"Failed: {label}",
+                "icon": icon,
+                "done": True,
+            }
             if run is not None:
-                run.log("tool_finished", tool_name=tool_name, ok=False, output=_friendly_error(e, "Try a different path. "))
-            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e, "Try a different path. ")}
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=False,
+                    output=_friendly_error(e, "Try a different path. "),
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": False,
+                "message": _friendly_error(e, "Try a different path. "),
+            }
         return
 
     if tool_name == "list_dir":
         path = params.get("path", ".")
         label = f"List {_short_path(path)}"
-        yield {"type": "activity", "id": tool_id, "label": label, "icon": "folder", "done": False}
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": label,
+            "icon": "folder",
+            "done": False,
+        }
         try:
             listing = await asyncio.to_thread(_list_dir, path)
-            yield {"type": "activity", "id": tool_id, "label": label, "icon": "folder", "done": True}
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": label,
+                "icon": "folder",
+                "done": True,
+            }
             if run is not None:
-                run.log("tool_finished", tool_name=tool_name, ok=True, output=f"Listed {path}")
-            yield {"type": "tool_result", "tool": tool_name, "ok": True, "message": listing}
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=True,
+                    output=f"Listed {path}",
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": True,
+                "message": listing,
+            }
         except Exception as e:
-            yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "folder", "done": True}
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": f"Failed: {label}",
+                "icon": "folder",
+                "done": True,
+            }
             if run is not None:
-                run.log("tool_finished", tool_name=tool_name, ok=False, output=_friendly_error(e, "Check that the path is a directory. "))
-            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e, "Check that the path is a directory. ")}
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=False,
+                    output=_friendly_error(e, "Check that the path is a directory. "),
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": False,
+                "message": _friendly_error(e, "Check that the path is a directory. "),
+            }
         return
 
     if tool_name == "run_command":
@@ -417,112 +677,322 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
         background = bool(params.get("background", False))
         short = command[:60] + ("…" if len(command) > 60 else "")
         label = f"Run: {short}" + (" (bg)" if background else "")
-        yield {"type": "activity", "id": tool_id, "label": label, "icon": "command", "done": False}
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": label,
+            "icon": "command",
+            "done": False,
+        }
         try:
             _ensure_command_allowed(command)
             if background:
                 pid = await asyncio.to_thread(_run_background, command, cwd)
-                yield {"type": "activity", "id": tool_id, "label": label, "icon": "command", "done": True}
+                yield {
+                    "type": "activity",
+                    "id": tool_id,
+                    "label": label,
+                    "icon": "command",
+                    "done": True,
+                }
                 if run is not None:
-                    run.log("tool_finished", tool_name=tool_name, ok=True, output=f"Started background process (pid={pid})")
-                yield {"type": "tool_result", "tool": tool_name, "ok": True,
-                       "message": f"Started background process (pid={pid})"}
+                    run.log(
+                        "tool_finished",
+                        tool_name=tool_name,
+                        ok=True,
+                        output=f"Started background process (pid={pid})",
+                    )
+                yield {
+                    "type": "tool_result",
+                    "tool": tool_name,
+                    "ok": True,
+                    "message": f"Started background process (pid={pid})",
+                }
             else:
                 yield {"type": "status", "text": f"Running command: {short}"}
                 result = await _run_command(command, cwd)
-                yield {"type": "activity", "id": tool_id, "label": label, "icon": "command", "done": True}
+                yield {
+                    "type": "activity",
+                    "id": tool_id,
+                    "label": label,
+                    "icon": "command",
+                    "done": True,
+                }
                 if run is not None:
-                    run.log("tool_finished", tool_name=tool_name, ok=result["ok"], output=result["output"] or f"exit {result['returncode']}")
-                yield {"type": "tool_result", "tool": tool_name, "ok": result["ok"],
-                       "message": result["output"] or (f"exit {result['returncode']}")}
+                    run.log(
+                        "tool_finished",
+                        tool_name=tool_name,
+                        ok=result["ok"],
+                        output=result["output"] or f"exit {result['returncode']}",
+                    )
+                yield {
+                    "type": "tool_result",
+                    "tool": tool_name,
+                    "ok": result["ok"],
+                    "message": result["output"] or (f"exit {result['returncode']}"),
+                }
         except Exception as e:
-            yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "command", "done": True}
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": f"Failed: {label}",
+                "icon": "command",
+                "done": True,
+            }
             if run is not None:
-                run.log("tool_finished", tool_name=tool_name, ok=False, output=_friendly_error(e))
-            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e)}
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=False,
+                    output=_friendly_error(e),
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": False,
+                "message": _friendly_error(e),
+            }
         return
 
     if tool_name == "web_search":
         query = str(params.get("query") or "").strip()
         max_results = int(params.get("max_results") or 6)
         label = f"Search web: {query[:50]}" if query else "Search current headlines"
-        yield {"type": "activity", "id": tool_id, "label": label, "icon": "search", "done": False}
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": label,
+            "icon": "search",
+            "done": False,
+        }
         try:
             text = await asyncio.to_thread(_web_search, query, max_results)
-            yield {"type": "activity", "id": tool_id, "label": label, "icon": "search", "done": True}
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": label,
+                "icon": "search",
+                "done": True,
+            }
             if run is not None:
-                run.log("tool_finished", tool_name=tool_name, ok=True, output=text[:1000])
-            yield {"type": "tool_result", "tool": tool_name, "ok": True, "message": text}
+                run.log(
+                    "tool_finished", tool_name=tool_name, ok=True, output=text[:1000]
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": True,
+                "message": text,
+            }
         except Exception as e:
-            yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "search", "done": True}
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": f"Failed: {label}",
+                "icon": "search",
+                "done": True,
+            }
             if run is not None:
-                run.log("tool_finished", tool_name=tool_name, ok=False, output=_friendly_error(e))
-            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e)}
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=False,
+                    output=_friendly_error(e),
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": False,
+                "message": _friendly_error(e),
+            }
         return
 
     if tool_name == "read_skill":
         slug = params.get("slug", "")
         label = f"Read skill {slug}"
-        yield {"type": "activity", "id": tool_id, "label": label, "icon": "file", "done": False}
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": label,
+            "icon": "file",
+            "done": False,
+        }
         try:
             text = await asyncio.to_thread(skills_mod.read_skill, slug)
             if text is None:
                 available = ", ".join(s.slug for s in skills_mod.list_skills()[:10])
                 msg = f"No skill named '{slug}'. Try one of: {available}"
-                yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "file", "done": True}
+                yield {
+                    "type": "activity",
+                    "id": tool_id,
+                    "label": f"Failed: {label}",
+                    "icon": "file",
+                    "done": True,
+                }
                 if run is not None:
                     run.log("tool_finished", tool_name=tool_name, ok=False, output=msg)
-                yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": msg}
+                yield {
+                    "type": "tool_result",
+                    "tool": tool_name,
+                    "ok": False,
+                    "message": msg,
+                }
             else:
                 # Cap to keep context sane.
                 if len(text) > 80_000:
                     text = text[:80_000] + "\n…[truncated]"
-                yield {"type": "activity", "id": tool_id, "label": label, "icon": "file", "done": True}
+                yield {
+                    "type": "activity",
+                    "id": tool_id,
+                    "label": label,
+                    "icon": "file",
+                    "done": True,
+                }
                 if run is not None:
-                    run.log("tool_finished", tool_name=tool_name, ok=True, output=f"Loaded skill {slug}")
-                yield {"type": "tool_result", "tool": tool_name, "ok": True, "message": text}
+                    run.log(
+                        "tool_finished",
+                        tool_name=tool_name,
+                        ok=True,
+                        output=f"Loaded skill {slug}",
+                    )
+                yield {
+                    "type": "tool_result",
+                    "tool": tool_name,
+                    "ok": True,
+                    "message": text,
+                }
         except Exception as e:
-            yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "file", "done": True}
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": f"Failed: {label}",
+                "icon": "file",
+                "done": True,
+            }
             if run is not None:
-                run.log("tool_finished", tool_name=tool_name, ok=False, output=_friendly_error(e, "Check the skill slug spelling. "))
-            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e, "Check the skill slug spelling. ")}
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=False,
+                    output=_friendly_error(e, "Check the skill slug spelling. "),
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": False,
+                "message": _friendly_error(e, "Check the skill slug spelling. "),
+            }
         return
 
     if tool_name == "deploy_web_app":
         project_path = params.get("project_path", ".")
         framework = params.get("framework", "")
         label = f"Serve {_short_path(project_path)}"
-        yield {"type": "activity", "id": tool_id, "label": label, "icon": "deploy", "done": False}
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": label,
+            "icon": "deploy",
+            "done": False,
+        }
         try:
             result = await asyncio.to_thread(_deploy_web_app, project_path, framework)
-            yield {"type": "activity", "id": tool_id, "label": label, "icon": "deploy", "done": True}
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": label,
+                "icon": "deploy",
+                "done": True,
+            }
             if run is not None:
-                run.log("tool_finished", tool_name=tool_name, ok=result["ok"], output=result["message"])
-            yield {"type": "tool_result", "tool": tool_name, "ok": result["ok"],
-                   "message": result["message"]}
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=result["ok"],
+                    output=result["message"],
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": result["ok"],
+                "message": result["message"],
+            }
         except Exception as e:
-            yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "deploy", "done": True}
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": f"Failed: {label}",
+                "icon": "deploy",
+                "done": True,
+            }
             if run is not None:
-                run.log("tool_finished", tool_name=tool_name, ok=False, output=_friendly_error(e))
-            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e)}
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=False,
+                    output=_friendly_error(e),
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": False,
+                "message": _friendly_error(e),
+            }
         return
 
     if tool_name == "save_memory":
         content = params.get("content", "")
         label = "Save memory"
-        yield {"type": "activity", "id": tool_id, "label": label, "icon": "file", "done": False}
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": label,
+            "icon": "file",
+            "done": False,
+        }
         try:
             await asyncio.to_thread(_save_memory, content)
-            yield {"type": "activity", "id": tool_id, "label": label, "icon": "file", "done": True}
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": label,
+                "icon": "file",
+                "done": True,
+            }
             if run is not None:
-                run.log("tool_finished", tool_name=tool_name, ok=True, output="Saved to memory.")
-            yield {"type": "tool_result", "tool": tool_name, "ok": True,
-                   "message": "Saved to memory."}
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=True,
+                    output="Saved to memory.",
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": True,
+                "message": "Saved to memory.",
+            }
         except Exception as e:
-            yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "file", "done": True}
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": f"Failed: {label}",
+                "icon": "file",
+                "done": True,
+            }
             if run is not None:
-                run.log("tool_finished", tool_name=tool_name, ok=False, output=_friendly_error(e))
-            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e)}
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=False,
+                    output=_friendly_error(e),
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": False,
+                "message": _friendly_error(e),
+            }
         return
 
     if tool_name == "extract_document":
@@ -530,20 +1000,56 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
         fmt = params.get("format", "markdown") or "markdown"
         pages = params.get("pages")
         label = f"Extract {_short_path(path)}"
-        yield {"type": "activity", "id": tool_id, "label": label, "icon": "file", "done": False}
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": label,
+            "icon": "file",
+            "done": False,
+        }
         try:
             result = await asyncio.to_thread(_extract_document, path, fmt, pages)
-            yield {"type": "activity", "id": tool_id, "label": label, "icon": "file", "done": True}
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": label,
+                "icon": "file",
+                "done": True,
+            }
             if run is not None:
-                run.log("tool_finished", tool_name=tool_name, ok=True, output=f"Extracted document {path}")
-            yield {"type": "tool_result", "tool": tool_name, "ok": True,
-                   "message": json.dumps(result, ensure_ascii=False)}
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=True,
+                    output=f"Extracted document {path}",
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": True,
+                "message": json.dumps(result, ensure_ascii=False),
+            }
         except Exception as e:
-            yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "file", "done": True}
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": f"Failed: {label}",
+                "icon": "file",
+                "done": True,
+            }
             if run is not None:
-                run.log("tool_finished", tool_name=tool_name, ok=False, output=_friendly_error(e, "Check the file path and extension. "))
-            yield {"type": "tool_result", "tool": tool_name, "ok": False,
-                   "message": _friendly_error(e, "Check the file path and extension. ")}
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=False,
+                    output=_friendly_error(e, "Check the file path and extension. "),
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": False,
+                "message": _friendly_error(e, "Check the file path and extension. "),
+            }
         return
 
     if tool_name == "dctl":
@@ -552,35 +1058,84 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
         cwd = params.get("cwd", ".")
         full = " ".join([subcommand, *args]).strip()
         label = f"dctl {full}" if full else "dctl"
-        yield {"type": "activity", "id": tool_id, "label": label, "icon": "window", "done": False}
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": label,
+            "icon": "window",
+            "done": False,
+        }
         try:
             result = await _run_dctl(subcommand, args, cwd)
-            yield {"type": "activity", "id": tool_id, "label": label, "icon": "window", "done": True}
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": label,
+                "icon": "window",
+                "done": True,
+            }
             if run is not None:
-                run.log("tool_finished", tool_name=tool_name, ok=result["ok"], output=result["output"] or (f"exit {result['returncode']}" if not result["ok"] else "ok"))
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=result["ok"],
+                    output=result["output"]
+                    or (f"exit {result['returncode']}" if not result["ok"] else "ok"),
+                )
             yield {
                 "type": "tool_result",
                 "tool": tool_name,
                 "ok": result["ok"],
-                "message": result["output"] or (f"exit {result['returncode']}" if not result["ok"] else "ok"),
+                "message": result["output"]
+                or (f"exit {result['returncode']}" if not result["ok"] else "ok"),
             }
         except Exception as e:
-            yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "window", "done": True}
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": f"Failed: {label}",
+                "icon": "window",
+                "done": True,
+            }
             if run is not None:
-                run.log("tool_finished", tool_name=tool_name, ok=False, output=_friendly_error(e, "Check that dctl is installed and the subcommand is valid. "))
-            yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e, "Check that dctl is installed and the subcommand is valid. ")}
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=False,
+                    output=_friendly_error(
+                        e, "Check that dctl is installed and the subcommand is valid. "
+                    ),
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": False,
+                "message": _friendly_error(
+                    e, "Check that dctl is installed and the subcommand is valid. "
+                ),
+            }
         return
 
     if tool_name == "spawn_agent":
         task = params.get("task", "")
         context = params.get("context", "")
         if not task:
-            yield {"type": "tool_result", "tool": tool_name, "ok": False,
-                   "message": "spawn_agent requires a 'task' parameter describing what to do."}
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": False,
+                "message": "spawn_agent requires a 'task' parameter describing what to do.",
+            }
             return
 
         label = f"Agent: {task[:40]}{'...' if len(task) > 40 else ''}"
-        yield {"type": "activity", "id": tool_id, "label": label, "icon": "bot", "done": False}
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": label,
+            "icon": "bot",
+            "done": False,
+        }
 
         try:
             from .subagent import spawn_agent
@@ -601,37 +1156,173 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                     full_result.append(evt.get("text", ""))
                 elif evt.get("type") == "subagent_done":
                     if evt.get("error"):
-                        yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "bot", "done": True}
-                        yield {"type": "tool_result", "tool": tool_name, "ok": False,
-                               "message": f"Subagent failed: {evt.get('error')}"}
+                        yield {
+                            "type": "activity",
+                            "id": tool_id,
+                            "label": f"Failed: {label}",
+                            "icon": "bot",
+                            "done": True,
+                        }
+                        yield {
+                            "type": "tool_result",
+                            "tool": tool_name,
+                            "ok": False,
+                            "message": f"Subagent failed: {evt.get('error')}",
+                        }
                         return
 
             result = "".join(full_result)
-            yield {"type": "activity", "id": tool_id, "label": label, "icon": "bot", "done": True}
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": label,
+                "icon": "bot",
+                "done": True,
+            }
             if run is not None:
-                run.log("tool_finished", tool_name=tool_name, ok=True, output=f"Subagent completed with {len(result)} chars")
-            yield {"type": "tool_result", "tool": tool_name, "ok": True, "message": result}
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=True,
+                    output=f"Subagent completed with {len(result)} chars",
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": True,
+                "message": result,
+            }
         except Exception as e:
-            yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "bot", "done": True}
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": f"Failed: {label}",
+                "icon": "bot",
+                "done": True,
+            }
+            if run is not None:
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=False,
+                    output=_friendly_error(e),
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": False,
+                "message": _friendly_error(e),
+            }
+        return
+
+    if tool_name == "search_papers":
+        query = str(params.get("query") or "").strip()
+        max_results = min(int(params.get("max_results") or 20), 50)
+        year_min = params.get("year_min")
+        year_max = params.get("year_max")
+        if year_min is not None:
+            year_min = int(year_min)
+        if year_max is not None:
+            year_max = int(year_max)
+        label = f"Search papers: {query[:50]}" if query else "Search papers"
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": label,
+            "icon": "search",
+            "done": False,
+        }
+        try:
+            papers = await academic_mod.search_academic_literature(
+                query, max_results=max_results, year_min=year_min, year_max=year_max
+            )
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": label,
+                "icon": "search",
+                "done": True,
+            }
+            if run is not None:
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=True,
+                    output=f"Found {len(papers)} papers for '{query}'",
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": True,
+                "message": json.dumps(papers, ensure_ascii=False),
+            }
+        except Exception as e:
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": f"Failed: {label}",
+                "icon": "search",
+                "done": True,
+            }
+            if run is not None:
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=False,
+                    output=_friendly_error(e),
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": False,
+                "message": _friendly_error(e, "Check the query and try again. "),
+            }
+        return
+
+    if tool_name == "format_citation":
+        paper_json = params.get("paper", {})
+        style = str(params.get("style") or "apa").strip().lower()
+        if style not in ("apa", "mla", "chicago"):
+            style = "apa"
+        label = f"Format citation ({style})"
+        yield {"type": "activity", "id": tool_id, "label": label, "icon": "file", "done": False}
+        try:
+            citation = academic_mod.format_citation(paper_json, style)
+            yield {"type": "activity", "id": tool_id, "label": label, "icon": "file", "done": True}
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=True, output=citation[:200])
+            yield {"type": "tool_result", "tool": tool_name, "ok": True, "message": citation}
+        except Exception as e:
+            yield {"type": "activity", "id": tool_id, "label": f"Failed: {label}", "icon": "file", "done": True}
             if run is not None:
                 run.log("tool_finished", tool_name=tool_name, ok=False, output=_friendly_error(e))
             yield {"type": "tool_result", "tool": tool_name, "ok": False, "message": _friendly_error(e)}
         return
 
     if run is not None:
-        run.log("tool_finished", tool_name=tool_name, ok=False, output=f"Unknown tool: {tool_name}")
-    yield {"type": "tool_result", "tool": tool_name, "ok": False,
-           "message": f"Unknown tool: {tool_name}. This tool is not available — try a different approach."}
+        run.log(
+            "tool_finished",
+            tool_name=tool_name,
+            ok=False,
+            output=f"Unknown tool: {tool_name}",
+        )
+    yield {
+        "type": "tool_result",
+        "tool": tool_name,
+        "ok": False,
+        "message": f"Unknown tool: {tool_name}. This tool is not available — try a different approach.",
+    }
 
 
 # ---------------- Impls ----------------
+
 
 def _short_path(path: str) -> str:
     try:
         home = str(Path.home())
         s = str(path)
         if s.startswith(home):
-            s = "~" + s[len(home):]
+            s = "~" + s[len(home) :]
         return s
     except Exception:
         return str(path)
@@ -755,10 +1446,17 @@ async def _run_command(command: str, cwd: str) -> dict[str, Any]:
     )
     if run is not None:
         run.register_process(proc.pid)
-        run.log("process_spawned", pid=proc.pid, command=command, cwd=str(Path(cwd).expanduser()))
+        run.log(
+            "process_spawned",
+            pid=proc.pid,
+            command=command,
+            cwd=str(Path(cwd).expanduser()),
+        )
     try:
         try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout_seconds
+            )
         except asyncio.TimeoutError:
             _terminate_process_tree(proc.pid)
             await proc.wait()
@@ -820,6 +1518,7 @@ def _terminate_process_tree(pid: int) -> None:
 
 def _pick_free_port(preferred: list[int]) -> int:
     import socket
+
     for port in preferred:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             try:
@@ -839,7 +1538,10 @@ def _deploy_web_app(project_path: str, framework: str) -> dict[str, Any]:
     if not p.exists():
         return {"ok": False, "message": f"Project path does not exist: {project_path}"}
     if not p.is_dir():
-        return {"ok": False, "message": f"Project path is not a directory: {project_path}"}
+        return {
+            "ok": False,
+            "message": f"Project path is not a directory: {project_path}",
+        }
 
     pkg = p / "package.json"
     if pkg.exists():
@@ -851,14 +1553,18 @@ def _deploy_web_app(project_path: str, framework: str) -> dict[str, Any]:
                 # Pass PORT env for CRA/Next; Vite uses --port via the script itself if configured.
                 command = f"PORT={port} npm run dev"
                 _run_background(command, str(p))
-                return {"ok": True,
-                        "message": f"Started `npm run dev` in {p.name}. Open http://localhost:{port} "
-                                   f"(check console if your dev server chose a different port)."}
+                return {
+                    "ok": True,
+                    "message": f"Started `npm run dev` in {p.name}. Open http://localhost:{port} "
+                    f"(check console if your dev server chose a different port).",
+                }
             if "start" in scripts:
                 port = _pick_free_port([3000, 8080])
                 _run_background(f"PORT={port} npm start", str(p))
-                return {"ok": True,
-                        "message": f"Started `npm start` in {p.name}. Open http://localhost:{port}."}
+                return {
+                    "ok": True,
+                    "message": f"Started `npm start` in {p.name}. Open http://localhost:{port}.",
+                }
         except Exception:
             pass
 
@@ -866,16 +1572,18 @@ def _deploy_web_app(project_path: str, framework: str) -> dict[str, Any]:
     if index.exists():
         port = _pick_free_port([8000, 8080, 5173])
         _run_background(f"python3 -m http.server {port}", str(p))
-        return {"ok": True,
-                "message": f"Serving {p.name} at http://localhost:{port}"}
+        return {"ok": True, "message": f"Serving {p.name} at http://localhost:{port}"}
 
-    return {"ok": False,
-            "message": f"No index.html or package.json in {p}. Nothing obvious to serve."}
+    return {
+        "ok": False,
+        "message": f"No index.html or package.json in {p}. Nothing obvious to serve.",
+    }
 
 
 def _save_memory(content: str) -> None:
     """Append a note to the global memory file."""
     import time as _time
+
     p = memory_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     existing = ""
@@ -996,10 +1704,15 @@ def _extract_pdf(p: Path, fmt: str, pages: str | None) -> dict[str, Any]:
                         for raw in pdf.pages[idx].extract_tables() or []:
                             if not raw:
                                 continue
-                            tables.append({
-                                "page": idx + 1,
-                                "rows": [[("" if c is None else str(c)) for c in row] for row in raw],
-                            })
+                            tables.append(
+                                {
+                                    "page": idx + 1,
+                                    "rows": [
+                                        [("" if c is None else str(c)) for c in row]
+                                        for row in raw
+                                    ],
+                                }
+                            )
             except Exception:
                 # Table extraction is best-effort; never fail the whole call
                 # because pdfplumber choked on a malformed table.
@@ -1174,10 +1887,17 @@ async def _run_dctl(subcommand: str, args: list[str], cwd: str) -> dict[str, Any
     )
     if run is not None:
         run.register_process(proc.pid)
-        run.log("process_spawned", pid=proc.pid, command=" ".join(cmd), cwd=str(Path(cwd).expanduser()))
+        run.log(
+            "process_spawned",
+            pid=proc.pid,
+            command=" ".join(cmd),
+            cwd=str(Path(cwd).expanduser()),
+        )
     try:
         try:
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout_seconds
+            )
         except asyncio.TimeoutError:
             _terminate_process_tree(proc.pid)
             await proc.wait()
@@ -1208,6 +1928,7 @@ async def _run_dctl(subcommand: str, args: list[str], cwd: str) -> dict[str, Any
 
 
 # ---------------- Legacy <<TOOL>> marker parser ----------------
+
 
 def parse_tool_calls(text: str) -> list[dict[str, Any]]:
     """Parse <<TOOL>>...<</TOOL>> blocks from model output (fallback)."""

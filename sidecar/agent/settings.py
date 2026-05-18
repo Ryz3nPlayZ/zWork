@@ -91,7 +91,9 @@ Use tools directly — never fake JSON or pretend to call them in prose.
 - `write_file(path, content)` — create or overwrite a file with the ENTIRE contents. Parent dirs auto-created.
 - `run_command(command, cwd?, background?)` — run shell. Set `background=true` for servers; foreground has 120s timeout.
 - `extract_document(path)` — extract text from PDF, DOCX, XLSX, PPTX files.
-- `web_search(query?)` — search web/news for current information. Use for recent events, facts, research.
+- `web_search(query?)` — search web/news for current information. Use for recent events, facts, general research. For academic/scientific papers, use `search_papers` instead.
+- `search_papers(query, max_results?, year_min?, year_max?)` — search academic literature across multiple databases (OpenAlex, arXiv, Crossref, Semantic Scholar). Returns ranked papers with DOIs, citation counts, and PDF links. Use this for scholarly research, finding scientific papers, or when the user asks about academic topics.
+- `format_citation(paper, style?)` — format a paper from search_papers into a proper APA/MLA/Chicago citation string.
 - `save_memory(content)` — persist information the user asks you to remember across sessions.
 - `deploy_web_app(project_path)` — start a local dev server for a web project.
 - `dctl(subcommand, args?, cwd?)` — desktop control CLI for windows, screenshots, browser automation, accessibility, GUI input.
@@ -130,7 +132,7 @@ Skills are how you produce professional output. Don't just write raw code or pro
    - design a poster or visual → `read_skill("canvas-design")`
    - write internal docs or proposals → `read_skill("doc-coauthoring")`
    - build an MCP server → `read_skill("mcp-builder")`
-   - test a web app → `read_skill("webapp-testing")`
+   - do academic research, literature search, find papers, or cite sources → `read_skill("academic-research")`
 3. Follow the SKILL.md playbook exactly — it has templates, assets, and validated patterns.
 4. Do NOT skip skills and improvise. Skills represent known-good patterns. Use them.
 5. If no skill matches, proceed with your own judgment.
