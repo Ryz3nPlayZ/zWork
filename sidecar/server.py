@@ -34,7 +34,7 @@ try:
     from .agent import home as home_mod
     from .agent import projects as projects_mod
     from .agent.env_loader import load_dotenv
-    from .agent.runtime import RunContext
+    from .agent.runtime import RunContext, active_process_pids
     from .agent.utils import new_id
 except ImportError:  # pragma: no cover - PyInstaller/script entrypoint fallback
     from sidecar import __version__
@@ -43,7 +43,7 @@ except ImportError:  # pragma: no cover - PyInstaller/script entrypoint fallback
     from sidecar.agent import home as home_mod
     from sidecar.agent import projects as projects_mod
     from sidecar.agent.env_loader import load_dotenv
-    from sidecar.agent.runtime import RunContext
+    from sidecar.agent.runtime import RunContext, active_process_pids
     from sidecar.agent.utils import new_id
 
 # Load .env from repo root (optional).
@@ -58,13 +58,33 @@ def _get_mcp_manager():
     return get_manager()
 
 
+def _get_composio_manager():
+    try:
+        from .agent.composio import get_manager
+    except ImportError:  # pragma: no cover
+        from sidecar.agent.composio import get_manager
+    return get_manager()
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app_instance: FastAPI):
+    memory_task: asyncio.Task[None] | None = None
     try:
         await _get_mcp_manager().start()
     except Exception:
         pass
+    try:
+        await _get_composio_manager().initialize()
+    except Exception:
+        pass
+    memory_interval = _memory_log_interval_seconds()
+    if memory_interval > 0:
+        memory_task = asyncio.create_task(_memory_logger(memory_interval))
     yield
+    if memory_task is not None:
+        memory_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await memory_task
     try:
         await _get_mcp_manager().stop()
     except Exception:
@@ -172,6 +192,15 @@ class UploadBody(BaseModel):
     files: list[UploadItem]
 
 
+class ComposioConfigBody(BaseModel):
+    enabled: bool | None = None
+    api_key: str | None = None
+
+
+class ComposioConnectBody(BaseModel):
+    app: str
+
+
 def _artifact_hint(message: str) -> str:
     t = message.lower()
     if any(k in t for k in ["document", "doc", "brief", "report", "note", "summary", "outline", "write a", "draft a", "make a document"]):
@@ -200,6 +229,43 @@ def health() -> dict:
         checks["data_dir_writable"] = False
     ok = all(checks.values())
     return {"ok": ok, "checks": checks}
+
+
+def _process_memory_mb() -> float | None:
+    try:
+        import resource
+    except ImportError:
+        return None
+
+    try:
+        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    except Exception:
+        return None
+
+    if rss <= 0:
+        return None
+
+    if platform.system() == "Darwin":
+        return rss / (1024 * 1024)
+    return rss / 1024
+
+
+def _memory_log_interval_seconds() -> int:
+    raw = os.environ.get("ZWORK_MEMORY_LOG_INTERVAL_SECONDS", "300").strip()
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 300
+
+
+async def _memory_logger(interval_seconds: int) -> None:
+    while True:
+        await asyncio.sleep(interval_seconds)
+        rss_mb = _process_memory_mb()
+        if rss_mb is None:
+            log.info("zWork backend memory: unavailable on this platform")
+        else:
+            log.info("zWork backend memory: rss_max=%.1f MiB", rss_mb)
 
 
 def _os_pretty() -> str:
@@ -631,6 +697,50 @@ def mcp_tools() -> dict:
     except ImportError:  # pragma: no cover
         from sidecar.agent.mcp import get_manager  # type: ignore[no-redef]
     return {"tools": get_manager().all_tool_schemas()}
+
+
+# ---------------- Composio app integrations ----------------
+
+@app.get("/api/composio/status")
+def composio_status() -> dict:
+    return _get_composio_manager().status()
+
+
+@app.post("/api/composio/config")
+def composio_set_config(body: ComposioConfigBody) -> dict:
+    mgr = _get_composio_manager()
+    if body.api_key is not None:
+        mgr.set_api_key(body.api_key)
+    if body.enabled is not None:
+        mgr.set_enabled(body.enabled)
+    return {"ok": True, "status": mgr.status()}
+
+
+@app.get("/api/composio/accounts")
+async def composio_accounts() -> dict:
+    accounts = await _get_composio_manager().get_connected_accounts()
+    return {"accounts": accounts}
+
+
+@app.post("/api/composio/connect")
+async def composio_connect(body: ComposioConnectBody) -> dict:
+    result = await _get_composio_manager().get_connect_link(body.app)
+    return {"url": result["url"]}
+
+
+@app.post("/api/composio/disconnect")
+async def composio_disconnect(body: ComposioConnectBody) -> dict:
+    await _get_composio_manager().disconnect(body.app)
+    return {"ok": True, "connected_apps": _get_composio_manager()._connected_apps}
+
+
+@app.get("/api/composio/apps")
+def composio_available_apps() -> dict:
+    try:
+        from .agent.composio import APP_DISPLAY
+    except ImportError:
+        from sidecar.agent.composio import APP_DISPLAY
+    return {"apps": [{"id": k, **v} for k, v in APP_DISPLAY.items()]}
 
 
 @app.get("/api/providers")
@@ -1451,9 +1561,9 @@ def _setup_signal_handlers() -> None:
     def _on_term(signum: int, frame: Any) -> None:
         log.info("zWork backend received signal %s, shutting down...", signum)
         _release_pid_lock()
-        # Kill any active child process groups spawned by this backend.
-        with contextlib.suppress(Exception):
-            os.killpg(0, _signal.SIGTERM)
+        for pid in active_process_pids():
+            with contextlib.suppress(Exception):
+                os.killpg(pid, _signal.SIGTERM)
         _signal.signal(signum, _signal.SIG_DFL)
         os.kill(os.getpid(), signum)
 
@@ -1493,7 +1603,6 @@ def main() -> None:
             host=host,
             port=port,
             log_level="info",
-            limit_max_requests=500,
             timeout_graceful_shutdown=10,
         )
     finally:

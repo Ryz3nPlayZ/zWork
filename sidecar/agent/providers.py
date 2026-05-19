@@ -357,6 +357,12 @@ def _active_tool_schemas(plan_mode: bool) -> list[dict]:
         schemas.extend(get_manager().all_tool_schemas())
     except Exception:
         pass
+    try:
+        from .composio import get_manager as _get_composio_manager
+
+        schemas.extend(_get_composio_manager().all_tool_schemas())
+    except Exception:
+        pass
     return schemas
 
 

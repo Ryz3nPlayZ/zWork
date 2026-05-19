@@ -121,6 +121,8 @@ def tool_risk(tool_name: str, params: dict[str, Any]) -> tuple[str, str]:
         return "sensitive", "controls the desktop UI"
     if tool_name.startswith("mcp__"):
         return "sensitive", "calls an external MCP tool"
+    if tool_name.startswith("composio__"):
+        return "sensitive", "calls an external app action via Composio"
     return "sensitive", "tool changes or accesses external state"
 
 
@@ -486,6 +488,54 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                 "id": tool_id,
                 "label": f"Failed: {label}",
                 "icon": "tool",
+                "done": True,
+            }
+            if run is not None:
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=False,
+                    output=_friendly_error(e),
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": False,
+                "message": _friendly_error(e),
+            }
+        return
+
+    if tool_name.startswith("composio__"):
+        label = f"App: {tool_name[len('composio__'):].replace('_', ' ').title()}"
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": label,
+            "icon": "plug",
+            "done": False,
+        }
+        try:
+            from .composio import get_manager
+
+            result = await get_manager().call_tool(tool_name, params)
+            text = _format_mcp_result(result)
+            ok = not bool(result.get("isError"))
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": label,
+                "icon": "plug",
+                "done": True,
+            }
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=ok, output=text)
+            yield {"type": "tool_result", "tool": tool_name, "ok": ok, "message": text}
+        except Exception as e:
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": f"Failed: {label}",
+                "icon": "plug",
                 "done": True,
             }
             if run is not None:

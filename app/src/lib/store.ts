@@ -6,11 +6,15 @@ import {
   type ProvidersResponse,
   type SettingsPublic,
   type Integration,
+  type ComposioStatus,
+  type ComposioAccount,
+  type ComposioApp,
   type CustomModel,
   type MeResponse,
   type Project,
 } from "./api";
 import { fetchCloudSession, getCloudToken, logoutCloudSession, startDesktopGoogleSignIn } from "./cloud";
+import { invoke } from "@tauri-apps/api/core";
 import { setTelemetryEnabled, trackError, trackArtifactCreated } from "./telemetry";
 
 const LEGACY_MANAGED_BASE_URLS = new Set(["https://ollama.com/v1"]);
@@ -310,6 +314,9 @@ interface AppState {
   // Backend state
   providers: ProvidersResponse | null;
   integrations: Integration[];
+  composioStatus: ComposioStatus | null;
+  composioAccounts: ComposioAccount[];
+  composioApps: ComposioApp[];
   settings: SettingsPublic | null;
   chatSummaries: ApiChatSummary[];
   me: MeResponse | null;
@@ -383,6 +390,10 @@ interface AppState {
   refreshProviders: () => Promise<void>;
   refreshSettings: () => Promise<void>;
   refreshIntegrations: () => Promise<void>;
+  refreshComposio: () => Promise<void>;
+  connectComposioApp: (app: string) => Promise<void>;
+  disconnectComposioApp: (app: string) => Promise<void>;
+  setComposioConfig: (body: { enabled?: boolean; api_key?: string }) => Promise<void>;
   refreshMe: () => Promise<void>;
 
   openLanding: () => void;
@@ -479,6 +490,9 @@ export const useApp = create<AppState>((set, get) => ({
 
   providers: null,
   integrations: [],
+  composioStatus: null,
+  composioAccounts: [],
+  composioApps: [],
   settings: null,
   chatSummaries: [],
   me: null,
@@ -647,6 +661,7 @@ export const useApp = create<AppState>((set, get) => ({
       get().refreshProviders(),
       get().refreshSettings(),
       get().refreshIntegrations(),
+      get().refreshComposio(),
       get().refreshChats(),
       get().refreshMe(),
       get().refreshProjects(),
@@ -697,6 +712,54 @@ export const useApp = create<AppState>((set, get) => ({
       const { integrations } = await api.integrations();
       set({ integrations });
     } catch (e) { console.warn("refreshIntegrations failed:", e) }
+  },
+
+  refreshComposio: async () => {
+    try {
+      const [status, accounts, apps] = await Promise.all([
+        api.composioStatus().catch(() => null),
+        api.composioAccounts().catch(() => ({ accounts: [] })),
+        api.composioApps().catch(() => ({ apps: [] })),
+      ]);
+      set({
+        composioStatus: status,
+        composioAccounts: accounts.accounts,
+        composioApps: apps.apps,
+      });
+    } catch (e) { console.warn("refreshComposio failed:", e) }
+  },
+
+  connectComposioApp: async (app: string) => {
+    try {
+      const { url } = await api.composioConnect(app);
+      await invoke("open_external", { url });
+      let attempts = 0;
+      const poll = setInterval(async () => {
+        attempts++;
+        try {
+          const { accounts } = await api.composioAccounts();
+          const connected = accounts.some((a) => a.app === app && a.status === "ACTIVE");
+          if (connected || attempts > 40) {
+            clearInterval(poll);
+            await get().refreshComposio();
+          }
+        } catch { /* keep polling */ }
+      }, 3000);
+    } catch (e) { console.warn("connectComposioApp failed:", e) }
+  },
+
+  disconnectComposioApp: async (app: string) => {
+    try {
+      await api.composioDisconnect(app);
+      await get().refreshComposio();
+    } catch (e) { console.warn("disconnectComposioApp failed:", e) }
+  },
+
+  setComposioConfig: async (body: { enabled?: boolean; api_key?: string }) => {
+    try {
+      await api.composioSetConfig(body);
+      await get().refreshComposio();
+    } catch (e) { console.warn("setComposioConfig failed:", e) }
   },
 
   refreshMe: async () => {

@@ -348,6 +348,11 @@ KNOWN_CREDENTIALS: tuple[str, ...] = (
     "cerebras",
     "deepseek",
     "zai",
+    "composio",
+)
+    "cerebras",
+    "deepseek",
+    "zai",
 )
 
 

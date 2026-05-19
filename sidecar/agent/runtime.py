@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import contextvars
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import AsyncIterator
@@ -15,6 +16,9 @@ TURN_TIMEOUT_SECONDS = 5 * 60
 MAX_TOOL_CALLS = 64
 COMMAND_TIMEOUT_SECONDS = 180
 COMMAND_OUTPUT_CAP = 20_000
+
+_ACTIVE_PROCESS_LOCK = threading.Lock()
+_ACTIVE_PROCESSES: set[int] = set()
 
 
 @dataclass
@@ -65,9 +69,13 @@ class RunContext:
 
     def register_process(self, pid: int) -> None:
         self._active_processes.add(pid)
+        with _ACTIVE_PROCESS_LOCK:
+            _ACTIVE_PROCESSES.add(pid)
 
     def unregister_process(self, pid: int) -> None:
         self._active_processes.discard(pid)
+        with _ACTIVE_PROCESS_LOCK:
+            _ACTIVE_PROCESSES.discard(pid)
 
 
 _CURRENT_RUN: contextvars.ContextVar[RunContext | None] = contextvars.ContextVar(
@@ -78,6 +86,11 @@ _CURRENT_RUN: contextvars.ContextVar[RunContext | None] = contextvars.ContextVar
 
 def current_run() -> RunContext | None:
     return _CURRENT_RUN.get()
+
+
+def active_process_pids() -> tuple[int, ...]:
+    with _ACTIVE_PROCESS_LOCK:
+        return tuple(_ACTIVE_PROCESSES)
 
 
 @contextlib.asynccontextmanager

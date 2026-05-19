@@ -34,6 +34,7 @@ import {
 } from "../lib/templates";
 import { IconButton } from "./IconButton";
 import { api, type Integration } from "../lib/api";
+import { ComposioPanel } from "./ComposioPanel";
 
 type Section = "account" | "general" | "memory" | "personalization" | "models" | "integrations";
 
@@ -215,7 +216,10 @@ export function SettingsPage() {
               />
             )}
             {section === "integrations" && (
-              <IntegrationsPanel integrations={integrations} onRefresh={refreshSettingsPage} />
+              <div className="space-y-8">
+                <ComposioPanel />
+                <IntegrationsPanel integrations={integrations} onRefresh={refreshSettingsPage} />
+              </div>
             )}
             {section === "general" && (
               <GeneralPanel settings={settings} onSave={saveSettings} />

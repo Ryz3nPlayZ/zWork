@@ -62,6 +62,31 @@ export interface Integration {
   path: string;
 }
 
+export interface ComposioStatus {
+  enabled: boolean;
+  configured: boolean;
+  available: boolean;
+  connected_apps: string[];
+  tool_count: number;
+  user_id: string;
+}
+
+export interface ComposioAccount {
+  app: string;
+  status: string;
+  account_id: string;
+  app_name: string;
+  icon: string;
+  color: string;
+}
+
+export interface ComposioApp {
+  id: string;
+  name: string;
+  icon: string;
+  color: string;
+}
+
 export interface CredentialStatus {
   configured: boolean;
   source: "byok" | "claude_code" | "env" | null;
@@ -225,6 +250,40 @@ export const api = {
   integrations: () =>
     localFetch("/api/integrations").then((r) =>
       j<{ integrations: Integration[] }>(r),
+    ),
+
+  composioStatus: () =>
+    localFetch("/api/composio/status").then((r) => j<ComposioStatus>(r)),
+
+  composioSetConfig: (body: { enabled?: boolean; api_key?: string }) =>
+    localFetch("/api/composio/config", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => j<{ ok: boolean; status: ComposioStatus }>(r)),
+
+  composioAccounts: () =>
+    localFetch("/api/composio/accounts").then((r) =>
+      j<{ accounts: ComposioAccount[] }>(r),
+    ),
+
+  composioConnect: (app: string) =>
+    localFetch("/api/composio/connect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ app }),
+    }).then((r) => j<{ url: string }>(r)),
+
+  composioDisconnect: (app: string) =>
+    localFetch("/api/composio/disconnect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ app }),
+    }).then((r) => j<{ ok: boolean; connected_apps: string[] }>(r)),
+
+  composioApps: () =>
+    localFetch("/api/composio/apps").then((r) =>
+      j<{ apps: ComposioApp[] }>(r),
     ),
 
   providers: () =>
