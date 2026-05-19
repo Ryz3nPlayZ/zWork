@@ -10,7 +10,7 @@ import logging
 import os
 import uuid
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from .home import zwork_home
 

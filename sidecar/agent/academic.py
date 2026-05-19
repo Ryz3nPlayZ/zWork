@@ -19,8 +19,7 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator
-from urllib.parse import quote
+from typing import Any
 
 import httpx
 

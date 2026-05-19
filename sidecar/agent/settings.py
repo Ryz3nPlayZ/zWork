@@ -350,10 +350,6 @@ KNOWN_CREDENTIALS: tuple[str, ...] = (
     "zai",
     "composio",
 )
-    "cerebras",
-    "deepseek",
-    "zai",
-)
 
 
 @dataclass

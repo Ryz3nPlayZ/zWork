@@ -21,16 +21,14 @@ import asyncio
 import json
 import os
 import random
-import re
 import uuid
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Optional
+from typing import AsyncIterator, Optional
 
 import httpx
 
 from . import detect, settings as settings_mod
 from .compaction import (
-    estimate_chars,
     plan_compaction,
     render_summary_message,
     should_compact,

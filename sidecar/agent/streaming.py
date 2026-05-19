@@ -6,10 +6,11 @@ instead of streaming every line of output.
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Callable
+from typing import AsyncIterator
 
 
 @dataclass
@@ -191,8 +192,6 @@ async def stream_batch_read(
 
     results = []
     for i, path in enumerate(paths):
-        # Update progress
-        pct = (i + 1) / total
         if tracker.should_emit():
             yield tracker.progress_event(
                 f"{label}: {i + 1}/{total}"
@@ -340,7 +339,3 @@ def _command_milestones(command: str) -> list[Milestone]:
         Milestone("Processing...", 0.7),
         Milestone("Finalizing...", 0.9),
     ]
-
-
-# Import os for stream_search
-import os

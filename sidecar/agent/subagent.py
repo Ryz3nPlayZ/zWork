@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from dataclasses import dataclass, field
-from typing import Any, AsyncIterator
+from dataclasses import dataclass
+from typing import AsyncIterator
 
 from .runtime import current_run, RunContext
 
