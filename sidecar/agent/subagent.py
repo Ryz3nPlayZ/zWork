@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from dataclasses import dataclass
-from typing import AsyncIterator, Literal
+from typing import Any, AsyncIterator, Literal
 
 from .runtime import current_run, RunContext
 
