@@ -2,6 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from fastapi import Request
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.testclient import TestClient
 
 from sidecar import server
@@ -49,6 +51,29 @@ class TestServerSecurity(unittest.TestCase):
 
             original_static_dir = server._STATIC_DIR
             server._STATIC_DIR = static_root
+
+            # Register SPA catch-all route if it wasn't registered at import
+            # (e.g. in CI where app/dist doesn't exist).
+            route_registered = any(
+                r.path == "/{path:path}" for r in server.app.routes
+            )
+            if not route_registered:
+
+                @server.app.get("/{path:path}")
+                async def serve_spa(request: Request, path: str) -> HTMLResponse:
+                    if path:
+                        normalized = Path(path.lstrip("/"))
+                        if not normalized.is_absolute() and ".." not in normalized.parts and "\\" not in path:
+                            sr = server._STATIC_DIR.resolve()
+                            candidate = (sr / normalized).resolve()
+                            try:
+                                candidate.relative_to(sr)
+                            except ValueError:
+                                candidate = None
+                            if candidate is not None and candidate.is_file():
+                                return FileResponse(candidate)
+                    return FileResponse(server._STATIC_DIR / "index.html")
+
             try:
                 allowed = self.client.get("/favicon.ico")
                 self.assertEqual(allowed.status_code, 200)

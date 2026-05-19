@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from dataclasses import dataclass
-from typing import AsyncIterator
+from typing import AsyncIterator, Literal
 
 from .runtime import current_run, RunContext
 
@@ -23,7 +23,7 @@ class SubagentTask:
     id: str
     description: str
     parent_run_id: str
-    status: "pending" | "running" | "completed" | "failed" = "pending"
+    status: Literal["pending", "running", "completed", "failed"] = "pending"
     result: str | None = None
     error: str | None = None
     started_at: float | None = None
