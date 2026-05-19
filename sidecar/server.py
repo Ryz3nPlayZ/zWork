@@ -191,7 +191,7 @@ def _artifact_hint(message: str) -> str:
 def health() -> dict:
     checks: dict[str, bool] = {}
     try:
-        data_dir = home_mod.data_dir()
+        data_dir = home_mod.zwork_home()
         probe = data_dir / ".healthcheck"
         probe.write_text("ok", encoding="utf-8")
         probe.unlink(missing_ok=True)
