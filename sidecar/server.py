@@ -1661,7 +1661,14 @@ def _setup_signal_handlers() -> None:
         _release_pid_lock()
         for pid in active_process_pids():
             with contextlib.suppress(Exception):
-                os.killpg(pid, _signal.SIGTERM)
+                if os.name == "nt":
+                    subprocess.run(
+                        ["taskkill", "/T", "/PID", str(pid), "/F"],
+                        capture_output=True,
+                        timeout=5,
+                    )
+                else:
+                    os.killpg(pid, _signal.SIGTERM)
         _signal.signal(signum, _signal.SIG_DFL)
         os.kill(os.getpid(), signum)
 

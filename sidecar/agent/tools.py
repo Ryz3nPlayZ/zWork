@@ -1517,8 +1517,13 @@ def _web_search(query: str, max_results: int = 6) -> str:
     return heading + "\n\n" + "\n".join(rows)
 
 
-def _shell_path() -> str:
-    """Return a working shell binary, falling back if /bin/sh is broken."""
+def _shell_path() -> str | None:
+    """Return a working shell binary, falling back if /bin/sh is broken.
+
+    On Windows returns None so subprocess uses the default COMSPEC.
+    """
+    if os.name == "nt":
+        return None
     for candidate in ("/bin/sh", "/usr/bin/bash", "/usr/bin/sh"):
         try:
             result = subprocess.run(
@@ -1538,14 +1543,15 @@ async def _run_command(command: str, cwd: str) -> dict[str, Any]:
     run = current_run()
     timeout_seconds = run.command_timeout_seconds if run is not None else 120
     output_cap = run.command_output_cap if run is not None else 20_000
-    proc = await asyncio.create_subprocess_shell(
-        command,
-        cwd=str(Path(cwd).expanduser()),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        start_new_session=True,
-        executable=_shell_path(),
-    )
+    kwargs: dict[str, Any] = {
+        "cwd": str(Path(cwd).expanduser()),
+        "stdout": asyncio.subprocess.PIPE,
+        "stderr": asyncio.subprocess.PIPE,
+    }
+    if os.name != "nt":
+        kwargs["start_new_session"] = True
+        kwargs["executable"] = _shell_path()
+    proc = await asyncio.create_subprocess_shell(command, **kwargs)
     if run is not None:
         run.register_process(proc.pid)
         run.log(
@@ -1591,15 +1597,19 @@ async def _run_command(command: str, cwd: str) -> dict[str, Any]:
 def _run_background(command: str, cwd: str) -> int:
     """Start a detached background process. Returns PID."""
     _ensure_command_allowed(command)
-    proc = subprocess.Popen(
-        command,
-        shell=True,
-        cwd=Path(cwd).expanduser(),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        stdin=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    kwargs: dict[str, Any] = {
+        "shell": True,
+        "cwd": Path(cwd).expanduser(),
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "stdin": subprocess.DEVNULL,
+    }
+    if os.name == "nt":
+        # Windows: create a new process group so we can signal the tree
+        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[assignment]
+    else:
+        kwargs["start_new_session"] = True
+    proc = subprocess.Popen(command, **kwargs)
     return proc.pid
 
 
@@ -1613,6 +1623,15 @@ def _ensure_command_allowed(command: str) -> None:
 
 def _terminate_process_tree(pid: int) -> None:
     if pid <= 0:
+        return
+    if os.name == "nt":
+        # Windows: use taskkill /T to terminate the process tree
+        with contextlib.suppress(Exception):
+            subprocess.run(
+                ["taskkill", "/T", "/PID", str(pid), "/F"],
+                capture_output=True,
+                timeout=10,
+            )
         return
     with contextlib.suppress(ProcessLookupError):
         os.killpg(pid, signal.SIGTERM)
@@ -1997,10 +2016,30 @@ def _extract_document(path: str, fmt: str, pages: str | None) -> dict[str, Any]:
 
 def _dctl_env() -> dict[str, str]:
     env = os.environ.copy()
-    repo = Path(__file__).resolve().parents[3] / "dctl"
-    if repo.exists():
-        prev = env.get("PYTHONPATH", "")
-        env["PYTHONPATH"] = f"{repo}{os.pathsep}{prev}" if prev else str(repo)
+    # 1. Already importable — nothing to do.
+    try:
+        import dctl
+        return env
+    except ImportError:
+        pass
+    # 2. Search relative to this file, zWork repo root, and ZWORK_ROOT env.
+    this_file = Path(__file__).resolve()
+    search_roots: list[Path] = []
+    # Walk up looking for a sibling "dctl" directory (dev layout).
+    for parent in this_file.parents:
+        if (parent / "zWork-Skills").exists() or (parent / "sidecar").exists():
+            search_roots.append(parent.parent)
+            break
+    # Env override.
+    zwork_root = os.environ.get("ZWORK_ROOT")
+    if zwork_root:
+        search_roots.append(Path(zwork_root).expanduser().parent)
+    for root in search_roots:
+        candidate = root / "dctl"
+        if candidate.exists():
+            prev = env.get("PYTHONPATH", "")
+            env["PYTHONPATH"] = f"{candidate}{os.pathsep}{prev}" if prev else str(candidate)
+            break
     return env
 
 
@@ -2011,14 +2050,15 @@ async def _run_dctl(subcommand: str, args: list[str], cwd: str) -> dict[str, Any
     run = current_run()
     timeout_seconds = run.command_timeout_seconds if run is not None else 120
     output_cap = run.command_output_cap if run is not None else 20_000
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        cwd=str(Path(cwd).expanduser()),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=_dctl_env(),
-        start_new_session=True,
-    )
+    kwargs: dict[str, Any] = {
+        "cwd": str(Path(cwd).expanduser()),
+        "stdout": asyncio.subprocess.PIPE,
+        "stderr": asyncio.subprocess.PIPE,
+        "env": _dctl_env(),
+    }
+    if os.name != "nt":
+        kwargs["start_new_session"] = True
+    proc = await asyncio.create_subprocess_exec(*cmd, **kwargs)
     if run is not None:
         run.register_process(proc.pid)
         run.log(
