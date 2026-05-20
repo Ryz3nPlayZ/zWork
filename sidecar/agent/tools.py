@@ -1517,6 +1517,22 @@ def _web_search(query: str, max_results: int = 6) -> str:
     return heading + "\n\n" + "\n".join(rows)
 
 
+def _shell_path() -> str:
+    """Return a working shell binary, falling back if /bin/sh is broken."""
+    for candidate in ("/bin/sh", "/usr/bin/bash", "/usr/bin/sh"):
+        try:
+            result = subprocess.run(
+                [candidate, "-c", "true"],
+                capture_output=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                return candidate
+        except Exception:
+            continue
+    return "/bin/sh"
+
+
 async def _run_command(command: str, cwd: str) -> dict[str, Any]:
     _ensure_command_allowed(command)
     run = current_run()
@@ -1528,6 +1544,7 @@ async def _run_command(command: str, cwd: str) -> dict[str, Any]:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         start_new_session=True,
+        executable=_shell_path(),
     )
     if run is not None:
         run.register_process(proc.pid)
@@ -1617,6 +1634,23 @@ def _pick_free_port(preferred: list[int]) -> int:
         return sock.getsockname()[1]
 
 
+def _wait_for_port(port: int, timeout: float = 5.0) -> bool:
+    """Poll localhost:port until it accepts connections or timeout expires."""
+    import socket
+    import time as _time
+
+    deadline = _time.monotonic() + timeout
+    while _time.monotonic() < deadline:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.5)
+            try:
+                sock.connect(("127.0.0.1", port))
+                return True
+            except (ConnectionRefusedError, OSError):
+                _time.sleep(0.25)
+    return False
+
+
 def _deploy_web_app(project_path: str, framework: str) -> dict[str, Any]:
     """Actually start a server."""
     p = Path(project_path).expanduser().resolve()
@@ -1635,20 +1669,29 @@ def _deploy_web_app(project_path: str, framework: str) -> dict[str, Any]:
             scripts = data.get("scripts") or {}
             if "dev" in scripts:
                 port = _pick_free_port([5173, 3000, 8080])
-                # Pass PORT env for CRA/Next; Vite uses --port via the script itself if configured.
-                command = f"PORT={port} npm run dev"
-                _run_background(command, str(p))
+                _run_background(f"PORT={port} npm run dev", str(p))
+                if _wait_for_port(port):
+                    return {
+                        "ok": True,
+                        "message": f"Started `npm run dev` in {p.name}. Open http://localhost:{port}",
+                    }
                 return {
-                    "ok": True,
-                    "message": f"Started `npm run dev` in {p.name}. Open http://localhost:{port} "
-                    f"(check console if your dev server chose a different port).",
+                    "ok": False,
+                    "message": f"`npm run dev` started but port {port} never opened. "
+                    "The dev server may have crashed — check its output.",
                 }
             if "start" in scripts:
                 port = _pick_free_port([3000, 8080])
                 _run_background(f"PORT={port} npm start", str(p))
+                if _wait_for_port(port):
+                    return {
+                        "ok": True,
+                        "message": f"Started `npm start` in {p.name}. Open http://localhost:{port}.",
+                    }
                 return {
-                    "ok": True,
-                    "message": f"Started `npm start` in {p.name}. Open http://localhost:{port}.",
+                    "ok": False,
+                    "message": f"`npm start` started but port {port} never opened. "
+                    "The server may have crashed — check its output.",
                 }
         except Exception:
             pass
@@ -1657,7 +1700,13 @@ def _deploy_web_app(project_path: str, framework: str) -> dict[str, Any]:
     if index.exists():
         port = _pick_free_port([8000, 8080, 5173])
         _run_background(f"python3 -m http.server {port}", str(p))
-        return {"ok": True, "message": f"Serving {p.name} at http://localhost:{port}"}
+        if _wait_for_port(port):
+            return {"ok": True, "message": f"Serving {p.name} at http://localhost:{port}"}
+        return {
+            "ok": False,
+            "message": f"http.server started but port {port} never opened. "
+            "The process may have crashed immediately.",
+        }
 
     return {
         "ok": False,
