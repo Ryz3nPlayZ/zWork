@@ -391,14 +391,21 @@ def _active_tool_schemas(plan_mode: bool) -> list[dict]:
         from .mcp import get_manager
 
         schemas.extend(get_manager().all_tool_schemas())
-    except Exception:
-        pass
+    except Exception as e:
+        import logging
+
+        logging.getLogger(__name__).warning("MCP tool schemas failed: %s", e)
     try:
         from .composio import get_manager as _get_composio_manager
 
-        schemas.extend(_get_composio_manager().all_tool_schemas())
-    except Exception:
-        pass
+        mgr = _get_composio_manager()
+        composio_schemas = mgr.all_tool_schemas()
+        if composio_schemas:
+            schemas.extend(composio_schemas)
+    except Exception as e:
+        import logging
+
+        logging.getLogger(__name__).warning("Composio tool schemas failed: %s", e)
     return schemas
 
 

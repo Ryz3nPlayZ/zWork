@@ -101,6 +101,8 @@ Use tools directly — never fake JSON or pretend to call them in prose.
 - `read_skill(slug)` — load a skill's full playbook. See Skills section below.
 - `spawn_agent(description, model_id?)` — spawn a sub-agent for parallel independent work.
 
+{connected_apps_block}
+
 ### Tool rules
 
 1. Call tools. Never write fake JSON or describe what a tool call would do.
@@ -248,6 +250,39 @@ def _zwork_md_block() -> str:
     return "The user has not yet completed onboarding; there is no `zwork.md` yet. Operate with sensible defaults."
 
 
+def _connected_apps_block() -> str:
+    try:
+        from .composio import get_manager
+
+        mgr = get_manager()
+        schemas = mgr.all_tool_schemas()
+        apps = mgr.status().get("connected_apps", [])
+        if not schemas or not apps:
+            return ""
+    except Exception:
+        return ""
+
+    tool_names = [s["name"] for s in schemas]
+    app_list = ", ".join(a.title() for a in apps)
+    tool_list = ", ".join(f"`{n}`" for n in tool_names[:20])
+    extra = f"\n  - ...and {len(tool_names) - 20} more" if len(tool_names) > 20 else ""
+    return (
+        "### Connected app actions\n\n"
+        f"The user has connected these apps: {app_list}. "
+        "You have tools prefixed `composio__` to act on their behalf. "
+        "Use these tools DIRECTLY when the user asks you to interact with a connected app — "
+        "do NOT try to use shell commands, browsers, or workarounds.\n\n"
+        f"Available actions: {tool_list}{extra}\n\n"
+        "Examples:\n"
+        '  - "check my email" / "find emails from today" → use `composio__GMAIL_READ_EMAILS` or `composio__GMAIL_SEARCH_EMAILS`\n'
+        '  - "send an email" → use `composio__GMAIL_SEND_EMAIL`\n'
+        '  - "what\'s on my calendar" → use `composio__GOOGLECALENDAR_GET_EVENTS`\n'
+        '  - "send a Slack message" → use `composio__SLACK_SEND_MESSAGE`\n'
+        '  - "search my Notion" → use `composio__NOTION_SEARCH_PAGES`\n'
+        "  - Always prefer `composio__*` tools over shell commands for connected apps."
+    )
+
+
 def _memory_block() -> str:
     p = memory_path()
     if not p.exists():
@@ -291,6 +326,7 @@ def build_system_prompt(
         workspace_scratch_dir=workspace_scratch_dir(),
         skills_list=skills_list,
         skill_example_slug=example_slug,
+        connected_apps_block=_connected_apps_block(),
     )
 
 
