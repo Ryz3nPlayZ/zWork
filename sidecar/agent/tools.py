@@ -1521,20 +1521,35 @@ def _shell_path() -> str | None:
     """Return a working shell binary, falling back if /bin/sh is broken.
 
     On Windows returns None so subprocess uses the default COMSPEC.
+
+    Tests each candidate with a command that exercises fork+exec
+    (not just a shell builtin like ``true``), so broken shared library
+    symbols are caught early and a working shell is selected.
+    The result is cached — tested once per process lifetime.
     """
     if os.name == "nt":
         return None
-    for candidate in ("/bin/sh", "/usr/bin/bash", "/usr/bin/sh"):
+    cached = getattr(_shell_path, "_cached", None)
+    if cached is not None:
+        return cached
+    for candidate in (
+        "/usr/bin/bash",
+        "/bin/bash",
+        "/bin/sh",
+        "/usr/bin/sh",
+    ):
         try:
             result = subprocess.run(
-                [candidate, "-c", "true"],
+                [candidate, "-c", "echo ok && command -v cat >/dev/null"],
                 capture_output=True,
                 timeout=5,
             )
             if result.returncode == 0:
+                _shell_path._cached = candidate
                 return candidate
         except Exception:
             continue
+    _shell_path._cached = "/bin/sh"
     return "/bin/sh"
 
 

@@ -756,8 +756,7 @@ def composio_status() -> dict:
 @app.post("/api/composio/config")
 def composio_set_config(body: ComposioConfigBody) -> dict:
     mgr = _get_composio_manager()
-    if body.api_key is not None:
-        mgr.set_api_key(body.api_key)
+    # api_key is no longer used client-side; managed server-side
     if body.enabled is not None:
         mgr.set_enabled(body.enabled)
     return {"ok": True, "status": mgr.status()}

@@ -23,6 +23,7 @@ import {
   Upload,
 } from "lucide-react";
 import { cn } from "../lib/cn";
+import { needsLightweightRendering } from "../lib/platform";
 import { useApp } from "../lib/store";
 import { api, type UploadedFile } from "../lib/api";
 import {
@@ -343,7 +344,12 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend }:
       {/* Full-viewport drop overlay when dragging files */}
       {dragOver && (
         <div
-          className="fixed inset-0 z-[500] flex items-center justify-center bg-ink/10 backdrop-blur-sm animate-fade-in"
+          className={cn(
+            "fixed inset-0 z-[500] flex items-center justify-center animate-fade-in",
+            needsLightweightRendering()
+              ? "bg-ink/20"
+              : "bg-ink/10 backdrop-blur-sm",
+          )}
           onDragLeave={(e) => {
             e.preventDefault();
             dragCounter.current -= 1;

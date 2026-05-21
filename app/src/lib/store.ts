@@ -101,7 +101,7 @@ export interface Chat {
   activeArtifactId?: string | null;
 }
 
-export type View = "chat" | "settings" | "projects" | "analytics" | "plan";
+export type View = "chat" | "settings" | "projects" | "analytics" | "plan" | "connectors";
 
 export type SettingsSection =
   | "account"

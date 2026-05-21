@@ -1,24 +1,27 @@
 """Composio integration: connect user apps (Gmail, Calendar, Slack, etc.)
 and expose their actions as tools prefixed ``composio__``.
 
-Follows the MCPManager singleton pattern in mcp.py.
+All Composio API calls are proxied through the zWork cloud server
+(api.tryzwork.app) so the platform API key never touches the client.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-import uuid
-from pathlib import Path
 from typing import Optional
+
+import httpx
 
 from .home import zwork_home
 
 log = logging.getLogger(__name__)
 
 TOOL_PREFIX = "composio__"
-CONFIG_FILENAME = "composio.json"
+
+COMPOSIO_CLOUD_BASE = os.environ.get(
+    "ZWORK_CLOUD_API_BASE", "https://api.tryzwork.app/api/composio"
+)
 
 APP_DISPLAY: dict[str, dict[str, str]] = {
     "gmail": {"name": "Gmail", "icon": "mail", "color": "#EA4335"},
@@ -39,151 +42,42 @@ APP_DISPLAY: dict[str, dict[str, str]] = {
     "hubspot": {"name": "HubSpot", "icon": "circle-dot", "color": "#FF7A59"},
 }
 
-PREFERRED_TOOLS: dict[str, list[str]] = {
-    "gmail": [
-        "GMAIL_SEND_EMAIL",
-        "GMAIL_READ_EMAILS",
-        "GMAIL_SEARCH_EMAILS",
-        "GMAIL_GET_THREAD",
-        "GMAIL_CREATE_DRAFT",
-        "GMAIL_REPLY_TO_EMAIL",
-    ],
-    "googlecalendar": [
-        "GOOGLECALENDAR_CREATE_EVENT",
-        "GOOGLECALENDAR_GET_EVENTS",
-        "GOOGLECALENDAR_UPDATE_EVENT",
-        "GOOGLECALENDAR_DELETE_EVENT",
-        "GOOGLECALENDAR_LIST_CALENDARS",
-    ],
-    "slack": [
-        "SLACK_SEND_MESSAGE",
-        "SLACK_GET_CHANNEL_MESSAGES",
-        "SLACK_CREATE_CHANNEL",
-        "SLACK_ADD_REACTION",
-        "SLACK_LIST_CHANNELS",
-        "SLACK_UPDATE_MESSAGE",
-    ],
-    "notion": [
-        "NOTION_CREATE_PAGE",
-        "NOTION_GET_PAGE",
-        "NOTION_UPDATE_PAGE",
-        "NOTION_SEARCH_PAGES",
-        "NOTION_CREATE_DATABASE",
-        "NOTION_QUERY_DATABASE",
-    ],
-    "googledrive": [
-        "GOOGLEDRIVE_LIST_FILES",
-        "GOOGLEDRIVE_UPLOAD_FILE",
-        "GOOGLEDRIVE_DOWNLOAD_FILE",
-        "GOOGLEDRIVE_CREATE_FOLDER",
-        "GOOGLEDRIVE_SHARE_FILE",
-    ],
-    "github": [
-        "GITHUB_CREATE_ISSUE",
-        "GITHUB_GET_ISSUE",
-        "GITHUB_LIST_ISSUES",
-        "GITHUB_CREATE_PULL_REQUEST",
-        "GITHUB_GET_PULL_REQUEST",
-        "GITHUB_LIST_REPOS",
-    ],
-    "jira": [
-        "JIRA_CREATE_ISSUE",
-        "JIRA_GET_ISSUE",
-        "JIRA_UPDATE_ISSUE",
-        "JIRA_SEARCH_ISSUES",
-        "JIRA_LIST_PROJECTS",
-    ],
-    "trello": [
-        "TRELLO_CREATE_CARD",
-        "TRELLO_GET_CARD",
-        "TRELLO_UPDATE_CARD",
-        "TRELLO_LIST_BOARDS",
-        "TRELLO_LIST_CARDS",
-    ],
-    "todoist": [
-        "TODOIST_CREATE_TASK",
-        "TODOIST_GET_TASK",
-        "TODOIST_UPDATE_TASK",
-        "TODOIST_LIST_TASKS",
-        "TODOIST_CREATE_PROJECT",
-    ],
-    "linear": [
-        "LINEAR_CREATE_ISSUE",
-        "LINEAR_GET_ISSUE",
-        "LINEAR_UPDATE_ISSUE",
-        "LINEAR_LIST_TEAMS",
-        "LINEAR_SEARCH_ISSUES",
-    ],
-}
 
-
-def _config_path() -> Path:
-    return zwork_home() / CONFIG_FILENAME
-
-
-def _load_config() -> dict:
-    p = _config_path()
-    if not p.exists():
-        return {}
+def _get_cloud_token() -> str:
+    """Load the zWork cloud auth token from settings."""
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
+        from . import settings as settings_mod
 
-
-def _save_config(data: dict) -> None:
-    p = _config_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(data, indent=2), encoding="utf-8")
-
-
-def _get_api_key() -> str:
-    """Load Composio API key. Checks secretstore first, then env var."""
-    try:
-        from .secretstore import get_api_key as _ss_get
-
-        key = _ss_get("composio")
-        if key:
-            return key
+        s = settings_mod.load()
+        keys = s.api_keys or {}
+        return keys.get("zwork_router", "")
     except Exception:
-        pass
-    return os.environ.get("COMPOSIO_API_KEY", "")
-
-
-def _get_or_create_user_id() -> str:
-    cfg = _load_config()
-    uid = cfg.get("user_id", "")
-    if uid:
-        return uid
-    uid = uuid.uuid4().hex
-    cfg["user_id"] = uid
-    _save_config(cfg)
-    return uid
+        return ""
 
 
 class ComposioManager:
     def __init__(self) -> None:
-        self._api_key: str = ""
         self._enabled: bool = False
-        self._user_id: str = ""
         self._connected_apps: list[str] = []
         self._tool_cache: list[dict] = []
         self._initialized: bool = False
+        self._cloud_token: str = ""
+
+    def _headers(self) -> dict:
+        token = self._cloud_token or _get_cloud_token()
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
 
     async def initialize(self) -> None:
-        cfg = _load_config()
-        api_key = _get_api_key()
-        self._api_key = (api_key or "").strip()
-        self._enabled = cfg.get("enabled", bool(self._api_key))
-        self._user_id = cfg.get("user_id", "") or _get_or_create_user_id()
-        self._connected_apps = cfg.get("connected_apps", [])
+        self._cloud_token = _get_cloud_token()
         self._initialized = True
-        if self.is_available and self._connected_apps:
-            await self._refresh_tool_cache()
+        await self._refresh_status()
 
     @property
     def is_available(self) -> bool:
-        return self._initialized and self._enabled and bool(self._api_key)
+        return self._initialized and self._enabled
 
     def all_tool_schemas(self) -> list[dict]:
         if not self.is_available:
@@ -205,129 +99,95 @@ class ComposioManager:
                 "content": [{"type": "text", "text": "Composio is not configured"}],
             }
         try:
-            from composio import Composio
-
-            client = Composio(api_key=self._api_key)
-            result = client.tools.execute(
-                slug=slug, user_id=self._user_id, arguments=params
-            )
-            data = result.model_dump() if hasattr(result, "model_dump") else result
-            text = json.dumps(data, default=str) if data else "ok"
-            return {"isError": False, "content": [{"type": "text", "text": text}]}
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(
+                    f"{COMPOSIO_CLOUD_BASE}/tools/execute/{slug}",
+                    headers=self._headers(),
+                    json=params,
+                )
+            resp.raise_for_status()
+            return resp.json()
         except Exception as e:
-            log.warning("composio call_tool(%s) failed: %s", slug, e)
+            log.warning("composio call_tool(%s) proxy failed: %s", slug, e)
             return {
                 "isError": True,
                 "content": [{"type": "text", "text": f"{type(e).__name__}: {e}"}],
             }
 
     async def get_connect_link(self, app_name: str) -> dict:
-        if not self.is_available:
-            raise RuntimeError("Composio is not configured")
-        from composio import Composio
-
-        client = Composio(api_key=self._api_key)
-        toolkit = app_name.upper()
-        try:
-            result = client.toolkits.authorize(
-                user_id=self._user_id, toolkit=toolkit
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{COMPOSIO_CLOUD_BASE}/connect",
+                headers=self._headers(),
+                json={"app": app_name},
             )
-            url = getattr(result, "redirect_url", None) or str(result)
-            return {"url": str(url)}
-        except Exception as e:
-            raise RuntimeError(
-                f"Failed to generate connect link for {app_name}: {e}"
-            ) from e
+        resp.raise_for_status()
+        return resp.json()
 
     async def get_connected_accounts(self) -> list[dict]:
         if not self.is_available:
             return []
         try:
-            from composio import Composio
-
-            client = Composio(api_key=self._api_key)
-            resp = client.connected_accounts.list(user_ids=[self._user_id])
-            items = getattr(resp, "items", []) or []
-            result = []
-            for acc in items:
-                toolkit_obj = getattr(acc, "toolkit", None)
-                app_id = ""
-                if toolkit_obj is not None:
-                    app_id = getattr(toolkit_obj, "slug", "") or ""
-                if not app_id:
-                    app_id = (
-                        getattr(acc, "appUniqueId", "")
-                        or getattr(acc, "app", "")
-                    )
-                app_id = str(app_id).lower()
-                status = str(getattr(acc, "status", "UNKNOWN"))
-                display = APP_DISPLAY.get(app_id, {})
-                result.append(
-                    {
-                        "app": app_id,
-                        "status": status,
-                        "account_id": str(getattr(acc, "id", "")),
-                        "app_name": display.get("name", app_id.title()),
-                        "icon": display.get("icon", "plug"),
-                        "color": display.get("color", "#6B7280"),
-                    }
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    f"{COMPOSIO_CLOUD_BASE}/accounts",
+                    headers=self._headers(),
                 )
-            active = [a["app"] for a in result if a["status"] == "ACTIVE"]
+            resp.raise_for_status()
+            data = resp.json()
+            accounts = data.get("accounts", [])
+            active = [a["app"] for a in accounts if a.get("status") == "ACTIVE"]
             if active != self._connected_apps:
                 self._connected_apps = active
-                self._persist_state()
                 await self._refresh_tool_cache()
-            return result
+            return accounts
         except Exception as e:
-            log.warning("composio get_connected_accounts failed: %s", e)
+            log.warning("composio get_connected_accounts proxy failed: %s", e)
             return []
 
     async def disconnect(self, app_name: str) -> None:
-        app_name = app_name.lower()
-        if app_name in self._connected_apps:
-            self._connected_apps.remove(app_name)
-        self._persist_state()
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{COMPOSIO_CLOUD_BASE}/disconnect",
+                headers=self._headers(),
+                json={"app": app_name},
+            )
+        resp.raise_for_status()
+        data = resp.json()
+        self._connected_apps = data.get("connected_apps", [])
         await self._refresh_tool_cache()
 
+    async def _refresh_status(self) -> None:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    f"{COMPOSIO_CLOUD_BASE}/status",
+                    headers=self._headers(),
+                )
+            if resp.status_code == 200:
+                data = resp.json()
+                self._enabled = data.get("available", False)
+            await self.get_connected_accounts()
+        except Exception:
+            pass
+
     async def _refresh_tool_cache(self) -> None:
-        if not self._connected_apps or not self._api_key:
+        if not self.is_available:
             self._tool_cache = []
             return
         try:
-            from composio import Composio
-
-            client = Composio(api_key=self._api_key)
-            all_tools: list[dict] = []
-            for app in self._connected_apps:
-                whitelist = set(PREFERRED_TOOLS.get(app, []))
-                try:
-                    tools = client.tools.get(
-                        user_id=self._user_id, toolkits=[app.upper()]
-                    )
-                    if not tools:
-                        continue
-                except Exception:
-                    continue
-                for t in tools:
-                    slug = str(getattr(t, "slug", "") or "")
-                    if whitelist and slug not in whitelist:
-                        continue
-                    name = str(getattr(t, "name", slug) or slug)
-                    desc = str(getattr(t, "description", "") or "")
-                    params = getattr(t, "parameters", None)
-                    if not isinstance(params, dict):
-                        params = {"type": "object", "properties": {}}
-                    all_tools.append(
-                        {
-                            "name": f"{TOOL_PREFIX}{slug}",
-                            "description": desc or f"Composio action: {name}",
-                            "parameters": params,
-                        }
-                    )
-            self._tool_cache = all_tools
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.get(
+                    f"{COMPOSIO_CLOUD_BASE}/tools",
+                    headers=self._headers(),
+                )
+            resp.raise_for_status()
+            data = resp.json()
+            self._tool_cache = data.get("tools", [])
+            self._connected_apps = data.get("connected_apps", self._connected_apps)
             log.info(
                 "composio: cached %d tools for apps %s",
-                len(all_tools),
+                len(self._tool_cache),
                 self._connected_apps,
             )
         except Exception as e:
@@ -336,34 +196,18 @@ class ComposioManager:
     def status(self) -> dict:
         return {
             "enabled": self._enabled,
-            "configured": bool(self._api_key),
+            "configured": bool(self._cloud_token),
             "available": self.is_available,
             "connected_apps": list(self._connected_apps),
             "tool_count": len(self._tool_cache),
-            "user_id": self._user_id[:8] + "..." if self._user_id else "",
+            "user_id": "",
         }
 
     def set_api_key(self, key: str) -> None:
-        from .secretstore import set_api_key, delete_api_key
-
-        key = (key or "").strip()
-        if key:
-            set_api_key("composio", key)
-            self._api_key = key
-        else:
-            delete_api_key("composio")
-            self._api_key = ""
+        """No-op: API key is managed server-side now."""
 
     def set_enabled(self, enabled: bool) -> None:
         self._enabled = enabled
-        self._persist_state()
-
-    def _persist_state(self) -> None:
-        cfg = _load_config()
-        cfg["enabled"] = self._enabled
-        cfg["user_id"] = self._user_id
-        cfg["connected_apps"] = self._connected_apps
-        _save_config(cfg)
 
 
 _manager: Optional[ComposioManager] = None

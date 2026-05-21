@@ -47,7 +47,7 @@ export function ComposioPanel() {
     }
   }
 
-  // Not configured by dev — show nothing (users never see this)
+  // Not available (user not logged in or server not configured) — show nothing
   if (!available) return null;
 
   return (

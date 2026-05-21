@@ -14,6 +14,7 @@ import {
   FolderOpen,
   BarChart3,
   CreditCard,
+  Plug,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { isMacOS } from "../lib/platform";
@@ -257,6 +258,13 @@ export function Sidebar() {
           collapsed={!open}
           active={view === "plan"}
           onClick={() => setView("plan")}
+        />
+        <SidebarButton
+          icon={<Plug />}
+          label="Connectors"
+          collapsed={!open}
+          active={view === "connectors"}
+          onClick={() => setView("connectors")}
         />
         <SidebarButton
           icon={<Settings />}

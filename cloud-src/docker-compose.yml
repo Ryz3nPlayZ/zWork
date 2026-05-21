@@ -69,6 +69,7 @@ services:
       - WEEKLY_LIMIT_MULTIPLIER=${WEEKLY_LIMIT_MULTIPLIER}
       - MAX_CONCURRENT_ROOT_RUNS=${MAX_CONCURRENT_ROOT_RUNS}
       - DEV_COUPON_CODES=${DEV_COUPON_CODES}
+      - COMPOSIO_API_KEY=${COMPOSIO_API_KEY}
     depends_on:
       - postgres
       - better_auth

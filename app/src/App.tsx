@@ -22,6 +22,7 @@ const ProjectView = lazy(() => import("./components/ProjectView").then((m) => ({
 const ArtifactPanel = lazy(() => import("./components/ArtifactPanel").then((m) => ({ default: m.ArtifactPanel })));
 const AnalyticsPage = lazy(() => import("./components/AnalyticsPage").then((m) => ({ default: m.AnalyticsPage })));
 const PlanPage = lazy(() => import("./components/PlanPage").then((m) => ({ default: m.PlanPage })));
+const ConnectorsPage = lazy(() => import("./components/ConnectorsPage").then((m) => ({ default: m.ConnectorsPage })));
 
 export default function App() {
   const previewMode = getPreviewMode();
@@ -343,6 +344,10 @@ export default function App() {
           ) : view === "projects" ? (
             <Suspense fallback={panelFallback}>
               <ProjectView />
+            </Suspense>
+          ) : view === "connectors" ? (
+            <Suspense fallback={panelFallback}>
+              <ConnectorsPage />
             </Suspense>
           ) : (
             <>

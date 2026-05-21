@@ -6,7 +6,7 @@ import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
 import { recordTelemetry } from "../lib/telemetry";
 import { useResolvedTheme } from "../lib/theme";
-import { isMacOS } from "../lib/platform";
+import { isMacOS, needsLightweightRendering } from "../lib/platform";
 import { api, type OnboardingAnswer, type OnboardingCredential } from "../lib/api";
 import LightRays from "./LightRays";
 
@@ -482,7 +482,10 @@ export function Onboarding() {
           transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
           className={cn(
             "relative flex h-full w-full max-w-[520px] flex-col ml-auto",
-            "rounded-2xl border border-line/80 bg-paper-raised/92 backdrop-blur-lg",
+            "rounded-2xl border border-line/80",
+            needsLightweightRendering()
+              ? "bg-paper-raised"
+              : "bg-paper-raised/92 backdrop-blur-lg",
             "shadow-[0_20px_60px_-20px_rgb(var(--shadow)/0.35),0_2px_6px_-2px_rgb(var(--shadow)/0.15)]",
             "overflow-hidden",
           )}

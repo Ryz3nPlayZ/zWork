@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::Sha256;
 use sqlx::{postgres::PgPoolOptions, PgPool, Row};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tower_governor::governor::GovernorConfigBuilder;
@@ -39,7 +40,10 @@ struct AppState {
     owner_emails: Vec<String>,
     features: AppFeatures,
     gateway: GatewayConfig,
+    composio_api_key: String,
 }
+
+const COMPOSIO_BASE_URL: &str = "https://backend.composio.dev/api/v3";
 
 #[derive(Clone)]
 struct AppFeatures {
@@ -491,6 +495,103 @@ struct AdminBillingMetrics {
 #[derive(Clone, Deserialize)]
 struct AdminUpdatePlanRequest {
     tier: String,
+}
+
+// -- Composio structs --
+
+#[derive(Deserialize)]
+struct ComposioConnectRequest {
+    app: String,
+}
+
+#[derive(Deserialize)]
+struct ComposioDisconnectRequest {
+    app: String,
+}
+
+fn composio_request_headers(api_key: &str) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        HeaderName::from_static("x-api-key"),
+        HeaderValue::from_str(api_key).unwrap_or_else(|_| HeaderValue::from_static("")),
+    );
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    headers
+}
+
+fn composio_app_display_map() -> HashMap<String, (String, String, String)> {
+    let mut m = HashMap::new();
+    m.insert("gmail".into(), ("Gmail".into(), "mail".into(), "#EA4335".into()));
+    m.insert("googlecalendar".into(), ("Google Calendar".into(), "calendar".into(), "#4285F4".into()));
+    m.insert("slack".into(), ("Slack".into(), "hash".into(), "#4A154B".into()));
+    m.insert("notion".into(), ("Notion".into(), "book-open".into(), "#000000".into()));
+    m.insert("googledrive".into(), ("Google Drive".into(), "folder".into(), "#0F9D58".into()));
+    m.insert("github".into(), ("GitHub".into(), "git-branch".into(), "#24292F".into()));
+    m.insert("jira".into(), ("Jira".into(), "layers".into(), "#0052CC".into()));
+    m.insert("trello".into(), ("Trello".into(), "layout-grid".into(), "#0079BF".into()));
+    m.insert("todoist".into(), ("Todoist".into(), "check-square".into(), "#E44332".into()));
+    m.insert("linear".into(), ("Linear".into(), "zap".into(), "#5E6AD2".into()));
+    m.insert("asana".into(), ("Asana".into(), "target".into(), "#F06A6A".into()));
+    m.insert("hubspot".into(), ("HubSpot".into(), "circle-dot".into(), "#FF7A59".into()));
+    m
+}
+
+fn preferred_tools_map() -> HashMap<String, Vec<String>> {
+    let mut m = HashMap::new();
+    m.insert("gmail".into(), vec![
+        "GMAIL_SEND_EMAIL".into(), "GMAIL_READ_EMAILS".into(),
+        "GMAIL_SEARCH_EMAILS".into(), "GMAIL_GET_THREAD".into(),
+        "GMAIL_CREATE_DRAFT".into(), "GMAIL_REPLY_TO_EMAIL".into(),
+    ]);
+    m.insert("googlecalendar".into(), vec![
+        "GOOGLECALENDAR_CREATE_EVENT".into(), "GOOGLECALENDAR_GET_EVENTS".into(),
+        "GOOGLECALENDAR_UPDATE_EVENT".into(), "GOOGLECALENDAR_DELETE_EVENT".into(),
+        "GOOGLECALENDAR_LIST_CALENDARS".into(),
+    ]);
+    m.insert("slack".into(), vec![
+        "SLACK_SEND_MESSAGE".into(), "SLACK_GET_CHANNEL_MESSAGES".into(),
+        "SLACK_CREATE_CHANNEL".into(), "SLACK_ADD_REACTION".into(),
+        "SLACK_LIST_CHANNELS".into(), "SLACK_UPDATE_MESSAGE".into(),
+    ]);
+    m.insert("notion".into(), vec![
+        "NOTION_CREATE_PAGE".into(), "NOTION_GET_PAGE".into(),
+        "NOTION_UPDATE_PAGE".into(), "NOTION_SEARCH_PAGES".into(),
+        "NOTION_CREATE_DATABASE".into(), "NOTION_QUERY_DATABASE".into(),
+    ]);
+    m.insert("googledrive".into(), vec![
+        "GOOGLEDRIVE_LIST_FILES".into(), "GOOGLEDRIVE_UPLOAD_FILE".into(),
+        "GOOGLEDRIVE_DOWNLOAD_FILE".into(), "GOOGLEDRIVE_CREATE_FOLDER".into(),
+        "GOOGLEDRIVE_SHARE_FILE".into(),
+    ]);
+    m.insert("github".into(), vec![
+        "GITHUB_CREATE_ISSUE".into(), "GITHUB_GET_ISSUE".into(),
+        "GITHUB_LIST_ISSUES".into(), "GITHUB_CREATE_PULL_REQUEST".into(),
+        "GITHUB_GET_PULL_REQUEST".into(), "GITHUB_LIST_REPOS".into(),
+    ]);
+    m.insert("jira".into(), vec![
+        "JIRA_CREATE_ISSUE".into(), "JIRA_GET_ISSUE".into(),
+        "JIRA_UPDATE_ISSUE".into(), "JIRA_SEARCH_ISSUES".into(),
+        "JIRA_LIST_PROJECTS".into(),
+    ]);
+    m.insert("trello".into(), vec![
+        "TRELLO_CREATE_CARD".into(), "TRELLO_GET_CARD".into(),
+        "TRELLO_UPDATE_CARD".into(), "TRELLO_LIST_BOARDS".into(),
+        "TRELLO_LIST_CARDS".into(),
+    ]);
+    m.insert("todoist".into(), vec![
+        "TODOIST_CREATE_TASK".into(), "TODOIST_GET_TASK".into(),
+        "TODOIST_UPDATE_TASK".into(), "TODOIST_LIST_TASKS".into(),
+        "TODOIST_CREATE_PROJECT".into(),
+    ]);
+    m.insert("linear".into(), vec![
+        "LINEAR_CREATE_ISSUE".into(), "LINEAR_GET_ISSUE".into(),
+        "LINEAR_UPDATE_ISSUE".into(), "LINEAR_LIST_TEAMS".into(),
+        "LINEAR_SEARCH_ISSUES".into(),
+    ]);
+    m
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -2748,6 +2849,481 @@ async fn admin_verify_password(
     Ok(Json(AdminPasswordResponse { token, email }))
 }
 
+// ── Composio proxy handlers ──
+
+async fn composio_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let _access = ensure_gateway_access(&state, &headers)
+        .await
+        .map_err(|s| (s, "access_denied".into()))?;
+
+    let available = !state.composio_api_key.is_empty();
+    Ok(Json(serde_json::json!({
+        "enabled": available,
+        "configured": available,
+        "available": available,
+        "connected_apps": [],
+        "tool_count": 0,
+        "user_id": ""
+    })))
+}
+
+async fn composio_accounts(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let access = ensure_gateway_access(&state, &headers)
+        .await
+        .map_err(|s| (s, "access_denied".into()))?;
+    let user = resolve_app_user(&state, access)
+        .await
+        .map_err(|s| (s, "user_lookup_failed".into()))?
+        .ok_or((StatusCode::UNAUTHORIZED, "not_signed_in".into()))?;
+
+    if state.composio_api_key.is_empty() {
+        return Ok(Json(serde_json::json!({"accounts": []})));
+    }
+
+    let url = format!(
+        "{}/connected_accounts?user_ids={}",
+        COMPOSIO_BASE_URL,
+        urlencoding::encode(&user.user_id)
+    );
+    let resp = state
+        .http_client
+        .get(&url)
+        .headers(composio_request_headers(&state.composio_api_key))
+        .send()
+        .await
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "composio_unreachable".into()))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status().as_u16();
+        let body = resp.text().await.unwrap_or_default();
+        tracing::warn!("Composio accounts failed: {} {}", status, body);
+        return Err((StatusCode::BAD_GATEWAY, "composio_accounts_failed".into()));
+    }
+
+    let composio_body: Value = resp
+        .json()
+        .await
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "composio_invalid_response".into()))?;
+
+    let items = composio_body
+        .get("items")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let app_display_map = composio_app_display_map();
+    let accounts: Vec<Value> = items
+        .iter()
+        .map(|acc| {
+            let app_id = acc
+                .get("toolkit")
+                .and_then(|t| t.get("slug"))
+                .and_then(|s| s.as_str())
+                .or_else(|| acc.get("appUniqueId").and_then(|v| v.as_str()))
+                .unwrap_or("")
+                .to_lowercase();
+            let status = acc
+                .get("status")
+                .and_then(|s| s.as_str())
+                .unwrap_or("UNKNOWN")
+                .to_string();
+            let account_id = acc
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let display = app_display_map.get(&app_id);
+            serde_json::json!({
+                "app": app_id,
+                "status": status,
+                "account_id": account_id,
+                "app_name": display.map(|d| d.0.clone()).unwrap_or_else(|| app_id.clone()),
+                "icon": display.map(|d| d.1.clone()).unwrap_or("plug".into()),
+                "color": display.map(|d| d.2.clone()).unwrap_or("#6B7280".into()),
+            })
+        })
+        .collect();
+
+    Ok(Json(serde_json::json!({"accounts": accounts})))
+}
+
+async fn composio_connect(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<ComposioConnectRequest>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let access = ensure_gateway_access(&state, &headers)
+        .await
+        .map_err(|s| (s, "access_denied".into()))?;
+    let user = resolve_app_user(&state, access)
+        .await
+        .map_err(|s| (s, "user_lookup_failed".into()))?
+        .ok_or((StatusCode::UNAUTHORIZED, "not_signed_in".into()))?;
+
+    if state.composio_api_key.is_empty() {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "composio_not_configured".into()));
+    }
+
+    let app_slug = body.app.trim().to_lowercase();
+    if app_slug.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "app_required".into()));
+    }
+
+    // Step 1: get auth_config_id
+    let auth_configs_url = format!(
+        "{}/auth_configs?toolkit_slug={}",
+        COMPOSIO_BASE_URL,
+        urlencoding::encode(&app_slug)
+    );
+    let auth_configs_resp = state
+        .http_client
+        .get(&auth_configs_url)
+        .headers(composio_request_headers(&state.composio_api_key))
+        .send()
+        .await
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "composio_unreachable".into()))?;
+
+    if !auth_configs_resp.status().is_success() {
+        return Err((StatusCode::BAD_GATEWAY, "composio_auth_config_failed".into()));
+    }
+
+    let auth_configs_body: Value = auth_configs_resp
+        .json()
+        .await
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "composio_invalid_response".into()))?;
+
+    let auth_config_id = auth_configs_body
+        .get("items")
+        .and_then(|items| items.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|first| first.get("id"))
+        .and_then(|id| id.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    if auth_config_id.is_empty() {
+        return Err((StatusCode::NOT_FOUND, "composio_auth_config_not_found".into()));
+    }
+
+    // Step 2: get OAuth link
+    let link_url = format!("{}/connected_accounts/link", COMPOSIO_BASE_URL);
+    let link_body = serde_json::json!({
+        "user_id": user.user_id,
+        "auth_config_id": auth_config_id,
+        "redirect_url": "https://api.tryzwork.app/api/composio/callback"
+    });
+
+    let link_resp = state
+        .http_client
+        .post(&link_url)
+        .headers(composio_request_headers(&state.composio_api_key))
+        .json(&link_body)
+        .send()
+        .await
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "composio_link_failed".into()))?;
+
+    if !link_resp.status().is_success() {
+        let status = link_resp.status().as_u16();
+        let text = link_resp.text().await.unwrap_or_default();
+        tracing::warn!("Composio link failed: {} {}", status, text);
+        return Err((
+            StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY),
+            "composio_link_failed".into(),
+        ));
+    }
+
+    let link_data: Value = link_resp
+        .json()
+        .await
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "composio_invalid_link_response".into()))?;
+
+    let redirect_url = link_data
+        .get("redirect_url")
+        .or_else(|| link_data.get("connection_url"))
+        .or_else(|| link_data.get("url"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    Ok(Json(serde_json::json!({"url": redirect_url})))
+}
+
+async fn composio_disconnect(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<ComposioDisconnectRequest>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let access = ensure_gateway_access(&state, &headers)
+        .await
+        .map_err(|s| (s, "access_denied".into()))?;
+    let user = resolve_app_user(&state, access)
+        .await
+        .map_err(|s| (s, "user_lookup_failed".into()))?
+        .ok_or((StatusCode::UNAUTHORIZED, "not_signed_in".into()))?;
+
+    if state.composio_api_key.is_empty() {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "composio_not_configured".into()));
+    }
+
+    let url = format!(
+        "{}/connected_accounts?user_ids={}",
+        COMPOSIO_BASE_URL,
+        urlencoding::encode(&user.user_id)
+    );
+    let resp = state
+        .http_client
+        .get(&url)
+        .headers(composio_request_headers(&state.composio_api_key))
+        .send()
+        .await
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "composio_unreachable".into()))?;
+
+    let composio_body: Value = resp
+        .json()
+        .await
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "composio_invalid_response".into()))?;
+
+    let app_slug = body.app.trim().to_lowercase();
+    let items = composio_body
+        .get("items")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut remaining_apps: Vec<String> = Vec::new();
+    for acc in &items {
+        let acc_app = acc
+            .get("toolkit")
+            .and_then(|t| t.get("slug"))
+            .and_then(|s| s.as_str())
+            .or_else(|| acc.get("appUniqueId").and_then(|v| v.as_str()))
+            .unwrap_or("")
+            .to_lowercase();
+        if acc_app == app_slug {
+            let account_id = acc.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let delete_url = format!("{}/connected_accounts/{}", COMPOSIO_BASE_URL, account_id);
+            let _ = state
+                .http_client
+                .delete(&delete_url)
+                .headers(composio_request_headers(&state.composio_api_key))
+                .send()
+                .await;
+        } else if acc
+            .get("status")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            == "ACTIVE"
+        {
+            remaining_apps.push(acc_app);
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "ok": true,
+        "connected_apps": remaining_apps
+    })))
+}
+
+async fn composio_apps() -> Json<Value> {
+    let display_map = composio_app_display_map();
+    let app_ids = [
+        "gmail", "googlecalendar", "slack", "notion", "googledrive",
+        "github", "jira", "trello", "todoist", "linear", "asana", "hubspot",
+    ];
+    let apps: Vec<Value> = app_ids
+        .iter()
+        .filter_map(|id| {
+            display_map.get(*id).map(|(name, icon, color)| {
+                serde_json::json!({"id": id, "name": name, "icon": icon, "color": color})
+            })
+        })
+        .collect();
+    Json(serde_json::json!({"apps": apps}))
+}
+
+async fn composio_tools(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let access = ensure_gateway_access(&state, &headers)
+        .await
+        .map_err(|s| (s, "access_denied".into()))?;
+    let user = resolve_app_user(&state, access)
+        .await
+        .map_err(|s| (s, "user_lookup_failed".into()))?
+        .ok_or((StatusCode::UNAUTHORIZED, "not_signed_in".into()))?;
+
+    if state.composio_api_key.is_empty() {
+        return Ok(Json(serde_json::json!({"tools": [], "connected_apps": []})));
+    }
+
+    let url = format!(
+        "{}/connected_accounts?user_ids={}",
+        COMPOSIO_BASE_URL,
+        urlencoding::encode(&user.user_id)
+    );
+    let resp = state
+        .http_client
+        .get(&url)
+        .headers(composio_request_headers(&state.composio_api_key))
+        .send()
+        .await
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "composio_unreachable".into()))?;
+
+    let composio_body: Value = resp
+        .json()
+        .await
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "composio_invalid_response".into()))?;
+
+    let items = composio_body
+        .get("items")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let connected_apps: Vec<String> = items
+        .iter()
+        .filter_map(|acc| {
+            let status = acc.get("status").and_then(|s| s.as_str()).unwrap_or("");
+            if status != "ACTIVE" {
+                return None;
+            }
+            acc.get("toolkit")
+                .and_then(|t| t.get("slug"))
+                .and_then(|s| s.as_str())
+                .or_else(|| acc.get("appUniqueId").and_then(|v| v.as_str()))
+                .map(|s| s.to_lowercase())
+        })
+        .collect();
+
+    let preferred = preferred_tools_map();
+    let mut all_tools: Vec<Value> = Vec::new();
+
+    for app in &connected_apps {
+        let tools_url = format!(
+            "{}/tools?toolkit_slug={}",
+            COMPOSIO_BASE_URL,
+            urlencoding::encode(app)
+        );
+        let tools_resp = match state
+            .http_client
+            .get(&tools_url)
+            .headers(composio_request_headers(&state.composio_api_key))
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+
+        if !tools_resp.status().is_success() {
+            continue;
+        }
+
+        let tools_body: Value = match tools_resp.json().await {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let tool_items = tools_body
+            .get("items")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        let whitelist: Vec<String> = preferred.get(app).cloned().unwrap_or_default();
+        for t in &tool_items {
+            let slug = t
+                .get("slug")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string();
+            if !whitelist.is_empty() && !whitelist.contains(&slug) {
+                continue;
+            }
+            let name = t
+                .get("name")
+                .and_then(|n| n.as_str())
+                .unwrap_or(&slug)
+                .to_string();
+            let desc = t
+                .get("description")
+                .and_then(|d| d.as_str())
+                .unwrap_or("")
+                .to_string();
+            let params = t.get("parameters").cloned().unwrap_or_else(|| {
+                serde_json::json!({"type": "object", "properties": {}})
+            });
+            all_tools.push(serde_json::json!({
+                "name": format!("composio__{}", slug),
+                "description": if desc.is_empty() { format!("Composio action: {}", name) } else { desc },
+                "parameters": params,
+            }));
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "tools": all_tools,
+        "connected_apps": connected_apps,
+    })))
+}
+
+async fn composio_execute(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(slug): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let access = ensure_gateway_access(&state, &headers)
+        .await
+        .map_err(|s| (s, "access_denied".into()))?;
+    let user = resolve_app_user(&state, access)
+        .await
+        .map_err(|s| (s, "user_lookup_failed".into()))?
+        .ok_or((StatusCode::UNAUTHORIZED, "not_signed_in".into()))?;
+
+    if state.composio_api_key.is_empty() {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "composio_not_configured".into()));
+    }
+
+    let exec_url = format!("{}/tools/execute/{}", COMPOSIO_BASE_URL, slug);
+    let exec_body = serde_json::json!({
+        "user_id": user.user_id,
+        "arguments": body,
+    });
+
+    let resp = state
+        .http_client
+        .post(&exec_url)
+        .headers(composio_request_headers(&state.composio_api_key))
+        .json(&exec_body)
+        .send()
+        .await
+        .map_err(|_| (StatusCode::BAD_GATEWAY, "composio_unreachable".into()))?;
+
+    let resp_status = resp.status();
+    let resp_text = resp.text().await.unwrap_or_default();
+
+    if !resp_status.is_success() {
+        tracing::warn!("Composio execute {} failed: {}", slug, resp_text.chars().take(200).collect::<String>());
+        return Ok(Json(serde_json::json!({
+            "isError": true,
+            "content": [{"type": "text", "text": format!("Composio error: {}", resp_text.chars().take(500).collect::<String>())}]
+        })));
+    }
+
+    Ok(Json(serde_json::json!({
+        "isError": false,
+        "content": [{"type": "text", "text": resp_text}]
+    })))
+}
+
 async fn desktop_auth_start(
     Query(query): Query<DesktopAuthStartQuery>,
 ) -> Result<Redirect, StatusCode> {
@@ -3429,6 +4005,7 @@ async fn main() {
                 .filter(|item| !item.is_empty())
                 .collect(),
         },
+        composio_api_key: std::env::var("COMPOSIO_API_KEY").unwrap_or_default(),
     };
 
     let cors = CorsLayer::new()
@@ -3518,6 +4095,14 @@ async fn main() {
             "/api/admin/users/:user_id/tier",
             put(admin_update_user_tier),
         )
+        // Composio proxy
+        .route("/api/composio/status", get(composio_status))
+        .route("/api/composio/accounts", get(composio_accounts))
+        .route("/api/composio/connect", post(composio_connect))
+        .route("/api/composio/disconnect", post(composio_disconnect))
+        .route("/api/composio/apps", get(composio_apps))
+        .route("/api/composio/tools", get(composio_tools))
+        .route("/api/composio/tools/execute/:slug", post(composio_execute))
         .merge(auth_routes)
         .layer(cors)
         .with_state(state);

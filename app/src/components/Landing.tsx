@@ -3,7 +3,7 @@ import { Download, RefreshCw } from "lucide-react";
 import { ChatInput } from "./ChatInput";
 import { useApp } from "../lib/store";
 import { useResolvedTheme } from "../lib/theme";
-import { isMacOS } from "../lib/platform";
+import { isMacOS, needsLightweightRendering } from "../lib/platform";
 import { cn } from "../lib/cn";
 import type { UpdateCardState, UpdateProgress } from "../lib/update";
 import LightRays from "./LightRays";
@@ -151,7 +151,10 @@ export function Landing({
           </div>
 
           {updateCard && (
-            <div className="mt-3 w-full max-w-[480px] rounded-lg border border-line/50 bg-paper/50 px-3 py-2 shadow-xs backdrop-blur-sm">
+            <div className={cn(
+              "mt-3 w-full max-w-[480px] rounded-lg border border-line/50 px-3 py-2 shadow-xs",
+              needsLightweightRendering() ? "bg-paper" : "bg-paper/50 backdrop-blur-sm",
+            )}>
               <div className="flex flex-wrap items-center gap-2">
                 <div className="min-w-0 flex-1 text-[11.5px] text-ink-muted">
                   <span className="text-ink">Update available</span>
