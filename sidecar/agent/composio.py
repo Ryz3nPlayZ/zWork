@@ -75,7 +75,15 @@ class ComposioManager:
 
     @property
     def is_available(self) -> bool:
-        return self._initialized and self._enabled
+        if not self._initialized:
+            return False
+        if self._enabled:
+            return True
+        token = self._cloud_token or _get_cloud_token()
+        if token:
+            self._enabled = True
+            return True
+        return False
 
     def all_tool_schemas(self) -> list[dict]:
         if not self.is_available:
@@ -192,9 +200,10 @@ class ComposioManager:
             log.warning("composio tool cache refresh failed: %s", e)
 
     def status(self) -> dict:
+        token = self._cloud_token or _get_cloud_token()
         return {
             "enabled": self._enabled,
-            "configured": bool(self._cloud_token),
+            "configured": bool(token),
             "available": self.is_available,
             "connected_apps": list(self._connected_apps),
             "tool_count": len(self._tool_cache),

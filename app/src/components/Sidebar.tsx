@@ -176,7 +176,7 @@ export function Sidebar() {
                   <SectionLabel title={bucket} />
                   <ul className="mt-1 flex flex-col">
                     {items.map((c) => {
-                      const isActive = c.id === active;
+                      const isActive = view === "chat" && c.id === active;
                       const rowMenuOpen = openMenuId === c.id;
                       return (
                         <li
@@ -327,7 +327,7 @@ function SidebarButton({
       className={cn(
         "press group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] text-ink-muted",
         "hover:bg-line/60 hover:text-ink",
-        active && "bg-line/70 text-ink",
+        active && "bg-paper-raised text-ink shadow-[0_0_0_1px_rgba(17,17,17,0.06)]",
       )}
     >
       <span className="flex h-5 w-5 items-center justify-center text-ink-muted group-hover:text-ink [&_svg]:h-[16px] [&_svg]:w-[16px]">

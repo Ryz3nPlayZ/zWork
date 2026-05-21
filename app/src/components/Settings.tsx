@@ -167,6 +167,7 @@ export function SettingsPage() {
             icon={<ArrowLeft />}
             label="Back to chat"
             size="sm"
+            showTooltip={false}
             onClick={() => setView("chat")}
           />
           <h1 className="text-[14px] font-semibold text-ink">Settings</h1>

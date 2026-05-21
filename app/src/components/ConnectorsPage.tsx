@@ -63,14 +63,14 @@ export function ConnectorsPage() {
             <h1 className="text-[28px] font-semibold tracking-tight text-ink">
               Connectors
             </h1>
-            <p className="mt-1.5 text-[14px] leading-relaxed text-ink-muted max-w-[480px]">
+            <p className="mt-1.5 text-[14px] leading-relaxed text-ink-soft max-w-[480px]">
               Connect your apps and zWork can act on your behalf — send emails,
               manage your calendar, update tasks, and more.
             </p>
           </div>
           <button
             onClick={() => void refreshComposio()}
-            className="press mt-1 shrink-0 rounded-xl border border-line bg-paper-raised p-2.5 text-ink-muted hover:text-ink transition-colors"
+            className="press ring-focus mt-1 shrink-0 rounded-xl border border-line bg-paper-raised p-2.5 text-ink-soft hover:text-ink transition-colors"
             aria-label="Refresh connectors"
           >
             <RefreshCw className="h-4 w-4" />
@@ -87,7 +87,7 @@ export function ConnectorsPage() {
               <p className="text-[13px] font-medium text-ink">
                 {connectedCount} app{connectedCount !== 1 ? "s" : ""} connected
                 {toolCount > 0 && (
-                  <span className="text-ink-muted font-normal">
+                  <span className="text-ink-soft font-normal">
                     {" "}&middot; {toolCount} action{toolCount !== 1 ? "s" : ""} available
                   </span>
                 )}
@@ -96,7 +96,7 @@ export function ConnectorsPage() {
           </div>
         ) : composioApps.length > 0 ? (
           <div className="mb-6 rounded-2xl border border-dashed border-line bg-paper-raised/50 px-5 py-4">
-            <p className="text-[13px] text-ink-muted text-center">
+            <p className="text-[13px] text-ink-soft text-center">
               No apps connected yet. Connect an app below to let zWork use it for you.
             </p>
           </div>
@@ -143,7 +143,7 @@ export function ConnectorsPage() {
                       </span>
                     )}
                   </div>
-                  <p className="text-[12.5px] leading-[18px] text-ink-muted truncate">
+                  <p className="text-[12.5px] leading-[18px] text-ink-soft truncate">
                     {desc}
                   </p>
                 </div>
@@ -157,14 +157,15 @@ export function ConnectorsPage() {
                   ) : isConnected ? (
                     <button
                       onClick={() => disconnectComposioApp(app.id)}
-                      className="press rounded-lg border border-line px-3 py-1.5 text-[12.5px] font-medium text-ink-muted hover:text-red-500 hover:border-red-300 transition-colors"
+                      className="press ring-focus rounded-lg border border-line px-3 py-1.5 text-[12.5px] font-medium text-ink-soft hover:text-red-500 hover:border-red-300 transition-colors"
                     >
                       Disconnect
                     </button>
                   ) : (
                     <button
                       onClick={() => handleConnect(app.id)}
-                      className="press inline-flex items-center gap-1.5 rounded-lg bg-ink px-3.5 py-1.5 text-[12.5px] font-medium text-paper hover:bg-ink/90 transition-colors"
+                      aria-label={`Connect ${app.name}`}
+                      className="press ring-focus inline-flex items-center gap-1.5 rounded-lg bg-ink-soft px-3.5 py-1.5 text-[12.5px] font-medium text-paper hover:bg-ink transition-colors"
                     >
                       Connect
                       <ExternalLink className="h-3 w-3 opacity-60" />

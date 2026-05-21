@@ -2855,18 +2855,71 @@ async fn composio_status(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, (StatusCode, String)> {
-    let _access = ensure_gateway_access(&state, &headers)
-        .await
-        .map_err(|s| (s, "access_denied".into()))?;
+    let configured = !state.composio_api_key.is_empty();
 
-    let available = !state.composio_api_key.is_empty();
+    // Try to resolve the user so we can return connected-app info.
+    // If auth fails we still return basic availability so the desktop
+    // sidecar knows the server is configured.
+    let mut connected_apps: Vec<String> = Vec::new();
+    let mut tool_count: u64 = 0;
+    let mut user_id = String::new();
+
+    if let Ok(access) = ensure_gateway_access(&state, &headers).await {
+        if let Ok(Some(user)) = resolve_app_user(&state, access).await {
+            user_id = user.user_id.clone();
+            // Query connected accounts for this user
+            if configured && !user_id.is_empty() {
+                let url = format!(
+                    "{}/connected_accounts?user_ids={}",
+                    COMPOSIO_BASE_URL,
+                    urlencoding::encode(&user_id)
+                );
+                if let Ok(resp) = state
+                    .http_client
+                    .get(&url)
+                    .headers(composio_request_headers(&state.composio_api_key))
+                    .send()
+                    .await
+                {
+                    if resp.status().is_success() {
+                        if let Ok(body) = resp.json::<Value>().await {
+                            let items = body
+                                .get("items")
+                                .and_then(|v| v.as_array())
+                                .cloned()
+                                .unwrap_or_default();
+                            for acc in &items {
+                                let status = acc
+                                    .get("status")
+                                    .and_then(|s| s.as_str())
+                                    .unwrap_or("");
+                                if status == "ACTIVE" {
+                                    let app_id = acc
+                                        .get("toolkit")
+                                        .and_then(|t| t.get("slug"))
+                                        .and_then(|s| s.as_str())
+                                        .unwrap_or("")
+                                        .to_lowercase();
+                                    if !app_id.is_empty() && !connected_apps.contains(&app_id) {
+                                        connected_apps.push(app_id);
+                                    }
+                                }
+                            }
+                            tool_count = items.len() as u64;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     Ok(Json(serde_json::json!({
-        "enabled": available,
-        "configured": available,
-        "available": available,
-        "connected_apps": [],
-        "tool_count": 0,
-        "user_id": ""
+        "enabled": configured,
+        "configured": configured,
+        "available": configured,
+        "connected_apps": connected_apps,
+        "tool_count": tool_count,
+        "user_id": user_id
     })))
 }
 
@@ -3322,6 +3375,47 @@ async fn composio_execute(
         "isError": false,
         "content": [{"type": "text", "text": resp_text}]
     })))
+}
+
+/// OAuth callback endpoint that receives the redirect after a user
+/// completes the Composio connection flow in their browser.
+async fn composio_callback() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Connected &ndash; zWork</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         display: flex; align-items: center; justify-content: center; min-height: 100vh;
+         margin: 0; background: #f8f9fa; color: #1a1a2e; }
+  .card { background: #fff; border-radius: 16px; padding: 40px 48px; text-align: center;
+          box-shadow: 0 4px 24px rgba(0,0,0,.06); max-width: 400px; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  p { font-size: 14px; color: #6b7280; margin: 0 0 24px; line-height: 1.5; }
+  .check { display: inline-flex; align-items: center; justify-content: center;
+           width: 48px; height: 48px; border-radius: 50%; background: #10b9811a;
+           margin-bottom: 16px; }
+  .check svg { width: 24px; height: 24px; color: #10b981; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="check">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+         stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="20 6 9 17 4 12"></polyline>
+    </svg>
+  </div>
+  <h1>App connected</h1>
+  <p>Your app has been connected to zWork. You can close this window and return to the app.</p>
+</div>
+</body>
+</html>"#,
+    )
 }
 
 async fn desktop_auth_start(
@@ -4103,6 +4197,7 @@ async fn main() {
         .route("/api/composio/apps", get(composio_apps))
         .route("/api/composio/tools", get(composio_tools))
         .route("/api/composio/tools/execute/:slug", post(composio_execute))
+        .route("/api/composio/callback", get(composio_callback))
         .merge(auth_routes)
         .layer(cors)
         .with_state(state);

@@ -41,13 +41,13 @@ export function ComposioPanel() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-[17px] font-semibold tracking-tight text-ink">Connected Apps</h2>
-          <p className="mt-1 text-[13px] leading-5 text-ink-muted">
+          <p className="mt-1 text-[13px] leading-5 text-ink-soft">
             Connect your apps and zWork can use them for you — send emails, manage your calendar, and more.
           </p>
         </div>
         <button
           onClick={() => void refreshComposio()}
-          className="press shrink-0 rounded-xl border border-line bg-paper-raised p-1.5 text-ink-muted hover:text-ink"
+          className="press ring-focus shrink-0 rounded-xl border border-line bg-paper-raised p-1.5 text-ink-soft hover:text-ink"
           aria-label="Refresh connected apps"
         >
           <RefreshCw className="h-3.5 w-3.5" />
@@ -101,14 +101,15 @@ export function ComposioPanel() {
               ) : isConnected ? (
                 <button
                   onClick={() => disconnectComposioApp(app.id)}
-                  className="press shrink-0 rounded-md border border-line px-2.5 py-1 text-[11.5px] font-medium text-ink-muted hover:text-red-500 hover:border-red-300"
+                  className="press ring-focus shrink-0 rounded-md border border-line px-2.5 py-1 text-[11.5px] font-medium text-ink-soft hover:text-red-500 hover:border-red-300"
                 >
                   Disconnect
                 </button>
               ) : (
                 <button
                   onClick={() => handleConnect(app.id)}
-                  className="press shrink-0 rounded-md bg-ink px-2.5 py-1 text-[11.5px] font-medium text-paper hover:bg-ink/90"
+                  aria-label={`Connect ${app.name}`}
+                  className="press ring-focus shrink-0 rounded-md bg-ink-soft px-2.5 py-1 text-[11.5px] font-medium text-paper hover:bg-ink"
                 >
                   Connect
                 </button>
