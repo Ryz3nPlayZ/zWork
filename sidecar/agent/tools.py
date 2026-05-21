@@ -2033,9 +2033,11 @@ def _dctl_env() -> dict[str, str]:
     env = os.environ.copy()
     # 1. Already importable — nothing to do.
     try:
-        import dctl
-        return env
-    except ImportError:
+        import importlib.util
+
+        if importlib.util.find_spec("dctl") is not None:
+            return env
+    except Exception:
         pass
     # 2. Search relative to this file, zWork repo root, and ZWORK_ROOT env.
     this_file = Path(__file__).resolve()

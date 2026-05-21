@@ -13,8 +13,6 @@ from typing import Optional
 
 import httpx
 
-from .home import zwork_home
-
 log = logging.getLogger(__name__)
 
 TOOL_PREFIX = "composio__"

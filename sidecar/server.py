@@ -12,6 +12,7 @@ import os
 import platform
 import getpass
 import re
+import subprocess
 import sys
 import base64
 import binascii
