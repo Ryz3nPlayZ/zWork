@@ -1735,7 +1735,10 @@ def _deploy_web_app(project_path: str, framework: str) -> dict[str, Any]:
         port = _pick_free_port([8000, 8080, 5173])
         _run_background(f"python3 -m http.server {port}", str(p))
         if _wait_for_port(port):
-            return {"ok": True, "message": f"Serving {p.name} at http://localhost:{port}"}
+            return {
+                "ok": True,
+                "message": f"Serving {p.name} at http://localhost:{port}",
+            }
         return {
             "ok": False,
             "message": f"http.server started but port {port} never opened. "
@@ -2055,7 +2058,9 @@ def _dctl_env() -> dict[str, str]:
         candidate = root / "dctl"
         if candidate.exists():
             prev = env.get("PYTHONPATH", "")
-            env["PYTHONPATH"] = f"{candidate}{os.pathsep}{prev}" if prev else str(candidate)
+            env["PYTHONPATH"] = (
+                f"{candidate}{os.pathsep}{prev}" if prev else str(candidate)
+            )
             break
     return env
 
