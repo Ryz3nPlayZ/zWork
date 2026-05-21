@@ -103,6 +103,23 @@ Use tools directly — never fake JSON or pretend to call them in prose.
 
 {connected_apps_block}
 
+### Tool selection priority
+
+When multiple tools could handle a request, follow this priority order:
+
+1. **Connected app actions → `composio__*` FIRST.** If the user asks to do something with a connected app (email, calendar, Slack, files, issues, tasks), use the matching `composio__` tool. Do NOT fall back to `run_command`, `dctl browser`, or `web_search` for these.
+2. **Academic research → `search_papers`.** For scientific papers, literature reviews, or scholarly topics, use `search_papers` — not `web_search`.
+3. **Current events / factual lookup → `web_search`.** For news, weather, sports, "what happened today", or any factual question about the world.
+4. **Desktop UI interaction → `dctl`.** For clicking, typing, screenshots, window management, or browser automation the user explicitly requested.
+5. **Everything else → `run_command` / `write_file` / etc.** Shell commands, file operations, dev servers, code.
+
+**Common mistakes to avoid:**
+- "check my email" → do NOT use `run_command`, `dctl browser`, or `web_search`. Use `composio__GMAIL_READ_EMAILS` or `composio__GMAIL_SEARCH_EMAILS`.
+- "what's on my calendar" → do NOT open a browser. Use `composio__GOOGLECALENDAR_GET_EVENTS`.
+- "search for papers on X" → do NOT use `web_search`. Use `search_papers`.
+- "open Google and search X" → do NOT use `web_search`. The user wants a browser. Use `dctl browser`.
+- "find a file on my Google Drive" → do NOT use `run_command`. Use `composio__GOOGLEDRIVE_FIND_FILE`.
+
 ### Tool rules
 
 1. Call tools. Never write fake JSON or describe what a tool call would do.
@@ -113,6 +130,7 @@ Use tools directly — never fake JSON or pretend to call them in prose.
 6. Read before writing. Never edit a file you haven't read first.
 7. Don't ask the user to run commands. Run them yourself via `run_command`.
 8. Don't ask where to save, what to name things, or which tech to use. Pick sensible defaults and go.
+9. Before picking a tool, check if a `composio__` tool matches the user's intent — connected app tools always win over generic tools for the same task.
 
 ## Skills
 
@@ -266,20 +284,84 @@ def _connected_apps_block() -> str:
     app_list = ", ".join(a.title() for a in apps)
     tool_list = ", ".join(f"`{n}`" for n in tool_names[:20])
     extra = f"\n  - ...and {len(tool_names) - 20} more" if len(tool_names) > 20 else ""
+
+    # Build app-specific examples based on what's connected
+    examples = []
+    lowered_apps = [a.lower() for a in apps]
+    if "gmail" in lowered_apps:
+        examples.extend(
+            [
+                '  - "check my email" / "any new emails?" → `composio__GMAIL_READ_EMAILS` or `composio__GMAIL_SEARCH_EMAILS`',
+                '  - "send an email to X about Y" → `composio__GMAIL_SEND_EMAIL`',
+                '  - "find emails from X" / "search my inbox" → `composio__GMAIL_SEARCH_EMAILS`',
+            ]
+        )
+    if "googlecalendar" in lowered_apps:
+        examples.extend(
+            [
+                '  - "what\'s on my calendar" / "any meetings today?" → `composio__GOOGLECALENDAR_GET_EVENTS`',
+                '  - "schedule a meeting" / "add to calendar" → `composio__GOOGLECALENDAR_CREATE_EVENT`',
+            ]
+        )
+    if "slack" in lowered_apps:
+        examples.extend(
+            [
+                '  - "send a Slack message" / "message X on Slack" → `composio__SLACK_SEND_MESSAGE`',
+                '  - "check Slack" / "read channel messages" → `composio__SLACK_GET_MESSAGES`',
+            ]
+        )
+    if "notion" in lowered_apps:
+        examples.extend(
+            [
+                '  - "search my Notion" / "find in Notion" → `composio__NOTION_SEARCH_PAGES`',
+                '  - "create a Notion page" → `composio__NOTION_CREATE_PAGE`',
+            ]
+        )
+    if "googledrive" in lowered_apps:
+        examples.extend(
+            [
+                '  - "find a file on Drive" / "search Google Drive" → `composio__GOOGLEDRIVE_FIND_FILE`',
+            ]
+        )
+    if "github" in lowered_apps:
+        examples.extend(
+            [
+                '  - "create an issue" / "open a PR" → use the matching `composio__GITHUB_*` tool',
+            ]
+        )
+    if (
+        "jira" in lowered_apps
+        or "linear" in lowered_apps
+        or "trello" in lowered_apps
+        or "asana" in lowered_apps
+    ):
+        examples.extend(
+            [
+                '  - "create a ticket" / "check my tasks" → use the matching `composio__` tool for that app',
+            ]
+        )
+    if "todoist" in lowered_apps:
+        examples.extend(
+            [
+                '  - "add to my todo list" / "create a task" → `composio__TODOIST_CREATE_TASK`',
+            ]
+        )
+    if "hubspot" in lowered_apps:
+        examples.extend(
+            [
+                '  - "look up a contact" / "create a deal" → use `composio__HUBSPOT_*` tools',
+            ]
+        )
+
+    examples_text = "\n".join(examples) if examples else ""
     return (
         "### Connected app actions\n\n"
         f"The user has connected these apps: {app_list}. "
         "You have tools prefixed `composio__` to act on their behalf. "
-        "Use these tools DIRECTLY when the user asks you to interact with a connected app — "
-        "do NOT try to use shell commands, browsers, or workarounds.\n\n"
+        "**ALWAYS use these composio__ tools for any request involving a connected app.** "
+        "Never fall back to `run_command`, `dctl browser`, or `web_search` for connected app tasks.\n\n"
         f"Available actions: {tool_list}{extra}\n\n"
-        "Examples:\n"
-        '  - "check my email" / "find emails from today" → use `composio__GMAIL_READ_EMAILS` or `composio__GMAIL_SEARCH_EMAILS`\n'
-        '  - "send an email" → use `composio__GMAIL_SEND_EMAIL`\n'
-        '  - "what\'s on my calendar" → use `composio__GOOGLECALENDAR_GET_EVENTS`\n'
-        '  - "send a Slack message" → use `composio__SLACK_SEND_MESSAGE`\n'
-        '  - "search my Notion" → use `composio__NOTION_SEARCH_PAGES`\n'
-        "  - Always prefer `composio__*` tools over shell commands for connected apps."
+        f"Intent → tool mapping:\n{examples_text}\n"
     )
 
 

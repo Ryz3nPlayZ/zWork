@@ -5,21 +5,7 @@ import {
   Plug,
 } from "lucide-react";
 import { useApp } from "../lib/store";
-
-const APP_ICONS: Record<string, React.ReactNode> = {
-  mail: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.5}><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>,
-  calendar: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.5}><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>,
-  hash: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M4 9h16M4 15h16M10 3 8 21M16 3 14 21"/></svg>,
-  "book-open": <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2zM22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>,
-  folder: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/></svg>,
-  "git-branch": <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.5}><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>,
-  layers: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 12-8.97 4.08a2 2 0 0 1-1.66 0L2 12"/><path d="m22 17-8.97 4.08a2 2 0 0 1-1.66 0L2 17"/></svg>,
-  zap: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>,
-  "check-square": <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>,
-  "layout-grid": <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.5}><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>,
-  target: <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.5}><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>,
-  "circle-dot": <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth={1.5}><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="1"/></svg>,
-};
+import { AppBrandLogo, hasBrandLogo } from "./BrandLogos";
 
 export function ComposioPanel() {
   const composioStatus = useApp((s) => s.composioStatus);
@@ -61,7 +47,8 @@ export function ComposioPanel() {
         </div>
         <button
           onClick={() => void refreshComposio()}
-          className="press shrink-0 rounded-lg border border-line p-1.5 text-ink-muted hover:text-ink"
+          className="press shrink-0 rounded-xl border border-line bg-paper-raised p-1.5 text-ink-muted hover:text-ink"
+          aria-label="Refresh connected apps"
         >
           <RefreshCw className="h-3.5 w-3.5" />
         </button>
@@ -77,7 +64,7 @@ export function ComposioPanel() {
         {composioApps.map((app) => {
           const isConnected = connectedApps.has(app.id);
           const isConnecting = connecting === app.id;
-          const icon = APP_ICONS[app.icon] ?? <Plug className="h-5 w-5" />;
+          const hasLogo = hasBrandLogo(app.id);
 
           return (
             <div
@@ -85,8 +72,18 @@ export function ComposioPanel() {
               className="flex items-center justify-between gap-3 rounded-xl border border-line bg-paper-raised p-3.5"
             >
               <div className="flex items-center gap-2.5 min-w-0">
-                <span className="shrink-0" style={{ color: app.color }}>
-                  {icon}
+                <span
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                  style={{
+                    backgroundColor: hasLogo ? `${app.color}14` : "rgb(var(--paper-sunken))",
+                    color: hasLogo ? app.color : "rgb(var(--ink-muted))",
+                  }}
+                >
+                  {hasLogo ? (
+                    <AppBrandLogo appId={app.id} size={16} />
+                  ) : (
+                    <Plug size={16} />
+                  )}
                 </span>
                 <div className="min-w-0">
                   <div className="flex items-center gap-1.5">
@@ -111,7 +108,7 @@ export function ComposioPanel() {
               ) : (
                 <button
                   onClick={() => handleConnect(app.id)}
-                  className="press shrink-0 rounded-md bg-ink px-2.5 py-1 text-[11.5px] font-medium text-white hover:bg-ink/90"
+                  className="press shrink-0 rounded-md bg-ink px-2.5 py-1 text-[11.5px] font-medium text-paper hover:bg-ink/90"
                 >
                   Connect
                 </button>

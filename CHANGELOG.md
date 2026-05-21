@@ -2,6 +2,17 @@
 
 All notable changes to zWork are documented here.
 
+## v0.4.0-alpha.4
+
+**UI redesign: Connectors, Analytics, and Plan pages.**
+
+- redesigned Connectors page with actual brand logos (Gmail, Slack, Notion, GitHub, Linear, etc.) instead of generic Lucide icons
+- redesigned Analytics page with improved visual hierarchy, stat cards, and empty states
+- redesigned Plan page with clearer pricing card layout and stronger typography hierarchy
+- softened color palette across light and dark modes: less extreme whites and blacks, warmer neutrals
+- fixed dark-mode accessibility issue where `bg-ink text-white` buttons became invisible
+- added `design.md` as locked design system for app pages
+
 ## v0.4.0-alpha.2
 
 **Hotfix: backend crash loop on fresh install / OAuth redirect.**

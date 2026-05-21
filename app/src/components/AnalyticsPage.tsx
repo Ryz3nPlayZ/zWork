@@ -65,11 +65,22 @@ export function AnalyticsPage() {
     : [];
   const maxValue = Math.max(1, ...chartData.map((d) => d.value));
 
+  const totalRequests = summary
+    ? (summary.root_requests_today ?? 0) + (summary.continuation_requests_today ?? 0)
+    : 0;
+  const weeklyLimit = summary?.weekly_limit ?? 100;
+  const fiveHourUsed = summary?.five_hour_used ?? 0;
+  const fiveHourLimit = summary?.five_hour_limit ?? 0;
+
   return (
     <div className="flex h-full min-w-0 flex-1 overflow-y-auto bg-paper">
       <div className="mx-auto w-full max-w-[760px] px-6 py-8">
+        {/* Header */}
         <header className="mb-8">
-          <h1 className="text-[36px] font-light tracking-tight text-ink">Analytics</h1>
+          <h1 className="text-[28px] font-semibold tracking-tight text-ink">Analytics</h1>
+          <p className="mt-1.5 text-[14px] text-ink-muted">
+            Track your usage and activity over time.
+          </p>
         </header>
 
         {error && (
@@ -81,38 +92,42 @@ export function AnalyticsPage() {
           </section>
         )}
 
-        {/* Usage bars */}
-        <div className="flex flex-col gap-4 mb-8">
-          <UsageBar
+        {/* Usage stat cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
+          <StatCard
             icon={<Clock className="h-4 w-4" />}
             label="5-hour limit"
             sublabel="Rolling window"
-            used={summary?.five_hour_used ?? 0}
-            limit={summary?.five_hour_limit ?? 0}
+            used={fiveHourUsed}
+            limit={fiveHourLimit}
             loading={loading}
           />
-          <UsageBar
-            icon={<Clock className="h-4 w-4" />}
+          <StatCard
+            icon={<TrendingUp className="h-4 w-4" />}
             label="Today"
             sublabel="Requests in the last 24 hours"
-            used={(summary?.root_requests_today ?? 0) + (summary?.continuation_requests_today ?? 0)}
-            limit={Math.max((summary?.weekly_limit ?? 100) / 7 | 0, 1)}
+            used={totalRequests}
+            limit={Math.max(weeklyLimit / 7 | 0, 1)}
             loading={loading}
           />
         </div>
 
         {/* Activity chart */}
         <section className="rounded-2xl border border-line bg-paper-raised p-6">
-          <div className="mb-5 flex items-center gap-2">
+          <div className="mb-6 flex items-center gap-2">
             <TrendingUp className="h-4 w-4 text-ink-muted" />
             <h2 className="text-[15px] font-semibold text-ink">Activity</h2>
             <span className="text-[12px] text-ink-faint">last {CHART_DAYS} days</span>
           </div>
 
           {loading && !summary ? (
-            <div className="flex h-[160px] items-center justify-center text-[13px] text-ink-muted">
+            <div className="flex h-[180px] items-center justify-center text-[13px] text-ink-muted">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Loading
+              Loading activity…
+            </div>
+          ) : chartData.length === 0 || chartData.every((d) => d.value === 0) ? (
+            <div className="flex h-[180px] items-center justify-center">
+              <p className="text-[13px] text-ink-muted">No activity yet.</p>
             </div>
           ) : (
             <div className="relative" role="img" aria-label="Activity chart">
@@ -124,36 +139,44 @@ export function AnalyticsPage() {
               </div>
 
               {/* Chart */}
-              <div className="relative ml-10" style={{ height: "160px" }}>
-                {/* Grid */}
+              <div className="relative ml-10" style={{ height: "180px" }}>
+                {/* Grid lines */}
                 <div className="pointer-events-none absolute inset-0 py-2">
                   {[0, 0.5].map((pos) => (
                     <div
                       key={pos}
-                      className="absolute left-0 right-0 border-t border-line/40"
+                      className="absolute left-0 right-0 border-t border-line/50"
                       style={{ top: `${pos * 100}%` }}
                     />
                   ))}
                 </div>
 
                 {/* Bars */}
-                <div className="relative flex h-full items-end gap-[3px] py-2">
+                <div className="relative flex h-full items-end gap-[4px] py-2">
                   {chartData.map((day, i) => {
-                    const h = day.value > 0 ? Math.max(3, (day.value / maxValue) * 156) : 0;
+                    const h = day.value > 0 ? Math.max(4, (day.value / maxValue) * 172) : 0;
                     return (
                       <div
                         key={`${day.date}-${i}`}
-                        className="flex-1 rounded-t bg-ink/60 hover:bg-ink/80 transition-colors"
-                        style={{ height: `${h}px`, minWidth: 1 }}
-                        title={`${day.date}: ${formatNumber(day.value)} requests`}
-                      />
+                        className="group flex-1 flex flex-col justify-end"
+                        style={{ minWidth: 1 }}
+                      >
+                        <div
+                          className={cn(
+                            "w-full rounded-t transition-colors",
+                            day.value > 0 ? "bg-ink/50 hover:bg-ink/70" : "bg-line/40"
+                          )}
+                          style={{ height: `${h}px` }}
+                          title={`${day.date}: ${formatNumber(day.value)} requests`}
+                        />
+                      </div>
                     );
                   })}
                 </div>
               </div>
 
               {/* X-axis */}
-              <div className="ml-10 mt-2 flex text-[11px] text-ink-faint">
+              <div className="ml-10 mt-3 flex text-[11px] text-ink-faint">
                 <span>{chartData[0]?.date}</span>
                 <span className="flex-1 text-center">{chartData[Math.floor(chartData.length / 2)]?.date}</span>
                 <span>{chartData[chartData.length - 1]?.date}</span>
@@ -166,7 +189,7 @@ export function AnalyticsPage() {
   );
 }
 
-function UsageBar({
+function StatCard({
   icon,
   label,
   sublabel,
@@ -182,6 +205,7 @@ function UsageBar({
   loading: boolean;
 }) {
   const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
+  const isHigh = pct > 85;
 
   return (
     <section className="rounded-2xl border border-line bg-paper-raised p-5">
@@ -196,7 +220,10 @@ function UsageBar({
           </div>
         </div>
         <div className="text-right">
-          <div className="text-[24px] font-light tracking-tight text-ink">
+          <div className={cn(
+            "text-[24px] font-semibold tracking-tight text-ink",
+            loading && "opacity-40"
+          )}>
             {loading ? "…" : formatNumber(used)}
           </div>
           <div className="text-[11.5px] text-ink-muted">
@@ -215,7 +242,7 @@ function UsageBar({
         <div
           className={cn(
             "h-full rounded-full transition-all duration-500",
-            pct > 85 ? "bg-red-500/70" : "bg-ink/70",
+            isHigh ? "bg-red-500/70" : "bg-ink/60"
           )}
           style={{ width: `${Math.max(pct, 0.5)}%` }}
         />

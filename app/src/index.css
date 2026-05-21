@@ -26,58 +26,55 @@
 :root.light {
   color-scheme: light;
 
-  /* Creamy warm off-white palette — gentle on the eyes. */
-  --paper: 247 246 243;
-  /* #f7f6f3 */
-  --paper-soft: 251 250 247;
-  --paper-raised: 255 255 255;
-  --paper-sunken: 239 237 232;
-  --paper-sidebar: 242 240 236;
+  /* Warm cream palette — gentle on the eyes, less extreme than pure white. */
+  --paper: 242 240 232;
+  --paper-soft: 248 246 238;
+  --paper-raised: 252 250 242;
+  --paper-sunken: 234 232 224;
+  --paper-sidebar: 236 234 226;
 
-  --ink: 23 23 22;
-  /* #171716 */
-  --ink-soft: 37 36 31;
-  --ink-muted: 107 106 101;
-  --ink-faint: 160 158 152;
+  --ink: 48 46 40;
+  --ink-soft: 80 76 68;
+  --ink-muted: 130 126 115;
+  --ink-faint: 175 170 158;
 
-  --line: 230 227 220;
-  --line-soft: 237 233 225;
-  --line-strong: 213 209 199;
+  --line: 218 214 202;
+  --line-soft: 228 224 212;
+  --line-strong: 200 196 184;
 
-  --accent: 23 23 22;
+  --accent: 48 46 40;
 
   /* Assistant → user bubble. Calm warm stone, not bright blue. */
-  --bubble: 242 240 236;
-  --bubble-fg: 23 23 22;
+  --bubble: 232 230 222;
+  --bubble-fg: 48 46 40;
 
-  --shadow: 17 17 17;
+  --shadow: 30 28 24;
 }
 
 :root.dark {
   color-scheme: dark;
 
-  /* A soft, calm dark — not pure black. Warm-cool neutrals. */
-  --paper: 22 22 24;
-  /* ~#161618 */
-  --paper-soft: 26 26 29;
-  --paper-raised: 31 31 34;
-  --paper-sunken: 18 18 20;
-  --paper-sidebar: 20 20 22;
+  /* A soft, calm dark — not pure black. Warm neutrals. */
+  --paper: 42 42 46;
+  --paper-soft: 48 48 52;
+  --paper-raised: 56 56 60;
+  --paper-sunken: 36 36 40;
+  --paper-sidebar: 38 38 42;
 
-  --ink: 236 236 234;
-  --ink-soft: 213 213 211;
-  --ink-muted: 160 160 157;
-  --ink-faint: 108 108 106;
+  --ink: 220 218 210;
+  --ink-soft: 190 188 180;
+  --ink-muted: 140 138 130;
+  --ink-faint: 100 98 90;
 
-  --line: 45 45 49;
-  --line-soft: 40 40 44;
-  --line-strong: 62 62 66;
+  --line: 60 60 65;
+  --line-soft: 54 54 58;
+  --line-strong: 72 72 78;
 
-  --accent: 236 236 234;
+  --accent: 220 218 210;
 
   /* Assistant → user bubble in dark mode: slightly lighter than paper. */
-  --bubble: 60 60 64;
-  --bubble-fg: 242 242 238;
+  --bubble: 72 72 76;
+  --bubble-fg: 232 230 222;
 
   --shadow: 0 0 0;
 }

@@ -109,10 +109,15 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
   return (
     <div className="flex h-full min-w-0 flex-1 overflow-y-auto bg-paper">
       <div className="mx-auto w-full max-w-[900px] px-6 py-8">
+        {/* Header */}
         <header className="mb-8">
-          <h1 className="text-[36px] font-light tracking-tight text-ink">Plan</h1>
-          <p className="mt-2 text-[14px] text-ink-muted">
-            You're on the <span className="font-medium text-ink">{currentTier === "free" ? "Free" : currentTier === "pro" ? "Pro" : "Max"}</span> plan
+          <h1 className="text-[28px] font-semibold tracking-tight text-ink">Plan</h1>
+          <p className="mt-1.5 text-[14px] text-ink-muted">
+            You are on the{" "}
+            <span className="font-medium text-ink">
+              {currentTier === "free" ? "Free" : currentTier === "pro" ? "Pro" : "Max"}
+            </span>{" "}
+            plan
           </p>
         </header>
 
@@ -131,12 +136,12 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
               <div
                 key={tier.id}
                 className={cn(
-                  "relative rounded-2xl border bg-paper p-6 transition-shadow",
+                  "relative flex flex-col rounded-2xl border bg-paper-raised p-6 transition-shadow",
                   isCurrent
-                    ? "border-line-strong shadow-[0_0_0_1px_rgb(var(--ink)/0.15)]"
+                    ? "border-line-strong shadow-[0_0_0_1px_rgb(var(--ink)/0.12)]"
                     : tier.highlight
-                      ? "border-line bg-paper-raised hover:shadow-md"
-                      : "border-line hover:shadow-sm",
+                      ? "border-line hover:shadow-md"
+                      : "border-line hover:shadow-sm"
                 )}
               >
                 {isCurrent && (
@@ -147,9 +152,9 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
                   </div>
                 )}
 
-                <div className="mb-4">
+                <div className="mb-5">
                   <div className="flex items-center gap-2">
-                    <h3 className="text-[18px] font-semibold tracking-tight text-ink">
+                    <h3 className="text-[17px] font-semibold tracking-tight text-ink">
                       {tier.name}
                     </h3>
                     {tier.highlight && !isCurrent && (
@@ -160,13 +165,13 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
                 </div>
 
                 <div className="mb-6">
-                  <span className="text-[36px] font-light tracking-tight text-ink">
+                  <span className="text-[32px] font-semibold tracking-tight text-ink">
                     {tier.priceDisplay}
                   </span>
                   <span className="ml-1 text-[14px] text-ink-muted">{tier.pricePeriod}</span>
                 </div>
 
-                <ul className="space-y-3 mb-6">
+                <ul className="mb-6 flex-1 space-y-3">
                   {tier.features.map((feature) => (
                     <li key={feature} className="flex items-start gap-2.5 text-[13px] text-ink">
                       <Check className="h-4 w-4 shrink-0 mt-0.5 text-ink-muted" />
@@ -180,7 +185,7 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
                     type="button"
                     onClick={handleManage}
                     disabled={busy}
-                    className="press ring-focus w-full rounded-xl border border-line bg-paper-raised px-4 py-2.5 text-[13px] font-medium text-ink hover:bg-paper-sunken transition-colors disabled:opacity-40"
+                    className="press ring-focus w-full rounded-xl border border-line bg-paper px-4 py-2.5 text-[13px] font-medium text-ink hover:bg-paper-sunken transition-colors disabled:opacity-40"
                   >
                     Manage billing
                   </button>
@@ -193,7 +198,7 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
                       "press ring-focus w-full rounded-xl px-4 py-2.5 text-[13px] font-medium transition-colors disabled:opacity-40",
                       tier.highlight
                         ? "bg-ink text-paper hover:bg-ink/90"
-                        : "border border-line bg-paper text-ink hover:bg-paper-sunken",
+                        : "border border-line bg-paper text-ink hover:bg-paper-sunken"
                     )}
                   >
                     Upgrade to {tier.name}
@@ -208,7 +213,7 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
         <section className="rounded-2xl border border-line bg-paper-raised p-5">
           <h3 className="text-[15px] font-semibold text-ink">Redeem access code</h3>
           <p className="mt-1 text-[13px] text-ink-muted">
-            Have a code? Enter it below.
+            Have a code? Enter it below to apply it to your account.
           </p>
           <div className="mt-3 flex gap-2">
             <label htmlFor="coupon-code-input" className="sr-only">Access code</label>
@@ -219,7 +224,7 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
               onChange={(e) => setCouponCode(e.target.value)}
               placeholder="Enter code…"
               disabled={couponBusy}
-              className="block flex-1 rounded-lg border border-line bg-paper px-3 py-2.5 text-[13px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none disabled:opacity-40"
+              className="block flex-1 rounded-xl border border-line bg-paper px-3 py-2.5 text-[13px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none disabled:opacity-40"
               onKeyDown={(e) => { if (e.key === "Enter") handleRedeem(); }}
             />
             <button

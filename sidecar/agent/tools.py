@@ -188,7 +188,8 @@ TOOL_SCHEMAS: list[dict] = [
         "description": (
             "Run a shell command. Set background=true for long-running servers (e.g. dev servers); "
             "the command will detach and return immediately. For foreground commands, the combined "
-            "stdout+stderr is returned (120s timeout)."
+            "stdout+stderr is returned (120s timeout). Do NOT use this for interacting with "
+            "connected apps (email, calendar, Slack, etc.) — use composio__ tools instead."
         ),
         "parameters": {
             "type": "object",
@@ -295,7 +296,9 @@ TOOL_SCHEMAS: list[dict] = [
         "name": "web_search",
         "description": (
             "Search the web/news without opening a browser. Use this for current events, "
-            "recent news, or factual web lookup requests when the user wants the answer in chat."
+            "recent news, or factual web lookup requests when the user wants the answer in chat. "
+            "Do NOT use for academic papers (use search_papers) or for connected app actions "
+            "like email or calendar (use composio__ tools)."
         ),
         "parameters": {
             "type": "object",
@@ -317,7 +320,8 @@ TOOL_SCHEMAS: list[dict] = [
         "description": (
             "Run the local dctl desktop-control CLI for window/app/browser automation, "
             "accessibility tree inspection, screenshots, and focus/click/type/scroll actions. "
-            "Prefer this over raw shell for GUI work."
+            "Prefer this over raw shell for GUI work. Do NOT use dctl browser for email, "
+            "calendar, or other connected app actions — use composio__ tools instead."
         ),
         "parameters": {
             "type": "object",
