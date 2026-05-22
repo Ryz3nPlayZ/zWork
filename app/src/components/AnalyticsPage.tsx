@@ -1,14 +1,12 @@
 import { useEffect, useState } from "react";
 import {
-  Clock,
   TrendingUp,
   Loader2,
   Zap,
-  Activity,
-  ChevronRight,
-  Server,
+  ArrowUpRight,
 } from "lucide-react";
 import { cn } from "../lib/cn";
+import { useApp } from "../lib/store";
 import { fetchAnalyticsSummary, type AnalyticsDay, type AnalyticsSummary } from "../lib/cloud";
 
 function formatNumber(value: number) {
@@ -39,12 +37,12 @@ function buildSeries(days: number, rows: AnalyticsDay[]) {
   });
 }
 
-const CHART_DAYS = 14;
-
 export function AnalyticsPage() {
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [chartDays, setChartDays] = useState<7 | 30>(7);
+  const setView = useApp((s) => s.setView);
 
   useEffect(() => {
     let alive = true;
@@ -68,38 +66,34 @@ export function AnalyticsPage() {
     };
   }, []);
 
-  const chartData = summary
-    ? buildSeries(CHART_DAYS, summary.past_week.length > 0 ? summary.past_week : [])
-    : [];
+  const chartSource = chartDays === 7
+    ? summary?.past_week ?? []
+    : summary?.past_month ?? [];
+  const chartData = summary ? buildSeries(chartDays, chartSource) : [];
   const maxValue = Math.max(1, ...chartData.map((d) => d.value));
 
-  const totalRequests = summary
-    ? (summary.root_requests_today ?? 0) + (summary.continuation_requests_today ?? 0)
-    : 0;
-
   const tier = summary?.user?.tier ?? "free";
-  const tierLabel = tier === "max" ? "Max" : tier === "pro" ? "Pro" : "Free";
-  const tierColor =
-    tier === "max" ? "bg-amber-500/10 text-amber-600" :
-    tier === "pro" ? "bg-accent/10 text-ink" :
-    "bg-ink/5 text-ink-soft";
+  const isPaid = tier !== "free";
 
   return (
     <div className="flex h-full min-w-0 flex-1 overflow-y-auto bg-paper">
-      <div className="mx-auto w-full max-w-[1100px] px-6 py-8">
+      <div className="mx-auto w-full max-w-[720px] px-6 py-10">
         {/* Header */}
-        <header className="mb-8 flex items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-[28px] font-semibold tracking-tight text-ink">Analytics</h1>
-              <span className={cn("rounded-full px-2.5 py-0.5 text-[12px] font-medium", tierColor)}>
-                {tierLabel}
-              </span>
-            </div>
-            <p className="mt-1.5 text-[14px] leading-relaxed text-ink-soft">
-              Track your usage and activity over time.
-            </p>
+        <header className="mb-10">
+          <div className="flex items-center gap-3">
+            <h1 className="text-[32px] font-semibold tracking-tight text-ink">Analytics</h1>
+            <span className={cn(
+              "rounded-full px-2.5 py-0.5 text-[12px] font-medium",
+              tier === "max" ? "bg-amber-500/10 text-amber-600" :
+              tier === "pro" ? "bg-accent/10 text-ink" :
+              "bg-ink/5 text-ink-soft"
+            )}>
+              {tier === "max" ? "Max" : tier === "pro" ? "Pro" : "Free"}
+            </span>
           </div>
+          <p className="mt-2 text-[14px] leading-relaxed text-ink-soft">
+            Track your usage and activity over time.
+          </p>
         </header>
 
         {error && (
@@ -111,55 +105,90 @@ export function AnalyticsPage() {
           </section>
         )}
 
-        {/* Stat cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <LimitCard
-            icon={<Clock className="h-4 w-4" />}
-            label="5-hour window"
-            used={summary?.five_hour_used ?? 0}
-            limit={summary?.five_hour_limit ?? 0}
-            loading={loading}
-          />
-          <LimitCard
-            icon={<TrendingUp className="h-4 w-4" />}
-            label="Weekly"
-            used={summary?.weekly_used ?? 0}
-            limit={summary?.weekly_limit ?? 0}
-            loading={loading}
-          />
-          <StatCard
-            icon={<Activity className="h-4 w-4" />}
-            label="Today"
-            value={totalRequests}
-            sublabel="root + continuation"
-            loading={loading}
-          />
-          <StatCard
-            icon={<Zap className="h-4 w-4" />}
-            label="All time"
-            value={summary?.root_requests_total ?? 0}
-            sublabel="root requests"
-            loading={loading}
-          />
-        </div>
+        {/* Usage limits */}
+        <section className="mb-8 rounded-2xl border border-line bg-paper-raised p-6">
+          <div className="mb-5 flex items-center justify-between">
+            <div>
+              <h2 className="text-[15px] font-semibold text-ink">Usage limits</h2>
+              <p className="mt-0.5 text-[12.5px] text-ink-muted">
+                Your plan's limits determine how much you can use zWork over time.
+              </p>
+            </div>
+            {!loading && summary && (
+              <span className="text-[12px] text-ink-faint">Updated just now</span>
+            )}
+          </div>
+
+          <div className="space-y-5">
+            <UsageBar
+              label="5-hour window"
+              used={summary?.five_hour_used ?? 0}
+              limit={summary?.five_hour_limit ?? 0}
+              loading={loading}
+            />
+            <UsageBar
+              label="Weekly limit"
+              used={summary?.weekly_used ?? 0}
+              limit={summary?.weekly_limit ?? 0}
+              loading={loading}
+            />
+          </div>
+        </section>
+
+        {/* Upgrade prompt — free users only */}
+        {!isPaid && !loading && (
+          <section className="mb-8 flex items-center gap-4 rounded-2xl border border-line bg-paper-raised px-5 py-4">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-ink/5">
+              <Zap className="h-4 w-4 text-ink" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[13px] font-medium text-ink">
+                Need more capacity?
+              </p>
+              <p className="text-[12.5px] text-ink-muted">
+                Upgrade to Pro for higher limits and hosted access.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setView("plan")}
+              className="press ring-focus inline-flex items-center gap-1 rounded-xl bg-ink px-4 py-2 text-[12.5px] font-medium text-paper hover:bg-ink/90"
+            >
+              Upgrade
+              <ArrowUpRight className="h-3.5 w-3.5" />
+            </button>
+          </section>
+        )}
 
         {/* Activity chart */}
-        <section className="rounded-2xl border border-line bg-paper-raised p-6 mb-6">
+        <section className="rounded-2xl border border-line bg-paper-raised p-6">
           <div className="mb-6 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Server className="h-4 w-4 text-ink-soft" />
+              <TrendingUp className="h-4 w-4 text-ink-soft" />
               <h2 className="text-[15px] font-semibold text-ink">Activity</h2>
-              <span className="text-[12px] text-ink-faint">last {CHART_DAYS} days</span>
             </div>
-            {summary?.active_runs ? (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-accent/10 px-2.5 py-0.5 text-[12px] font-medium text-ink">
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
-                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent" />
-                </span>
-                {summary.active_runs} active
-              </span>
-            ) : null}
+            <div className="inline-flex rounded-full border border-line bg-paper p-0.5">
+              <button
+                type="button"
+                onClick={() => setChartDays(7)}
+                className={cn(
+                  "press rounded-full px-3 py-1 text-[12px] font-medium transition-colors",
+                  chartDays === 7 ? "bg-ink text-paper" : "text-ink-muted hover:text-ink"
+                )}
+              >
+                7 days
+              </button>
+              <button
+                type="button"
+                onClick={() => setChartDays(30)}
+                className={cn(
+                  "press rounded-full px-3 py-1 text-[12px] font-medium transition-colors",
+                  chartDays === 30 ? "bg-ink text-paper" : "text-ink-muted hover:text-ink"
+                )}
+              >
+                30 days
+              </button>
+            </div>
           </div>
 
           {loading && !summary ? (
@@ -205,7 +234,7 @@ export function AnalyticsPage() {
                       >
                         <div
                           className={cn(
-                            "w-full rounded-t-sm transition-colors",
+                            "w-full rounded-md transition-colors",
                             day.value > 0 ? "bg-accent/50 hover:bg-accent/70" : "bg-line/30"
                           )}
                           style={{ height: `${h}px` }}
@@ -226,46 +255,20 @@ export function AnalyticsPage() {
             </div>
           )}
         </section>
-
-        {/* Gateway status */}
-        {summary && (
-          <section className="rounded-2xl border border-line bg-paper-raised p-5">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className={cn(
-                  "flex h-8 w-8 items-center justify-center rounded-lg",
-                  summary.managed_gateway_ready ? "bg-emerald-500/10 text-emerald-600" : "bg-red-500/10 text-red-500"
-                )}>
-                  <Server className="h-4 w-4" />
-                </div>
-                <div>
-                  <div className="text-[13px] font-semibold text-ink">{summary.router_label}</div>
-                  <div className="text-[12px] text-ink-soft">{summary.managed_gateway_status}</div>
-                </div>
-              </div>
-              <div className="flex items-center gap-1.5 text-[12px] text-ink-faint">
-                {summary.managed_gateway_ready ? "Online" : "Offline"}
-                <ChevronRight className="h-3.5 w-3.5" />
-              </div>
-            </div>
-          </section>
-        )}
       </div>
     </div>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/*  Limit card — used / limit with progress bar                        */
+/*  Gemini-style usage bar                                             */
 /* ------------------------------------------------------------------ */
-function LimitCard({
-  icon,
+function UsageBar({
   label,
   used,
   limit,
   loading,
 }: {
-  icon: React.ReactNode;
   label: string;
   used: number;
   limit: number;
@@ -276,25 +279,20 @@ function LimitCard({
   const isCritical = pct > 95;
 
   return (
-    <section className="rounded-2xl border border-line bg-paper-raised p-5">
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-paper-sunken text-ink-soft">
-            {icon}
-          </div>
-          <span className="text-[13px] font-semibold text-ink">{label}</span>
-        </div>
+    <div>
+      <div className="mb-2 flex items-end justify-between">
+        <div className="text-[13px] font-medium text-ink">{label}</div>
         <div className="text-right">
-          <div className={cn("text-[22px] font-semibold tracking-tight text-ink", loading && "opacity-40")}>
-            {loading ? "…" : formatNumber(used)}
-          </div>
-          <div className="text-[11px] text-ink-faint">
-            {loading ? "…" : `of ${formatNumber(limit)}`}
-          </div>
+          <span className={cn("text-[18px] font-semibold tracking-tight text-ink", loading && "opacity-40")}>
+            {loading ? "—" : `${Math.round(pct)}%`}
+          </span>
+          <span className="ml-1 text-[11px] text-ink-faint">
+            {loading ? "" : `used`}
+          </span>
         </div>
       </div>
       <div
-        className="h-2 overflow-hidden rounded-full bg-paper-sunken"
+        className="h-2.5 overflow-hidden rounded-full bg-paper-sunken"
         role="progressbar"
         aria-valuenow={used}
         aria-valuemin={0}
@@ -309,38 +307,9 @@ function LimitCard({
           style={{ width: `${Math.max(pct, 0.5)}%` }}
         />
       </div>
-    </section>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Simple stat card — just a number                                   */
-/* ------------------------------------------------------------------ */
-function StatCard({
-  icon,
-  label,
-  value,
-  sublabel,
-  loading,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: number;
-  sublabel: string;
-  loading: boolean;
-}) {
-  return (
-    <section className="rounded-2xl border border-line bg-paper-raised p-5">
-      <div className="flex items-center gap-2.5 mb-3">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-paper-sunken text-ink-soft">
-          {icon}
-        </div>
-        <span className="text-[13px] font-semibold text-ink">{label}</span>
+      <div className="mt-1.5 flex justify-between text-[11px] text-ink-faint">
+        <span>{loading ? "—" : `${formatNumber(used)} of ${formatNumber(limit)}`}</span>
       </div>
-      <div className={cn("text-[28px] font-semibold tracking-tight text-ink", loading && "opacity-40")}>
-        {loading ? "…" : formatNumber(value)}
-      </div>
-      <div className="text-[11px] text-ink-faint mt-0.5">{sublabel}</div>
-    </section>
+    </div>
   );
 }

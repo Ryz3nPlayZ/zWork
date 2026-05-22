@@ -175,7 +175,7 @@ export function SettingsPage() {
       </div>
 
       {/* Body */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto" style={{ scrollbarGutter: "stable" }}>
         <div className="mx-auto flex w-full max-w-[1080px] gap-0 lg:gap-8 px-0 lg:px-8 py-0 lg:py-6">
           {/* Section tabs — horizontal on mobile, vertical on desktop */}
           <nav className="flex shrink-0 flex-row gap-0 lg:flex-col lg:w-[200px] border-b border-line lg:border-b-0 lg:pt-2 overflow-x-auto">
@@ -204,7 +204,7 @@ export function SettingsPage() {
           </nav>
 
           {/* Content area */}
-          <div className="min-w-0 flex-1 px-5 lg:px-0 py-5 space-y-5">
+          <div className="min-w-0 flex-1 w-full px-5 lg:px-0 py-5 space-y-5">
             {section === "account" && <AccountPanel />}
             {section === "models" && (
               <ModelsPanel

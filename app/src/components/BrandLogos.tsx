@@ -7,11 +7,15 @@ interface LogoProps {
   size?: number;
 }
 
-/* Gmail — official simple-icons "gmail" */
+/* Gmail — official 2020 brand mark (multi-color envelope) */
 export function GmailLogo({ className, size = 24 }: LogoProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden="true">
-      <path fill="#EA4335" d="M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 0 1 0 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.91 1.528-1.145C21.69 2.28 24 3.434 24 5.457z"/>
+    <svg width={size} height={size} viewBox="0 0 192 192" className={className} aria-hidden="true">
+      <path fill="#4285F4" d="M58 108 h14 V74 L52 59 v43 c0 3.32 2.69 6 6 6"/>
+      <path fill="#34A853" d="M120 108 h14 c3.32 0 6-2.69 6-6 V59 l-20 15"/>
+      <path fill="#FBBC04" d="M120 48 v26 l20-15 v-8 c0-7.42-8.47-11.65-14.4-7.2"/>
+      <path fill="#EA4335" d="M72 74 V48 l24 18 24-18 v26 L96 92"/>
+      <path fill="#C5221F" d="M52 51 v8 l20 15 V48 l-5.6-4.2 c-5.94-4.45-14.4-.22-14.4 7.2"/>
     </svg>
   );
 }

@@ -39,6 +39,8 @@ export default function App() {
   const setSearchOpen = useApp((s) => s.setSearchOpen);
   const triggerFocusChatInput = useApp((s) => s.triggerFocusChatInput);
   const onboardingDone = useApp((s) => s.onboardingDone);
+  // Skip onboarding in browser preview mode (non-Tauri environment)
+  const skipOnboarding = typeof window !== "undefined" && !((window as any).__TAURI_INTERNALS__);
   const [updateCard, setUpdateCard] = useState<UpdateCardState | null>(null);
   const [updateProgress, setUpdateProgress] = useState<UpdateProgress>({ phase: "idle" });
   const [recentUpdateNotice, setRecentUpdateNotice] = useState<{
@@ -88,11 +90,25 @@ export default function App() {
   useEffect(() => {
     if (previewMode) return;
     let cancelled = false;
+    const stubUser: CloudUser = {
+      user_id: "browser-preview",
+      email: "preview@zwork.local",
+      name: "Preview",
+      tier: "free",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
     void fetchCloudSession()
       .then((user) => {
         if (!cancelled) {
           setCloudUser(user);
           syncStoreUser(user);
+        }
+      })
+      .catch(() => {
+        // Not in Tauri — provide stub user so the app renders
+        if (!cancelled && typeof window !== "undefined" && !(window as any).__TAURI_INTERNALS__) {
+          setCloudUser(stubUser);
         }
       })
       .finally(() => {
@@ -312,15 +328,15 @@ export default function App() {
   }
 
   // Show onboarding when we know it's NOT done. `null` = still loading; render
-  // nothing then to avoid flash.
-  if (onboardingDone === false) {
+  // nothing then to avoid flash. Skip in browser (non-Tauri) preview.
+  if (!skipOnboarding && onboardingDone === false) {
     return (
       <Suspense fallback={<div className="h-screen w-screen bg-paper" />}>
         <Onboarding />
       </Suspense>
     );
   }
-  if (onboardingDone === null) {
+  if (!skipOnboarding && onboardingDone === null) {
     return <div className="h-screen w-screen bg-paper" />;
   }
 

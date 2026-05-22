@@ -539,61 +539,6 @@ fn composio_app_display_map() -> HashMap<String, (String, String, String)> {
     m
 }
 
-fn preferred_tools_map() -> HashMap<String, Vec<String>> {
-    let mut m = HashMap::new();
-    m.insert("gmail".into(), vec![
-        "GMAIL_SEND_EMAIL".into(), "GMAIL_READ_EMAILS".into(),
-        "GMAIL_SEARCH_EMAILS".into(), "GMAIL_GET_THREAD".into(),
-        "GMAIL_CREATE_DRAFT".into(), "GMAIL_REPLY_TO_EMAIL".into(),
-    ]);
-    m.insert("googlecalendar".into(), vec![
-        "GOOGLECALENDAR_CREATE_EVENT".into(), "GOOGLECALENDAR_GET_EVENTS".into(),
-        "GOOGLECALENDAR_UPDATE_EVENT".into(), "GOOGLECALENDAR_DELETE_EVENT".into(),
-        "GOOGLECALENDAR_LIST_CALENDARS".into(),
-    ]);
-    m.insert("slack".into(), vec![
-        "SLACK_SEND_MESSAGE".into(), "SLACK_GET_CHANNEL_MESSAGES".into(),
-        "SLACK_CREATE_CHANNEL".into(), "SLACK_ADD_REACTION".into(),
-        "SLACK_LIST_CHANNELS".into(), "SLACK_UPDATE_MESSAGE".into(),
-    ]);
-    m.insert("notion".into(), vec![
-        "NOTION_CREATE_PAGE".into(), "NOTION_GET_PAGE".into(),
-        "NOTION_UPDATE_PAGE".into(), "NOTION_SEARCH_PAGES".into(),
-        "NOTION_CREATE_DATABASE".into(), "NOTION_QUERY_DATABASE".into(),
-    ]);
-    m.insert("googledrive".into(), vec![
-        "GOOGLEDRIVE_LIST_FILES".into(), "GOOGLEDRIVE_UPLOAD_FILE".into(),
-        "GOOGLEDRIVE_DOWNLOAD_FILE".into(), "GOOGLEDRIVE_CREATE_FOLDER".into(),
-        "GOOGLEDRIVE_SHARE_FILE".into(),
-    ]);
-    m.insert("github".into(), vec![
-        "GITHUB_CREATE_ISSUE".into(), "GITHUB_GET_ISSUE".into(),
-        "GITHUB_LIST_ISSUES".into(), "GITHUB_CREATE_PULL_REQUEST".into(),
-        "GITHUB_GET_PULL_REQUEST".into(), "GITHUB_LIST_REPOS".into(),
-    ]);
-    m.insert("jira".into(), vec![
-        "JIRA_CREATE_ISSUE".into(), "JIRA_GET_ISSUE".into(),
-        "JIRA_UPDATE_ISSUE".into(), "JIRA_SEARCH_ISSUES".into(),
-        "JIRA_LIST_PROJECTS".into(),
-    ]);
-    m.insert("trello".into(), vec![
-        "TRELLO_CREATE_CARD".into(), "TRELLO_GET_CARD".into(),
-        "TRELLO_UPDATE_CARD".into(), "TRELLO_LIST_BOARDS".into(),
-        "TRELLO_LIST_CARDS".into(),
-    ]);
-    m.insert("todoist".into(), vec![
-        "TODOIST_CREATE_TASK".into(), "TODOIST_GET_TASK".into(),
-        "TODOIST_UPDATE_TASK".into(), "TODOIST_LIST_TASKS".into(),
-        "TODOIST_CREATE_PROJECT".into(),
-    ]);
-    m.insert("linear".into(), vec![
-        "LINEAR_CREATE_ISSUE".into(), "LINEAR_GET_ISSUE".into(),
-        "LINEAR_UPDATE_ISSUE".into(), "LINEAR_LIST_TEAMS".into(),
-        "LINEAR_SEARCH_ISSUES".into(),
-    ]);
-    m
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RequestKind {
     Root,
@@ -3255,12 +3200,11 @@ async fn composio_tools(
         })
         .collect();
 
-    let preferred = preferred_tools_map();
     let mut all_tools: Vec<Value> = Vec::new();
 
     for app in &connected_apps {
         let tools_url = format!(
-            "{}/tools?toolkit_slug={}",
+            "{}/tools?toolkit_slug={}&toolkit_versions=latest",
             COMPOSIO_BASE_URL,
             urlencoding::encode(app)
         );
@@ -3272,16 +3216,30 @@ async fn composio_tools(
             .await
         {
             Ok(r) => r,
-            Err(_) => continue,
+            Err(e) => {
+                tracing::warn!("Composio tools fetch failed for {}: {}", app, e);
+                continue;
+            }
         };
 
         if !tools_resp.status().is_success() {
+            let status = tools_resp.status();
+            let body = tools_resp.text().await.unwrap_or_default();
+            tracing::warn!(
+                "Composio tools non-success for {}: {} {}",
+                app,
+                status,
+                body.chars().take(200).collect::<String>()
+            );
             continue;
         }
 
         let tools_body: Value = match tools_resp.json().await {
             Ok(v) => v,
-            Err(_) => continue,
+            Err(e) => {
+                tracing::warn!("Composio tools JSON parse failed for {}: {}", app, e);
+                continue;
+            }
         };
 
         let tool_items = tools_body
@@ -3290,16 +3248,12 @@ async fn composio_tools(
             .cloned()
             .unwrap_or_default();
 
-        let whitelist: Vec<String> = preferred.get(app).cloned().unwrap_or_default();
         for t in &tool_items {
             let slug = t
                 .get("slug")
                 .and_then(|s| s.as_str())
                 .unwrap_or("")
                 .to_string();
-            if !whitelist.is_empty() && !whitelist.contains(&slug) {
-                continue;
-            }
             let name = t
                 .get("name")
                 .and_then(|n| n.as_str())

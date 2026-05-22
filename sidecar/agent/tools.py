@@ -1536,6 +1536,15 @@ def _shell_path() -> str | None:
     cached = getattr(_shell_path, "_cached", None)
     if cached is not None:
         return cached
+
+    # Clean environment for shell testing: remove bundled libs that break system binaries
+    test_env = os.environ.copy()
+    for key in ("LD_LIBRARY_PATH", "GTK_PATH", "QT_PLUGIN_PATH", "GST_PLUGIN_PATH", "GST_PLUGIN_SYSTEM_PATH", "GST_PLUGIN_SYSTEM_PATH_1_0"):
+        test_env.pop(key, None)
+    for key, val in list(test_env.items()):
+        if "/tmp/_MEI" in val or "/extracted/usr/lib" in val or "/extracted/lib" in val:
+            test_env.pop(key, None)
+
     for candidate in (
         "/usr/bin/bash",
         "/bin/bash",
@@ -1547,6 +1556,7 @@ def _shell_path() -> str | None:
                 [candidate, "-c", "echo ok && command -v cat >/dev/null"],
                 capture_output=True,
                 timeout=5,
+                env=test_env,
             )
             if result.returncode == 0:
                 _shell_path._cached = candidate
@@ -1562,10 +1572,22 @@ async def _run_command(command: str, cwd: str) -> dict[str, Any]:
     run = current_run()
     timeout_seconds = run.command_timeout_seconds if run is not None else 120
     output_cap = run.command_output_cap if run is not None else 20_000
+
+    # Clean environment for subprocess: remove bundled PyInstaller libs that
+    # break system binaries (e.g., bundled readline causes /bin/sh to fail)
+    import subprocess as _sp
+    clean_env = os.environ.copy()
+    for key in ("LD_LIBRARY_PATH", "GTK_PATH", "QT_PLUGIN_PATH", "GST_PLUGIN_PATH", "GST_PLUGIN_SYSTEM_PATH", "GST_PLUGIN_SYSTEM_PATH_1_0"):
+        clean_env.pop(key, None)
+    for key, val in list(clean_env.items()):
+        if "/tmp/_MEI" in val or "/extracted/usr/lib" in val or "/extracted/lib" in val:
+            clean_env.pop(key, None)
+
     kwargs: dict[str, Any] = {
         "cwd": str(Path(cwd).expanduser()),
         "stdout": asyncio.subprocess.PIPE,
         "stderr": asyncio.subprocess.PIPE,
+        "env": clean_env,
     }
     if os.name != "nt":
         kwargs["start_new_session"] = True
@@ -1616,12 +1638,22 @@ async def _run_command(command: str, cwd: str) -> dict[str, Any]:
 def _run_background(command: str, cwd: str) -> int:
     """Start a detached background process. Returns PID."""
     _ensure_command_allowed(command)
+
+    # Clean environment for subprocess: remove bundled PyInstaller libs
+    clean_env = os.environ.copy()
+    for key in ("LD_LIBRARY_PATH", "GTK_PATH", "QT_PLUGIN_PATH", "GST_PLUGIN_PATH", "GST_PLUGIN_SYSTEM_PATH", "GST_PLUGIN_SYSTEM_PATH_1_0"):
+        clean_env.pop(key, None)
+    for key, val in list(clean_env.items()):
+        if "/tmp/_MEI" in val or "/extracted/usr/lib" in val or "/extracted/lib" in val:
+            clean_env.pop(key, None)
+
     kwargs: dict[str, Any] = {
         "shell": True,
         "cwd": Path(cwd).expanduser(),
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
         "stdin": subprocess.DEVNULL,
+        "env": clean_env,
     }
     if os.name == "nt":
         # Windows: create a new process group so we can signal the tree
@@ -2037,42 +2069,59 @@ def _extract_document(path: str, fmt: str, pages: str | None) -> dict[str, Any]:
 
 
 def _dctl_env() -> dict[str, str]:
+    """Return a clean environment for running dctl as a standalone binary."""
     env = os.environ.copy()
-    # 1. Already importable — nothing to do.
-    try:
-        import importlib.util
+    # Clean bundled PyInstaller libs that break system binaries
+    for key in ("LD_LIBRARY_PATH", "GTK_PATH", "QT_PLUGIN_PATH", "GST_PLUGIN_PATH", "GST_PLUGIN_SYSTEM_PATH", "GST_PLUGIN_SYSTEM_PATH_1_0"):
+        env.pop(key, None)
+    for key, val in list(env.items()):
+        if "/tmp/_MEI" in val or "/extracted/usr/lib" in val or "/extracted/lib" in val:
+            env.pop(key, None)
+    return env
 
-        if importlib.util.find_spec("dctl") is not None:
-            return env
-    except Exception:
-        pass
-    # 2. Search relative to this file, zWork repo root, and ZWORK_ROOT env.
+
+def _dctl_path() -> str:
+    """Find the dctl standalone binary in dev or bundle layouts."""
+    # In bundles, dctl should be installed alongside the backend
+    # Check common locations
     this_file = Path(__file__).resolve()
-    search_roots: list[Path] = []
-    # Walk up looking for a sibling "dctl" directory (dev layout).
+    candidates = []
+
+    # Bundled: same directory as the backend binary
+    if "extracted" in str(this_file):
+        bundle_dir = this_file.parents[2]  # up from .../extracted/usr/lib/python*/sidecar/agent/tools.py
+        candidates.extend([
+            bundle_dir / "usr" / "bin" / "dctl",
+            bundle_dir / "bin" / "dctl",
+            bundle_dir / "dctl",
+        ])
+
+    # Dev: zWork repo root
     for parent in this_file.parents:
         if (parent / "zWork-Skills").exists() or (parent / "sidecar").exists():
-            search_roots.append(parent.parent)
+            candidates.append(parent.parent / "dctl" / "dctl")
+            candidates.append(parent.parent / "dctl")
             break
-    # Env override.
-    zwork_root = os.environ.get("ZWORK_ROOT")
-    if zwork_root:
-        search_roots.append(Path(zwork_root).expanduser().parent)
-    for root in search_roots:
-        candidate = root / "dctl"
-        if candidate.exists():
-            prev = env.get("PYTHONPATH", "")
-            env["PYTHONPATH"] = (
-                f"{candidate}{os.pathsep}{prev}" if prev else str(candidate)
-            )
-            break
-    return env
+
+    # System PATH
+    import shutil
+    system_dctl = shutil.which("dctl")
+    if system_dctl:
+        candidates.append(Path(system_dctl))
+
+    for candidate in candidates:
+        if candidate.exists() and os.access(candidate, os.X_OK):
+            return str(candidate)
+
+    # Fallback: hope it's in PATH
+    return "dctl"
 
 
 async def _run_dctl(subcommand: str, args: list[str], cwd: str) -> dict[str, Any]:
     if not subcommand:
         raise ValueError("dctl requires a subcommand")
-    cmd = [sys.executable, "-m", "dctl", subcommand, *args]
+    dctl_bin = _dctl_path()
+    cmd = [dctl_bin, subcommand, *args]
     run = current_run()
     timeout_seconds = run.command_timeout_seconds if run is not None else 120
     output_cap = run.command_output_cap if run is not None else 20_000

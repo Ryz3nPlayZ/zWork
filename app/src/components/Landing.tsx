@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Download, RefreshCw } from "lucide-react";
+import { Download, ArrowUpRight, Loader2 } from "lucide-react";
 import { ChatInput } from "./ChatInput";
 import { useApp } from "../lib/store";
 import { useResolvedTheme } from "../lib/theme";
@@ -7,6 +7,14 @@ import { isMacOS, needsLightweightRendering } from "../lib/platform";
 import { cn } from "../lib/cn";
 import type { UpdateCardState, UpdateProgress } from "../lib/update";
 import LightRays from "./LightRays";
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+}
 
 interface GreetingOption {
   text: string;
@@ -152,15 +160,17 @@ export function Landing({
 
           {updateCard && (
             <div className={cn(
-              "mt-3 w-full max-w-[480px] rounded-lg border border-line/50 px-3 py-2 shadow-xs",
+              "mt-3 w-full max-w-[480px] rounded-xl border border-line bg-paper-raised px-4 py-3 shadow-xs",
               needsLightweightRendering() ? "bg-paper" : "bg-paper/50 backdrop-blur-sm",
             )}>
               <div className="flex flex-wrap items-center gap-2">
-                <div className="min-w-0 flex-1 text-[11.5px] text-ink-muted">
-                  <span className="text-ink">Update available</span>
-                  <span className="text-ink-dim ml-1">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12.5px] font-medium text-ink">
+                    Update available
+                  </div>
+                  <div className="text-[11.5px] text-ink-muted">
                     {updateCard.currentVersion} → {updateCard.latestVersion}
-                  </span>
+                  </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5" data-no-drag>
                   <button
@@ -173,42 +183,61 @@ export function Landing({
                       void import("../lib/update").then((m) => m.openReleaseUrl(updateCard.releaseUrl));
                     }}
                     disabled={updateBusy}
-                    className="press inline-flex items-center gap-1 rounded-full bg-ink/90 px-2.5 py-1 text-[11px] font-medium text-paper transition-colors hover:bg-ink disabled:cursor-not-allowed disabled:opacity-60"
+                    className="press inline-flex items-center gap-1 rounded-xl bg-ink px-3 py-1.5 text-[12px] font-medium text-paper transition-colors hover:bg-ink/90 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {updateBusy ? (
-                      <>
-                        <RefreshCw className="h-3 w-3 animate-spin" />
-                      </>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : updateCard.source === "github" ? (
+                      <ArrowUpRight className="h-3.5 w-3.5" />
                     ) : (
-                      <>
-                        <Download className="h-3 w-3" />
-                        Update
-                      </>
+                      <Download className="h-3.5 w-3.5" />
                     )}
+                    {updateBusy
+                      ? updateProgress.phase === "downloading"
+                        ? "Downloading"
+                        : updateProgress.phase === "installing"
+                          ? "Installing"
+                          : updateProgress.phase === "relaunching"
+                            ? "Restarting"
+                            : "Updating"
+                      : updateCard.source === "github"
+                        ? "Get update"
+                        : "Install"}
                   </button>
-                  {onDismissUpdate && (
+                  {onDismissUpdate && !updateBusy && (
                     <button
                       type="button"
                       onClick={onDismissUpdate}
-                      className="press text-[11px] text-ink-dim hover:text-ink transition-colors px-1"
+                      className="press rounded-lg p-1 text-ink-faint hover:text-ink hover:bg-line/40 transition-colors"
                     >
-                      ✕
+                      <span className="sr-only">Dismiss</span>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
                     </button>
                   )}
                 </div>
               </div>
-              {(updateProgress.phase === "error" || updateBusy) && (
-                <div className="mt-1.5 flex items-center gap-1.5 text-[10.5px] text-ink-dim">
-                  <RefreshCw className={cn("h-3 w-3", updateBusy && "animate-spin")} />
-                  <span>
-                    {updateProgress.phase === "error"
-                      ? updateProgress.message
-                      : updateProgress.phase === "opening"
-                        ? "Opening release page…"
-                      : updateProgress.phase === "relaunching"
-                        ? "Relaunching…"
-                        : "Updating…"}
-                  </span>
+
+              {/* Download progress */}
+              {updateProgress.phase === "downloading" && updateProgress.totalBytes != null && (
+                <div className="mt-2.5">
+                  <div className="h-1.5 overflow-hidden rounded-full bg-paper-sunken">
+                    <div
+                      className="h-full rounded-full bg-accent/60 transition-all duration-300"
+                      style={{
+                        width: `${Math.min(100, (updateProgress.downloadedBytes / updateProgress.totalBytes) * 100)}%`,
+                      }}
+                    />
+                  </div>
+                  <div className="mt-1 text-[10.5px] text-ink-faint">
+                    {formatBytes(updateProgress.downloadedBytes)} of {formatBytes(updateProgress.totalBytes)}
+                  </div>
+                </div>
+              )}
+
+              {/* Error state */}
+              {updateProgress.phase === "error" && (
+                <div className="mt-2 text-[11.5px] text-red-600">
+                  {updateProgress.message}
                 </div>
               )}
             </div>

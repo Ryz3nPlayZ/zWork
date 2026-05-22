@@ -4,6 +4,8 @@ import {
   RefreshCw,
   ExternalLink,
   Plug,
+  X,
+  Check,
 } from "lucide-react";
 import { useApp } from "../lib/store";
 import { AppBrandLogo, hasBrandLogo } from "./BrandLogos";
@@ -23,8 +25,22 @@ const APP_DESCRIPTIONS: Record<string, string> = {
   hubspot: "Manage contacts, deals, and your CRM pipeline",
 };
 
+const APP_DETAILED_DESCRIPTIONS: Record<string, string> = {
+  gmail: "Connect Gmail to let zWork read, send, and search your emails on your behalf.",
+  googlecalendar: "Connect Google Calendar to create events, check availability, and manage your schedule.",
+  slack: "Connect Slack to send messages, read channels, and manage your workspace.",
+  notion: "Connect Notion to create pages, search your workspace, and query databases.",
+  googledrive: "Connect Google Drive to browse, upload, and share your files.",
+  github: "Connect GitHub to create issues, manage pull requests, and browse repositories.",
+  jira: "Connect Jira to track issues, manage projects, and search your board.",
+  trello: "Connect Trello to create cards, manage boards, and organize your work.",
+  todoist: "Connect Todoist to create tasks, manage projects, and stay organized.",
+  linear: "Connect Linear to create issues, track progress, and manage your team.",
+  asana: "Connect Asana to manage tasks, track projects, and organize work.",
+  hubspot: "Connect HubSpot to manage contacts, deals, and your CRM pipeline.",
+};
+
 export function ConnectorsPage() {
-  const composioStatus = useApp((s) => s.composioStatus);
   const composioAccounts = useApp((s) => s.composioAccounts);
   const composioApps = useApp((s) => s.composioApps);
   const refreshComposio = useApp((s) => s.refreshComposio);
@@ -32,6 +48,7 @@ export function ConnectorsPage() {
   const disconnectComposioApp = useApp((s) => s.disconnectComposioApp);
 
   const [connecting, setConnecting] = useState<string | null>(null);
+  const [expandedApp, setExpandedApp] = useState<string | null>(null);
 
   useEffect(() => {
     void refreshComposio();
@@ -42,8 +59,6 @@ export function ConnectorsPage() {
       .filter((a) => a.status === "ACTIVE")
       .map((a) => a.app),
   );
-  const toolCount = composioStatus?.tool_count ?? 0;
-  const connectedCount = connectedApps.size;
 
   async function handleConnect(appId: string) {
     setConnecting(appId);
@@ -54,16 +69,19 @@ export function ConnectorsPage() {
     }
   }
 
+  const expandedAppData = composioApps.find((a) => a.id === expandedApp);
+  const isExpandedConnected = expandedApp ? connectedApps.has(expandedApp) : false;
+
   return (
     <div className="flex h-full min-w-0 flex-1 overflow-y-auto bg-paper">
-      <div className="mx-auto w-full max-w-[860px] px-6 py-8">
+      <div className="mx-auto w-full max-w-[860px] px-6 py-10">
         {/* Header */}
-        <div className="mb-8 flex items-start justify-between gap-4">
+        <div className="mb-10 flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-[28px] font-semibold tracking-tight text-ink">
+            <h1 className="text-[32px] font-semibold tracking-tight text-ink">
               Connectors
             </h1>
-            <p className="mt-1.5 text-[14px] leading-relaxed text-ink-soft max-w-[480px]">
+            <p className="mt-2 text-[14px] leading-relaxed text-ink-soft max-w-[520px]">
               Connect your apps and zWork can act on your behalf — send emails,
               manage your calendar, update tasks, and more.
             </p>
@@ -77,33 +95,8 @@ export function ConnectorsPage() {
           </button>
         </div>
 
-        {/* Status summary */}
-        {connectedCount > 0 ? (
-          <div className="mb-6 flex items-center gap-3 rounded-2xl border border-line bg-paper-raised px-5 py-4">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/10">
-              <Plug className="h-4 w-4 text-emerald-600" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-[13px] font-medium text-ink">
-                {connectedCount} app{connectedCount !== 1 ? "s" : ""} connected
-                {toolCount > 0 && (
-                  <span className="text-ink-soft font-normal">
-                    {" "}&middot; {toolCount} action{toolCount !== 1 ? "s" : ""} available
-                  </span>
-                )}
-              </p>
-            </div>
-          </div>
-        ) : composioApps.length > 0 ? (
-          <div className="mb-6 rounded-2xl border border-dashed border-line bg-paper-raised/50 px-5 py-4">
-            <p className="text-[13px] text-ink-soft text-center">
-              No apps connected yet. Connect an app below to let zWork use it for you.
-            </p>
-          </div>
-        ) : null}
-
         {/* App grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {composioApps.map((app) => {
             const isConnected = connectedApps.has(app.id);
             const isConnecting = connecting === app.id;
@@ -111,72 +104,160 @@ export function ConnectorsPage() {
             const hasLogo = hasBrandLogo(app.id);
 
             return (
-              <div
+              <button
                 key={app.id}
-                className="group flex items-center gap-4 rounded-2xl border border-line bg-paper-raised px-4 py-3.5 transition-colors hover:border-line-strong"
+                type="button"
+                onClick={() => setExpandedApp(app.id)}
+                className="group text-left flex flex-col gap-3 rounded-2xl border border-line bg-paper-raised p-4 transition-colors hover:border-line-strong"
               >
-                {/* Logo */}
-                <div
-                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
-                  style={{
-                    backgroundColor: hasLogo ? `${app.color}14` : "rgb(var(--paper-sunken))",
-                    color: hasLogo ? app.color : "rgb(var(--ink-muted))",
-                  }}
-                >
-                  {hasLogo ? (
-                    <AppBrandLogo appId={app.id} size={22} />
-                  ) : (
-                    <Plug size={20} />
-                  )}
-                </div>
-
-                {/* Info */}
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-[14px] font-semibold text-ink truncate">
-                      {app.name}
-                    </h3>
-                    {isConnected && (
-                      <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-600">
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                        Connected
-                      </span>
+                <div className="flex items-center gap-3">
+                  <div
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+                    style={{
+                      backgroundColor: hasLogo ? `${app.color}14` : "rgb(var(--paper-sunken))",
+                      color: hasLogo ? app.color : "rgb(var(--ink-muted))",
+                    }}
+                  >
+                    {hasLogo ? (
+                      <AppBrandLogo appId={app.id} size={20} />
+                    ) : (
+                      <Plug size={18} />
                     )}
                   </div>
-                  <p className="text-[12.5px] leading-[18px] text-ink-soft truncate">
-                    {desc}
-                  </p>
-                </div>
-
-                {/* Action */}
-                <div className="shrink-0">
-                  {isConnecting ? (
-                    <div className="flex h-8 w-8 items-center justify-center">
-                      <Loader2 className="h-4 w-4 animate-spin text-ink-muted" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-[14px] font-semibold text-ink truncate">
+                        {app.name}
+                      </h3>
+                      {isConnected && (
+                        <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-600">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                          Connected
+                        </span>
+                      )}
                     </div>
-                  ) : isConnected ? (
-                    <button
-                      onClick={() => disconnectComposioApp(app.id)}
-                      className="press ring-focus rounded-lg border border-line px-3 py-1.5 text-[12.5px] font-medium text-ink-soft hover:text-red-500 hover:border-red-300 transition-colors"
-                    >
-                      Disconnect
-                    </button>
+                  </div>
+                </div>
+                <p className="text-[12.5px] leading-[18px] text-ink-soft line-clamp-2">
+                  {desc}
+                </p>
+
+                <div className="mt-auto pt-1">
+                  {isConnecting ? (
+                    <div className="flex h-7 items-center gap-1.5 text-[12px] text-ink-muted">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Connecting…
+                    </div>
                   ) : (
-                    <button
-                      onClick={() => handleConnect(app.id)}
-                      aria-label={`Connect ${app.name}`}
-                      className="press ring-focus inline-flex items-center gap-1.5 rounded-lg bg-ink-soft px-3.5 py-1.5 text-[12.5px] font-medium text-paper hover:bg-ink transition-colors"
-                    >
-                      Connect
+                    <span className="inline-flex items-center gap-1 text-[12px] font-medium text-ink-muted group-hover:text-ink transition-colors">
+                      {isConnected ? "Manage" : "Connect"}
                       <ExternalLink className="h-3 w-3 opacity-60" />
-                    </button>
+                    </span>
                   )}
                 </div>
-              </div>
+              </button>
             );
           })}
         </div>
       </div>
+
+      {/* Expanded overlay */}
+      {expandedAppData && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-paper/80 backdrop-blur-sm p-4"
+          onClick={() => setExpandedApp(null)}
+        >
+          <div
+            className="w-full max-w-[420px] rounded-2xl border border-line bg-paper-raised p-6 shadow-pop"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div
+                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl"
+                  style={{
+                    backgroundColor: hasBrandLogo(expandedAppData.id)
+                      ? `${expandedAppData.color}14`
+                      : "rgb(var(--paper-sunken))",
+                    color: hasBrandLogo(expandedAppData.id)
+                      ? expandedAppData.color
+                      : "rgb(var(--ink-muted))",
+                  }}
+                >
+                  {hasBrandLogo(expandedAppData.id) ? (
+                    <AppBrandLogo appId={expandedAppData.id} size={26} />
+                  ) : (
+                    <Plug size={22} />
+                  )}
+                </div>
+                <div>
+                  <h3 className="text-[18px] font-semibold text-ink">{expandedAppData.name}</h3>
+                  {isExpandedConnected && (
+                    <span className="inline-flex items-center gap-1 text-[12px] font-medium text-emerald-600">
+                      <Check className="h-3 w-3" /> Connected
+                    </span>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setExpandedApp(null)}
+                className="press rounded-lg p-1.5 text-ink-muted hover:text-ink hover:bg-line/40"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Description */}
+            <p className="mt-4 text-[13px] leading-relaxed text-ink-soft">
+              {APP_DETAILED_DESCRIPTIONS[expandedAppData.id] ?? APP_DESCRIPTIONS[expandedAppData.id] ?? `Use ${expandedAppData.name} from zWork`}
+            </p>
+
+            {/* Actions */}
+            <div className="mt-6 flex gap-2">
+              {isExpandedConnected ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void disconnectComposioApp(expandedAppData.id);
+                      setExpandedApp(null);
+                    }}
+                    className="press ring-focus flex-1 rounded-xl border border-red-300 bg-red-50 px-4 py-2.5 text-[13px] font-medium text-red-600 hover:bg-red-100 transition-colors dark:bg-red-500/10 dark:hover:bg-red-500/20"
+                  >
+                    Disconnect
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleConnect(expandedAppData.id);
+                      setExpandedApp(null);
+                    }}
+                    disabled={connecting === expandedAppData.id}
+                    className="press ring-focus flex-1 rounded-xl border border-line bg-paper px-4 py-2.5 text-[13px] font-medium text-ink hover:bg-paper-sunken disabled:opacity-40 transition-colors"
+                  >
+                    {connecting === expandedAppData.id ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Connecting…
+                      </span>
+                    ) : (
+                      <span className="flex items-center justify-center gap-2">
+                        Connect
+                        <ExternalLink className="h-3.5 w-3.5 opacity-60" />
+                      </span>
+                    )}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

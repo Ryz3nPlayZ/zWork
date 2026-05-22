@@ -865,7 +865,19 @@ export const useApp = create<AppState>((set, get) => ({
 
   stop: () => {
     get()._abort?.abort();
-    set({ _abort: null });
+    set((s) => {
+      const id = s.activeChatId;
+      if (!id) return { _abort: null };
+      const c = s.chats[id];
+      if (!c) return { _abort: null };
+      return {
+        _abort: null,
+        chats: {
+          ...s.chats,
+          [id]: { ...c, working: false, status: undefined },
+        },
+      };
+    });
   },
 
   retry: async () => {
@@ -1358,17 +1370,17 @@ export const useApp = create<AppState>((set, get) => ({
       const isAbort = e instanceof DOMException && e.name === "AbortError";
       if (!isAbort) {
         trackError("chat_error", String(e));
-        set((s) => {
-          const c = s.chats[localId];
-          if (!c) return s;
-          return {
-            chats: {
-              ...s.chats,
-              [localId]: { ...c, working: false, status: undefined, error: String(e) },
-            },
-          };
-        });
       }
+      set((s) => {
+        const c = s.chats[localId];
+        if (!c) return s;
+        return {
+          chats: {
+            ...s.chats,
+            [localId]: { ...c, working: false, status: undefined, error: isAbort ? undefined : String(e) },
+          },
+        };
+      });
     } finally {
       set({ _abort: null });
       // Refresh history so the new chat shows up in the sidebar.
