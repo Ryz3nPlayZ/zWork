@@ -12,9 +12,13 @@ initTheme();
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ErrorBoundary>
-      <PostHogProvider apiKey={posthogProjectToken} options={posthogOptions}>
+      {posthogProjectToken ? (
+        <PostHogProvider apiKey={posthogProjectToken} options={posthogOptions}>
+          <App />
+        </PostHogProvider>
+      ) : (
         <App />
-      </PostHogProvider>
+      )}
     </ErrorBoundary>
   </React.StrictMode>,
 );

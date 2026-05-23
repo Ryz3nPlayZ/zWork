@@ -2072,7 +2072,7 @@ def _dctl_env() -> dict[str, str]:
     """Return a clean environment for running dctl as a standalone binary."""
     env = os.environ.copy()
     # Clean bundled PyInstaller libs that break system binaries
-    for key in ("LD_LIBRARY_PATH", "GTK_PATH", "QT_PLUGIN_PATH", "GST_PLUGIN_PATH", "GST_PLUGIN_SYSTEM_PATH", "GST_PLUGIN_SYSTEM_PATH_1_0"):
+    for key in ("LD_LIBRARY_PATH", "PYTHONHOME", "PYTHONPATH", "GTK_PATH", "QT_PLUGIN_PATH", "GST_PLUGIN_PATH", "GST_PLUGIN_SYSTEM_PATH", "GST_PLUGIN_SYSTEM_PATH_1_0"):
         env.pop(key, None)
     for key, val in list(env.items()):
         if "/tmp/_MEI" in val or "/extracted/usr/lib" in val or "/extracted/lib" in val:
@@ -2082,8 +2082,6 @@ def _dctl_env() -> dict[str, str]:
 
 def _dctl_path() -> str:
     """Find the dctl standalone binary in dev or bundle layouts."""
-    # In bundles, dctl should be installed alongside the backend
-    # Check common locations
     this_file = Path(__file__).resolve()
     candidates = []
 
@@ -2102,6 +2100,9 @@ def _dctl_path() -> str:
             candidates.append(parent.parent / "dctl" / "dctl")
             candidates.append(parent.parent / "dctl")
             break
+
+    # Installed via install.sh
+    candidates.append(Path.home() / ".local" / "bin" / "dctl")
 
     # System PATH
     import shutil

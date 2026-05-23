@@ -4,6 +4,29 @@ const CLOUD_BASE = "https://api.tryzwork.app";
 const TOKEN_KEY = "zwork:cloud-token";
 const AUTH_CHANGED_EVENT = "zwork:cloud-auth-changed";
 
+/** Redirect to Better Auth Google sign-in for web (non-Tauri) environments. */
+export function startWebGoogleSignIn() {
+  window.location.href = `${CLOUD_BASE}/api/auth/sign-in/google`;
+}
+
+/** Check URL for a token param from OAuth callback and store it. Returns true if token was found. */
+export function handleOAuthTokenCallback(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("token");
+    if (token) {
+      setToken(token);
+      // Clean the URL
+      const url = new URL(window.location.href);
+      url.searchParams.delete("token");
+      window.history.replaceState({}, "", url.pathname);
+      return true;
+    }
+  } catch { /* ignore */ }
+  return false;
+}
+
 class CloudFetchError extends Error {
   status: number;
 
@@ -236,11 +259,12 @@ export async function fetchAnalyticsSummary() {
   return cloudFetch<AnalyticsSummary>("/api/analytics/summary");
 }
 
-export async function createBillingCheckoutSession(annual = false) {
+export async function createBillingCheckoutSession(annual = false, tier = "pro") {
   return cloudFetch<BillingSession>("/api/billing/checkout", {
     method: "POST",
     body: JSON.stringify({
       annual,
+      tier,
       success_url: `${window.location.origin}/billing/success`,
       cancel_url: `${window.location.origin}/billing/cancel`,
     }),

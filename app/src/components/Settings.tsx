@@ -653,7 +653,6 @@ function GeneralPanel({
     if (v === "light" || v === "dark") return v;
     return "system";
   });
-
   useEffect(() => {
     setDefaultModel(settings?.default_model ?? "");
     setUseClaude(!!settings?.use_claude_code_config);

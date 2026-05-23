@@ -48,6 +48,7 @@ export function ConnectorsPage() {
   const disconnectComposioApp = useApp((s) => s.disconnectComposioApp);
 
   const [connecting, setConnecting] = useState<string | null>(null);
+  const [connectError, setConnectError] = useState<string | null>(null);
   const [expandedApp, setExpandedApp] = useState<string | null>(null);
 
   useEffect(() => {
@@ -62,8 +63,11 @@ export function ConnectorsPage() {
 
   async function handleConnect(appId: string) {
     setConnecting(appId);
+    setConnectError(null);
     try {
       await connectComposioApp(appId);
+    } catch (e: any) {
+      setConnectError(e?.message || String(e));
     } finally {
       setConnecting(null);
     }
@@ -74,14 +78,14 @@ export function ConnectorsPage() {
 
   return (
     <div className="flex h-full min-w-0 flex-1 overflow-y-auto bg-paper">
-      <div className="mx-auto w-full max-w-[860px] px-6 py-10">
+      <div className="mx-auto w-full max-w-[860px] px-6 py-14">
         {/* Header */}
-        <div className="mb-10 flex items-start justify-between gap-4">
+        <div className="mb-12 flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-[32px] font-semibold tracking-tight text-ink">
+            <h1 className="font-serif text-[36px] tracking-tight text-ink">
               Connectors
             </h1>
-            <p className="mt-2 text-[14px] leading-relaxed text-ink-soft max-w-[520px]">
+            <p className="mt-3 text-[14px] leading-relaxed text-ink-soft max-w-[520px]">
               Connect your apps and zWork can act on your behalf — send emails,
               manage your calendar, update tasks, and more.
             </p>
@@ -214,8 +218,15 @@ export function ConnectorsPage() {
               {APP_DETAILED_DESCRIPTIONS[expandedAppData.id] ?? APP_DESCRIPTIONS[expandedAppData.id] ?? `Use ${expandedAppData.name} from zWork`}
             </p>
 
+            {/* Error */}
+            {connectError && (
+              <div className="mt-4 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-[12.5px] leading-relaxed text-red-700 dark:bg-red-500/10 dark:border-red-500/30 dark:text-red-400">
+                {connectError}
+              </div>
+            )}
+
             {/* Actions */}
-            <div className="mt-6 flex gap-2">
+            <div className="mt-4 flex gap-2">
               {isExpandedConnected ? (
                 <>
                   <button

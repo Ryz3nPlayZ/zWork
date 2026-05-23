@@ -2,8 +2,6 @@ import { useEffect, useState } from "react";
 import {
   TrendingUp,
   Loader2,
-  Zap,
-  ArrowUpRight,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
@@ -77,13 +75,13 @@ export function AnalyticsPage() {
 
   return (
     <div className="flex h-full min-w-0 flex-1 overflow-y-auto bg-paper">
-      <div className="mx-auto w-full max-w-[720px] px-6 py-10">
+      <div className="mx-auto w-full max-w-[720px] px-6 py-14">
         {/* Header */}
-        <header className="mb-10">
+        <header className="mb-12">
           <div className="flex items-center gap-3">
-            <h1 className="text-[32px] font-semibold tracking-tight text-ink">Analytics</h1>
+            <h1 className="font-serif text-[36px] tracking-tight text-ink">Analytics</h1>
             <span className={cn(
-              "rounded-full px-2.5 py-0.5 text-[12px] font-medium",
+              "rounded-full px-2.5 py-0.5 text-[12px] font-semibold",
               tier === "max" ? "bg-amber-500/10 text-amber-600" :
               tier === "pro" ? "bg-accent/10 text-ink" :
               "bg-ink/5 text-ink-soft"
@@ -91,7 +89,7 @@ export function AnalyticsPage() {
               {tier === "max" ? "Max" : tier === "pro" ? "Pro" : "Free"}
             </span>
           </div>
-          <p className="mt-2 text-[14px] leading-relaxed text-ink-soft">
+          <p className="mt-3 text-[14px] leading-relaxed text-ink-soft">
             Track your usage and activity over time.
           </p>
         </header>
@@ -105,11 +103,27 @@ export function AnalyticsPage() {
           </section>
         )}
 
+        {/* Upgrade prompt — free users only, subtle banner */}
+        {!isPaid && !loading && (
+          <div className="mb-8 flex items-center justify-between gap-3 rounded-xl border border-line bg-paper-raised px-4 py-2.5">
+            <p className="text-[12.5px] text-ink-soft">
+              Need more capacity?{" "}
+              <button
+                type="button"
+                onClick={() => setView("plan")}
+                className="font-semibold text-ink hover:underline underline-offset-2"
+              >
+                Upgrade to Pro
+              </button>
+            </p>
+          </div>
+        )}
+
         {/* Usage limits */}
         <section className="mb-8 rounded-2xl border border-line bg-paper-raised p-6">
           <div className="mb-5 flex items-center justify-between">
             <div>
-              <h2 className="text-[15px] font-semibold text-ink">Usage limits</h2>
+              <h2 className="text-[16px] font-bold text-ink">Usage limits</h2>
               <p className="mt-0.5 text-[12.5px] text-ink-muted">
                 Your plan's limits determine how much you can use zWork over time.
               </p>
@@ -135,37 +149,12 @@ export function AnalyticsPage() {
           </div>
         </section>
 
-        {/* Upgrade prompt — free users only */}
-        {!isPaid && !loading && (
-          <section className="mb-8 flex items-center gap-4 rounded-2xl border border-line bg-paper-raised px-5 py-4">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-ink/5">
-              <Zap className="h-4 w-4 text-ink" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-[13px] font-medium text-ink">
-                Need more capacity?
-              </p>
-              <p className="text-[12.5px] text-ink-muted">
-                Upgrade to Pro for higher limits and hosted access.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setView("plan")}
-              className="press ring-focus inline-flex items-center gap-1 rounded-xl bg-ink px-4 py-2 text-[12.5px] font-medium text-paper hover:bg-ink/90"
-            >
-              Upgrade
-              <ArrowUpRight className="h-3.5 w-3.5" />
-            </button>
-          </section>
-        )}
-
         {/* Activity chart */}
         <section className="rounded-2xl border border-line bg-paper-raised p-6">
           <div className="mb-6 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <TrendingUp className="h-4 w-4 text-ink-soft" />
-              <h2 className="text-[15px] font-semibold text-ink">Activity</h2>
+              <h2 className="text-[16px] font-bold text-ink">Activity</h2>
             </div>
             <div className="inline-flex rounded-full border border-line bg-paper p-0.5">
               <button

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import {
   api,
   streamChat,
+  IS_WEB,
   type ApiChatSummary,
   type ProvidersResponse,
   type SettingsPublic,
@@ -639,6 +640,48 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   bootstrap: async () => {
+    // Web mode: skip local sidecar entirely
+    if (IS_WEB) {
+      try {
+        const cloudUser = await fetchCloudSession();
+        if (cloudUser) {
+          set({
+            user: {
+              id: cloudUser.user_id,
+              email: cloudUser.email,
+              name: cloudUser.name,
+              tier: cloudUser.tier,
+              coupon_code: cloudUser.coupon_code ?? null,
+            },
+          });
+        }
+      } catch (e) { console.warn("bootstrap cloud sync failed:", e) }
+
+      // Mark onboarding done in web (no local sidecar)
+      rememberOnboardingDone(true);
+
+      // Provide a synthetic providers object so the model picker shows zwork-router
+      const webProviders: ProvidersResponse = {
+        credentials: {},
+        default_model: "zwork-router",
+        models: [
+          {
+            id: "zwork-router",
+            name: "zWork Router",
+            subtitle: "Managed AI router",
+            shape: "openai",
+            credential: "managed",
+            model_id: "zwork-router",
+            configured: true,
+            synthesized: false,
+          },
+        ],
+      };
+
+      set({ onboardingDone: true, model: "zwork-router", providers: webProviders });
+      return;
+    }
+
     await api.waitForBackend(20).catch(() => {});
 
     try {
@@ -730,22 +773,20 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   connectComposioApp: async (app: string) => {
-    try {
-      const { url } = await api.composioConnect(app);
-      await invoke("open_external", { url });
-      let attempts = 0;
-      const poll = setInterval(async () => {
-        attempts++;
-        try {
-          const { accounts } = await api.composioAccounts();
-          const connected = accounts.some((a) => a.app === app && a.status === "ACTIVE");
-          if (connected || attempts > 40) {
-            clearInterval(poll);
-            await get().refreshComposio();
-          }
-        } catch { /* keep polling */ }
-      }, 3000);
-    } catch (e) { console.warn("connectComposioApp failed:", e) }
+    const { url } = await api.composioConnect(app);
+    await invoke("open_external", { url });
+    let attempts = 0;
+    const poll = setInterval(async () => {
+      attempts++;
+      try {
+        const { accounts } = await api.composioAccounts();
+        const connected = accounts.some((a) => a.app === app && a.status === "ACTIVE");
+        if (connected || attempts > 40) {
+          clearInterval(poll);
+          await get().refreshComposio();
+        }
+      } catch { /* keep polling */ }
+    }, 3000);
   },
 
   disconnectComposioApp: async (app: string) => {

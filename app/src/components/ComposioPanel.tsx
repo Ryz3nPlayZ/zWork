@@ -16,6 +16,7 @@ export function ComposioPanel() {
   const disconnectComposioApp = useApp((s) => s.disconnectComposioApp);
 
   const [connecting, setConnecting] = useState<string | null>(null);
+  const [connectError, setConnectError] = useState<string | null>(null);
 
   const available = composioStatus?.available ?? false;
   const connectedApps = new Set(
@@ -26,8 +27,11 @@ export function ComposioPanel() {
 
   async function handleConnect(appId: string) {
     setConnecting(appId);
+    setConnectError(null);
     try {
       await connectComposioApp(appId);
+    } catch (e: any) {
+      setConnectError(e?.message || String(e));
     } finally {
       setConnecting(null);
     }
@@ -53,6 +57,12 @@ export function ComposioPanel() {
           <RefreshCw className="h-3.5 w-3.5" />
         </button>
       </div>
+
+      {connectError && (
+        <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-[12.5px] leading-relaxed text-red-700 dark:bg-red-500/10 dark:border-red-500/30 dark:text-red-400">
+          {connectError}
+        </div>
+      )}
 
       {composioStatus && composioStatus.tool_count > 0 && (
         <p className="text-[12px] text-ink-faint">

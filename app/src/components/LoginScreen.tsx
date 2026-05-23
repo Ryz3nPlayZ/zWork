@@ -5,6 +5,7 @@ import { Logo } from "./Logo";
 import LightRays from "./LightRays";
 import { useResolvedTheme } from "../lib/theme";
 import { useApp } from "../lib/store";
+import { startWebGoogleSignIn } from "../lib/cloud";
 import { cn } from "../lib/cn";
 import { isMacOS, needsLightweightRendering } from "../lib/platform";
 import { ROTATING_WORDS } from "../lib/constants";
@@ -63,8 +64,15 @@ export function LoginScreen() {
   const [error, setError] = useState<string | null>(null);
   // const [notice, setNotice] = useState<string | null>(null);
 
+  const isWeb = typeof window !== "undefined" && !((window as any).__TAURI_INTERNALS__);
+
   const handleGoogleSignIn = async () => {
     setError(null);
+    if (isWeb) {
+      // Web: redirect to Better Auth Google OAuth
+      startWebGoogleSignIn();
+      return;
+    }
     try {
       await signInWithGoogle();
     } catch (err) {

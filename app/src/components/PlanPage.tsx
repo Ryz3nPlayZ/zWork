@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Zap, ArrowRight, Gift } from "lucide-react";
+import { Check, ArrowUpRight } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { type CloudUser, createBillingCheckoutSession, createBillingPortalSession, redeemAccessCode } from "../lib/cloud";
 import { cn } from "../lib/cn";
@@ -9,9 +9,11 @@ interface PricingTier {
   name: string;
   priceMonthly: number;
   priceAnnual: number;
+  annualPerMonth: number;
   description: string;
   features: string[];
   cta: string;
+  highlight?: boolean;
 }
 
 const TIERS: PricingTier[] = [
@@ -20,6 +22,7 @@ const TIERS: PricingTier[] = [
     name: "Free",
     priceMonthly: 0,
     priceAnnual: 0,
+    annualPerMonth: 0,
     description: "For getting started with AI-powered development.",
     features: [
       "20 root requests per 5 hours",
@@ -34,6 +37,7 @@ const TIERS: PricingTier[] = [
     name: "Pro",
     priceMonthly: 12,
     priceAnnual: 120,
+    annualPerMonth: 10,
     description: "Higher limits and hosted access for serious work.",
     features: [
       "200 root requests per 5 hours",
@@ -43,12 +47,14 @@ const TIERS: PricingTier[] = [
       "Priority support",
     ],
     cta: "Upgrade to Pro",
+    highlight: true,
   },
   {
     id: "max",
     name: "Max",
     priceMonthly: 50,
-    priceAnnual: 480,
+    priceAnnual: 500,
+    annualPerMonth: 41.67,
     description: "Maximum capacity for power users and teams.",
     features: [
       "1,000 root requests per 5 hours",
@@ -91,7 +97,7 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
     setBusy(true);
     setError("");
     try {
-      const session = await createBillingCheckoutSession(isAnnual);
+      const session = await createBillingCheckoutSession(isAnnual, tierId);
       if (session?.url) {
         await invoke("open_external", { url: session.url });
       }
@@ -121,12 +127,12 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
 
   return (
     <div className="flex h-full min-w-0 flex-1 overflow-y-auto bg-paper">
-      <div className="mx-auto w-full max-w-[980px] px-6 py-10">
+      <div className="mx-auto w-full max-w-[1060px] px-8 py-14">
         {/* Header */}
-        <header className="mb-10 text-center">
-          <h1 className="text-[32px] font-semibold tracking-tight text-ink">Pricing</h1>
-          <p className="mx-auto mt-3 max-w-[480px] text-[15px] leading-relaxed text-ink-soft">
-            Upgrade to zWork Membership to unlock faster models, higher concurrency, and more powerful capabilities.
+        <header className="mb-14 text-center">
+          <h1 className="font-serif text-[40px] tracking-tight text-ink">Pricing</h1>
+          <p className="mx-auto mt-4 max-w-[500px] text-[15px] leading-relaxed text-ink-soft">
+            Upgrade to unlock faster models, higher concurrency, and more powerful capabilities.
           </p>
         </header>
 
@@ -137,13 +143,13 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
         )}
 
         {/* Monthly / Annual toggle */}
-        <div className="mb-10 flex justify-center">
-          <div className="inline-flex rounded-full border border-line bg-paper-raised p-0.5">
+        <div className="mb-12 flex justify-center">
+          <div className="inline-flex rounded-full border border-line bg-paper-raised p-1">
             <button
               type="button"
               onClick={() => setIsAnnual(false)}
               className={cn(
-                "press rounded-full px-5 py-2 text-[13px] font-medium transition-colors",
+                "press rounded-full px-6 py-2.5 text-[13px] font-semibold transition-colors",
                 !isAnnual ? "bg-ink text-paper" : "text-ink-muted hover:text-ink"
               )}
             >
@@ -153,12 +159,12 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
               type="button"
               onClick={() => setIsAnnual(true)}
               className={cn(
-                "press rounded-full px-5 py-2 text-[13px] font-medium transition-colors",
+                "press rounded-full px-6 py-2.5 text-[13px] font-semibold transition-colors",
                 isAnnual ? "bg-ink text-paper" : "text-ink-muted hover:text-ink"
               )}
             >
               Annual
-              <span className="ml-1.5 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600">
+              <span className="ml-1.5 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-600">
                 Save 17%
               </span>
             </button>
@@ -166,7 +172,7 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
         </div>
 
         {/* Cards */}
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-3 items-start">
           {TIERS.map((tier) => (
             <PricingCard
               key={tier.id}
@@ -181,31 +187,19 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
           ))}
         </div>
 
-        {/* Coupon */}
-        <section className="mx-auto mt-10 max-w-[480px] rounded-2xl border border-line bg-paper-raised p-5">
-          <button
-            type="button"
-            onClick={() => setShowCoupon((s) => !s)}
-            className="press flex w-full items-center justify-between"
-          >
-            <div className="flex items-center gap-2">
-              <Gift className="h-4 w-4 text-ink-muted" />
-              <span className="text-[13px] font-medium text-ink">Redeem access code</span>
-            </div>
-            <ArrowRight
-              className={cn(
-                "h-4 w-4 text-ink-muted transition-transform duration-200",
-                showCoupon && "rotate-90"
-              )}
-            />
-          </button>
-
-          {showCoupon && (
-            <div className="mt-4 border-t border-line pt-4">
-              <p className="mb-3 text-[12.5px] text-ink-muted">
-                Have a code? Enter it below to apply it to your account.
-              </p>
-              <div className="flex gap-2">
+        {/* Coupon — small text link */}
+        <div className="mt-10 text-center">
+          {!showCoupon ? (
+            <button
+              type="button"
+              onClick={() => setShowCoupon(true)}
+              className="text-[12px] text-ink-faint hover:text-ink-muted underline underline-offset-2 transition-colors"
+            >
+              Redeem access code
+            </button>
+          ) : (
+            <div className="mx-auto inline-flex flex-col items-center gap-2">
+              <div className="flex items-center gap-2">
                 <label htmlFor="coupon-code-input" className="sr-only">
                   Access code
                 </label>
@@ -216,7 +210,7 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
                   onChange={(e) => setCouponCode(e.target.value)}
                   placeholder="Enter code…"
                   disabled={couponBusy}
-                  className="block flex-1 rounded-xl border border-line bg-paper px-3 py-2.5 text-[13px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none disabled:opacity-40"
+                  className="block w-[200px] rounded-lg border border-line bg-paper px-3 py-1.5 text-[12px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none disabled:opacity-40"
                   onKeyDown={(e) => {
                     if (e.key === "Enter") handleRedeem();
                   }}
@@ -225,14 +219,21 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
                   type="button"
                   disabled={couponBusy || !couponCode.trim()}
                   onClick={handleRedeem}
-                  className="press ring-focus rounded-xl bg-ink px-5 py-2.5 text-[13px] font-medium text-paper hover:bg-ink/90 disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="press ring-focus rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-paper hover:bg-ink/90 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {couponBusy ? "Redeeming…" : "Redeem"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShowCoupon(false); setCouponCode(""); }}
+                  className="text-[12px] text-ink-faint hover:text-ink-muted"
+                >
+                  Cancel
                 </button>
               </div>
             </div>
           )}
-        </section>
+        </div>
       </div>
     </div>
   );
@@ -257,43 +258,45 @@ function PricingCard({
 }) {
   const price = isAnnual ? tier.priceAnnual : tier.priceMonthly;
   const periodLabel = isAnnual ? "/year" : "/month";
-  const billingLabel = isAnnual ? "Billed annually" : "Billed monthly";
   const isFree = tier.id === "free";
 
   return (
     <div
       className={cn(
-        "relative flex flex-col rounded-2xl border p-6 transition-colors",
+        "relative flex flex-col rounded-2xl border p-7 transition-colors",
         isCurrent
           ? "border-ink/20 bg-paper-raised"
-          : "border-line bg-paper-raised hover:border-line-strong"
+          : tier.highlight
+            ? "border-ink/30 bg-paper-raised shadow-sm"
+            : "border-line bg-paper-raised hover:border-line-strong"
       )}
     >
       {isCurrent && (
         <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-          <span className="inline-flex items-center gap-1 rounded-full border border-line-strong bg-paper px-2.5 py-0.5 text-[11px] font-medium text-ink shadow-sm">
-            <Zap className="h-3 w-3" /> Current
+          <span className="inline-flex items-center rounded-full border border-line-strong bg-paper px-3 py-0.5 text-[11px] font-semibold text-ink shadow-sm">
+            Current
           </span>
         </div>
       )}
 
       {/* Plan name */}
-      <div className="mb-4">
-        <h3 className="text-[16px] font-semibold tracking-tight text-ink">{tier.name}</h3>
-        <p className="mt-1 text-[13px] text-ink-muted">{tier.description}</p>
+      <div className="mb-5">
+        <h3 className="text-[18px] font-bold tracking-tight text-ink">{tier.name}</h3>
+        <p className="mt-1.5 text-[13px] text-ink-muted">{tier.description}</p>
       </div>
 
       {/* Price */}
       <div className="mb-6">
         <div className="flex items-baseline gap-1">
-          <span className="text-[36px] font-semibold tracking-tight text-ink">
+          <span className="text-[44px] font-bold tracking-tight text-ink">
             ${price}
           </span>
-          <span className="text-[14px] text-ink-muted">{periodLabel}</span>
+          <span className="text-[15px] text-ink-muted">{periodLabel}</span>
         </div>
-        {!isFree && (
-          <p className="mt-0.5 text-[12px] text-ink-faint">{billingLabel}</p>
-        )}
+        {/* Always render the billing line so cards align, even for Free */}
+        <p className={cn("mt-1 text-[12px]", isFree ? "text-transparent" : "text-ink-faint")}>
+          {isAnnual ? "Billed annually" : "Billed monthly"}
+        </p>
       </div>
 
       {/* CTA */}
@@ -302,7 +305,7 @@ function PricingCard({
           type="button"
           onClick={onManage}
           disabled={busy}
-          className="press ring-focus mb-6 w-full rounded-xl border border-line bg-paper px-4 py-2.5 text-[13px] font-medium text-ink hover:bg-paper-sunken disabled:opacity-40"
+          className="press ring-focus mb-6 w-full rounded-xl border border-line bg-paper px-4 py-3 text-[13px] font-semibold text-ink hover:bg-paper-sunken disabled:opacity-40"
         >
           Manage billing
         </button>
@@ -310,34 +313,36 @@ function PricingCard({
         <button
           type="button"
           disabled
-          className="mb-6 w-full rounded-xl border border-line bg-paper px-4 py-2.5 text-[13px] font-medium text-ink-muted opacity-60 cursor-default"
+          className="mb-6 w-full rounded-xl border border-line bg-paper px-4 py-3 text-[13px] font-semibold text-ink-muted opacity-60 cursor-default"
         >
           {tier.cta}
-        </button>
-      ) : tier.id === "max" ? (
-        <button
-          type="button"
-          disabled
-          className="mb-6 w-full rounded-xl border border-line bg-paper px-4 py-2.5 text-[13px] font-medium text-ink-muted opacity-60 cursor-default"
-        >
-          Coming soon
         </button>
       ) : (
         <button
           type="button"
           disabled={busy}
           onClick={onUpgrade}
-          className="press ring-focus mb-6 w-full rounded-xl bg-ink px-4 py-2.5 text-[13px] font-medium text-paper hover:bg-ink/90 disabled:opacity-40 disabled:cursor-not-allowed"
+          className={cn(
+            "press ring-focus mb-6 w-full rounded-xl px-4 py-3 text-[13px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
+            tier.highlight
+              ? "bg-ink text-paper hover:bg-ink/90"
+              : "border border-line bg-paper text-ink hover:bg-paper-sunken"
+          )}
         >
-          {busy ? "Opening…" : tier.cta}
+          {busy ? "Opening…" : (
+            <span className="inline-flex items-center justify-center gap-1.5">
+              {tier.cta}
+              <ArrowUpRight className="h-3.5 w-3.5" />
+            </span>
+          )}
         </button>
       )}
 
       {/* Features */}
-      <ul className="mt-auto space-y-2.5">
+      <ul className="mt-auto space-y-3">
         {tier.features.map((feature) => (
-          <li key={feature} className="flex items-start gap-2 text-[12.5px] text-ink-soft">
-            <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-muted" />
+          <li key={feature} className="flex items-start gap-2.5 text-[13px] text-ink-soft">
+            <Check className="mt-0.5 h-4 w-4 shrink-0 text-ink-muted" />
             {feature}
           </li>
         ))}

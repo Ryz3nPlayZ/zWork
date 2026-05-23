@@ -121,14 +121,19 @@ class ComposioManager:
             }
 
     async def get_connect_link(self, app_name: str) -> dict:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                f"{COMPOSIO_CLOUD_BASE}/connect",
-                headers=self._headers(),
-                json={"app": app_name},
-            )
-        resp.raise_for_status()
-        return resp.json()
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    f"{COMPOSIO_CLOUD_BASE}/connect",
+                    headers=self._headers(),
+                    json={"app": app_name},
+                )
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.TimeoutError:
+            raise RuntimeError(f"Timeout connecting to {app_name}") from None
+        except httpx.HTTPStatusError as e:
+            raise RuntimeError(f"Failed to get connect link for {app_name}: {e.response.status_code}") from None
 
     async def get_connected_accounts(self) -> list[dict]:
         if not self.is_available:
@@ -152,16 +157,21 @@ class ComposioManager:
             return []
 
     async def disconnect(self, app_name: str) -> None:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                f"{COMPOSIO_CLOUD_BASE}/disconnect",
-                headers=self._headers(),
-                json={"app": app_name},
-            )
-        resp.raise_for_status()
-        data = resp.json()
-        self._connected_apps = data.get("connected_apps", [])
-        await self._refresh_tool_cache()
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    f"{COMPOSIO_CLOUD_BASE}/disconnect",
+                    headers=self._headers(),
+                    json={"app": app_name},
+                )
+            resp.raise_for_status()
+            data = resp.json()
+            self._connected_apps = data.get("connected_apps", [])
+            await self._refresh_tool_cache()
+        except httpx.TimeoutError:
+            raise RuntimeError(f"Timeout disconnecting {app_name}") from None
+        except httpx.HTTPStatusError as e:
+            raise RuntimeError(f"Failed to disconnect {app_name}: {e.response.status_code}") from None
 
     async def _refresh_status(self) -> None:
         try:
@@ -174,8 +184,10 @@ class ComposioManager:
                 data = resp.json()
                 self._enabled = data.get("available", False)
             await self.get_connected_accounts()
-        except Exception:
-            pass
+        except httpx.TimeoutError:
+            log.debug("composio _refresh_status timed out")
+        except httpx.HTTPError as e:
+            log.debug("composio _refresh_status failed: %s", e)
 
     async def _refresh_tool_cache(self) -> None:
         if not self.is_available:

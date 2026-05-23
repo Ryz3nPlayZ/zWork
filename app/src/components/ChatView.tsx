@@ -25,7 +25,19 @@ export function ChatView() {
   const [titleDraft, setTitleDraft] = useState("");
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    const el = endRef.current;
+    if (!el) return;
+    const container = el.parentElement;
+    if (!container) return;
+    const scrollEl = container.parentElement as HTMLElement | null;
+    if (!scrollEl) return;
+    const distance = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
+    if (distance <= 0) return;
+    if (distance < 300) {
+      scrollEl.scrollBy({ top: distance, behavior: "smooth" });
+    } else {
+      scrollEl.scrollTo({ top: scrollEl.scrollHeight, behavior: "instant" });
+    }
   }, [chat?.messages.length, chat?.working, chat?.status]);
 
   const handleOpenArtifact = useCallback(

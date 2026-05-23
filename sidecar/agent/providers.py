@@ -412,7 +412,12 @@ def _active_tool_schemas(plan_mode: bool) -> list[dict]:
 def _anthropic_tools(plan_mode: bool = False) -> list[dict]:
     """Convert our generic TOOL_SCHEMAS into Anthropic's input_schema shape."""
     out = []
+    seen: set[str] = set()
     for t in _active_tool_schemas(plan_mode):
+        name = t["name"]
+        if name in seen:
+            continue
+        seen.add(name)
         out.append(
             {
                 "name": t["name"],
@@ -425,7 +430,12 @@ def _anthropic_tools(plan_mode: bool = False) -> list[dict]:
 
 def _openai_tools(plan_mode: bool = False) -> list[dict]:
     out = []
+    seen: set[str] = set()
     for t in _active_tool_schemas(plan_mode):
+        name = t["name"]
+        if name in seen:
+            continue
+        seen.add(name)
         out.append(
             {
                 "type": "function",

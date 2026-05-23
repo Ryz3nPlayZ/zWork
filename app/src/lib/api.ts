@@ -5,6 +5,8 @@
  * In a bundled Tauri app, the frontend is served from `tauri://`, so we must
  * rewrite `/api/*` to an absolute `http://127.0.0.1:8787/api/*`. The Tauri
  * Rust side launches the backend on that port at app startup.
+ *
+ * In web mode (app.tryzwork.app), Caddy proxies `/api/*` to the Axum cloud API.
  */
 import { invoke } from "@tauri-apps/api/core";
 
@@ -14,6 +16,13 @@ const IS_TAURI =
   (!!(window as any).__TAURI_INTERNALS__ ||
     !!(window as any).__TAURI__ ||
     (window.location && window.location.protocol === "tauri:"));
+
+/** True when running as a web app (not Tauri, not vite dev server). */
+export const IS_WEB =
+  typeof window !== "undefined" &&
+  !IS_TAURI &&
+  window.location.origin !== "http://localhost:1420" &&
+  window.location.origin !== "http://127.0.0.1:1420";
 
 const API_BASE = IS_TAURI ? "http://127.0.0.1:8787" : "";
 
@@ -330,23 +339,46 @@ export const api = {
       j<{ custom_models: CustomModel[] }>(r),
     ),
 
-  listChats: () =>
-    localFetch("/api/chats").then((r) => j<{ chats: ApiChatSummary[] }>(r)),
+  listChats: () => {
+    const base = IS_WEB ? "/api/web/chats" : "/api/chats";
+    return localFetch(base).then((r) => j<{ chats: ApiChatSummary[] }>(r));
+  },
 
-  getChat: (id: string) =>
-    localFetch(`/api/chats/${id}`).then((r) => j<ApiChat>(r)),
+  getChat: (id: string) => {
+    const base = IS_WEB ? `/api/web/chats/${id}` : `/api/chats/${id}`;
+    return localFetch(base).then((r) => j<ApiChat>(r));
+  },
 
-  deleteChat: (id: string) =>
-    localFetch(`/api/chats/${id}`, { method: "DELETE" }).then((r) =>
+  deleteChat: (id: string) => {
+    const base = IS_WEB ? `/api/web/chats/${id}` : `/api/chats/${id}`;
+    return localFetch(base, { method: "DELETE" }).then((r) =>
       j<{ ok: boolean }>(r),
-    ),
+    );
+  },
 
-  renameChat: (id: string, title: string) =>
-    localFetch(`/api/chats/${id}`, {
+  renameChat: (id: string, title: string) => {
+    const base = IS_WEB ? `/api/web/chats/${id}` : `/api/chats/${id}`;
+    return localFetch(base, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title }),
-    }).then((r) => j<ApiChat>(r)),
+    }).then((r) => j<ApiChat>(r));
+  },
+
+  // ---- Web chat persistence (Axum API) ----
+  webCreateChat: (title: string) =>
+    localFetch("/api/web/chats", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title }),
+    }).then((r) => j<{ id: string; title: string; created_at: string; updated_at: string }>(r)),
+
+  webAddMessage: (chatId: string, role: string, content: string) =>
+    localFetch(`/api/web/chats/${chatId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ role, content }),
+    }).then((r) => j<{ id: string; chat_id: string; role: string; content: string; created_at: string }>(r)),
 
   // ---- Skills + onboarding ----
   skills: () =>
@@ -473,6 +505,153 @@ export type StreamEvent =
   | { type: "subagent_activity"; task_id: string; event: StreamEvent }
   | { type: "subagent_done"; task_id: string; result?: string; error?: string };
 
+/** Web-mode streaming: sends Anthropic-format request to the Axum API and
+ *  translates Anthropic SSE chunks into the custom event format the UI expects. */
+async function streamChatWeb(
+  body: {
+    chat_id?: string;
+    message: string;
+    model?: string;
+    artifact_mode?: boolean;
+    project_id?: string;
+    plan_mode?: boolean;
+    auto_approve_destructive?: boolean;
+    attachments?: Array<{
+      client_id?: string | null;
+      name: string;
+      path: string;
+      mime: string;
+      kind: string;
+    }>;
+  },
+  onEvent: (evt: StreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const cloudToken = typeof window !== "undefined"
+    ? window.localStorage.getItem("zwork:cloud-token") || ""
+    : "";
+
+  const anthropicBody = {
+    model: "deepseek-v4-flash",
+    system: "You are zWork, an action-oriented AI work assistant created by Zemu Liu. Respond in the same language the user writes in. Be concise, direct, and helpful. If the user writes in English, respond in English. Under the hood you are deepseek-v4-flash from DeepSeek.",
+    messages: [{ role: "user" as const, content: body.message }],
+    stream: true,
+    max_tokens: 16384,
+  };
+
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (cloudToken) headers["authorization"] = `Bearer ${cloudToken}`;
+
+  // Create or reuse a server-side web chat for persistence
+  let serverChatId = body.chat_id;
+  if (!serverChatId || serverChatId.startsWith("tmp_") || serverChatId.startsWith("web_")) {
+    try {
+      const chat = await fetch(u("/api/web/chats"), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ title: body.message.slice(0, 56) }),
+      }).then((r) => r.json() as Promise<{ id: string }>);
+      serverChatId = chat.id;
+    } catch { /* persistence failure is non-fatal */ }
+  }
+
+  // Save user message to server
+  if (serverChatId) {
+    try {
+      await fetch(u(`/api/web/chats/${serverChatId}/messages`), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ role: "user", content: body.message }),
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  onEvent({ type: "chat", id: serverChatId || `web_${Date.now()}`, title: body.message.slice(0, 56) });
+  onEvent({ type: "status", text: "Thinking" });
+
+  const resp = await fetch(u("/api/v1/messages"), {
+    method: "POST",
+    headers,
+    body: JSON.stringify(anthropicBody),
+    signal,
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "");
+    onEvent({ type: "error", text: `${resp.status}: ${text}` });
+    onEvent({ type: "end" });
+    return;
+  }
+
+  // Extract provider/model from response headers
+  const provider = resp.headers.get("x-zwork-router-provider") || "zwork-router";
+  const resolvedModel = resp.headers.get("x-zwork-router-model") || "deepseek-v4-flash";
+  onEvent({ type: "meta", provider, resolved_model: resolvedModel, upstream_provider: provider });
+
+  onEvent({ type: "status", text: "Drafting" });
+
+  let assistantText = "";
+
+  if (resp.body) {
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 1);
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (!data) continue;
+        try {
+          const chunk = JSON.parse(data);
+          // Anthropic content_block_delta: { type: "content_block_delta", delta: { type: "text_delta", text: "..." } }
+          if (chunk.type === "content_block_delta" && chunk.delta?.text) {
+            assistantText += chunk.delta.text;
+            onEvent({ type: "delta", text: chunk.delta.text });
+          }
+          // message_stop signals end of streaming
+          if (chunk.type === "message_stop") {
+            break;
+          }
+        } catch { /* ignore malformed */ }
+      }
+    }
+  } else {
+    const text = await resp.text();
+    for (const line of text.split("\n")) {
+      if (!line.startsWith("data:")) continue;
+      const data = line.slice(5).trim();
+      if (!data) continue;
+      try {
+        const chunk = JSON.parse(data);
+        if (chunk.type === "content_block_delta" && chunk.delta?.text) {
+          assistantText += chunk.delta.text;
+          onEvent({ type: "delta", text: chunk.delta.text });
+        }
+      } catch { /* ignore */ }
+    }
+  }
+
+  // Save assistant response to server
+  if (serverChatId && assistantText) {
+    try {
+      await fetch(u(`/api/web/chats/${serverChatId}/messages`), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ role: "assistant", content: assistantText }),
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  onEvent({ type: "done" });
+  onEvent({ type: "end" });
+}
+
 export async function streamChat(
   body: {
     chat_id?: string;
@@ -493,6 +672,10 @@ export async function streamChat(
   onEvent: (evt: StreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
+  if (IS_WEB) {
+    return streamChatWeb(body, onEvent, signal);
+  }
+
   let sawEvent = false;
   let sawTerminal = false;
   let sawServerError = false;

@@ -7,7 +7,7 @@ import { consumeInstalledUpdateNotice, detectUpdate, installUpdate, openReleaseU
 import { cn } from "./lib/cn";
 import { recordTelemetry, setTelemetryEnabled, startTelemetrySession, stopTelemetrySession } from "./lib/telemetry";
 import { fallbackAppVersion, resolveAppVersion } from "./lib/appVersion";
-import { fetchCloudSession, onCloudAuthChanged, type CloudUser } from "./lib/cloud";
+import { fetchCloudSession, onCloudAuthChanged, handleOAuthTokenCallback, type CloudUser } from "./lib/cloud";
 import { identifyPostHogUser, resetPostHogUser } from "./lib/posthog";
 import { getPreviewMode } from "./lib/preview";
 import { PreviewAppShell, PreviewAuthShell } from "./components/PreviewShell";
@@ -26,6 +26,8 @@ const ConnectorsPage = lazy(() => import("./components/ConnectorsPage").then((m)
 
 export default function App() {
   const previewMode = getPreviewMode();
+  // Handle OAuth token callback from web sign-in (must run before any auth logic)
+  handleOAuthTokenCallback();
   const [appVersion, setAppVersion] = useState(fallbackAppVersion());
   const bootstrap = useApp((s) => s.bootstrap);
   const view = useApp((s) => s.view);
@@ -85,6 +87,17 @@ export default function App() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Restore saved zoom level
+  useEffect(() => {
+    const saved = localStorage.getItem("zwork.zoom");
+    if (saved) {
+      const zoom = parseFloat(saved);
+      if (zoom >= 0.8 && zoom <= 1.5) {
+        document.documentElement.style.zoom = String(zoom);
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -285,6 +298,22 @@ export default function App() {
       } else if (mod && e.key.toLowerCase() === "l") {
         e.preventDefault();
         triggerFocusChatInput();
+      } else if (mod && (e.key === "+" || e.key === "=")) {
+        e.preventDefault();
+        const cur = parseFloat(localStorage.getItem("zwork.zoom") || "1");
+        const next = Math.min(1.5, Math.round((cur + 0.1) * 10) / 10);
+        localStorage.setItem("zwork.zoom", String(next));
+        document.documentElement.style.zoom = String(next);
+      } else if (mod && e.key === "-") {
+        e.preventDefault();
+        const cur = parseFloat(localStorage.getItem("zwork.zoom") || "1");
+        const next = Math.max(0.5, Math.round((cur - 0.1) * 10) / 10);
+        localStorage.setItem("zwork.zoom", String(next));
+        document.documentElement.style.zoom = String(next);
+      } else if (mod && e.key === "0") {
+        e.preventDefault();
+        localStorage.setItem("zwork.zoom", "1");
+        document.documentElement.style.zoom = "1";
       }
     };
     window.addEventListener("keydown", onKey);

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import dataclass, field, asdict
+from pathlib import Path
 from typing import Any
 
 from .home import chats_dir
@@ -93,7 +96,21 @@ def get(chat_id: str) -> Chat | None:
 
 def save(chat: Chat) -> None:
     p = _path(chat.id)
-    p.write_text(json.dumps(asdict(chat), indent=2), encoding="utf-8")
+    data = json.dumps(asdict(chat), indent=2)
+    fd, tmp = tempfile.mkstemp(dir=p.parent, suffix=".tmp")
+    try:
+        os.write(fd, data.encode("utf-8"))
+        os.close(fd)
+        fd = -1
+        os.replace(tmp, p)
+    except BaseException:
+        if fd >= 0:
+            os.close(fd)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def delete(chat_id: str) -> bool:
