@@ -4505,6 +4505,7 @@ async fn main() {
     };
 
     let cors = CorsLayer::new()
+        .allow_credentials(true)
         .allow_origin(cors_allowed_origins())
         .allow_methods([
             axum::http::Method::GET,
