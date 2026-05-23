@@ -3,7 +3,7 @@ use axum::{
     extract::{Json, Path, Query, Request, State},
     http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode},
     response::{IntoResponse, Redirect, Response},
-    routing::{get, post, put},
+    routing::{delete, get, patch, post, put},
     Router,
 };
 use chrono::{DateTime, Duration, NaiveDate, Utc};
@@ -162,32 +162,78 @@ fn auth_endpoint_url(auth_internal_base: &Url, endpoint: &str) -> Url {
         .unwrap_or_else(|_| panic!("failed to build auth endpoint URL: {endpoint}"))
 }
 
-fn load_gateway_providers() -> Vec<GatewayProvider> {
-    let base_url = env_or("DEEPSEEK_BASE_URL", "https://api.deepseek.com/anthropic");
-    let protocol = match std::env::var("DEEPSEEK_PROTOCOL")
-        .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "openai" => GatewayProtocol::OpenAi,
-        "anthropic" => GatewayProtocol::Anthropic,
-        _ if base_url.trim_end_matches('/').ends_with("/anthropic") => GatewayProtocol::Anthropic,
-        _ => GatewayProtocol::OpenAi,
-    };
-    let provider = GatewayProvider {
-        name: "DeepSeek".to_string(),
-        base_url,
-        api_key: std::env::var("DEEPSEEK_API_KEY").unwrap_or_default(),
-        primary_model: env_or("DEEPSEEK_MODEL_PRIMARY", "deepseek-v4-flash"),
-        fallback_model: String::new(),
-        protocol,
-    };
+/// Allowed model IDs that the router will serve.
+const ALLOWED_MODELS: &[&str] = &["deepseek-v4-flash", "deepseek-v4-pro"];
+/// Models restricted to pro+ tiers.
+const PRO_ONLY_MODELS: &[&str] = &["deepseek-v4-pro"];
 
-    if provider.api_key.trim().is_empty() {
-        Vec::new()
-    } else {
-        vec![provider]
+fn load_gateway_providers() -> Vec<GatewayProvider> {
+    let api_key = std::env::var("DEEPSEEK_API_KEY").unwrap_or_default();
+    if api_key.trim().is_empty() {
+        return Vec::new();
+    }
+    vec![GatewayProvider {
+        name: "DeepSeek".to_string(),
+        base_url: env_or("DEEPSEEK_BASE_URL", "https://api.deepseek.com/anthropic"),
+        api_key,
+        primary_model: env_or("DEEPSEEK_MODEL_PRIMARY", "deepseek-v4-flash"),
+        fallback_model: env_or("DEEPSEEK_MODEL_FALLBACK", "deepseek-v4-flash"),
+        protocol: match std::env::var("DEEPSEEK_PROTOCOL")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
+            "openai" => GatewayProtocol::OpenAi,
+            _ => GatewayProtocol::Anthropic,
+        },
+    }]
+}
+
+/// Ensure assistant messages include a thinking block for DeepSeek compatibility.
+/// DeepSeek requires thinking content to be passed back in multi-turn conversations.
+fn ensure_thinking_blocks(body: &mut Value) {
+    let Some(messages) = body.get_mut("messages").and_then(|m| m.as_array_mut()) else {
+        return;
+    };
+    for msg in messages.iter_mut() {
+        if msg.get("role").and_then(|r| r.as_str()) != Some("assistant") {
+            continue;
+        }
+        let Some(content) = msg.get_mut("content") else {
+            continue;
+        };
+        // If content is a string, convert to content blocks with a synthetic thinking block
+        if let Some(text) = content.as_str() {
+            let mut blocks: Vec<Value> = vec![serde_json::json!({
+                "type": "thinking",
+                "thinking": "(thinking omitted)",
+                "signature": "synthetic"
+            })];
+            if !text.is_empty() {
+                blocks.push(serde_json::json!({"type": "text", "text": text}));
+            }
+            *content = Value::Array(blocks);
+            continue;
+        }
+        // If content is already content blocks, ensure first block is thinking
+        if let Some(blocks) = content.as_array_mut() {
+            let has_thinking = blocks
+                .first()
+                .and_then(|b| b.get("type"))
+                .and_then(|t| t.as_str())
+                == Some("thinking");
+            if !has_thinking {
+                blocks.insert(
+                    0,
+                    serde_json::json!({
+                        "type": "thinking",
+                        "thinking": "(thinking omitted)",
+                        "signature": "synthetic"
+                    }),
+                );
+            }
+        }
     }
 }
 
@@ -342,6 +388,7 @@ struct BillingCheckoutRequest {
     success_url: String,
     cancel_url: String,
     annual: Option<bool>,
+    tier: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -495,6 +542,42 @@ struct AdminBillingMetrics {
 #[derive(Clone, Deserialize)]
 struct AdminUpdatePlanRequest {
     tier: String,
+}
+
+// -- Web chat structs --
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+struct WebChat {
+    id: Uuid,
+    user_id: String,
+    title: String,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+struct WebChatMessage {
+    id: Uuid,
+    chat_id: Uuid,
+    role: String,
+    content: String,
+    created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateWebChatPayload {
+    title: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateWebChatPayload {
+    title: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AddWebChatMessagePayload {
+    role: String,
+    content: String,
 }
 
 // -- Composio structs --
@@ -781,6 +864,52 @@ async fn bootstrap_schema(db: &PgPool) -> Result<(), sqlx::Error> {
         r#"
         CREATE INDEX IF NOT EXISTS idx_desktop_access_tokens_user_id
         ON desktop_access_tokens (user_id, created_at DESC);
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS web_chats (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id TEXT NOT NULL,
+            title TEXT NOT NULL DEFAULT 'New chat',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS web_chat_messages (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            chat_id UUID NOT NULL REFERENCES web_chats(id) ON DELETE CASCADE,
+            role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
+            content TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_web_chats_user
+        ON web_chats(user_id, updated_at DESC);
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_web_chat_messages_chat
+        ON web_chat_messages(chat_id, created_at);
         "#,
     )
     .execute(db)
@@ -1729,6 +1858,36 @@ async fn ai_proxy_anthropic(
         )
     })?;
 
+    // Validate requested model
+    let requested_model = body_json
+        .get("model")
+        .and_then(|m| m.as_str())
+        .unwrap_or("")
+        .to_string();
+    if !ALLOWED_MODELS.contains(&requested_model.as_str()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("unsupported_model: {requested_model}"),
+        ));
+    }
+
+    // Enforce tier restrictions
+    let user_tier = app_user
+        .as_ref()
+        .map(|u| u.tier.as_str())
+        .unwrap_or("free");
+    if PRO_ONLY_MODELS.contains(&requested_model.as_str())
+        && !matches!(user_tier, "pro" | "max")
+    {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "model_requires_pro_tier".to_string(),
+        ));
+    }
+
+    // Ensure thinking blocks are present in assistant messages for DeepSeek
+    ensure_thinking_blocks(&mut body_json);
+
     let mut failures: Vec<String> = Vec::new();
 
     for provider in &state.gateway.providers {
@@ -1737,10 +1896,8 @@ async fn ai_proxy_anthropic(
         }
 
         if let Some(obj) = body_json.as_object_mut() {
-            obj.insert(
-                "model".to_string(),
-                Value::String(provider.primary_model.clone()),
-            );
+            // Use the requested model, not the provider default
+            obj.insert("model".to_string(), Value::String(requested_model.clone()));
             obj.insert("stream".to_string(), Value::Bool(true));
         }
 
@@ -1775,6 +1932,28 @@ async fn ai_proxy_anthropic(
                 .chars()
                 .take(180)
                 .collect::<String>();
+            // Log tool names to help debug duplicate-tool-name errors
+            if let Some(tools) = body_json.get("tools").and_then(|t| t.as_array()) {
+                let names: Vec<&str> = tools
+                    .iter()
+                    .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
+                    .collect();
+                tracing::warn!(
+                    "Anthropic upstream {} returned {} {}. {} tools: {:?}",
+                    provider.name,
+                    status.as_u16(),
+                    &detail,
+                    names.len(),
+                    names,
+                );
+            } else {
+                tracing::warn!(
+                    "Anthropic upstream {} returned {} {}",
+                    provider.name,
+                    status.as_u16(),
+                    &detail,
+                );
+            }
             failures.push(format!(
                 "{}:{} {} {}",
                 provider.name,
@@ -1880,15 +2059,33 @@ fn stripe_billing_ready(state: &AppState) -> bool {
             .is_empty()
 }
 
-fn stripe_price_id(annual: bool) -> Option<String> {
+fn stripe_price_id(annual: bool, tier: &str) -> Option<String> {
+    let tier_lower = tier.to_lowercase();
     if annual {
-        let annual_price = std::env::var("STRIPE_PRICE_PRO_ANNUAL").unwrap_or_default();
+        let env_key = if tier_lower == "max" {
+            "STRIPE_PRICE_MAX_ANNUAL"
+        } else {
+            "STRIPE_PRICE_PRO_ANNUAL"
+        };
+        let annual_price = std::env::var(env_key).unwrap_or_default();
         if !annual_price.trim().is_empty() {
             return Some(annual_price);
         }
+        // Fall back to pro if max not configured
+        if tier_lower == "max" {
+            let pro_annual = std::env::var("STRIPE_PRICE_PRO_ANNUAL").unwrap_or_default();
+            if !pro_annual.trim().is_empty() {
+                return None; // Don't silently fall back — Max must have its own price
+            }
+        }
     }
 
-    let monthly_price = std::env::var("STRIPE_PRICE_PRO_MONTHLY").unwrap_or_default();
+    let env_key = if tier_lower == "max" {
+        "STRIPE_PRICE_MAX_MONTHLY"
+    } else {
+        "STRIPE_PRICE_PRO_MONTHLY"
+    };
+    let monthly_price = std::env::var(env_key).unwrap_or_default();
     if monthly_price.trim().is_empty() {
         None
     } else {
@@ -2018,10 +2215,22 @@ fn stripe_signature_valid(secret: &str, payload: &[u8], header_value: &str) -> b
     false
 }
 
-fn subscription_tier(status: &str) -> &'static str {
+fn subscription_tier(status: &str, price_id: Option<&String>) -> String {
     match status {
-        "active" | "trialing" | "past_due" => "pro",
-        _ => "free",
+        "active" | "trialing" | "past_due" => {
+            let max_monthly = std::env::var("STRIPE_PRICE_MAX_MONTHLY").unwrap_or_default();
+            let max_annual = std::env::var("STRIPE_PRICE_MAX_ANNUAL").unwrap_or_default();
+            if let Some(pid) = price_id {
+                if !max_monthly.is_empty() && pid == &max_monthly {
+                    return "max".to_string();
+                }
+                if !max_annual.is_empty() && pid == &max_annual {
+                    return "max".to_string();
+                }
+            }
+            "pro".to_string()
+        }
+        _ => "free".to_string(),
     }
 }
 
@@ -2060,7 +2269,8 @@ async fn billing_checkout(
         .map_err(|status| (status, "user_lookup_failed".to_string()))?
         .ok_or((StatusCode::UNAUTHORIZED, "not_signed_in".to_string()))?;
     let customer_id = ensure_stripe_customer(&state, &user).await?;
-    let price_id = stripe_price_id(body.annual.unwrap_or(false)).ok_or((
+    let tier = body.tier.as_deref().unwrap_or("pro");
+    let price_id = stripe_price_id(body.annual.unwrap_or(false), tier).ok_or((
         StatusCode::SERVICE_UNAVAILABLE,
         "stripe_price_not_configured".to_string(),
     ))?;
@@ -2336,9 +2546,9 @@ async fn stripe_webhook(
                     .bind(event_type)
                     .bind(subscription_id)
                     .bind(status)
-                    .bind(price_id)
+                    .bind(&price_id)
                     .bind(current_period_end)
-                    .bind(subscription_tier(status))
+                    .bind(subscription_tier(status, price_id.as_ref()))
                     .execute(&state.db)
                     .await
                 } else {
@@ -2360,9 +2570,9 @@ async fn stripe_webhook(
                     .bind(event_type)
                     .bind(subscription_id)
                     .bind(status)
-                    .bind(price_id)
+                    .bind(&price_id)
                     .bind(current_period_end)
-                    .bind(subscription_tier(status))
+                    .bind(subscription_tier(status, price_id.as_ref()))
                     .execute(&state.db)
                     .await
                 };
@@ -3972,6 +4182,244 @@ async fn analytics_summary(
     }))
 }
 
+// -- Web chat handlers --
+
+async fn web_chats_list(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, StatusCode> {
+    let access = ensure_gateway_access(&state, &headers).await?;
+    let user = resolve_app_user(&state, access)
+        .await?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let chats = sqlx::query_as::<_, WebChat>(
+        r#"
+        SELECT id, user_id, title, created_at, updated_at
+        FROM web_chats
+        WHERE user_id = $1
+        ORDER BY updated_at DESC
+        "#,
+    )
+    .bind(&user.user_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(serde_json::json!({ "chats": chats })))
+}
+
+async fn web_chats_create(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<CreateWebChatPayload>,
+) -> Result<Json<WebChat>, StatusCode> {
+    let access = ensure_gateway_access(&state, &headers).await?;
+    let user = resolve_app_user(&state, access)
+        .await?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let title = body
+        .title
+        .filter(|t| !t.trim().is_empty())
+        .unwrap_or_else(|| "New chat".to_string());
+
+    let chat = sqlx::query_as::<_, WebChat>(
+        r#"
+        INSERT INTO web_chats (user_id, title)
+        VALUES ($1, $2)
+        RETURNING id, user_id, title, created_at, updated_at
+        "#,
+    )
+    .bind(&user.user_id)
+    .bind(&title)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(chat))
+}
+
+async fn web_chats_get(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(chat_id): Path<Uuid>,
+) -> Result<Json<Value>, StatusCode> {
+    let access = ensure_gateway_access(&state, &headers).await?;
+    let user = resolve_app_user(&state, access)
+        .await?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let chat = sqlx::query_as::<_, WebChat>(
+        r#"
+        SELECT id, user_id, title, created_at, updated_at
+        FROM web_chats
+        WHERE id = $1
+        "#,
+    )
+    .bind(chat_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    if chat.user_id != user.user_id {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let messages = sqlx::query_as::<_, WebChatMessage>(
+        r#"
+        SELECT id, chat_id, role, content, created_at
+        FROM web_chat_messages
+        WHERE chat_id = $1
+        ORDER BY created_at ASC
+        "#,
+    )
+    .bind(chat_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(serde_json::json!({
+        "id": chat.id,
+        "user_id": chat.user_id,
+        "title": chat.title,
+        "created_at": chat.created_at,
+        "updated_at": chat.updated_at,
+        "messages": messages,
+    })))
+}
+
+async fn web_chats_update(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(chat_id): Path<Uuid>,
+    Json(body): Json<UpdateWebChatPayload>,
+) -> Result<Json<WebChat>, StatusCode> {
+    let access = ensure_gateway_access(&state, &headers).await?;
+    let user = resolve_app_user(&state, access)
+        .await?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let existing = sqlx::query_scalar::<_, String>(
+        r#"SELECT user_id FROM web_chats WHERE id = $1"#,
+    )
+    .bind(chat_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    if existing != user.user_id {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let title = body.title.trim();
+    if title.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let chat = sqlx::query_as::<_, WebChat>(
+        r#"
+        UPDATE web_chats
+        SET title = $2, updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, user_id, title, created_at, updated_at
+        "#,
+    )
+    .bind(chat_id)
+    .bind(title)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(chat))
+}
+
+async fn web_chats_delete(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(chat_id): Path<Uuid>,
+) -> Result<StatusCode, StatusCode> {
+    let access = ensure_gateway_access(&state, &headers).await?;
+    let user = resolve_app_user(&state, access)
+        .await?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let existing = sqlx::query_scalar::<_, String>(
+        r#"SELECT user_id FROM web_chats WHERE id = $1"#,
+    )
+    .bind(chat_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    if existing != user.user_id {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    sqlx::query(r#"DELETE FROM web_chats WHERE id = $1"#)
+        .bind(chat_id)
+        .execute(&state.db)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn web_chats_add_message(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(chat_id): Path<Uuid>,
+    Json(body): Json<AddWebChatMessagePayload>,
+) -> Result<Json<WebChatMessage>, StatusCode> {
+    let access = ensure_gateway_access(&state, &headers).await?;
+    let user = resolve_app_user(&state, access)
+        .await?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let existing = sqlx::query_scalar::<_, String>(
+        r#"SELECT user_id FROM web_chats WHERE id = $1"#,
+    )
+    .bind(chat_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .ok_or(StatusCode::NOT_FOUND)?;
+
+    if existing != user.user_id {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    let valid_roles = ["user", "assistant", "system"];
+    if !valid_roles.contains(&body.role.as_str()) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let message = sqlx::query_as::<_, WebChatMessage>(
+        r#"
+        INSERT INTO web_chat_messages (chat_id, role, content)
+        VALUES ($1, $2, $3)
+        RETURNING id, chat_id, role, content, created_at
+        "#,
+    )
+    .bind(chat_id)
+    .bind(&body.role)
+    .bind(&body.content)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // Bump the chat's updated_at so it surfaces at the top of the list
+    let _ = sqlx::query(r#"UPDATE web_chats SET updated_at = NOW() WHERE id = $1"#)
+        .bind(chat_id)
+        .execute(&state.db)
+        .await;
+
+    Ok(Json(message))
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
@@ -4063,6 +4511,7 @@ async fn main() {
             axum::http::Method::POST,
             axum::http::Method::PUT,
             axum::http::Method::DELETE,
+            axum::http::Method::PATCH,
             axum::http::Method::OPTIONS,
         ])
         .allow_headers([
@@ -4152,6 +4601,18 @@ async fn main() {
         .route("/api/composio/tools", get(composio_tools))
         .route("/api/composio/tools/execute/:slug", post(composio_execute))
         .route("/api/composio/callback", get(composio_callback))
+        // Web chat persistence
+        .route("/api/web/chats", get(web_chats_list).post(web_chats_create))
+        .route(
+            "/api/web/chats/:id",
+            get(web_chats_get)
+                .patch(web_chats_update)
+                .delete(web_chats_delete),
+        )
+        .route(
+            "/api/web/chats/:id/messages",
+            post(web_chats_add_message),
+        )
         .merge(auth_routes)
         .layer(cors)
         .with_state(state);
