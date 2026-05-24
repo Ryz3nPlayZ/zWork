@@ -91,12 +91,30 @@ def test_backend_kill_command_is_rejected() -> None:
 
 
 def test_dctl_subcommands_have_split_risk() -> None:
-    safe, _ = tools.tool_risk("dctl", {"subcommand": "snapshot"})
-    browser_safe, _ = tools.tool_risk("dctl", {"subcommand": "browser", "args": ["snapshot"]})
-    sensitive, _ = tools.tool_risk("dctl", {"subcommand": "click"})
-    assert safe == "safe"
+    # Test dctl_ui: tree/describe/screenshot are safe; click/type/etc. are sensitive.
+    ui_safe, _ = tools.tool_risk("dctl_ui", {"action": "screenshot"})
+    ui_sensitive, _ = tools.tool_risk("dctl_ui", {"action": "click"})
+    assert ui_safe == "safe"
+    assert ui_sensitive == "sensitive"
+
+    # Test dctl_browser: dom/snapshot are safe; open/click/etc. are sensitive.
+    browser_safe, _ = tools.tool_risk("dctl_browser", {"action": "dom"})
+    browser_sensitive, _ = tools.tool_risk("dctl_browser", {"action": "click"})
     assert browser_safe == "safe"
-    assert sensitive == "sensitive"
+    assert browser_sensitive == "sensitive"
+
+    # Test dctl_system: capabilities/list-windows are safe; open/start are sensitive.
+    sys_safe, _ = tools.tool_risk("dctl_system", {"action": "capabilities"})
+    sys_sensitive, _ = tools.tool_risk("dctl_system", {"action": "open"})
+    assert sys_safe == "safe"
+    assert sys_sensitive == "sensitive"
+
+    # Test dctl_office: read/inspect are safe; write/append are sensitive.
+    office_safe, _ = tools.tool_risk("dctl_office", {"action": "read"})
+    office_sensitive, _ = tools.tool_risk("dctl_office", {"action": "append"})
+    assert office_safe == "safe"
+    assert office_sensitive == "sensitive"
+
 
 
 def test_filter_tools_for_plan_mode_keeps_only_read_only() -> None:
