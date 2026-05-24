@@ -825,6 +825,8 @@ export const useApp = create<AppState>((set, get) => ({
         .catch(() => {
           if (hasCompletedOnboardingLocally()) {
             set({ onboardingDone: true });
+          } else {
+            set({ onboardingDone: false });
           }
         }),
     ]);
