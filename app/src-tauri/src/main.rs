@@ -125,6 +125,12 @@ fn configure_linux_webview_env() {
     // System WebKitGTK works natively with the host's Mesa/EGL, so no
     // software rendering overrides are needed.
     if std::env::var_os("ZWORK_SYSTEM_WEBKIT").is_some() {
+        // Patched AppImage using system WebKitGTK — skip software
+        // rendering overrides, but still force X11 on Wayland to
+        // avoid EGL_BAD_PARAMETER on Intel GPUs.
+        if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+            std::env::set_var("GDK_BACKEND", "x11");
+        }
         return;
     }
 
