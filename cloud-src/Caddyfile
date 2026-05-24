@@ -38,3 +38,18 @@ db.tryzwork.app {
 analytics.tryzwork.app {
     redir https://us.posthog.com/project/397748?
 }
+
+# 4. Web App
+app.tryzwork.app {
+    root * /var/www/app.tryzwork.app
+    encode gzip
+
+    handle /api/* {
+        reverse_proxy axum_api:8080
+    }
+
+    handle {
+        try_files {path} /index.html
+        file_server
+    }
+}

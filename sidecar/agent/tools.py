@@ -377,7 +377,7 @@ TOOL_SCHEMAS: list[dict] = [
           },
           "double": {
             "type": "boolean",
-            "default": false,
+            "default": False,
             "description": "Whether to double-click (used with action='click')."
           },
           "clipboard_action": {
