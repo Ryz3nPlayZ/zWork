@@ -170,11 +170,10 @@ async function waitForBackendReady(attempts = 60) {
   for (let i = 0; i < attempts; i += 1) {
     try {
       if (i === 0) await invokeBackendCommand("ensure_backend");
-      if (IS_TAURI && i === 15) await invokeBackendCommand("restart_backend");
       return await healthFetch();
     } catch (err) {
       lastError = err;
-      await sleep(i < 6 ? 250 : 900);
+      await sleep(i < 6 ? 500 : 1000);
     }
   }
   throw lastError instanceof Error
