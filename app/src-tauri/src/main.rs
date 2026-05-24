@@ -30,6 +30,10 @@ impl BackendChild {
         match self {
             BackendChild::Packaged(child) => {
                 let _ = child.kill();
+                // Clean the Python backend's PID lock so the next spawn
+                // doesn't refuse to start ("already running").
+                let pid_path = zwork_sidecar_home().join("state").join("backend.pid");
+                let _ = std::fs::remove_file(&pid_path);
             }
             BackendChild::Dev(mut child) => {
                 let _ = child.kill();
@@ -91,17 +95,16 @@ fn backend_http_healthy() -> bool {
     let _ = stream.set_write_timeout(Some(timeout));
 
     if stream
-        .write_all(b"GET /api/health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .write_all(b"GET /api/health HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
         .is_err()
     {
         return false;
     }
-    let _ = stream.shutdown(Shutdown::Write);
 
     let mut buf = [0_u8; 128];
     let n = match stream.read(&mut buf) {
+        Ok(0) | Err(_) => return false,
         Ok(n) => n,
-        Err(_) => return false,
     };
     std::str::from_utf8(&buf[..n])
         .map(|head| head.starts_with("HTTP/1.1 200") || head.starts_with("HTTP/1.0 200"))
@@ -359,6 +362,11 @@ fn kill_stale_on_port(port: u16) {
 /// Spawn a backend without cleaning the port. Used during normal operation
 /// where the previous child is shut down via its PID before calling this.
 fn spawn_backend(app: &tauri::AppHandle) -> Option<BackendChild> {
+    // Remove stale PID lock so the new backend won't refuse to start.
+    // This handles the case where a previous backend was killed (SIGKILL,
+    // crash, relaunch) without cleaning up its PID file.
+    let pid_path = zwork_sidecar_home().join("state").join("backend.pid");
+    let _ = std::fs::remove_file(&pid_path);
     if let Some(child) = start_packaged_backend(app) {
         return Some(child);
     }
