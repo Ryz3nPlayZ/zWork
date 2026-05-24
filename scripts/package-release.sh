@@ -102,6 +102,12 @@ PY
 
   cp "$src" "$out"
   chmod +x "$out" || true
+
+  # Post-process the final AppImage to remove bundled shared libraries
+  # so they don't cause EGL/Wayland crashes on newer distros.
+  # Must run BEFORE signing.
+  "$ROOT_DIR/scripts/patch-linux-appimage.sh" "$out"
+
   sig_src="${src}.sig"
   if [[ -f "$sig_src" ]]; then
     cp "$sig_src" "$sig_out"

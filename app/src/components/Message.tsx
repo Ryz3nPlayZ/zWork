@@ -19,10 +19,14 @@ import {
   Globe,
   GitCompare,
   Image as ImageIcon,
+  Edit2,
+  Send,
+  X as XIcon,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { ActivityBlocks } from "./ActivityBlocks";
 import type { Activity, Artifact } from "../lib/store";
+import { useApp } from "../lib/store";
 import { Logo } from "./Logo";
 import { IconButton } from "./IconButton";
 import { AskCard, splitAroundAsk, parseAskPayload } from "./AskCard";
@@ -198,6 +202,115 @@ function AssistantMarkdown({
   );
 }
 
+// ---- User message bubble with inline edit ----
+function UserBubble({
+  message,
+  attachments,
+  streaming,
+}: {
+  message: Msg;
+  attachments: NonNullable<Msg["attachments"]>;
+  streaming: boolean;
+}) {
+  const editAndResend = useApp((s) => s.editAndResend);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(message.content);
+
+  const startEdit = () => {
+    setDraft(message.content);
+    setEditing(true);
+  };
+
+  const cancel = () => {
+    setDraft(message.content);
+    setEditing(false);
+  };
+
+  const submit = () => {
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === message.content) { cancel(); return; }
+    setEditing(false);
+    void editAndResend(message.id, trimmed);
+  };
+
+  return (
+    <div className="group flex w-full animate-fade-in justify-end">
+      <div className="max-w-[85%] min-w-0">
+        {attachments.length > 0 && (
+          <div className="mb-1.5 flex flex-wrap justify-end gap-1.5">
+            {attachments.map((a, i) => (
+              <div
+                key={`${message.id}-att-${i}`}
+                className="flex items-center gap-2 rounded-full border border-line bg-paper px-2.5 py-1 text-[11.5px] text-ink-muted"
+                title={a.name}
+              >
+                {a.kind === "image" && a.previewUrl ? (
+                  <img src={a.previewUrl} alt="" className="h-4 w-4 rounded object-cover" />
+                ) : a.kind === "image" ? (
+                  <ImageIcon className="h-3.5 w-3.5" />
+                ) : (
+                  <FileText className="h-3.5 w-3.5" />
+                )}
+                <span className="max-w-[180px] truncate">{a.name}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {editing ? (
+          <div className="flex flex-col gap-1.5">
+            <textarea
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
+                if (e.key === "Escape") cancel();
+              }}
+              rows={Math.min(10, draft.split("\n").length + 1)}
+              className="w-full resize-none rounded-2xl rounded-br-md border border-accent/50 bg-paper-raised px-3.5 py-2.5 text-[14px] leading-6 text-ink outline-none ring-2 ring-accent/20 focus:ring-accent/30"
+            />
+            <div className="flex items-center justify-end gap-1.5">
+              <button
+                type="button"
+                onClick={cancel}
+                className="press flex items-center gap-1 rounded-lg border border-line px-2.5 py-1 text-[11.5px] text-ink-muted hover:bg-paper-sunken"
+              >
+                <XIcon className="h-3 w-3" /> Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submit}
+                className="press flex items-center gap-1 rounded-lg bg-ink px-2.5 py-1 text-[11.5px] font-medium text-paper hover:bg-ink/80"
+              >
+                <Send className="h-3 w-3" /> Send
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="relative">
+            <div className="rounded-2xl rounded-br-md bg-paper-raised border border-line px-3.5 py-2.5 text-[14px] leading-6 text-ink break-words whitespace-pre-wrap">
+              {message.content}
+            </div>
+            {!streaming && (
+              <button
+                type="button"
+                onClick={startEdit}
+                title="Edit message"
+                className="press absolute -left-8 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-ink-faint opacity-0 transition-opacity hover:bg-paper-sunken hover:text-ink group-hover:opacity-100"
+              >
+                <Edit2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        )}
+
+        <p className="mt-1 text-right text-[10.5px] text-ink-faint">{formatTime(message.createdAt)}</p>
+      </div>
+    </div>
+  );
+}
+
 // ---- Main Message component ----
 export function Message({
   message,
@@ -230,40 +343,7 @@ export function Message({
 
   if (isUser) {
     const attachments = message.attachments ?? [];
-    return (
-      <div className="group flex w-full animate-fade-in justify-end">
-        <div className="max-w-[85%] min-w-0">
-          {attachments.length > 0 && (
-            <div className="mb-1.5 flex flex-wrap justify-end gap-1.5">
-              {attachments.map((a, i) => (
-                <div
-                  key={`${message.id}-att-${i}`}
-                  className="flex items-center gap-2 rounded-full border border-line bg-paper px-2.5 py-1 text-[11.5px] text-ink-muted"
-                  title={a.name}
-                >
-                  {a.kind === "image" && a.previewUrl ? (
-                    <img
-                      src={a.previewUrl}
-                      alt=""
-                      className="h-4 w-4 rounded object-cover"
-                    />
-                  ) : a.kind === "image" ? (
-                    <ImageIcon className="h-3.5 w-3.5" />
-                  ) : (
-                    <FileText className="h-3.5 w-3.5" />
-                  )}
-                  <span className="max-w-[180px] truncate">{a.name}</span>
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="rounded-2xl rounded-br-md bg-paper-raised border border-line px-3.5 py-2.5 text-[14px] leading-6 text-ink break-words whitespace-pre-wrap">
-            {message.content}
-          </div>
-          <p className="mt-1 text-right text-[10.5px] text-ink-faint">{formatTime(message.createdAt)}</p>
-        </div>
-      </div>
-    );
+    return <UserBubble message={message} attachments={attachments} streaming={!!streaming} />;
   }
 
   // Assistant message — no bubble, markdown + LaTeX, AskCard injection

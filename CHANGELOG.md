@@ -1,6 +1,14 @@
 # Changelog
 
 All notable changes to zWork are documented here.
+## v0.4.0-alpha.8
+
+**Task & Calendar Cockpit, Fine-Grained dctl Tools, and Production Readiness.**
+
+- Added toggleable Task & Calendar Cockpit drawer (Kanban board & daily agenda) via Cmd+J/Ctrl+J.
+- Upgraded desktop control with fine-grained dctl tools (dctl_system, dctl_ui, dctl_browser, dctl_office).
+- Injected dctl instruction addon into agent system prompts for precise automation.
+- Handled Better Auth OAuth route resolution to prevent state mismatches.
 
 ## v0.4.0-alpha.4
 

@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { Plus, Trash2, Download } from "lucide-react";
+import { useApp } from "../../lib/store";
 import type { Artifact } from "../../lib/store";
 
 function parseCSV(raw: string): string[][] {
@@ -16,19 +17,35 @@ function toCSV(rows: string[][]): string {
     .join("\n");
 }
 
+function toTSV(rows: string[][]): string {
+  return rows.map((r) => r.join("\t")).join("\n");
+}
+
 export function ArtifactSheetViewer({ artifact }: { artifact: Artifact }) {
+  const updateArtifact = useApp((s) => s.updateArtifact);
   const initialRows = artifact.rows ?? parseCSV(artifact.content);
   const [rows, setRows] = useState<string[][]>(initialRows);
   const [selectedCell, setSelectedCell] = useState<[number, number] | null>(null);
   const [editingCell, setEditingCell] = useState<[number, number] | null>(null);
   const [editValue, setEditValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (editingCell && inputRef.current) {
       inputRef.current.focus();
     }
   }, [editingCell]);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      updateArtifact(artifact.id, { content: toTSV(rows), rows }).catch(() => {});
+    }, 800);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [rows]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateCell = useCallback(
     (r: number, c: number, value: string) => {

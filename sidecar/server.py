@@ -161,6 +161,28 @@ class ChatRename(BaseModel):
     title: str
 
 
+class MessagePatch(BaseModel):
+    content: str | None = None
+    activities: list[dict[str, Any]] | None = None
+
+
+class TaskCreateUpdate(BaseModel):
+    title: str
+    column: str = "inbox"
+    due_date: str | None = None
+
+
+class TaskColumnUpdate(BaseModel):
+    column: str
+
+
+class EventCreateUpdate(BaseModel):
+    title: str
+    date: str
+    start_time: str | None = None
+    end_time: str | None = None
+
+
 class StreamRequest(BaseModel):
     chat_id: str | None = None
     message: str
@@ -1193,6 +1215,28 @@ def delete_chat(chat_id: str) -> dict:
     return {"ok": True}
 
 
+@app.patch("/api/chats/{chat_id}/messages/{message_id}")
+def patch_message(chat_id: str, message_id: str, body: MessagePatch) -> dict:
+    """Partially update a stored message (content and/or activities).
+
+    Used by the frontend to persist artifact edits back to disk so that
+    the edited content survives an app restart.
+    """
+    if not home_mod.is_safe_id(chat_id):
+        raise HTTPException(400, "invalid chat_id")
+    if not home_mod.is_safe_id(message_id):
+        raise HTTPException(400, "invalid message_id")
+    updated = chatstore.update_message(
+        chat_id,
+        message_id,
+        content=body.content,
+        activities=body.activities,
+    )
+    if updated is None:
+        raise HTTPException(404, "chat or message not found")
+    return {"ok": True, "message": asdict(updated)}
+
+
 def _chat_public(c: chatstore.Chat) -> dict[str, Any]:
     return {
         "id": c.id,
@@ -1205,6 +1249,77 @@ def _chat_public(c: chatstore.Chat) -> dict[str, Any]:
         "compaction_cursor": c.compaction_cursor,
         "messages": [asdict(m) for m in c.messages],
     }
+
+
+# ---------------- Tasks & Calendar ----------------
+
+
+@app.get("/api/tasks")
+def list_tasks() -> dict:
+    from .agent import taskstore
+    return {"tasks": [taskstore.asdict(t) for t in taskstore.get_tasks()]}
+
+
+@app.post("/api/tasks")
+def create_task(body: TaskCreateUpdate) -> dict:
+    from .agent import taskstore
+    t = taskstore.save_task(title=body.title, column=body.column, due_date=body.due_date)
+    return {"task": taskstore.asdict(t)}
+
+
+@app.patch("/api/tasks/{task_id}")
+def update_task(task_id: str, body: TaskCreateUpdate) -> dict:
+    from .agent import taskstore
+    if not home_mod.is_safe_id(task_id):
+        raise HTTPException(400, "invalid task_id")
+    t = taskstore.save_task(title=body.title, column=body.column, due_date=body.due_date, task_id=task_id)
+    return {"task": taskstore.asdict(t)}
+
+
+@app.patch("/api/tasks/{task_id}/column")
+def update_task_column_endpoint(task_id: str, body: TaskColumnUpdate) -> dict:
+    from .agent import taskstore
+    if not home_mod.is_safe_id(task_id):
+        raise HTTPException(400, "invalid task_id")
+    t = taskstore.update_task_column(task_id=task_id, column=body.column)
+    if not t:
+        raise HTTPException(404, "task not found")
+    return {"task": taskstore.asdict(t)}
+
+
+@app.delete("/api/tasks/{task_id}")
+def delete_task_endpoint(task_id: str) -> dict:
+    from .agent import taskstore
+    if not home_mod.is_safe_id(task_id):
+        raise HTTPException(400, "invalid task_id")
+    ok = taskstore.delete_task(task_id)
+    if not ok:
+        raise HTTPException(404, "task not found")
+    return {"ok": True}
+
+
+@app.get("/api/events")
+def list_events() -> dict:
+    from .agent import taskstore
+    return {"events": [taskstore.asdict(e) for e in taskstore.get_events()]}
+
+
+@app.post("/api/events")
+def create_event(body: EventCreateUpdate) -> dict:
+    from .agent import taskstore
+    e = taskstore.save_event(title=body.title, date=body.date, start_time=body.start_time, end_time=body.end_time)
+    return {"event": taskstore.asdict(e)}
+
+
+@app.delete("/api/events/{event_id}")
+def delete_event_endpoint(event_id: str) -> dict:
+    from .agent import taskstore
+    if not home_mod.is_safe_id(event_id):
+        raise HTTPException(400, "invalid event_id")
+    ok = taskstore.delete_event(event_id)
+    if not ok:
+        raise HTTPException(404, "event not found")
+    return {"ok": True}
 
 
 # ---------------- Chat stream ----------------

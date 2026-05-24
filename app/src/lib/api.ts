@@ -254,6 +254,51 @@ export const api = {
 
   waitForBackend: waitForBackendReady,
 
+  // --- Tasks & Calendar ---
+  listTasks: () =>
+    localFetch("/api/tasks").then((r) => j<{ tasks: any[] }>(r)),
+
+  createTask: (body: { title: string; column?: string; due_date?: string | null }) =>
+    localFetch("/api/tasks", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => j<{ task: any }>(r)),
+
+  updateTask: (id: string, body: { title: string; column: string; due_date?: string | null }) =>
+    localFetch(`/api/tasks/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => j<{ task: any }>(r)),
+
+  updateTaskColumn: (id: string, column: string) =>
+    localFetch(`/api/tasks/${id}/column`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ column }),
+    }).then((r) => j<{ task: any }>(r)),
+
+  deleteTask: (id: string) =>
+    localFetch(`/api/tasks/${id}`, {
+      method: "DELETE",
+    }).then((r) => j<{ ok: boolean }>(r)),
+
+  listEvents: () =>
+    localFetch("/api/events").then((r) => j<{ events: any[] }>(r)),
+
+  createEvent: (body: { title: string; date: string; start_time?: string | null; end_time?: string | null }) =>
+    localFetch("/api/events", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => j<{ event: any }>(r)),
+
+  deleteEvent: (id: string) =>
+    localFetch(`/api/events/${id}`, {
+      method: "DELETE",
+    }).then((r) => j<{ ok: boolean }>(r)),
+
   me: () => localFetch("/api/me").then((r) => j<MeResponse>(r)),
 
   integrations: () =>
@@ -363,6 +408,24 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title }),
     }).then((r) => j<ApiChat>(r));
+  },
+
+  /**
+   * Persist edits to an individual stored message (content and/or activities).
+   * Used to write artifact edits back to disk so they survive restart.
+   * No-op in web mode (web chats are ephemeral).
+   */
+  patchMessage: (
+    chatId: string,
+    messageId: string,
+    patch: { content?: string; activities?: Array<{ id: string; label: string; icon?: string; done: boolean }> },
+  ) => {
+    if (IS_WEB) return Promise.resolve({ ok: true });
+    return localFetch(`/api/chats/${chatId}/messages/${messageId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    }).then((r) => j<{ ok: boolean }>(r));
   },
 
   // ---- Web chat persistence (Axum API) ----

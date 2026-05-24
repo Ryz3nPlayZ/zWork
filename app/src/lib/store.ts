@@ -44,6 +44,25 @@ function rememberOnboardingDone(done: boolean) {
 
 export type Role = "user" | "assistant";
 
+export interface Task {
+  id: string;
+  title: string;
+  column: "inbox" | "todo" | "doing" | "done";
+  created_at: number;
+  updated_at: number;
+  due_date: string | null;
+  completed_at: number | null;
+}
+
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  date: string;
+  created_at: number;
+  start_time: string | null;
+  end_time: string | null;
+}
+
 export interface MessageAttachment {
   name: string;
   mime: string;
@@ -353,7 +372,7 @@ interface AppState {
   openArtifact: (a: Artifact) => void;
   closeArtifactPanel: () => void;
   clearArtifacts: () => void;
-  updateArtifact: (id: string, patch: Partial<Artifact>) => void;
+  updateArtifact: (id: string, patch: Partial<Artifact>) => Promise<void>;
 
   // Projects
   projects: Project[];
@@ -420,11 +439,27 @@ interface AppState {
     },
   ) => Promise<void>;
   retry: () => Promise<void>;
+  /** Edit a previously sent user message and re-run the conversation from that point. */
+  editAndResend: (messageId: string, newText: string) => Promise<void>;
   stop: () => void;
 
   saveSettings: (patch: Partial<SettingsPublic> & { api_keys?: Record<string, string> }) => Promise<void>;
   upsertCustomModel: (m: Omit<CustomModel, "id"> & { id?: string }) => Promise<void>;
   deleteCustomModel: (id: string) => Promise<void>;
+
+  // Cockpit (Tasks & Calendar)
+  tasks: Task[];
+  events: CalendarEvent[];
+  cockpitOpen: boolean;
+  setCockpitOpen: (v: boolean) => void;
+  fetchTasks: () => Promise<void>;
+  addTask: (title: string, column: Task["column"], due_date?: string | null) => Promise<void>;
+  updateTask: (id: string, title: string, column: Task["column"], due_date?: string | null) => Promise<void>;
+  updateTaskColumn: (id: string, column: Task["column"]) => Promise<void>;
+  deleteTask: (id: string) => Promise<void>;
+  fetchEvents: () => Promise<void>;
+  addEvent: (title: string, date: string, start_time?: string | null, end_time?: string | null) => Promise<void>;
+  deleteEvent: (id: string) => Promise<void>;
 }
 
 const uid = () =>
@@ -499,6 +534,12 @@ export const useApp = create<AppState>((set, get) => ({
   me: null,
   searchOpen: false,
   setSearchOpen: (v) => set({ searchOpen: v }),
+
+  // Cockpit
+  tasks: [],
+  events: [],
+  cockpitOpen: false,
+  setCockpitOpen: (v) => set({ cockpitOpen: v }),
 
   onboardingDone: hasCompletedOnboardingLocally() ? true : null,
   setOnboardingDone: (v) => {
@@ -639,6 +680,70 @@ export const useApp = create<AppState>((set, get) => ({
     set({ userMdContent: content });
   },
 
+  fetchTasks: async () => {
+    try {
+      const { tasks } = await api.listTasks();
+      set({ tasks });
+    } catch (e) { console.warn("fetchTasks failed:", e); }
+  },
+
+  addTask: async (title, column, due_date) => {
+    try {
+      const { task } = await api.createTask({ title, column, due_date });
+      set((s) => ({ tasks: [...s.tasks, task] }));
+    } catch (e) { console.warn("addTask failed:", e); }
+  },
+
+  updateTask: async (id, title, column, due_date) => {
+    try {
+      const { task } = await api.updateTask(id, { title, column, due_date });
+      set((s) => ({
+        tasks: s.tasks.map((t) => (t.id === id ? task : t)),
+      }));
+    } catch (e) { console.warn("updateTask failed:", e); }
+  },
+
+  updateTaskColumn: async (id, column) => {
+    try {
+      // Optimistic update
+      set((s) => ({
+        tasks: s.tasks.map((t) => (t.id === id ? { ...t, column } : t)),
+      }));
+      await api.updateTaskColumn(id, column);
+    } catch (e) {
+      console.warn("updateTaskColumn failed, reverting:", e);
+      await get().fetchTasks();
+    }
+  },
+
+  deleteTask: async (id) => {
+    try {
+      await api.deleteTask(id);
+      set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) }));
+    } catch (e) { console.warn("deleteTask failed:", e); }
+  },
+
+  fetchEvents: async () => {
+    try {
+      const { events } = await api.listEvents();
+      set({ events });
+    } catch (e) { console.warn("fetchEvents failed:", e); }
+  },
+
+  addEvent: async (title, date, start_time, end_time) => {
+    try {
+      const { event } = await api.createEvent({ title, date, start_time, end_time });
+      set((s) => ({ events: [...s.events, event] }));
+    } catch (e) { console.warn("addEvent failed:", e); }
+  },
+
+  deleteEvent: async (id) => {
+    try {
+      await api.deleteEvent(id);
+      set((s) => ({ events: s.events.filter((e) => e.id !== id) }));
+    } catch (e) { console.warn("deleteEvent failed:", e); }
+  },
+
   bootstrap: async () => {
     // Web mode: skip local sidecar entirely
     if (IS_WEB) {
@@ -708,6 +813,8 @@ export const useApp = create<AppState>((set, get) => ({
       get().refreshChats(),
       get().refreshMe(),
       get().refreshProjects(),
+      get().fetchTasks().catch(() => {}),
+      get().fetchEvents().catch(() => {}),
       api
         .onboardStatus()
         .then((st) => {
@@ -958,6 +1065,36 @@ export const useApp = create<AppState>((set, get) => ({
     const fallback = pickAvailableModel(p, get().model);
     if (fallback !== get().model) set({ model: fallback });
     await get().send(last);
+  },
+
+  editAndResend: async (messageId, newText) => {
+    const trimmed = newText.trim();
+    if (!trimmed) return;
+    const id = get().activeChatId;
+    if (!id) return;
+    const c = get().chats[id];
+    if (!c) return;
+
+    // Find the index of the target message.
+    const idx = c.messages.findIndex((m) => m.id === messageId);
+    if (idx === -1) return;
+
+    // Drop the target user message + everything after (assistant reply, etc.)
+    const trimmedMessages = c.messages.slice(0, idx);
+
+    set((s) => ({
+      chats: {
+        ...s.chats,
+        [id]: {
+          ...s.chats[id],
+          messages: trimmedMessages,
+          needsSetup: false,
+          error: undefined,
+        },
+      },
+    }));
+
+    await get().send(trimmed);
   },
 
   send: async (text, options) => {
@@ -1446,12 +1583,53 @@ export const useApp = create<AppState>((set, get) => ({
     await Promise.all([get().refreshProviders(), get().refreshSettings()]);
   },
 
-  updateArtifact: (id, patch) => {
-    set((s) => ({
-      artifacts: s.artifacts.map((artifact) =>
-        artifact.id === id ? { ...artifact, ...patch } : artifact,
-      ),
-    }));
+  updateArtifact: async (id, patch) => {
+    // 1. Apply patch to in-memory state and capture the updated artifact list.
+    let updatedArtifact: Artifact | undefined;
+    set((s) => {
+      const artifacts = s.artifacts.map((a) => {
+        if (a.id !== id) return a;
+        updatedArtifact = { ...a, ...patch };
+        return updatedArtifact;
+      });
+      return { artifacts };
+    });
+
+    if (!updatedArtifact?.sourceMessageId) return;
+
+    // 2. Rebuild the raw message content so the backend stores the
+    //    updated artifact body inside [[ARTIFACT ...]] blocks.
+    const { activeChatId, chats, artifacts } = get();
+    const chatId = activeChatId;
+    const msgId = updatedArtifact.sourceMessageId;
+    if (!chatId) return;
+
+    const chat = chats[chatId];
+    if (!chat) return;
+
+    const baseMsg = chat.messages.find((m) => m.id === msgId);
+    if (!baseMsg) return;
+
+    // Collect all artifacts that belong to this message (after applying patch).
+    const msgArtifacts = artifacts.map((a) =>
+      a.id === id ? (updatedArtifact as Artifact) : a
+    ).filter((a) => a.sourceMessageId === msgId);
+
+    // Serialize each artifact back into [[ARTIFACT ...]] wire format.
+    const blocks = msgArtifacts
+      .map((a) => {
+        const titleAttr = a.title ? ` title="${a.title.replace(/"/g, "'")}"`  : "";
+        const langAttr = a.language ? ` language="${a.language}"` : "";
+        return `[[ARTIFACT kind=${a.kind}${titleAttr}${langAttr}]]\n${a.content}\n[[/ARTIFACT]]`;
+      })
+      .join("\n\n");
+
+    const rawContent = blocks
+      ? `${baseMsg.content}\n\n${blocks}`.trim()
+      : baseMsg.content;
+
+    // 3. Fire-and-forget PATCH; failures are non-fatal.
+    api.patchMessage(chatId, msgId, { content: rawContent }).catch(() => {});
   },
 }));
 

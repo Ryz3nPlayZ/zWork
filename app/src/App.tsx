@@ -24,6 +24,7 @@ const AnalyticsPage = lazy(() => import("./components/AnalyticsPage").then((m) =
 const PlanPage = lazy(() => import("./components/PlanPage").then((m) => ({ default: m.PlanPage })));
 const ConnectorsPage = lazy(() => import("./components/ConnectorsPage").then((m) => ({ default: m.ConnectorsPage })));
 const AdminPage = lazy(() => import("./components/AdminPage").then((m) => ({ default: m.AdminPage })));
+import { CockpitPanel } from "./components/cockpit/CockpitPanel";
 
 export default function App() {
   const previewMode = getPreviewMode();
@@ -48,6 +49,8 @@ export default function App() {
   const setView = useApp((s) => s.setView);
   const setSearchOpen = useApp((s) => s.setSearchOpen);
   const triggerFocusChatInput = useApp((s) => s.triggerFocusChatInput);
+  const cockpitOpen = useApp((s) => s.cockpitOpen);
+  const setCockpitOpen = useApp((s) => s.setCockpitOpen);
   const onboardingDone = useApp((s) => s.onboardingDone);
   // Skip onboarding in browser preview mode (non-Tauri environment)
   const skipOnboarding = typeof window !== "undefined" && !((window as any).__TAURI_INTERNALS__);
@@ -328,11 +331,14 @@ export default function App() {
         e.preventDefault();
         localStorage.setItem("zwork.zoom", "1");
         document.documentElement.style.zoom = "1";
+      } else if (mod && e.key.toLowerCase() === "j") {
+        e.preventDefault();
+        setCockpitOpen(!cockpitOpen);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openLanding, toggleSidebar, setView, setSearchOpen, triggerFocusChatInput]);
+  }, [openLanding, toggleSidebar, setView, setSearchOpen, triggerFocusChatInput, cockpitOpen, setCockpitOpen]);
 
   const [showLandingOverlay, setShowLandingOverlay] = useState(showLanding);
   const [particlesExiting, setParticlesExiting] = useState(false);
@@ -473,6 +479,7 @@ export default function App() {
         <Suspense fallback={null}>
           <SearchModal />
         </Suspense>
+        <CockpitPanel />
       </div>
     </div>
   );

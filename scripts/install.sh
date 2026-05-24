@@ -62,7 +62,7 @@ case "$OS" in
     rm -rf "$extract_dir"
     (cd "$tmp_dir" && "$install_path" --appimage-extract >/dev/null 2>&1)
     mv "$tmp_dir/squashfs-root" "$extract_dir"
-    find "$extract_dir/usr/lib" -name '*.so.*' -not -type l -delete 2>/dev/null || true
+    find "$extract_dir/usr/lib" -maxdepth 1 -type f -name '*.so*' -delete 2>/dev/null || true
     find "$extract_dir/usr/lib" -type d -empty -delete 2>/dev/null || true
 
     # Create launcher pointing to the extracted version

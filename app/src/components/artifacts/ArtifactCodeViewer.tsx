@@ -1,8 +1,11 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
-import { Copy, Check } from "lucide-react";
+import { Copy, Check, Edit3, Eye, Download } from "lucide-react";
 import type { Artifact } from "../../lib/store";
+import { useApp } from "../../lib/store";
+
+const AUTOSAVE_MS = 600;
 
 // ---- Diff line parser ----
 
@@ -43,6 +46,10 @@ function parseDiff(raw: string): DiffLine[] {
 }
 
 // ---- Diff viewer ----
+
+function cn(...inputs: (string | undefined | false)[]) {
+  return inputs.filter(Boolean).join(" ");
+}
 
 function DiffView({ lines }: { lines: DiffLine[] }) {
   return (
@@ -87,42 +94,137 @@ function DiffView({ lines }: { lines: DiffLine[] }) {
   );
 }
 
-function cn(...inputs: (string | undefined | false)[]) {
-  return inputs.filter(Boolean).join(" ");
-}
-
-// ---- Code/Diff viewer ----
+// ---- Main code/diff viewer ----
 
 export function ArtifactCodeViewer({ artifact }: { artifact: Artifact }) {
+  const updateArtifact = useApp((s) => s.updateArtifact);
+  const isDiff =
+    artifact.kind === "diff" ||
+    artifact.content.startsWith("@@") ||
+    artifact.content.startsWith("diff --git");
+
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(artifact.content);
   const [copied, setCopied] = useState(false);
-  const isDiff = artifact.kind === "diff" || artifact.content.startsWith("@@") || artifact.content.startsWith("diff --git");
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Keep draft in sync when externally updated (streaming)
+  useEffect(() => {
+    if (!editing) setDraft(artifact.content);
+  }, [artifact.content, editing]);
+
+  const scheduleSave = useCallback(
+    (text: string) => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => {
+        updateArtifact(artifact.id, { content: text });
+      }, AUTOSAVE_MS);
+    },
+    [artifact.id, updateArtifact],
+  );
+
+  const handleChange = useCallback(
+    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const text = e.target.value;
+      setDraft(text);
+      scheduleSave(text);
+    },
+    [scheduleSave],
+  );
+
+  const commitAndPreview = useCallback(() => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    updateArtifact(artifact.id, { content: draft });
+    setEditing(false);
+  }, [artifact.id, draft, updateArtifact]);
 
   const copy = useCallback(() => {
-    navigator.clipboard.writeText(artifact.content).catch(() => {});
+    navigator.clipboard.writeText(draft).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
-  }, [artifact.content]);
+  }, [draft]);
+
+  const ext = artifact.language
+    ? `.${artifact.language}`
+    : artifact.kind === "diff"
+      ? ".patch"
+      : ".txt";
+
+  const downloadFile = useCallback(() => {
+    const blob = new Blob([draft], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${artifact.title.replace(/\s+/g, "_")}${ext}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [draft, artifact.title, ext]);
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex shrink-0 items-center justify-end border-b border-line px-2 py-1">
+      {/* Toolbar */}
+      <div className="flex shrink-0 items-center gap-1 border-b border-line px-2 py-1">
+        {!isDiff && (
+          <button
+            type="button"
+            onClick={() => (editing ? commitAndPreview() : setEditing(true))}
+            className={`press flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+              editing
+                ? "bg-accent/10 text-accent hover:bg-accent/15"
+                : "text-ink-muted hover:bg-paper-sunken hover:text-ink"
+            }`}
+          >
+            {editing ? (
+              <><Eye className="h-3 w-3" /> Preview</>
+            ) : (
+              <><Edit3 className="h-3 w-3" /> Edit</>
+            )}
+          </button>
+        )}
+
+        <div className="flex-1" />
+
         <button
           type="button"
           onClick={copy}
           className="press flex items-center gap-1.5 rounded px-2 py-1 text-[11px] text-ink-muted hover:bg-paper-sunken hover:text-ink"
         >
           {copied ? (
-            <Check className="h-3 w-3" />
+            <Check className="h-3 w-3 text-emerald-500" />
           ) : (
             <Copy className="h-3 w-3" />
           )}
           {copied ? "Copied" : "Copy"}
         </button>
+
+        <button
+          type="button"
+          onClick={downloadFile}
+          className="press flex items-center gap-1.5 rounded px-2 py-1 text-[11px] text-ink-muted hover:bg-paper-sunken hover:text-ink"
+        >
+          <Download className="h-3 w-3" />
+          Export
+        </button>
       </div>
 
+      {/* Body */}
       <div className="flex-1 overflow-auto">
-        {isDiff ? (
-          <DiffView lines={parseDiff(artifact.content)} />
+        {editing ? (
+          <textarea
+            className="h-full w-full resize-none bg-paper p-4 font-mono text-[12px] leading-5 text-ink outline-none"
+            value={draft}
+            onChange={handleChange}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                e.preventDefault();
+                commitAndPreview();
+              }
+            }}
+            spellCheck={false}
+            autoFocus
+          />
+        ) : isDiff ? (
+          <DiffView lines={parseDiff(draft)} />
         ) : (
           <SyntaxHighlighter
             language={artifact.language || "text"}
@@ -137,10 +239,16 @@ export function ArtifactCodeViewer({ artifact }: { artifact: Artifact }) {
             }}
             codeTagProps={{ style: { fontFamily: "var(--font-mono, monospace)" } }}
           >
-            {artifact.content}
+            {draft}
           </SyntaxHighlighter>
         )}
       </div>
+
+      {editing && (
+        <div className="shrink-0 border-t border-line px-3 py-1 text-[10.5px] text-ink-faint">
+          ⌘+Enter to preview · auto-saves
+        </div>
+      )}
     </div>
   );
 }

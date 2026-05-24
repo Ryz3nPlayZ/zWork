@@ -111,13 +111,26 @@ def tool_risk(tool_name: str, params: dict[str, Any]) -> tuple[str, str]:
         return "sensitive", "starts a local server"
     if tool_name == "save_memory":
         return "sensitive", "persists memory"
-    if tool_name == "dctl":
-        sub = str(params.get("subcommand") or "").strip().lower()
-        args = [str(a).strip().lower() for a in (params.get("args") or [])]
-        effective = args[0] if sub == "browser" and args else sub
-        if effective in READ_ONLY_DCTL_SUBCOMMANDS:
-            return "safe", "read-only desktop inspection"
+    if tool_name == "dctl_system":
+        action = str(params.get("action") or "").strip().lower()
+        if action in ("capabilities", "doctor", "list-apps", "list-windows", "list-launchable"):
+            return "safe", "read-only system discovery"
+        return "sensitive", "starts apps or opens resources"
+    if tool_name == "dctl_ui":
+        action = str(params.get("action") or "").strip().lower()
+        if action in ("tree", "element", "read", "describe", "screenshot"):
+            return "safe", "read-only desktop UI inspection"
         return "sensitive", "controls the desktop UI"
+    if tool_name == "dctl_browser":
+        action = str(params.get("action") or "").strip().lower()
+        if action in ("tabs", "targets", "active-tab", "dom", "ax", "text", "selector", "actions", "selection", "caret", "snapshot"):
+            return "safe", "read-only browser inspection"
+        return "sensitive", "controls the browser state"
+    if tool_name == "dctl_office":
+        action = str(params.get("action") or "").strip().lower()
+        if action in ("inspect", "read", "paragraphs", "sheets"):
+            return "safe", "read-only document inspection"
+        return "sensitive", "modifies documents or spreadsheets"
     if tool_name.startswith("mcp__"):
         return "sensitive", "calls an external MCP tool"
     if tool_name.startswith("composio__"):
@@ -315,32 +328,179 @@ TOOL_SCHEMAS: list[dict] = [
         },
     },
     {
-        "name": "dctl",
-        "description": (
-            "Run the local dctl desktop-control CLI for window/app/browser automation, "
-            "accessibility tree inspection, screenshots, and focus/click/type/scroll actions. "
-            "Prefer this over raw shell for GUI work. Do NOT use dctl browser for email, "
-            "calendar, or other connected app actions — use composio__ tools instead."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "subcommand": {
-                    "type": "string",
-                    "description": "dctl subcommand to run",
-                },
-                "args": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Arguments passed to the dctl subcommand",
-                },
-                "cwd": {
-                    "type": "string",
-                    "description": "Working directory for the command",
-                },
-            },
-            "required": ["subcommand"],
+      "name": "dctl_system",
+      "description": "General system control and discovery. Use this to list open windows, find launchable apps, or start new processes. Returns JSON describing windows, apps, or execution status.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["capabilities", "doctor", "list-apps", "list-windows", "list-launchable", "launch", "open"],
+            "description": "The system action to perform. 'launch' starts an app by name; 'open' opens a URL or file path; 'list-windows' shows all visible window titles and IDs."
+          },
+          "target": {
+            "type": "string",
+            "description": "The target app name (for launch) or URL/file path (for open). Optional for other actions."
+          },
+          "cwd": {
+            "type": "string",
+            "description": "Working directory for the command (default: '.')"
+          }
         },
+        "required": ["action"]
+      }
+    },
+    {
+      "name": "dctl_ui",
+      "description": "Native UI automation via the OS Accessibility Tree. Use this to inspect UI elements, click buttons, type into fields, or read text on the desktop. Locates elements using a boolean selector string (e.g. 'app:\"Code\" AND role:button').",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["tree", "element", "read", "click", "type", "key", "focus", "scroll", "wait", "describe", "screenshot", "clipboard"],
+            "description": "The UI interaction to perform. 'tree' dumps the accessibility hierarchy; 'click' triggers a button; 'type' inserts text; 'describe' identifies what is at coordinates; 'clipboard' reads or writes the system clipboard."
+          },
+          "selector": {
+            "type": "string",
+            "description": "The dctl selector query to find the element (e.g., 'app:\"Chrome\" AND name:\"Search\"'). Required for click, type, focus, read, wait, element."
+          },
+          "text": {
+            "type": "string",
+            "description": "The text to type into the element (used with action='type'), or text to write to clipboard (used with action='clipboard' and clipboard_action='write')."
+          },
+          "button": {
+            "type": "string",
+            "enum": ["left", "right", "middle"],
+            "default": "left",
+            "description": "Mouse button for click action. Use 'right' for context menu."
+          },
+          "double": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether to double-click (used with action='click')."
+          },
+          "clipboard_action": {
+            "type": "string",
+            "enum": ["read", "write"],
+            "description": "Clipboard operation. 'read' returns current clipboard text; 'write' stores the text parameter."
+          },
+          "combo": {
+            "type": "string",
+            "description": "The key combination to press (e.g., 'ctrl+c', 'win+r'). Used with action='key'."
+          },
+          "direction": {
+            "type": "string",
+            "enum": ["up", "down", "left", "right"],
+            "description": "Scroll direction (used with action='scroll')."
+          },
+          "amount": {
+            "type": "integer",
+            "default": 1,
+            "description": "Number of scroll increments."
+          },
+          "x": { "type": "integer", "description": "X coordinate for 'describe'." },
+          "y": { "type": "integer", "description": "Y coordinate for 'describe'." },
+          "cwd": {
+            "type": "string",
+            "description": "Working directory for the command (default: '.')"
+          }
+        },
+        "required": ["action"]
+      }
+    },
+    {
+      "name": "dctl_browser",
+      "description": "Deep browser automation via CDP (Chrome DevTools Protocol). Use this for complex web tasks like automating Google Docs, switching tabs, or reading the DOM. This bypasses OS accessibility and interacts directly with the browser engine.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["start", "tabs", "targets", "active-tab", "open", "activate", "close", "ax", "dom", "text", "selector", "actions", "selection", "caret", "click", "click-action", "act", "type", "press", "eval", "send", "wait-url", "wait-selector", "snapshot", "batch"],
+            "description": "Browser action. Use `actions` + `click-action` for semantic clicking, `selector` for deterministic CSS diagnostics, and `snapshot` for structured page extraction."
+          },
+          "target": {
+            "type": "string",
+            "description": "The target tab/page ID or index. Required for most actions except 'start' and 'tabs'."
+          },
+          "selector": {
+            "type": "string",
+            "description": "CSS selector for DOM actions or AX selector."
+          },
+          "url": {
+            "type": "string",
+            "description": "URL to navigate to."
+          },
+          "text": {
+            "type": "string",
+            "description": "Text or key combo or json batch array or expression to pass to the action."
+          },
+          "expression": {
+            "type": "string",
+            "description": "JavaScript expression to evaluate in the page context."
+          },
+          "session": {
+            "type": "string",
+            "description": "Optional session name for persistent browser state."
+          },
+          "cwd": {
+            "type": "string",
+            "description": "Working directory for the command (default: '.')"
+          }
+        },
+        "required": ["action"]
+      }
+    },
+    {
+      "name": "dctl_office",
+      "description": "Semantic document and spreadsheet editing (Word/Excel/LibreOffice). Use this to read paragraphs, edit cells, append text, or replace content in documents without a GUI. Supports .docx and .xlsx files.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["word", "excel", "libreoffice"],
+            "description": "The type of document or editor backend."
+          },
+          "action": {
+            "type": "string",
+            "enum": ["inspect", "read", "paragraphs", "append", "set-paragraph", "replace", "sheets", "write-cell", "write-range", "fill-table", "locate-cell", "fill-cell"],
+            "description": "The editing action."
+          },
+          "path": {
+            "type": "string",
+            "description": "Path to the .docx or .xlsx file."
+          },
+          "text": {
+            "type": "string",
+            "description": "Text content to insert or append."
+          },
+          "index": {
+            "type": "integer",
+            "description": "Paragraph or element index."
+          },
+          "sheet": {
+            "type": "string",
+            "description": "Sheet name for Excel/Calc."
+          },
+          "cell": {
+            "type": "string",
+            "description": "Cell reference (e.g., 'A1')."
+          },
+          "value": {
+            "type": "string",
+            "description": "Value to write to a cell."
+          },
+          "find": { "type": "string", "description": "Search text or row label" },
+          "replace": { "type": "string", "description": "Replacement text or column label" },
+          "cwd": {
+            "type": "string",
+            "description": "Working directory for the command (default: '.')"
+          }
+        },
+        "required": ["type", "action", "path"]
+      }
     },
     {
         "name": "spawn_agent",
@@ -419,6 +579,81 @@ TOOL_SCHEMAS: list[dict] = [
                 },
             },
             "required": ["paper"],
+        },
+    },
+    {
+        "name": "manage_tasks",
+        "description": (
+            "List, create, update, or delete user tasks in the cockpit's Kanban board. "
+            "Use this whenever the user asks to add a task, change a task's status/column "
+            "(inbox, todo, doing, done), update a task, list their tasks, or delete a task."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list", "create", "update", "delete"],
+                    "description": "Action to perform on tasks",
+                },
+                "task_id": {
+                    "type": "string",
+                    "description": "ID of the task to update or delete (optional)",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Title of the task (required for create/update)",
+                },
+                "column": {
+                    "type": "string",
+                    "enum": ["inbox", "todo", "doing", "done"],
+                    "description": "Column state for the task",
+                },
+                "due_date": {
+                    "type": "string",
+                    "description": "Due date in YYYY-MM-DD format (optional)",
+                },
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "name": "manage_events",
+        "description": (
+            "List, create, or delete calendar events in the cockpit's Daily Agenda. "
+            "Use this whenever the user asks to schedule a meeting, add an event to their calendar, "
+            "list their events/schedule, or remove an event."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["list", "create", "delete"],
+                    "description": "Action to perform on calendar events",
+                },
+                "event_id": {
+                    "type": "string",
+                    "description": "ID of the event to delete (optional)",
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Title of the event (required for create)",
+                },
+                "date": {
+                    "type": "string",
+                    "description": "Date in YYYY-MM-DD format (required for create)",
+                },
+                "start_time": {
+                    "type": "string",
+                    "description": "Start time in HH:MM format (optional, e.g. '09:00')",
+                },
+                "end_time": {
+                    "type": "string",
+                    "description": "End time in HH:MM format (optional, e.g. '10:00')",
+                },
+            },
+            "required": ["action"],
         },
     },
 ]
@@ -666,6 +901,144 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                 "tool": tool_name,
                 "ok": False,
                 "message": _friendly_error(e, "Try a different path. "),
+            }
+        return
+
+    if tool_name == "manage_tasks":
+        action = params.get("action", "")
+        task_id = params.get("task_id")
+        title = params.get("title", "")
+        column = params.get("column", "inbox")
+        due_date = params.get("due_date")
+
+        label = f"Tasks: {action.title()}"
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": label,
+            "icon": "list",
+            "done": False,
+        }
+        try:
+            from . import taskstore
+            if action == "list":
+                tasks = taskstore.get_tasks()
+                res = json.dumps([taskstore.asdict(t) for t in tasks], indent=2)
+            elif action == "create":
+                if not title:
+                    raise ValueError("Title is required to create a task")
+                t = taskstore.save_task(title, column, due_date)
+                res = f"Created task: {t.title} (ID: {t.id}) in column '{t.column}'"
+            elif action == "update":
+                if not task_id:
+                    raise ValueError("Task ID is required to update a task")
+                t = taskstore.save_task(title, column, due_date, task_id)
+                res = f"Updated task: {t.title} (ID: {t.id}) in column '{t.column}'"
+            elif action == "delete":
+                if not task_id:
+                    raise ValueError("Task ID is required to delete a task")
+                ok = taskstore.delete_task(task_id)
+                res = f"Deleted task with ID: {task_id}" if ok else f"Task with ID {task_id} not found"
+            else:
+                raise ValueError(f"Unknown action: {action}")
+
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": label,
+                "icon": "list",
+                "done": True,
+            }
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=True, output=res)
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": True,
+                "message": res,
+            }
+        except Exception as e:
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": f"Failed: {label}",
+                "icon": "list",
+                "done": True,
+            }
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=False, output=str(e))
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": False,
+                "message": f"Error managing tasks: {str(e)}",
+            }
+        return
+
+    if tool_name == "manage_events":
+        action = params.get("action", "")
+        event_id = params.get("event_id")
+        title = params.get("title", "")
+        date = params.get("date", "")
+        start_time = params.get("start_time")
+        end_time = params.get("end_time")
+
+        label = f"Events: {action.title()}"
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": label,
+            "icon": "calendar",
+            "done": False,
+        }
+        try:
+            from . import taskstore
+            if action == "list":
+                events = taskstore.get_events()
+                res = json.dumps([taskstore.asdict(e) for e in events], indent=2)
+            elif action == "create":
+                if not title or not date:
+                    raise ValueError("Title and Date are required to create an event")
+                e = taskstore.save_event(title, date, start_time, end_time)
+                res = f"Created event: {e.title} on {e.date} (ID: {e.id})"
+            elif action == "delete":
+                if not event_id:
+                    raise ValueError("Event ID is required to delete an event")
+                ok = taskstore.delete_event(event_id)
+                res = f"Deleted event with ID: {event_id}" if ok else f"Event with ID {event_id} not found"
+            else:
+                raise ValueError(f"Unknown action: {action}")
+
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": label,
+                "icon": "calendar",
+                "done": True,
+            }
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=True, output=res)
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": True,
+                "message": res,
+            }
+        except Exception as e:
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": f"Failed: {label}",
+                "icon": "calendar",
+                "done": True,
+            }
+            if run is not None:
+                run.log("tool_finished", tool_name=tool_name, ok=False, output=str(e))
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": False,
+                "message": f"Error managing events: {str(e)}",
             }
         return
 
@@ -1105,10 +1478,26 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
             }
         return
 
-    if tool_name == "dctl":
-        subcommand = str(params.get("subcommand", "")).strip()
-        args = [str(a) for a in (params.get("args") or []) if str(a).strip()]
+    if tool_name in ("dctl_system", "dctl_ui", "dctl_browser", "dctl_office"):
         cwd = params.get("cwd", ".")
+        try:
+            if tool_name == "dctl_system":
+                subcommand, args = _map_dctl_system(params)
+            elif tool_name == "dctl_ui":
+                subcommand, args = _map_dctl_ui(params)
+            elif tool_name == "dctl_browser":
+                subcommand, args = _map_dctl_browser(params)
+            else: # dctl_office
+                subcommand, args = _map_dctl_office(params)
+        except Exception as e:
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": False,
+                "message": f"Parameter mapping error: {str(e)}",
+            }
+            return
+
         full = " ".join([subcommand, *args]).strip()
         label = f"dctl {full}" if full else "dctl"
         yield {
@@ -2114,6 +2503,163 @@ def _dctl_path() -> str:
 
     # Fallback: hope it's in PATH
     return "dctl"
+
+
+def _map_dctl_system(params: dict[str, Any]) -> tuple[str, list[str]]:
+    action = params.get("action", "")
+    target = params.get("target")
+    args = []
+    if target:
+        args.append(target)
+    return action, args
+
+
+def _map_dctl_ui(params: dict[str, Any]) -> tuple[str, list[str]]:
+    action = params.get("action", "")
+    args = []
+
+    if action in ("element", "read", "focus", "click", "wait"):
+        selector = params.get("selector", "")
+        args.append(selector)
+        if action == "click":
+            button = params.get("button", "left")
+            if button != "left":
+                args.extend(["--button", button])
+            if params.get("double"):
+                args.append("--double")
+    elif action == "type":
+        text = params.get("text", "")
+        args.append(text)
+        selector = params.get("selector")
+        if selector:
+            args.extend(["--into", selector])
+    elif action == "key":
+        combo = params.get("combo", "")
+        args.append(combo)
+    elif action == "scroll":
+        direction = params.get("direction", "down")
+        args.append(direction)
+        amount = params.get("amount")
+        if amount is not None:
+            args.extend(["--amount", str(amount)])
+    elif action == "describe":
+        x = params.get("x")
+        y = params.get("y")
+        if x is not None and y is not None:
+            args.extend([str(x), str(y)])
+    elif action == "clipboard":
+        clip_action = params.get("clipboard_action", "read")
+        args.append(clip_action)
+        if clip_action == "write":
+            text = params.get("text", "")
+            args.append(text)
+
+    return action, args
+
+
+def _map_dctl_browser(params: dict[str, Any]) -> tuple[str, list[str]]:
+    action = params.get("action", "")
+    target = params.get("target")
+    selector = params.get("selector")
+    url = params.get("url")
+    text = params.get("text")
+    expression = params.get("expression")
+    session = params.get("session")
+
+    # All browser commands start with browser subcommand
+    args = [action]
+
+    # Subcommand specific positioning
+    if action in ("open", "activate", "close", "dom", "ax", "text", "actions", "selection", "caret", "snapshot", "click", "click-action", "act", "type", "press", "eval", "send", "wait-url", "wait-selector"):
+        if target:
+            args.append(target)
+
+    if action in ("click", "wait-selector", "selector"):
+        if selector:
+            args.append(selector)
+    elif action in ("type", "dom", "ax", "text", "caret"):
+        if selector:
+            args.extend(["--selector", selector])
+
+    if action == "open" and url:
+        args.append(url)
+    elif action == "start" and url:
+        args.extend(["--url", url])
+
+    if action in ("type", "press", "eval", "send", "batch") and text:
+        args.append(text)
+
+    if expression and action == "eval":
+        args.append(expression)
+
+    if session:
+        args.extend(["--session", session])
+
+    return "browser", args
+
+
+def _map_dctl_office(params: dict[str, Any]) -> tuple[str, list[str]]:
+    otype = params.get("type", "")
+    action = params.get("action", "")
+    path = params.get("path", "")
+    text = params.get("text")
+    index = params.get("index")
+    sheet = params.get("sheet")
+    cell = params.get("cell")
+    value = params.get("value")
+    find = params.get("find")
+    replace = params.get("replace")
+
+    if otype == "libreoffice":
+        args = [action]
+        if path:
+            args.append(path)
+        if text:
+            args.append(text)
+        return "libreoffice", args
+
+    subcommand = "docx" if otype == "word" else "xlsx"
+    args = [action, path]
+
+    if otype == "word":
+        if action in ("append", "insert-before", "set-paragraph"):
+            if index is not None and action in ("insert-before", "set-paragraph"):
+                args.append(str(index))
+            if text:
+                args.append(text)
+        elif action == "replace":
+            if find:
+                args.append(find)
+            if replace:
+                args.append(replace)
+    elif otype == "excel":
+        if sheet:
+            args.append(sheet)
+        if action == "read":
+            range_val = cell or text or "A1"
+            args.append(range_val)
+        elif action == "write-cell":
+            if cell:
+                args.append(cell)
+            if value:
+                args.append(value)
+        elif action == "write-range":
+            if cell:
+                args.append(cell)
+            if value:
+                args.append(value)
+        elif action in ("locate-cell", "fill-cell"):
+            if find:
+                args.extend(["--row-label", find])
+            if replace:
+                args.extend(["--column-label", replace])
+            if action == "fill-cell" and value:
+                args.extend(["--value", value])
+        elif action == "fill-table":
+            if value:
+                args.append(value)
+
+    return subcommand, args
 
 
 async def _run_dctl(subcommand: str, args: list[str], cwd: str) -> dict[str, Any]:

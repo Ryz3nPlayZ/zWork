@@ -50,11 +50,12 @@ chmod +x "$APPIMAGE"
 
 SQFS="$WORK_DIR/squashfs-root"
 
-# Remove all bundled shared libraries (*.so.* versioned files).
+# Remove all bundled shared libraries directly under usr/lib.
+# This includes both versioned files (*.so.*) and unversioned/dotted files (*.so, e.g., libgio-2.0.so).
 # The dynamic linker will resolve everything from the host via ldconfig.
-# We do NOT remove unversioned symlinks (*.so) or loader-style files
-# since those are typically linker scripts, not actual libraries.
-removed=$(find "$SQFS/usr/lib" -name '*.so.*' -not -type l -print -delete | wc -l)
+# We do NOT remove symlinks (type l) because those are typically hooks/loaders or symlinks pointing to subdirectories.
+# We do NOT search recursively to avoid deleting plugins/modules inside subfolders (like gdk-pixbuf loaders, GTK immodules, etc.).
+removed=$(find "$SQFS/usr/lib" -maxdepth 1 -type f -name '*.so*' -print -delete | wc -l)
 
 # Remove WebKit subprocess binaries — system WebKitGTK spawns its own.
 find "$SQFS" -path '*/webkit2gtk-*/WebKitWebProcess' -print -delete
