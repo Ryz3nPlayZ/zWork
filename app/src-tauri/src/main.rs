@@ -131,6 +131,10 @@ fn configure_linux_webview_env() {
         if std::env::var_os("WAYLAND_DISPLAY").is_some() {
             std::env::set_var("GDK_BACKEND", "x11");
         }
+        // Force WebKitGTK to use system/host paths for its helper binaries
+        // (WebKitNetworkProcess / WebKitWebProcess) since they were removed
+        // from the AppImage bundle during the patching process.
+        std::env::remove_var("WEBKIT_EXEC_PATH");
         return;
     }
 

@@ -1,6 +1,13 @@
 # Changelog
 
 All notable changes to zWork are documented here.
+
+## v0.4.0-alpha.9
+
+**Fix auto-updater relaunch WebKit crash on Linux.**
+
+- Unset `WEBKIT_EXEC_PATH` environment variable when using system WebKitGTK to prevent relaunch process spawn crashes on Linux.
+
 ## v0.4.0-alpha.8
 
 **Task & Calendar Cockpit, Fine-Grained dctl Tools, and Production Readiness.**
