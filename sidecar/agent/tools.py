@@ -16,7 +16,6 @@ import os
 import re
 import signal
 import subprocess
-import sys
 import urllib.parse
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -1575,7 +1574,6 @@ async def _run_command(command: str, cwd: str) -> dict[str, Any]:
 
     # Clean environment for subprocess: remove bundled PyInstaller libs that
     # break system binaries (e.g., bundled readline causes /bin/sh to fail)
-    import subprocess as _sp
     clean_env = os.environ.copy()
     for key in ("LD_LIBRARY_PATH", "GTK_PATH", "QT_PLUGIN_PATH", "GST_PLUGIN_PATH", "GST_PLUGIN_SYSTEM_PATH", "GST_PLUGIN_SYSTEM_PATH_1_0"):
         clean_env.pop(key, None)

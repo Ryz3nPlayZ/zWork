@@ -6,7 +6,6 @@ import json
 import os
 import tempfile
 from dataclasses import dataclass, field, asdict
-from pathlib import Path
 from typing import Any
 
 from .home import chats_dir
