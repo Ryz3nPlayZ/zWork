@@ -8,6 +8,7 @@ services:
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
+      - /var/www/app.tryzwork.app:/var/www/app.tryzwork.app
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
@@ -38,7 +39,7 @@ services:
 
   # 3. Rust (Axum) API Proxy
   axum_api:
-    build: 
+    build:
       context: ./api
       dockerfile: Dockerfile
     restart: unless-stopped
@@ -59,7 +60,10 @@ services:
       - ROUTER_LABEL=${ROUTER_LABEL}
       - STRIPE_PRICE_PRO_MONTHLY=${STRIPE_PRICE_PRO_MONTHLY}
       - STRIPE_PRICE_PRO_ANNUAL=${STRIPE_PRICE_PRO_ANNUAL}
+      - STRIPE_PRICE_MAX_MONTHLY=${STRIPE_PRICE_MAX_MONTHLY}
+      - STRIPE_PRICE_MAX_ANNUAL=${STRIPE_PRICE_MAX_ANNUAL}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_PROTOCOL=${DEEPSEEK_PROTOCOL}
       - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL}
       - DEEPSEEK_MODEL_PRIMARY=${DEEPSEEK_MODEL_PRIMARY}
       - DEEPSEEK_MODEL_FALLBACK=${DEEPSEEK_MODEL_FALLBACK}
@@ -68,8 +72,16 @@ services:
       - ROOT_REQUESTS_PER_5H=${ROOT_REQUESTS_PER_5H}
       - WEEKLY_LIMIT_MULTIPLIER=${WEEKLY_LIMIT_MULTIPLIER}
       - MAX_CONCURRENT_ROOT_RUNS=${MAX_CONCURRENT_ROOT_RUNS}
+      - PRO_MAX_CONCURRENT_ROOT_RUNS=${PRO_MAX_CONCURRENT_ROOT_RUNS}
+      - MAX_MAX_CONCURRENT_ROOT_RUNS=${MAX_MAX_CONCURRENT_ROOT_RUNS}
       - DEV_COUPON_CODES=${DEV_COUPON_CODES}
       - COMPOSIO_API_KEY=${COMPOSIO_API_KEY}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      - APP_PUBLIC_URL=${APP_PUBLIC_URL}
+      - FREE_TIER_POOL_5H=${FREE_TIER_POOL_5H}
+      - PRO_ROOT_REQUESTS_PER_5H=${PRO_ROOT_REQUESTS_PER_5H}
+      - MAX_ROOT_REQUESTS_PER_5H=${MAX_ROOT_REQUESTS_PER_5H}
     depends_on:
       - postgres
       - better_auth
@@ -84,16 +96,6 @@ services:
       - POSTGRES_DB=zwork_db
     volumes:
       - pg_data:/var/lib/postgresql/data
-
-  # 5. DB Management (pgAdmin)
-  pgadmin:
-    image: dpage/pgadmin4
-    restart: unless-stopped
-    environment:
-      - PGADMIN_DEFAULT_EMAIL=admin@tryzwork.app
-      - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_DEFAULT_PASSWORD}
-    depends_on:
-      - postgres
 
 volumes:
   caddy_data:

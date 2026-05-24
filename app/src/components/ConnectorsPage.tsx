@@ -116,13 +116,15 @@ export function ConnectorsPage() {
               >
                 <div className="flex items-center gap-3">
                   <div
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl overflow-hidden"
                     style={{
                       backgroundColor: hasLogo ? `${app.color}14` : "rgb(var(--paper-sunken))",
                       color: hasLogo ? app.color : "rgb(var(--ink-muted))",
                     }}
                   >
-                    {hasLogo ? (
+                    {app.icon ? (
+                      <img src={app.icon} alt="" className="h-6 w-6 object-contain" />
+                    ) : hasLogo ? (
                       <AppBrandLogo appId={app.id} size={20} />
                     ) : (
                       <Plug size={18} />
@@ -179,7 +181,7 @@ export function ConnectorsPage() {
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div
-                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl"
+                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl overflow-hidden"
                   style={{
                     backgroundColor: hasBrandLogo(expandedAppData.id)
                       ? `${expandedAppData.color}14`
@@ -189,7 +191,9 @@ export function ConnectorsPage() {
                       : "rgb(var(--ink-muted))",
                   }}
                 >
-                  {hasBrandLogo(expandedAppData.id) ? (
+                  {expandedAppData.icon ? (
+                    <img src={expandedAppData.icon} alt="" className="h-7 w-7 object-contain" />
+                  ) : hasBrandLogo(expandedAppData.id) ? (
                     <AppBrandLogo appId={expandedAppData.id} size={26} />
                   ) : (
                     <Plug size={22} />

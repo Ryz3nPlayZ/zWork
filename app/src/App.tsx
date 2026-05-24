@@ -23,6 +23,7 @@ const ArtifactPanel = lazy(() => import("./components/ArtifactPanel").then((m) =
 const AnalyticsPage = lazy(() => import("./components/AnalyticsPage").then((m) => ({ default: m.AnalyticsPage })));
 const PlanPage = lazy(() => import("./components/PlanPage").then((m) => ({ default: m.PlanPage })));
 const ConnectorsPage = lazy(() => import("./components/ConnectorsPage").then((m) => ({ default: m.ConnectorsPage })));
+const AdminPage = lazy(() => import("./components/AdminPage").then((m) => ({ default: m.AdminPage })));
 
 export default function App() {
   const previewMode = getPreviewMode();
@@ -30,6 +31,13 @@ export default function App() {
   handleOAuthTokenCallback();
   const [appVersion, setAppVersion] = useState(fallbackAppVersion());
   const bootstrap = useApp((s) => s.bootstrap);
+  // Check for /admin path in web mode
+  const [initialView] = useState(() => {
+    if (typeof window !== "undefined" && !(window as any).__TAURI_INTERNALS__) {
+      if (window.location.pathname === "/admin") return "admin" as const;
+    }
+    return null;
+  });
   const view = useApp((s) => s.view);
   const settings = useApp((s) => s.settings);
   const active = useApp((s) => s.activeChatId);
@@ -78,6 +86,12 @@ export default function App() {
   useEffect(() => {
     void bootstrap();
   }, [bootstrap]);
+
+  useEffect(() => {
+    if (initialView === "admin") {
+      useApp.getState().setView("admin");
+    }
+  }, [initialView]);
 
   useEffect(() => {
     let cancelled = false;
@@ -393,6 +407,10 @@ export default function App() {
           ) : view === "connectors" ? (
             <Suspense fallback={panelFallback}>
               <ConnectorsPage />
+            </Suspense>
+          ) : view === "admin" ? (
+            <Suspense fallback={panelFallback}>
+              <AdminPage />
             </Suspense>
           ) : (
             <>

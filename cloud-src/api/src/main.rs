@@ -20,7 +20,7 @@ use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::key_extractor::SmartIpKeyExtractor;
 use tower_governor::GovernorLayer;
 use tower_http::cors::CorsLayer;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -61,6 +61,8 @@ struct GatewayConfig {
     root_requests_per_5h: i64,
     weekly_limit_multiplier: i64,
     max_concurrent_roots: i64,
+    pro_max_concurrent_roots: i64,
+    max_max_concurrent_roots: i64,
     dev_coupon_codes: Vec<String>,
     /// Total root requests available to ALL free users combined per 5 hours.
     /// Each free user gets an equal share: pool / active_free_users (floor 5).
@@ -1351,7 +1353,12 @@ async fn enforce_root_rate_limit(state: &AppState, user_id: &str, tier: &str) ->
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if active_roots >= state.gateway.max_concurrent_roots {
+    let concurrent_limit = match tier {
+        "pro" => state.gateway.pro_max_concurrent_roots,
+        "max" => state.gateway.max_max_concurrent_roots,
+        _ => state.gateway.max_concurrent_roots,
+    };
+    if active_roots >= concurrent_limit {
         return Err(StatusCode::TOO_MANY_REQUESTS);
     }
 
@@ -1398,15 +1405,80 @@ fn parse_i64_header(headers: &HeaderMap, name: &str) -> Option<i64> {
 fn parse_usage_counts(body_json: &Value) -> (Option<i64>, Option<i64>, Option<i64>) {
     let usage = body_json.get("usage").and_then(|value| value.as_object());
     let prompt = usage
-        .and_then(|usage| usage.get("prompt_tokens"))
+        .and_then(|usage| usage.get("input_tokens"))
+        .or_else(|| usage.and_then(|u| u.get("prompt_tokens")))
         .and_then(|value| value.as_i64());
     let completion = usage
-        .and_then(|usage| usage.get("completion_tokens"))
+        .and_then(|usage| usage.get("output_tokens"))
+        .or_else(|| usage.and_then(|u| u.get("completion_tokens")))
         .and_then(|value| value.as_i64());
     let total = usage
         .and_then(|usage| usage.get("total_tokens"))
-        .and_then(|value| value.as_i64());
+        .and_then(|value| value.as_i64())
+        .or_else(|| match (prompt, completion) {
+            (Some(p), Some(c)) => Some(p + c),
+            _ => None,
+        });
     (prompt, completion, total)
+}
+
+/// Extracts token usage from an SSE `data:` line (Anthropic message_delta / message_start).
+fn extract_sse_usage(line: &str) -> Option<(Option<i64>, Option<i64>, Option<i64>)> {
+    let data = line.strip_prefix("data: ")?;
+    let json: Value = serde_json::from_str(data).ok()?;
+    let event_type = json.get("type")?.as_str()?;
+    match event_type {
+        "message_delta" => {
+            let usage = json.get("usage")?;
+            let output = usage.get("output_tokens").and_then(|v| v.as_i64());
+            Some((None, output, None))
+        }
+        "message_start" => {
+            let usage = json.pointer("/message/usage")?;
+            let input = usage.get("input_tokens").and_then(|v| v.as_i64());
+            let output = usage.get("output_tokens").and_then(|v| v.as_i64());
+            Some((input, output, None))
+        }
+        _ => None,
+    }
+}
+
+/// Wraps an SSE byte stream to extract token usage from Anthropic events.
+/// Returns the stream for passthrough and a oneshot receiver with the captured usage.
+fn sse_stream_with_usage(
+    stream: impl futures::Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
+) -> (
+    axum::body::Body,
+    tokio::sync::oneshot::Receiver<(Option<i64>, Option<i64>, Option<i64>)>,
+) {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let (body_tx, body_rx) = tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(32);
+
+    tokio::spawn(async move {
+        use futures::StreamExt;
+        let mut final_input: Option<i64> = None;
+        let mut final_output: Option<i64> = None;
+        let mut stream = Box::pin(stream);
+        while let Some(chunk) = stream.next().await {
+            if let Ok(ref bytes) = chunk {
+                let text = String::from_utf8_lossy(bytes);
+                for line in text.lines() {
+                    if let Some((i, o, _)) = extract_sse_usage(line) {
+                        if i.is_some() { final_input = i; }
+                        if o.is_some() { final_output = o; }
+                    }
+                }
+            }
+            let bytes = chunk.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
+            if body_tx.send(bytes).await.is_err() {
+                break;
+            }
+        }
+        let _ = tx.send((final_input, final_output, None));
+    });
+
+    let body_stream = tokio_stream::wrappers::ReceiverStream::new(body_rx);
+    (axum::body::Body::from_stream(body_stream), rx)
 }
 
 fn wrap_json_completion_as_sse(body_json: &Value) -> Option<Vec<u8>> {
@@ -1964,11 +2036,12 @@ async fn ai_proxy_anthropic(
             continue;
         }
 
-        // Stream the response instead of reading it all into memory
+        // Stream the response, intercepting SSE events to extract token usage
         let upstream_body = resp.bytes_stream();
-        let body = axum::body::Body::from_stream(upstream_body);
+        let (body, usage_rx) = sse_stream_with_usage(upstream_body);
 
         if let Some(request_id) = request_id {
+            let upstream_status = status.as_u16() as i32;
             mark_gateway_request_upstream(
                 &state,
                 request_id,
@@ -1979,7 +2052,25 @@ async fn ai_proxy_anthropic(
                 None,
             )
             .await;
-            finish_gateway_request(&state, request_id, Some(status.as_u16() as i32)).await;
+            finish_gateway_request(&state, request_id, Some(upstream_status)).await;
+
+            // Update tokens once the stream finishes
+            let state_clone = state.clone();
+            tokio::spawn(async move {
+                if let Ok((prompt_tokens, completion_tokens, _)) = usage_rx.await {
+                    if prompt_tokens.is_some() || completion_tokens.is_some() {
+                        sqlx::query(
+                            "UPDATE gateway_requests SET prompt_tokens = COALESCE($2, prompt_tokens), completion_tokens = COALESCE($3, completion_tokens) WHERE id = $1"
+                        )
+                        .bind(request_id)
+                        .bind(prompt_tokens)
+                        .bind(completion_tokens)
+                        .execute(&state_clone.db)
+                        .await
+                        .ok();
+                    }
+                }
+            });
         }
         upsert_provider_snapshot(
             &state,
@@ -2787,7 +2878,59 @@ async fn admin_metrics_overview(
         0.0
     };
 
-    let mrr = 0.0; // Placeholder - would need Stripe integration
+    let pro_monthly = std::env::var("STRIPE_PRICE_PRO_MONTHLY").unwrap_or_default();
+    let pro_annual = std::env::var("STRIPE_PRICE_PRO_ANNUAL").unwrap_or_default();
+    let max_monthly = std::env::var("STRIPE_PRICE_MAX_MONTHLY").unwrap_or_default();
+    let max_annual = std::env::var("STRIPE_PRICE_MAX_ANNUAL").unwrap_or_default();
+
+    let pro_price_monthly = std::env::var("PRO_PRICE_MONTHLY_USD")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(20.0);
+    let pro_price_annual_monthly = std::env::var("PRO_PRICE_ANNUAL_MONTHLY_USD")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(16.0);
+    let max_price_monthly = std::env::var("MAX_PRICE_MONTHLY_USD")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(50.0);
+    let max_price_annual_monthly = std::env::var("MAX_PRICE_ANNUAL_MONTHLY_USD")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(40.0);
+
+    let subscription_rows = sqlx::query(
+        "SELECT tier, subscription_price_id FROM app_users WHERE subscription_status = 'active'"
+    )
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+
+    let mut mrr = 0.0_f64;
+    for row in &subscription_rows {
+        let tier: String = row.get("tier");
+        let price_id: Option<String> = row.get("subscription_price_id");
+        let pid = price_id.as_deref().unwrap_or("");
+        match tier.as_str() {
+            "pro" => {
+                if pid == pro_annual {
+                    mrr += pro_price_annual_monthly;
+                } else {
+                    mrr += pro_price_monthly;
+                }
+            }
+            "max" => {
+                if pid == max_annual {
+                    mrr += max_price_annual_monthly;
+                } else {
+                    mrr += max_price_monthly;
+                }
+            }
+            _ => {}
+        }
+    }
+
     let arpu = if total_users > 0 {
         mrr / (total_users as f64)
     } else {
@@ -2824,7 +2967,7 @@ async fn admin_list_users(
             u.created_at,
             MAX(g.created_at) as last_activity,
             COUNT(g.id) as total_requests,
-            COALESCE(SUM(g.total_tokens), 0) as total_tokens,
+            COALESCE(SUM(g.total_tokens), 0)::bigint as total_tokens,
             u.stripe_customer_id,
             u.subscription_status
         FROM app_users u
@@ -4482,6 +4625,14 @@ async fn main() {
                 .ok()
                 .and_then(|v| v.parse::<i64>().ok())
                 .unwrap_or(3),
+            pro_max_concurrent_roots: std::env::var("PRO_MAX_CONCURRENT_ROOT_RUNS")
+                .ok()
+                .and_then(|v| v.parse::<i64>().ok())
+                .unwrap_or(10),
+            max_max_concurrent_roots: std::env::var("MAX_MAX_CONCURRENT_ROOT_RUNS")
+                .ok()
+                .and_then(|v| v.parse::<i64>().ok())
+                .unwrap_or(20),
             free_tier_pool_5h: std::env::var("FREE_TIER_POOL_5H")
                 .ok()
                 .and_then(|v| v.parse::<i64>().ok())

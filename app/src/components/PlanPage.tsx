@@ -1,8 +1,18 @@
 import { useState } from "react";
 import { Check, ArrowUpRight } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
 import { type CloudUser, createBillingCheckoutSession, createBillingPortalSession, redeemAccessCode } from "../lib/cloud";
 import { cn } from "../lib/cn";
+
+const IS_TAURI = typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
+
+async function openUrl(url: string) {
+  if (IS_TAURI) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("open_external", { url });
+  } else {
+    window.open(url, "_blank");
+  }
+}
 
 interface PricingTier {
   id: "free" | "pro" | "max";
@@ -99,7 +109,7 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
     try {
       const session = await createBillingCheckoutSession(isAnnual, tierId);
       if (session?.url) {
-        await invoke("open_external", { url: session.url });
+        await openUrl(session.url);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start checkout");
@@ -114,7 +124,7 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
     try {
       const session = await createBillingPortalSession();
       if (session?.url) {
-        await invoke("open_external", { url: session.url });
+        await openUrl(session.url);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to open billing portal");
