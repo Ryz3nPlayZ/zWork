@@ -133,7 +133,9 @@ class ComposioManager:
         except httpx.TimeoutError:
             raise RuntimeError(f"Timeout connecting to {app_name}") from None
         except httpx.HTTPStatusError as e:
-            raise RuntimeError(f"Failed to get connect link for {app_name}: {e.response.status_code}") from None
+            raise RuntimeError(
+                f"Failed to get connect link for {app_name}: {e.response.status_code}"
+            ) from None
 
     async def get_connected_accounts(self) -> list[dict]:
         if not self.is_available:
@@ -171,7 +173,9 @@ class ComposioManager:
         except httpx.TimeoutError:
             raise RuntimeError(f"Timeout disconnecting {app_name}") from None
         except httpx.HTTPStatusError as e:
-            raise RuntimeError(f"Failed to disconnect {app_name}: {e.response.status_code}") from None
+            raise RuntimeError(
+                f"Failed to disconnect {app_name}: {e.response.status_code}"
+            ) from None
 
     async def _refresh_status(self) -> None:
         try:

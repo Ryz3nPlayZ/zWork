@@ -113,7 +113,13 @@ def tool_risk(tool_name: str, params: dict[str, Any]) -> tuple[str, str]:
         return "sensitive", "persists memory"
     if tool_name == "dctl_system":
         action = str(params.get("action") or "").strip().lower()
-        if action in ("capabilities", "doctor", "list-apps", "list-windows", "list-launchable"):
+        if action in (
+            "capabilities",
+            "doctor",
+            "list-apps",
+            "list-windows",
+            "list-launchable",
+        ):
             return "safe", "read-only system discovery"
         return "sensitive", "starts apps or opens resources"
     if tool_name == "dctl_ui":
@@ -123,7 +129,19 @@ def tool_risk(tool_name: str, params: dict[str, Any]) -> tuple[str, str]:
         return "sensitive", "controls the desktop UI"
     if tool_name == "dctl_browser":
         action = str(params.get("action") or "").strip().lower()
-        if action in ("tabs", "targets", "active-tab", "dom", "ax", "text", "selector", "actions", "selection", "caret", "snapshot"):
+        if action in (
+            "tabs",
+            "targets",
+            "active-tab",
+            "dom",
+            "ax",
+            "text",
+            "selector",
+            "actions",
+            "selection",
+            "caret",
+            "snapshot",
+        ):
             return "safe", "read-only browser inspection"
         return "sensitive", "controls the browser state"
     if tool_name == "dctl_office":
@@ -328,179 +346,236 @@ TOOL_SCHEMAS: list[dict] = [
         },
     },
     {
-      "name": "dctl_system",
-      "description": "General system control and discovery. Use this to list open windows, find launchable apps, or start new processes. Returns JSON describing windows, apps, or execution status.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "action": {
-            "type": "string",
-            "enum": ["capabilities", "doctor", "list-apps", "list-windows", "list-launchable", "launch", "open"],
-            "description": "The system action to perform. 'launch' starts an app by name; 'open' opens a URL or file path; 'list-windows' shows all visible window titles and IDs."
-          },
-          "target": {
-            "type": "string",
-            "description": "The target app name (for launch) or URL/file path (for open). Optional for other actions."
-          },
-          "cwd": {
-            "type": "string",
-            "description": "Working directory for the command (default: '.')"
-          }
+        "name": "dctl_system",
+        "description": "General system control and discovery. Use this to list open windows, find launchable apps, or start new processes. Returns JSON describing windows, apps, or execution status.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "capabilities",
+                        "doctor",
+                        "list-apps",
+                        "list-windows",
+                        "list-launchable",
+                        "launch",
+                        "open",
+                    ],
+                    "description": "The system action to perform. 'launch' starts an app by name; 'open' opens a URL or file path; 'list-windows' shows all visible window titles and IDs.",
+                },
+                "target": {
+                    "type": "string",
+                    "description": "The target app name (for launch) or URL/file path (for open). Optional for other actions.",
+                },
+                "cwd": {
+                    "type": "string",
+                    "description": "Working directory for the command (default: '.')",
+                },
+            },
+            "required": ["action"],
         },
-        "required": ["action"]
-      }
     },
     {
-      "name": "dctl_ui",
-      "description": "Native UI automation via the OS Accessibility Tree. Use this to inspect UI elements, click buttons, type into fields, or read text on the desktop. Locates elements using a boolean selector string (e.g. 'app:\"Code\" AND role:button').",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "action": {
-            "type": "string",
-            "enum": ["tree", "element", "read", "click", "type", "key", "focus", "scroll", "wait", "describe", "screenshot", "clipboard"],
-            "description": "The UI interaction to perform. 'tree' dumps the accessibility hierarchy; 'click' triggers a button; 'type' inserts text; 'describe' identifies what is at coordinates; 'clipboard' reads or writes the system clipboard."
-          },
-          "selector": {
-            "type": "string",
-            "description": "The dctl selector query to find the element (e.g., 'app:\"Chrome\" AND name:\"Search\"'). Required for click, type, focus, read, wait, element."
-          },
-          "text": {
-            "type": "string",
-            "description": "The text to type into the element (used with action='type'), or text to write to clipboard (used with action='clipboard' and clipboard_action='write')."
-          },
-          "button": {
-            "type": "string",
-            "enum": ["left", "right", "middle"],
-            "default": "left",
-            "description": "Mouse button for click action. Use 'right' for context menu."
-          },
-          "double": {
-            "type": "boolean",
-            "default": False,
-            "description": "Whether to double-click (used with action='click')."
-          },
-          "clipboard_action": {
-            "type": "string",
-            "enum": ["read", "write"],
-            "description": "Clipboard operation. 'read' returns current clipboard text; 'write' stores the text parameter."
-          },
-          "combo": {
-            "type": "string",
-            "description": "The key combination to press (e.g., 'ctrl+c', 'win+r'). Used with action='key'."
-          },
-          "direction": {
-            "type": "string",
-            "enum": ["up", "down", "left", "right"],
-            "description": "Scroll direction (used with action='scroll')."
-          },
-          "amount": {
-            "type": "integer",
-            "default": 1,
-            "description": "Number of scroll increments."
-          },
-          "x": { "type": "integer", "description": "X coordinate for 'describe'." },
-          "y": { "type": "integer", "description": "Y coordinate for 'describe'." },
-          "cwd": {
-            "type": "string",
-            "description": "Working directory for the command (default: '.')"
-          }
+        "name": "dctl_ui",
+        "description": "Native UI automation via the OS Accessibility Tree. Use this to inspect UI elements, click buttons, type into fields, or read text on the desktop. Locates elements using a boolean selector string (e.g. 'app:\"Code\" AND role:button').",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "tree",
+                        "element",
+                        "read",
+                        "click",
+                        "type",
+                        "key",
+                        "focus",
+                        "scroll",
+                        "wait",
+                        "describe",
+                        "screenshot",
+                        "clipboard",
+                    ],
+                    "description": "The UI interaction to perform. 'tree' dumps the accessibility hierarchy; 'click' triggers a button; 'type' inserts text; 'describe' identifies what is at coordinates; 'clipboard' reads or writes the system clipboard.",
+                },
+                "selector": {
+                    "type": "string",
+                    "description": 'The dctl selector query to find the element (e.g., \'app:"Chrome" AND name:"Search"\'). Required for click, type, focus, read, wait, element.',
+                },
+                "text": {
+                    "type": "string",
+                    "description": "The text to type into the element (used with action='type'), or text to write to clipboard (used with action='clipboard' and clipboard_action='write').",
+                },
+                "button": {
+                    "type": "string",
+                    "enum": ["left", "right", "middle"],
+                    "default": "left",
+                    "description": "Mouse button for click action. Use 'right' for context menu.",
+                },
+                "double": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Whether to double-click (used with action='click').",
+                },
+                "clipboard_action": {
+                    "type": "string",
+                    "enum": ["read", "write"],
+                    "description": "Clipboard operation. 'read' returns current clipboard text; 'write' stores the text parameter.",
+                },
+                "combo": {
+                    "type": "string",
+                    "description": "The key combination to press (e.g., 'ctrl+c', 'win+r'). Used with action='key'.",
+                },
+                "direction": {
+                    "type": "string",
+                    "enum": ["up", "down", "left", "right"],
+                    "description": "Scroll direction (used with action='scroll').",
+                },
+                "amount": {
+                    "type": "integer",
+                    "default": 1,
+                    "description": "Number of scroll increments.",
+                },
+                "x": {"type": "integer", "description": "X coordinate for 'describe'."},
+                "y": {"type": "integer", "description": "Y coordinate for 'describe'."},
+                "cwd": {
+                    "type": "string",
+                    "description": "Working directory for the command (default: '.')",
+                },
+            },
+            "required": ["action"],
         },
-        "required": ["action"]
-      }
     },
     {
-      "name": "dctl_browser",
-      "description": "Deep browser automation via CDP (Chrome DevTools Protocol). Use this for complex web tasks like automating Google Docs, switching tabs, or reading the DOM. This bypasses OS accessibility and interacts directly with the browser engine.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "action": {
-            "type": "string",
-            "enum": ["start", "tabs", "targets", "active-tab", "open", "activate", "close", "ax", "dom", "text", "selector", "actions", "selection", "caret", "click", "click-action", "act", "type", "press", "eval", "send", "wait-url", "wait-selector", "snapshot", "batch"],
-            "description": "Browser action. Use `actions` + `click-action` for semantic clicking, `selector` for deterministic CSS diagnostics, and `snapshot` for structured page extraction."
-          },
-          "target": {
-            "type": "string",
-            "description": "The target tab/page ID or index. Required for most actions except 'start' and 'tabs'."
-          },
-          "selector": {
-            "type": "string",
-            "description": "CSS selector for DOM actions or AX selector."
-          },
-          "url": {
-            "type": "string",
-            "description": "URL to navigate to."
-          },
-          "text": {
-            "type": "string",
-            "description": "Text or key combo or json batch array or expression to pass to the action."
-          },
-          "expression": {
-            "type": "string",
-            "description": "JavaScript expression to evaluate in the page context."
-          },
-          "session": {
-            "type": "string",
-            "description": "Optional session name for persistent browser state."
-          },
-          "cwd": {
-            "type": "string",
-            "description": "Working directory for the command (default: '.')"
-          }
+        "name": "dctl_browser",
+        "description": "Deep browser automation via CDP (Chrome DevTools Protocol). Use this for complex web tasks like automating Google Docs, switching tabs, or reading the DOM. This bypasses OS accessibility and interacts directly with the browser engine.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "start",
+                        "tabs",
+                        "targets",
+                        "active-tab",
+                        "open",
+                        "activate",
+                        "close",
+                        "ax",
+                        "dom",
+                        "text",
+                        "selector",
+                        "actions",
+                        "selection",
+                        "caret",
+                        "click",
+                        "click-action",
+                        "act",
+                        "type",
+                        "press",
+                        "eval",
+                        "send",
+                        "wait-url",
+                        "wait-selector",
+                        "snapshot",
+                        "batch",
+                    ],
+                    "description": "Browser action. Use `actions` + `click-action` for semantic clicking, `selector` for deterministic CSS diagnostics, and `snapshot` for structured page extraction.",
+                },
+                "target": {
+                    "type": "string",
+                    "description": "The target tab/page ID or index. Required for most actions except 'start' and 'tabs'.",
+                },
+                "selector": {
+                    "type": "string",
+                    "description": "CSS selector for DOM actions or AX selector.",
+                },
+                "url": {"type": "string", "description": "URL to navigate to."},
+                "text": {
+                    "type": "string",
+                    "description": "Text or key combo or json batch array or expression to pass to the action.",
+                },
+                "expression": {
+                    "type": "string",
+                    "description": "JavaScript expression to evaluate in the page context.",
+                },
+                "session": {
+                    "type": "string",
+                    "description": "Optional session name for persistent browser state.",
+                },
+                "cwd": {
+                    "type": "string",
+                    "description": "Working directory for the command (default: '.')",
+                },
+            },
+            "required": ["action"],
         },
-        "required": ["action"]
-      }
     },
     {
-      "name": "dctl_office",
-      "description": "Semantic document and spreadsheet editing (Word/Excel/LibreOffice). Use this to read paragraphs, edit cells, append text, or replace content in documents without a GUI. Supports .docx and .xlsx files.",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "enum": ["word", "excel", "libreoffice"],
-            "description": "The type of document or editor backend."
-          },
-          "action": {
-            "type": "string",
-            "enum": ["inspect", "read", "paragraphs", "append", "set-paragraph", "replace", "sheets", "write-cell", "write-range", "fill-table", "locate-cell", "fill-cell"],
-            "description": "The editing action."
-          },
-          "path": {
-            "type": "string",
-            "description": "Path to the .docx or .xlsx file."
-          },
-          "text": {
-            "type": "string",
-            "description": "Text content to insert or append."
-          },
-          "index": {
-            "type": "integer",
-            "description": "Paragraph or element index."
-          },
-          "sheet": {
-            "type": "string",
-            "description": "Sheet name for Excel/Calc."
-          },
-          "cell": {
-            "type": "string",
-            "description": "Cell reference (e.g., 'A1')."
-          },
-          "value": {
-            "type": "string",
-            "description": "Value to write to a cell."
-          },
-          "find": { "type": "string", "description": "Search text or row label" },
-          "replace": { "type": "string", "description": "Replacement text or column label" },
-          "cwd": {
-            "type": "string",
-            "description": "Working directory for the command (default: '.')"
-          }
+        "name": "dctl_office",
+        "description": "Semantic document and spreadsheet editing (Word/Excel/LibreOffice). Use this to read paragraphs, edit cells, append text, or replace content in documents without a GUI. Supports .docx and .xlsx files.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "type": {
+                    "type": "string",
+                    "enum": ["word", "excel", "libreoffice"],
+                    "description": "The type of document or editor backend.",
+                },
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "inspect",
+                        "read",
+                        "paragraphs",
+                        "append",
+                        "set-paragraph",
+                        "replace",
+                        "sheets",
+                        "write-cell",
+                        "write-range",
+                        "fill-table",
+                        "locate-cell",
+                        "fill-cell",
+                    ],
+                    "description": "The editing action.",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Path to the .docx or .xlsx file.",
+                },
+                "text": {
+                    "type": "string",
+                    "description": "Text content to insert or append.",
+                },
+                "index": {
+                    "type": "integer",
+                    "description": "Paragraph or element index.",
+                },
+                "sheet": {
+                    "type": "string",
+                    "description": "Sheet name for Excel/Calc.",
+                },
+                "cell": {
+                    "type": "string",
+                    "description": "Cell reference (e.g., 'A1').",
+                },
+                "value": {"type": "string", "description": "Value to write to a cell."},
+                "find": {"type": "string", "description": "Search text or row label"},
+                "replace": {
+                    "type": "string",
+                    "description": "Replacement text or column label",
+                },
+                "cwd": {
+                    "type": "string",
+                    "description": "Working directory for the command (default: '.')",
+                },
+            },
+            "required": ["type", "action", "path"],
         },
-        "required": ["type", "action", "path"]
-      }
     },
     {
         "name": "spawn_agent",
@@ -921,6 +996,7 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
         }
         try:
             from . import taskstore
+
             if action == "list":
                 tasks = taskstore.get_tasks()
                 res = json.dumps([taskstore.asdict(t) for t in tasks], indent=2)
@@ -938,7 +1014,11 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                 if not task_id:
                     raise ValueError("Task ID is required to delete a task")
                 ok = taskstore.delete_task(task_id)
-                res = f"Deleted task with ID: {task_id}" if ok else f"Task with ID {task_id} not found"
+                res = (
+                    f"Deleted task with ID: {task_id}"
+                    if ok
+                    else f"Task with ID {task_id} not found"
+                )
             else:
                 raise ValueError(f"Unknown action: {action}")
 
@@ -993,6 +1073,7 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
         }
         try:
             from . import taskstore
+
             if action == "list":
                 events = taskstore.get_events()
                 res = json.dumps([taskstore.asdict(e) for e in events], indent=2)
@@ -1005,7 +1086,11 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                 if not event_id:
                     raise ValueError("Event ID is required to delete an event")
                 ok = taskstore.delete_event(event_id)
-                res = f"Deleted event with ID: {event_id}" if ok else f"Event with ID {event_id} not found"
+                res = (
+                    f"Deleted event with ID: {event_id}"
+                    if ok
+                    else f"Event with ID {event_id} not found"
+                )
             else:
                 raise ValueError(f"Unknown action: {action}")
 
@@ -1487,7 +1572,7 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                 subcommand, args = _map_dctl_ui(params)
             elif tool_name == "dctl_browser":
                 subcommand, args = _map_dctl_browser(params)
-            else: # dctl_office
+            else:  # dctl_office
                 subcommand, args = _map_dctl_office(params)
         except Exception as e:
             yield {
@@ -1927,7 +2012,14 @@ def _shell_path() -> str | None:
 
     # Clean environment for shell testing: remove bundled libs that break system binaries
     test_env = os.environ.copy()
-    for key in ("LD_LIBRARY_PATH", "GTK_PATH", "QT_PLUGIN_PATH", "GST_PLUGIN_PATH", "GST_PLUGIN_SYSTEM_PATH", "GST_PLUGIN_SYSTEM_PATH_1_0"):
+    for key in (
+        "LD_LIBRARY_PATH",
+        "GTK_PATH",
+        "QT_PLUGIN_PATH",
+        "GST_PLUGIN_PATH",
+        "GST_PLUGIN_SYSTEM_PATH",
+        "GST_PLUGIN_SYSTEM_PATH_1_0",
+    ):
         test_env.pop(key, None)
     for key, val in list(test_env.items()):
         if "/tmp/_MEI" in val or "/extracted/usr/lib" in val or "/extracted/lib" in val:
@@ -1964,7 +2056,14 @@ async def _run_command(command: str, cwd: str) -> dict[str, Any]:
     # Clean environment for subprocess: remove bundled PyInstaller libs that
     # break system binaries (e.g., bundled readline causes /bin/sh to fail)
     clean_env = os.environ.copy()
-    for key in ("LD_LIBRARY_PATH", "GTK_PATH", "QT_PLUGIN_PATH", "GST_PLUGIN_PATH", "GST_PLUGIN_SYSTEM_PATH", "GST_PLUGIN_SYSTEM_PATH_1_0"):
+    for key in (
+        "LD_LIBRARY_PATH",
+        "GTK_PATH",
+        "QT_PLUGIN_PATH",
+        "GST_PLUGIN_PATH",
+        "GST_PLUGIN_SYSTEM_PATH",
+        "GST_PLUGIN_SYSTEM_PATH_1_0",
+    ):
         clean_env.pop(key, None)
     for key, val in list(clean_env.items()):
         if "/tmp/_MEI" in val or "/extracted/usr/lib" in val or "/extracted/lib" in val:
@@ -2028,7 +2127,14 @@ def _run_background(command: str, cwd: str) -> int:
 
     # Clean environment for subprocess: remove bundled PyInstaller libs
     clean_env = os.environ.copy()
-    for key in ("LD_LIBRARY_PATH", "GTK_PATH", "QT_PLUGIN_PATH", "GST_PLUGIN_PATH", "GST_PLUGIN_SYSTEM_PATH", "GST_PLUGIN_SYSTEM_PATH_1_0"):
+    for key in (
+        "LD_LIBRARY_PATH",
+        "GTK_PATH",
+        "QT_PLUGIN_PATH",
+        "GST_PLUGIN_PATH",
+        "GST_PLUGIN_SYSTEM_PATH",
+        "GST_PLUGIN_SYSTEM_PATH_1_0",
+    ):
         clean_env.pop(key, None)
     for key, val in list(clean_env.items()):
         if "/tmp/_MEI" in val or "/extracted/usr/lib" in val or "/extracted/lib" in val:
@@ -2459,7 +2565,16 @@ def _dctl_env() -> dict[str, str]:
     """Return a clean environment for running dctl as a standalone binary."""
     env = os.environ.copy()
     # Clean bundled PyInstaller libs that break system binaries
-    for key in ("LD_LIBRARY_PATH", "PYTHONHOME", "PYTHONPATH", "GTK_PATH", "QT_PLUGIN_PATH", "GST_PLUGIN_PATH", "GST_PLUGIN_SYSTEM_PATH", "GST_PLUGIN_SYSTEM_PATH_1_0"):
+    for key in (
+        "LD_LIBRARY_PATH",
+        "PYTHONHOME",
+        "PYTHONPATH",
+        "GTK_PATH",
+        "QT_PLUGIN_PATH",
+        "GST_PLUGIN_PATH",
+        "GST_PLUGIN_SYSTEM_PATH",
+        "GST_PLUGIN_SYSTEM_PATH_1_0",
+    ):
         env.pop(key, None)
     for key, val in list(env.items()):
         if "/tmp/_MEI" in val or "/extracted/usr/lib" in val or "/extracted/lib" in val:
@@ -2474,12 +2589,16 @@ def _dctl_path() -> str:
 
     # Bundled: same directory as the backend binary
     if "extracted" in str(this_file):
-        bundle_dir = this_file.parents[2]  # up from .../extracted/usr/lib/python*/sidecar/agent/tools.py
-        candidates.extend([
-            bundle_dir / "usr" / "bin" / "dctl",
-            bundle_dir / "bin" / "dctl",
-            bundle_dir / "dctl",
-        ])
+        bundle_dir = this_file.parents[
+            2
+        ]  # up from .../extracted/usr/lib/python*/sidecar/agent/tools.py
+        candidates.extend(
+            [
+                bundle_dir / "usr" / "bin" / "dctl",
+                bundle_dir / "bin" / "dctl",
+                bundle_dir / "dctl",
+            ]
+        )
 
     # Dev: zWork repo root
     for parent in this_file.parents:
@@ -2493,6 +2612,7 @@ def _dctl_path() -> str:
 
     # System PATH
     import shutil
+
     system_dctl = shutil.which("dctl")
     if system_dctl:
         candidates.append(Path(system_dctl))
@@ -2570,7 +2690,27 @@ def _map_dctl_browser(params: dict[str, Any]) -> tuple[str, list[str]]:
     args = [action]
 
     # Subcommand specific positioning
-    if action in ("open", "activate", "close", "dom", "ax", "text", "actions", "selection", "caret", "snapshot", "click", "click-action", "act", "type", "press", "eval", "send", "wait-url", "wait-selector"):
+    if action in (
+        "open",
+        "activate",
+        "close",
+        "dom",
+        "ax",
+        "text",
+        "actions",
+        "selection",
+        "caret",
+        "snapshot",
+        "click",
+        "click-action",
+        "act",
+        "type",
+        "press",
+        "eval",
+        "send",
+        "wait-url",
+        "wait-selector",
+    ):
         if target:
             args.append(target)
 

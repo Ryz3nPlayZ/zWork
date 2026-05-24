@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any
 
@@ -76,6 +76,7 @@ def _save_data(data: dict[str, list[dict[str, Any]]]) -> None:
 
 # --- Task CRUD Operations ---
 
+
 def get_tasks() -> list[Task]:
     data = _load_data()
     out = []
@@ -119,20 +120,22 @@ def save_task(
         t_data = tasks_list[existing_idx]
         prev_column = t_data.get("column", "inbox")
         completed_at = t_data.get("completed_at")
-        
+
         # If transitioning to "done", set completed_at
         if column == "done" and prev_column != "done":
             completed_at = now
         elif column != "done":
             completed_at = None
 
-        t_data.update({
-            "title": title,
-            "column": column,
-            "due_date": due_date,
-            "completed_at": completed_at,
-            "updated_at": now,
-        })
+        t_data.update(
+            {
+                "title": title,
+                "column": column,
+                "due_date": due_date,
+                "completed_at": completed_at,
+                "updated_at": now,
+            }
+        )
         task = Task(**t_data)
     else:
         # Create a new task
@@ -161,17 +164,19 @@ def update_task_column(task_id: str, column: str) -> Task | None:
         if t_data["id"] == task_id:
             prev_column = t_data.get("column", "inbox")
             completed_at = t_data.get("completed_at")
-            
+
             if column == "done" and prev_column != "done":
                 completed_at = now
             elif column != "done":
                 completed_at = None
 
-            t_data.update({
-                "column": column,
-                "completed_at": completed_at,
-                "updated_at": now,
-            })
+            t_data.update(
+                {
+                    "column": column,
+                    "completed_at": completed_at,
+                    "updated_at": now,
+                }
+            )
             task = Task(**t_data)
             _save_data(data)
             return task
@@ -190,6 +195,7 @@ def delete_task(task_id: str) -> bool:
 
 
 # --- Calendar Event CRUD Operations ---
+
 
 def get_events() -> list[CalendarEvent]:
     data = _load_data()
@@ -232,12 +238,14 @@ def save_event(
 
     if existing_idx >= 0:
         e_data = events_list[existing_idx]
-        e_data.update({
-            "title": title,
-            "date": date,
-            "start_time": start_time,
-            "end_time": end_time,
-        })
+        e_data.update(
+            {
+                "title": title,
+                "date": date,
+                "start_time": start_time,
+                "end_time": end_time,
+            }
+        )
         event = CalendarEvent(**e_data)
     else:
         event = CalendarEvent(

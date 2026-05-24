@@ -918,6 +918,7 @@ async def _openai_turn(
 def _dctl_addon_prompt() -> str:
     try:
         from pathlib import Path
+
         this_file = Path(__file__).resolve()
         for parent in this_file.parents:
             if (parent / "zWork-Skills").exists() or (parent / "sidecar").exists():
