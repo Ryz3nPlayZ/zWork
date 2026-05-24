@@ -24,7 +24,6 @@ mkdir -p "$DIST_DIR" "$WORK_DIR" "$SPEC_DIR" "$STAGE_DIR"
 
 python3 -m PyInstaller \
   --noconfirm \
-  --clean \
   --onefile \
   --name zwork-backend \
   --add-data "$ROOT_DIR/zWork-Skills:zWork-Skills" \

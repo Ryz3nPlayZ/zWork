@@ -14,7 +14,25 @@ permissions:
   contents: read
 
 jobs:
+  verify:
+    name: Verify preconditions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify version sync
+        run: python3 scripts/check-version-sync.py
+
+      - name: Verify updater signing secret
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" ]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY is missing. Add the updater private key as a GitHub Actions secret."
+            exit 1
+          fi
+
   build:
+    needs: verify
     env:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -32,24 +50,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify version sync
-        run: python3 scripts/check-version-sync.py
-
-      - name: Verify updater signing secret
-        shell: bash
-        run: |
-          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
-            echo "TAURI_SIGNING_PRIVATE_KEY is missing. Add the updater private key as a GitHub Actions secret."
-            exit 1
-          fi
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri -> target
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -82,6 +96,7 @@ jobs:
           path: dist/*
 
   macos-backend:
+    needs: verify
     name: macOS backend (${{ matrix.arch }})
     strategy:
       matrix:
@@ -100,6 +115,14 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+
+      - name: Cache PyInstaller work dir
+        uses: actions/cache@v4
+        with:
+          path: .release/pyinstaller-work
+          key: pyinstaller-${{ matrix.target }}-${{ hashFiles('pyproject.toml', 'sidecar/**/*.py', 'zWork-Skills/**/*') }}
+          restore-keys: pyinstaller-${{ matrix.target }}-
 
       - name: Build backend
         run: bash scripts/build-backend.sh ${{ matrix.target }}
@@ -112,7 +135,7 @@ jobs:
 
   macos-universal:
     name: macOS universal build
-    needs: macos-backend
+    needs: [verify, macos-backend]
     runs-on: macos-15-intel
     env:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -120,26 +143,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify version sync
-        run: python3 scripts/check-version-sync.py
-
-      - name: Verify updater signing secret
-        shell: bash
-        run: |
-          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
-            echo "TAURI_SIGNING_PRIVATE_KEY is missing. Add the updater private key as a GitHub Actions secret."
-            exit 1
-          fi
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri -> target
+          cache-targets: true
 
       - name: Install frontend deps
         run: npm ci
