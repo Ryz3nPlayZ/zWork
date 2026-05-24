@@ -176,10 +176,13 @@ async function cloudFetch<T>(path: string, init?: RequestInit, token = getToken(
   if (init?.body && !headers.has("content-type")) {
     headers.set("content-type", "application/json");
   }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
   const response = await fetch(`${CLOUD_BASE}${path}`, {
     ...init,
     headers,
-  });
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timeout));
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     throw new CloudFetchError(response.status, response.statusText, text);

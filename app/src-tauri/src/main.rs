@@ -397,8 +397,9 @@ fn ensure_backend_running(app: &tauri::AppHandle, backend: &Backend) -> Result<b
     }
 
     // Don't kill a freshly spawned backend before it has time to bind.
+    // PyInstaller cold-start on slow machines can take 20+ seconds.
     if let Some(spawned_at) = guard.spawned_at {
-        if spawned_at.elapsed() < Duration::from_secs(5) {
+        if spawned_at.elapsed() < Duration::from_secs(45) {
             return Ok(false);
         }
     }
@@ -410,6 +411,8 @@ fn ensure_backend_running(app: &tauri::AppHandle, backend: &Backend) -> Result<b
         ));
         child.shutdown();
     }
+    // Kill any orphan processes on the port before spawning a new one.
+    kill_stale_on_port(8787);
     guard.child = spawn_backend(app);
     if guard.child.is_some() {
         guard.spawned_at = Some(Instant::now());
