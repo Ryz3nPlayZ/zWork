@@ -111,7 +111,7 @@ export function ChatView() {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto pb-44">
           <div className="mx-auto flex max-w-[960px] flex-col gap-5 px-6 py-8">
             <ConcurrentWorkBanner />
             {chat.messages.map((m, idx) => {
@@ -161,9 +161,9 @@ export function ChatView() {
           </div>
         </div>
 
-        {/* Composer — no top border, just padding */}
-        <div className="shrink-0 bg-paper px-6 pb-5 pt-3">
-          <div className="mx-auto max-w-[960px]">
+        {/* Composer — floating directly over the chat text */}
+        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-paper via-paper/95 to-transparent px-6 pb-5 pt-10 pointer-events-none z-10">
+          <div className="mx-auto max-w-[960px] pointer-events-auto">
             <ChatInput autoFocus placeholder="Reply to zWork" />
             <p className="mt-2 text-center text-[11px] text-ink-faint">
               zWork can take actions on your computer. Review before approving.
