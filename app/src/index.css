@@ -83,16 +83,29 @@
 /* --------------------------------------------------------
    Base
    -------------------------------------------------------- */
-html,
-body,
-#root {
+:root {
+  --zoom-level: 1;
+}
+
+html {
   height: 100%;
+  overflow: hidden;
 }
 
 body {
+  height: calc(100% / var(--zoom-level, 1)) !important;
+  width: calc(100% / var(--zoom-level, 1)) !important;
+  transform: scale(var(--zoom-level, 1));
+  transform-origin: top left;
   @apply bg-paper text-ink font-sans antialiased;
   font-feature-settings: "ss01", "cv11";
   -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+#root {
+  height: 100%;
+  width: 100%;
 }
 
 /* --------------------------------------------------------

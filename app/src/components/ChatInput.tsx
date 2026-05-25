@@ -9,20 +9,14 @@ import {
 } from "react";
 import {
   ArrowUp,
-  Eye,
-  EyeOff,
-  Globe,
-  Layers3,
   Paperclip,
-  Shield,
+  ShieldCheck,
   ShieldAlert,
   Square,
   X,
   FileText,
   Image as ImageIcon,
   Upload,
-  Mic,
-  MicOff,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { needsLightweightRendering } from "../lib/platform";
@@ -75,42 +69,6 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, v
       setLocalValue(val);
     }
   };
-  const [isRecording, setIsRecording] = useState(false);
-  const recognitionRef = useRef<any>(null);
-
-  useEffect(() => {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (SpeechRecognition) {
-      const rec = new SpeechRecognition();
-      rec.continuous = false;
-      rec.interimResults = false;
-      rec.lang = "en-US";
-
-      rec.onstart = () => setIsRecording(true);
-      rec.onresult = (event: any) => {
-        const transcript = event.results[0][0].transcript;
-        if (transcript) {
-          setValue((prev) => (prev ? `${prev} ${transcript}` : transcript));
-        }
-      };
-      rec.onerror = (e: any) => {
-        console.error(e);
-        setIsRecording(false);
-      };
-      rec.onend = () => setIsRecording(false);
-      recognitionRef.current = rec;
-    }
-  }, []);
-
-  const toggleRecording = () => {
-    if (!recognitionRef.current) return;
-    if (isRecording) {
-      recognitionRef.current.stop();
-    } else {
-      recognitionRef.current.start();
-    }
-  };
 
   const [focused, setFocused] = useState(false);
   const [artifactMode, setArtifactMode] = useState(false);
@@ -129,12 +87,8 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, v
 
   const send = useApp((s) => s.send);
   const stop = useApp((s) => s.stop);
-  const webSearch = useApp((s) => s.webSearch);
-  const toggleWeb = useApp((s) => s.toggleWeb);
   const focusChatInput = useApp((s) => s.focusChatInput);
   const openSettings = useApp((s) => s.openSettings);
-  const planMode = useApp((s) => s.planMode);
-  const setPlanMode = useApp((s) => s.setPlanMode);
   const autoApproveDestructive = useApp((s) => s.autoApproveDestructive);
   const setAutoApproveDestructive = useApp((s) => s.setAutoApproveDestructive);
   const working = useApp((s) => {
@@ -332,7 +286,7 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, v
     onSend?.(text);
     void send(text, {
       artifactMode,
-      planMode,
+      planMode: false,
       autoApproveDestructive,
       attachments: attachments
         .filter((a): a is ComposerAttachment & { uploadedPath: string } => !!a.uploadedPath)
@@ -466,7 +420,13 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, v
                 key={a.id}
                 className="flex items-center gap-2 rounded-xl border border-line bg-paper px-3 py-1.5 text-[12px] text-ink-muted transition-all"
               >
-                {a.kind === "image" ? (
+                {a.kind === "image" && a.previewUrl ? (
+                  <img
+                    src={a.previewUrl}
+                    alt={a.name}
+                    className="h-5 w-5 rounded object-cover border border-line"
+                  />
+                ) : a.kind === "image" ? (
                   <ImageIcon className="h-3.5 w-3.5 text-blue-500" />
                 ) : (
                   <FileText className="h-3.5 w-3.5 text-ink-faint" />
@@ -513,30 +473,7 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, v
         />
       )}
 
-      {/* Quick Actions Shortcut Bar */}
-      <div className="flex items-center gap-1.5 overflow-x-auto px-4 pt-2.5 select-none scrollbar-none">
-        {[
-          { label: "Draft Email", icon: "✉️", template: "Draft a professional email regarding: " },
-          { label: "Summarize", icon: "📝", template: "Summarize the following text or upload: " },
-          { label: "Explain Code", icon: "💻", template: "Explain how this code works and suggest improvements:\n\n" },
-          { label: "Task Plan", icon: "📋", template: "Break down the following goal into a step-by-step checklist of tasks: " },
-          { label: "Find Bugs", icon: "🔍", template: "Review this code for errors, edge cases, and bugs:\n\n" },
-          { label: "Brainstorm", icon: "💡", template: "Brainstorm 5 innovative startup or feature ideas for: " },
-        ].map((action) => (
-          <button
-            key={action.label}
-            type="button"
-            onClick={() => {
-              setValue(action.template);
-              areaRef.current?.focus();
-            }}
-            className="press flex shrink-0 items-center gap-1 rounded-full border border-line bg-paper-sunken/45 hover:bg-paper-raised px-2.5 py-1 text-[10.5px] font-semibold text-ink-muted hover:text-ink transition-all duration-150"
-          >
-            <span>{action.icon}</span>
-            <span>{action.label}</span>
-          </button>
-        ))}
-      </div>
+
 
       <textarea
         ref={areaRef}
@@ -586,20 +523,9 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, v
             size="md"
             onClick={() => fileInputRef.current?.click()}
           />
-          {recognitionRef.current && (
-            <IconButton
-              icon={isRecording ? <MicOff className="text-red-500 animate-pulse" /> : <Mic />}
-              label={isRecording ? "Stop recording" : "Dictate message"}
-              tooltipSide="top"
-              variant="ghost"
-              size="md"
-              active={isRecording}
-              onClick={toggleRecording}
-            />
-          )}
           <IconButton
-            icon={<Layers3 />}
-            label={artifactMode ? "Artifacts: on" : "Artifacts: off"}
+            icon={<FileText className="h-4 w-4" />}
+            label={artifactMode ? "Document mode: on" : "Document mode"}
             tooltipSide="top"
             variant="ghost"
             size="md"
@@ -607,26 +533,8 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, v
             onClick={() => setArtifactMode((v) => !v)}
           />
           <IconButton
-            icon={<Globe />}
-            label={webSearch ? "Web search: on" : "Web search"}
-            tooltipSide="top"
-            variant="ghost"
-            size="md"
-            active={webSearch}
-            onClick={toggleWeb}
-          />
-          <IconButton
-            icon={planMode ? <Eye /> : <EyeOff />}
-            label={planMode ? "Plan mode: on (read-only)" : "Plan mode: off"}
-            tooltipSide="top"
-            variant="ghost"
-            size="md"
-            active={planMode}
-            onClick={() => setPlanMode(!planMode)}
-          />
-          <IconButton
-            icon={autoApproveDestructive ? <ShieldAlert /> : <Shield />}
-            label={autoApproveDestructive ? "Auto-approve destructive: on" : "Auto-approve destructive: off"}
+            icon={autoApproveDestructive ? <ShieldAlert className="text-amber-500" /> : <ShieldCheck className="text-green-500" />}
+            label={autoApproveDestructive ? "Auto-approve: on" : "Auto-approve: off"}
             tooltipSide="top"
             variant="ghost"
             size="md"

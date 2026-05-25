@@ -172,15 +172,27 @@ export default function App() {
     releaseUrl: string;
     notes?: string;
   } | null>(null);
-  const [cloudUser, setCloudUser] = useState<CloudUser | null>(previewMode === "app" ? {
-    user_id: "preview-user",
-    email: "preview@zwork.local",
-    name: "Preview",
+  // In browser (non-Tauri) dev mode, skip cloud auth entirely and use a local stub.
+  const isBrowserDevMode = typeof window !== "undefined" && !((window as any).__TAURI_INTERNALS__) && !previewMode;
+  const localStubUser: CloudUser = {
+    user_id: "local-dev",
+    email: "dev@zwork.local",
+    name: "Local Dev",
     tier: "free",
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
-  } : null);
-  const [cloudLoading, setCloudLoading] = useState(previewMode ? false : true);
+  };
+  const [cloudUser, setCloudUser] = useState<CloudUser | null>(
+    previewMode === "app" ? {
+      user_id: "preview-user",
+      email: "preview@zwork.local",
+      name: "Preview",
+      tier: "free",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    } : isBrowserDevMode ? localStubUser : null
+  );
+  const [cloudLoading, setCloudLoading] = useState(previewMode || isBrowserDevMode ? false : true);
   const showLanding = view === "chat" && active === null;
 
   const syncStoreUser = (user: CloudUser | null) => {
@@ -200,6 +212,15 @@ export default function App() {
   useEffect(() => {
     void bootstrap();
   }, [bootstrap]);
+
+  // Seed Zustand store with stub user in browser dev mode so components
+  // that read `useApp(s => s.me)` work without a real cloud session.
+  useEffect(() => {
+    if (isBrowserDevMode) {
+      syncStoreUser(localStubUser);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isBrowserDevMode]);
 
   useEffect(() => {
     if (initialView === "admin") {
@@ -223,22 +244,15 @@ export default function App() {
     if (saved) {
       const zoom = parseFloat(saved);
       if (zoom >= 0.8 && zoom <= 1.5) {
-        document.documentElement.style.zoom = String(zoom);
+        document.documentElement.style.setProperty("--zoom-level", String(zoom));
       }
     }
   }, []);
 
   useEffect(() => {
-    if (previewMode) return;
+    // Browser dev mode: stub already set, skip cloud fetch entirely
+    if (previewMode || isBrowserDevMode) return;
     let cancelled = false;
-    const stubUser: CloudUser = {
-      user_id: "browser-preview",
-      email: "preview@zwork.local",
-      name: "Preview",
-      tier: "free",
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
     void fetchCloudSession()
       .then((user) => {
         if (!cancelled) {
@@ -246,19 +260,14 @@ export default function App() {
           syncStoreUser(user);
         }
       })
-      .catch(() => {
-        // Not in Tauri — provide stub user so the app renders
-        if (!cancelled && typeof window !== "undefined" && !(window as any).__TAURI_INTERNALS__) {
-          setCloudUser(stubUser);
-        }
-      })
+      .catch(() => { /* ignore */ })
       .finally(() => {
         if (!cancelled) setCloudLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [previewMode]);
+  }, [previewMode, isBrowserDevMode]);
 
   useEffect(() => {
     if (previewMode) return;
@@ -431,17 +440,17 @@ export default function App() {
         const cur = parseFloat(localStorage.getItem("zwork.zoom") || "1");
         const next = Math.min(1.5, Math.round((cur + 0.1) * 10) / 10);
         localStorage.setItem("zwork.zoom", String(next));
-        document.documentElement.style.zoom = String(next);
+        document.documentElement.style.setProperty("--zoom-level", String(next));
       } else if (mod && e.key === "-") {
         e.preventDefault();
         const cur = parseFloat(localStorage.getItem("zwork.zoom") || "1");
         const next = Math.max(0.5, Math.round((cur - 0.1) * 10) / 10);
         localStorage.setItem("zwork.zoom", String(next));
-        document.documentElement.style.zoom = String(next);
+        document.documentElement.style.setProperty("--zoom-level", String(next));
       } else if (mod && e.key === "0") {
         e.preventDefault();
         localStorage.setItem("zwork.zoom", "1");
-        document.documentElement.style.zoom = "1";
+        document.documentElement.style.setProperty("--zoom-level", "1");
       } else if (mod && e.key.toLowerCase() === "j") {
         e.preventDefault();
         setCockpitOpen(!cockpitOpen);
@@ -482,7 +491,7 @@ export default function App() {
   if (cloudLoading) {
     return <div className="h-screen w-screen bg-paper" />;
   }
-  if (!cloudUser) {
+  if (!cloudUser && !isBrowserDevMode) {
     return (
       <Suspense fallback={<div className="h-screen w-screen bg-paper" />}>
         <LoginScreen />
