@@ -24,6 +24,7 @@ const AnalyticsPage = lazy(() => import("./components/AnalyticsPage").then((m) =
 const PlanPage = lazy(() => import("./components/PlanPage").then((m) => ({ default: m.PlanPage })));
 const ConnectorsPage = lazy(() => import("./components/ConnectorsPage").then((m) => ({ default: m.ConnectorsPage })));
 const AdminPage = lazy(() => import("./components/AdminPage").then((m) => ({ default: m.AdminPage })));
+import { Logo } from "./components/Logo";
 import { CockpitPanel } from "./components/cockpit/CockpitPanel";
 
 export default function App() {
@@ -396,9 +397,11 @@ export default function App() {
   if (isTauri && !backendReady) {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-paper">
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-ink/20 border-t-ink" />
-          <span className="text-[12px] text-ink-muted">Starting backend…</span>
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-[pulse_2s_ease-in-out_infinite]">
+            <Logo size={48} className="text-ink" />
+          </div>
+          <span className="text-[12px] text-ink-faint">Warming up…</span>
         </div>
       </div>
     );

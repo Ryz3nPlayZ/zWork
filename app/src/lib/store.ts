@@ -302,6 +302,15 @@ async function syncManagedRouterToken() {
       zwork_router: { base_url: ROUTER_BASE_URL },
     },
   });
+  // Ensure the custom model entry exists so it shows in the model picker.
+  await api.upsertCustomModel({
+    id: ROUTER_MODEL_ID,
+    name: ROUTER_MODEL_NAME,
+    shape: "anthropic",
+    credential: "zwork_router",
+    model_id: ROUTER_TARGET_MODEL_ID,
+    base_url_override: ROUTER_BASE_URL,
+  });
 }
 
 export interface User {
