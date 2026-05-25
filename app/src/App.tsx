@@ -52,6 +52,7 @@ export default function App() {
   const cockpitOpen = useApp((s) => s.cockpitOpen);
   const setCockpitOpen = useApp((s) => s.setCockpitOpen);
   const onboardingDone = useApp((s) => s.onboardingDone);
+  const backendReady = useApp((s) => s.backendReady);
   // Skip onboarding in browser preview mode (non-Tauri environment)
   const skipOnboarding = typeof window !== "undefined" && !((window as any).__TAURI_INTERNALS__);
   const [updateCard, setUpdateCard] = useState<UpdateCardState | null>(null);
@@ -387,6 +388,20 @@ export default function App() {
   }
   if (!skipOnboarding && onboardingDone === null) {
     return <div className="h-screen w-screen bg-paper" />;
+  }
+
+  // Gate: don't render the main UI until the local backend is healthy.
+  // Without this, providers/settings/connectors all load as empty.
+  const isTauri = typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
+  if (isTauri && !backendReady) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-paper">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-ink/20 border-t-ink" />
+          <span className="text-[12px] text-ink-muted">Starting backend…</span>
+        </div>
+      </div>
+    );
   }
 
   return (

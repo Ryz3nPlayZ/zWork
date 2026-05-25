@@ -347,6 +347,9 @@ interface AppState {
   onboardingDone: boolean | null;
   setOnboardingDone: (v: boolean) => void;
 
+  // Backend readiness
+  backendReady: boolean;
+
   // Composer state
   model: string;
   setModel: (m: string) => void;
@@ -546,6 +549,8 @@ export const useApp = create<AppState>((set, get) => ({
     rememberOnboardingDone(v);
     set({ onboardingDone: v });
   },
+
+  backendReady: false,
 
   model: "",
   setModel: (m) => set({ model: m }),
@@ -783,11 +788,14 @@ export const useApp = create<AppState>((set, get) => ({
         ],
       };
 
-      set({ onboardingDone: true, model: "zwork-router", providers: webProviders });
+      set({ onboardingDone: true, model: "zwork-router", providers: webProviders, backendReady: true });
       return;
     }
 
-    await api.waitForBackend(20).catch(() => {});
+    // Wait for the backend to be fully healthy before loading any data.
+    // The Rust side already spawned the backend; this polls until it responds.
+    await api.waitForBackend(60).catch(() => {});
+    set({ backendReady: true });
 
     try {
       const cloudUser = await fetchCloudSession();

@@ -162,18 +162,22 @@ async function invokeBackendCommand(command: "ensure_backend" | "restart_backend
 }
 
 async function healthFetch() {
-  return fetch(u("/api/health")).then((r) => j<{ ok: boolean }>(r));
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5_000);
+  return fetch(u("/api/health"), { signal: controller.signal })
+    .then((r) => j<{ ok: boolean }>(r))
+    .finally(() => clearTimeout(timeout));
 }
 
 async function waitForBackendReady(attempts = 60) {
   let lastError: unknown = null;
   for (let i = 0; i < attempts; i += 1) {
     try {
-      if (i === 0) await invokeBackendCommand("ensure_backend");
+      if (i === 0 || (i > 0 && i % 15 === 0)) await invokeBackendCommand("ensure_backend");
       return await healthFetch();
     } catch (err) {
       lastError = err;
-      await sleep(i < 6 ? 500 : 1000);
+      await sleep(i < 10 ? 500 : 1500);
     }
   }
   throw lastError instanceof Error
