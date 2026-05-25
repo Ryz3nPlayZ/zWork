@@ -20,7 +20,8 @@ import {
   ListOrdered,
   Square,
   CheckSquare,
-  FileCode
+  FileCode,
+  HelpCircle
 } from "lucide-react";
 import type { Artifact } from "../../lib/store";
 import { useApp } from "../../lib/store";
@@ -150,6 +151,7 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
   const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null);
   const [blockMenuId, setBlockMenuId] = useState<string | null>(null);
+  const [showCheatSheet, setShowCheatSheet] = useState(false);
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -278,7 +280,7 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
   };
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col relative">
       {/* Toolbar */}
       <div className="flex shrink-0 items-center gap-1 border-b border-line px-2 py-1 bg-paper-soft">
         <div className="flex rounded-lg border border-line bg-paper p-0.5">
@@ -355,6 +357,20 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
         >
           <Download className="h-3 w-3" />
           <span>Export Word</span>
+        </button>
+
+        <button
+          onClick={() => setShowCheatSheet(!showCheatSheet)}
+          className={cn(
+            "press flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] transition-colors",
+            showCheatSheet
+              ? "bg-accent/10 border-accent/30 text-accent"
+              : "border-line bg-paper text-ink-muted hover:text-ink"
+          )}
+          title="Show Markdown block formatting guide"
+        >
+          <HelpCircle className="h-3 w-3" />
+          <span>Guide</span>
         </button>
       </div>
 
@@ -579,6 +595,107 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
         <span>Notion Blocks Mode: Press Enter for new line · Backspace to merge blocks</span>
         <span>Auto-saved</span>
       </div>
+
+      {showCheatSheet && (
+        <div className="absolute right-4 top-14 bottom-4 z-50 w-72 rounded-xl border border-line bg-paper-raised p-4 shadow-pop flex flex-col backdrop-blur-md bg-paper/95 animate-in slide-in-from-right-4 duration-200">
+          <div className="flex items-center justify-between border-b border-line pb-2 mb-3">
+            <h3 className="font-semibold text-xs text-ink flex items-center gap-1.5">
+              <HelpCircle className="h-3.5 w-3.5 text-accent" />
+              Markdown Formatting Guide
+            </h3>
+            <button
+              onClick={() => setShowCheatSheet(false)}
+              className="text-[10px] text-ink-faint hover:text-ink p-1 rounded-md hover:bg-paper-sunken transition-colors"
+            >
+              Close
+            </button>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto space-y-3.5 text-[11.5px] pr-1">
+            <div>
+              <h4 className="font-medium text-ink-muted mb-1.5 text-[10.5px] uppercase tracking-wider">Headers & Structure</h4>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
+                  <span className="font-mono text-accent"># Heading 1</span>
+                  <span className="text-ink-faint text-[10px]">Title size</span>
+                </div>
+                <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
+                  <span className="font-mono text-accent">## Heading 2</span>
+                  <span className="text-ink-faint text-[10px]">Section size</span>
+                </div>
+                <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
+                  <span className="font-mono text-accent">### Heading 3</span>
+                  <span className="text-ink-faint text-[10px]">Subsection</span>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="font-medium text-ink-muted mb-1.5 text-[10.5px] uppercase tracking-wider">Lists & Tasks</h4>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
+                  <span className="font-mono text-accent">- Item</span>
+                  <span className="text-ink-faint text-[10px]">Bullet point</span>
+                </div>
+                <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
+                  <span className="font-mono text-accent">1. Item</span>
+                  <span className="text-ink-faint text-[10px]">Numbered</span>
+                </div>
+                <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
+                  <span className="font-mono text-accent">- [ ] Task</span>
+                  <span className="text-ink-faint text-[10px]">Unchecked Todo</span>
+                </div>
+                <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
+                  <span className="font-mono text-accent">- [x] Done</span>
+                  <span className="text-ink-faint text-[10px]">Completed Todo</span>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="font-medium text-ink-muted mb-1.5 text-[10.5px] uppercase tracking-wider">Inline Styles</h4>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
+                  <span className="font-mono text-accent">**bold text**</span>
+                  <span className="text-ink-faint text-[10px]">Bold</span>
+                </div>
+                <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
+                  <span className="font-mono text-accent">*italic text*</span>
+                  <span className="text-ink-faint text-[10px]">Italic</span>
+                </div>
+                <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
+                  <span className="font-mono text-accent">`code`</span>
+                  <span className="text-ink-faint text-[10px]">Inline code</span>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <h4 className="font-medium text-ink-muted mb-1.5 text-[10.5px] uppercase tracking-wider">Advanced Blocks</h4>
+              <div className="space-y-1.5">
+                <div className="flex flex-col p-1.5 rounded bg-paper-sunken border border-line-soft">
+                  <span className="font-mono text-accent">```javascript</span>
+                  <span className="font-mono text-ink-muted pl-2">console.log("hello");</span>
+                  <span className="font-mono text-accent">```</span>
+                  <span className="text-ink-faint text-[9px] mt-1 text-right">Code Block</span>
+                </div>
+                <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
+                  <span className="font-mono text-accent">&gt; quote</span>
+                  <span className="text-ink-faint text-[10px]">Quote block</span>
+                </div>
+                <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
+                  <span className="font-mono text-accent">[Link](https://...)</span>
+                  <span className="text-ink-faint text-[10px]">Hyperlink</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div className="border-t border-line pt-2.5 mt-2 text-[10px] text-ink-faint text-center">
+            Blocks auto-convert when typing in Notion mode.
+          </div>
+        </div>
+      )}
     </div>
   );
 }
