@@ -72,6 +72,42 @@ function DailyGoalBar() {
   );
 }
 
+function OfflineBanner() {
+  const offline = useApp((s) => s.backendOffline);
+  const bootstrap = useApp((s) => s.bootstrap);
+  const [reconnecting, setReconnecting] = useState(false);
+
+  if (!offline) return null;
+
+  const handleRetry = async () => {
+    setReconnecting(true);
+    try {
+      await bootstrap();
+    } catch {}
+    setReconnecting(false);
+  };
+
+  return (
+    <div className="shrink-0 border-b border-amber-500/20 bg-amber-500/5 px-4 py-2 flex items-center justify-between text-[11px] text-amber-500 animate-in fade-in duration-200">
+      <div className="flex items-center gap-2">
+        <span className="font-semibold flex items-center gap-1">
+          ⚠️ Running Offline:
+        </span>
+        <span className="text-amber-500/90">
+          The local backend is unreachable. Showing cached chats and local canvas editors.
+        </span>
+      </div>
+      <button
+        onClick={handleRetry}
+        disabled={reconnecting}
+        className="px-2.5 py-1 text-[10.5px] font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 rounded-lg transition-all border border-amber-500/30 disabled:opacity-50 cursor-pointer"
+      >
+        {reconnecting ? "Connecting..." : "Reconnect"}
+      </button>
+    </div>
+  );
+}
+
 export default function App() {
   const previewMode = getPreviewMode();
   // Handle OAuth token callback from web sign-in (must run before any auth logic)
@@ -483,6 +519,7 @@ export default function App() {
         <Sidebar />
         <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
           <DailyGoalBar />
+          <OfflineBanner />
           <div className="relative flex-grow flex min-h-0 overflow-hidden">
           {view === "settings" ? (
             <Suspense fallback={panelFallback}>

@@ -376,6 +376,7 @@ interface AppState {
 
   // Backend readiness
   backendReady: boolean;
+  backendOffline: boolean;
 
   // Composer state
   model: string;
@@ -579,6 +580,7 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   backendReady: false,
+  backendOffline: false,
 
   model: "",
   setModel: (m) => set({ model: m }),
@@ -839,8 +841,29 @@ export const useApp = create<AppState>((set, get) => ({
 
     // Wait for the backend to be fully healthy before loading any data.
     // The Rust side already spawned the backend; this polls until it responds.
-    await api.waitForBackend(60).catch(() => {});
-    set({ backendReady: true });
+    try {
+      await api.waitForBackend(15);
+      set({ backendReady: true, backendOffline: false });
+    } catch (e) {
+      console.warn("Backend failed to start. Running in offline fallback mode.");
+      set({ backendReady: true, backendOffline: true });
+    }
+
+    if (get().backendOffline) {
+      try {
+        const cachedSummaries = localStorage.getItem("zwork:cached-summaries");
+        if (cachedSummaries) {
+          set({ chatSummaries: JSON.parse(cachedSummaries) });
+        }
+        const cachedChats = localStorage.getItem("zwork:cached-chats");
+        if (cachedChats) {
+          set({ chats: JSON.parse(cachedChats) });
+        }
+      } catch (err) {
+        console.warn("Failed to load cached offline data:", err);
+      }
+      return;
+    }
 
     try {
       const cloudUser = await fetchCloudSession();
@@ -888,10 +911,20 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   refreshChats: async () => {
+    if (get().backendOffline) {
+      const cached = localStorage.getItem("zwork:cached-summaries");
+      if (cached) set({ chatSummaries: JSON.parse(cached) });
+      return;
+    }
     try {
       const { chats } = await api.listChats();
-      set({ chatSummaries: chats });
-    } catch (e) { console.warn("refreshChats failed:", e) }
+      set({ chatSummaries: chats, backendOffline: false });
+    } catch (e) {
+      console.warn("refreshChats failed:", e);
+      set({ backendOffline: true });
+      const cached = localStorage.getItem("zwork:cached-summaries");
+      if (cached) set({ chatSummaries: JSON.parse(cached) });
+    }
   },
 
   refreshProviders: async () => {
@@ -976,6 +1009,23 @@ export const useApp = create<AppState>((set, get) => ({
 
   openChat: async (id) => {
     set({ activeChatId: id, view: "chat" });
+    if (get().backendOffline) {
+      const cachedChats = localStorage.getItem("zwork:cached-chats");
+      if (cachedChats) {
+        try {
+          const allChats = JSON.parse(cachedChats);
+          if (allChats[id]) {
+            set((s) => ({
+              chats: {
+                ...s.chats,
+                [id]: allChats[id],
+              }
+            }));
+            return;
+          }
+        } catch {}
+      }
+    }
     // Fetch full chat lazily
     if (!get().chats[id]) {
       try {
@@ -1020,6 +1070,22 @@ export const useApp = create<AppState>((set, get) => ({
           },
         }));
       } catch (e) {
+        // Fallback to cache if available
+        const cachedChats = localStorage.getItem("zwork:cached-chats");
+        if (cachedChats) {
+          try {
+            const allChats = JSON.parse(cachedChats);
+            if (allChats[id]) {
+              set((s) => ({
+                chats: {
+                  ...s.chats,
+                  [id]: allChats[id],
+                }
+              }));
+              return;
+            }
+          } catch {}
+        }
         set((s) => ({
           chats: {
             ...s.chats,
@@ -1688,6 +1754,17 @@ export const useApp = create<AppState>((set, get) => ({
     api.patchMessage(chatId, msgId, { content: rawContent }).catch(() => {});
   },
 }));
+
+if (typeof window !== "undefined") {
+  useApp.subscribe((state) => {
+    try {
+      localStorage.setItem("zwork:cached-chats", JSON.stringify(state.chats));
+      localStorage.setItem("zwork:cached-summaries", JSON.stringify(state.chatSummaries));
+    } catch (e) {
+      console.warn("Failed to write offline cache:", e);
+    }
+  });
+}
 
 export function bucketFor(ts: number): ChatBucket {
   const d = new Date(ts);
