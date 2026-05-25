@@ -435,15 +435,15 @@ function ModelsPanel({
                 className="w-full bg-paper border border-line text-[13px] px-3.5 py-2 rounded-xl focus:outline-none focus:ring-1 focus:ring-ink focus:border-line-strong text-ink shadow-xs appearance-none pr-10 bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2020%2020%22%20fill%3D%22none%22%3E%3Cpath%20d%3D%22M7%209l3%203%203-3%22%20stroke%3D%22%23888888%22%20stroke-width%3D%221.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E')] bg-[length:18px_18px] bg-[right_10px_center] bg-no-repeat cursor-pointer transition-all duration-150"
                 >
                   {deprecatedCredentialLabel && (
-                    <option value={form.credential}>
+                    <option value={form.credential} className="bg-paper text-ink">
                       {form.credential === "zwork_router" ? `${deprecatedCredentialLabel} (Managed)` : `${deprecatedCredentialLabel} (Deprecated)`}
                     </option>
                   )}
-                  <option value="anthropic">Anthropic (BYOK)</option>
-                  <option value="openai">OpenAI-compatible (BYOK)</option>
-                  <option value="deepseek">DeepSeek (BYOK)</option>
-                  <option value="zai">z.ai (BYOK)</option>
-                  <option value="claude_code">Local config (reuse credentials)</option>
+                  <option value="anthropic" className="bg-paper text-ink">Anthropic (BYOK)</option>
+                  <option value="openai" className="bg-paper text-ink">OpenAI-compatible (BYOK)</option>
+                  <option value="deepseek" className="bg-paper text-ink">DeepSeek (BYOK)</option>
+                  <option value="zai" className="bg-paper text-ink">z.ai (BYOK)</option>
+                  <option value="claude_code" className="bg-paper text-ink">Local config (reuse credentials)</option>
                 </select>
             </Field>
             {deprecatedCredentialLabel && (
@@ -832,7 +832,7 @@ function GeneralPanel({
             className="w-full bg-paper border border-line text-[13px] px-3.5 py-2 rounded-xl focus:outline-none focus:ring-1 focus:ring-ink focus:border-line-strong text-ink shadow-xs appearance-none pr-10 bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2020%2020%22%20fill%3D%22none%22%3E%3Cpath%20d%3D%22M7%209l3%203%203-3%22%20stroke%3D%22%23888888%22%20stroke-width%3D%221.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E')] bg-[length:18px_18px] bg-[right_10px_center] bg-no-repeat cursor-pointer transition-all duration-150"
           >
             {models.map((m) => (
-              <option key={m.id} value={m.id}>
+              <option key={m.id} value={m.id} className="bg-paper text-ink">
                 {m.name}{m.subtitle ? ` · ${m.subtitle}` : ""}
               </option>
             ))}
@@ -1026,14 +1026,6 @@ function PersonalizationPanel() {
     }
   };
 
-  const personas = [
-    { name: "Default Assistant", desc: "Standard helpful, friendly, and structured assistant." },
-    { name: "Executive Coach", desc: "Goal-oriented, focusing on execution, prioritization, and business metrics." },
-    { name: "Creative Writer", desc: "Expressive, engaging, specializing in copy, marketing, and design thinking." },
-    { name: "Brutal Critic", desc: "Direct, pointing out flaws, security vulnerabilities, and code bloat." },
-    { name: "Friendly Peer", desc: "Casual, collaborative, acts like a startup co-founder bouncing ideas." }
-  ];
-
   return (
     <div className="flex flex-col gap-4">
       <div>
@@ -1075,10 +1067,10 @@ function PersonalizationPanel() {
                   onChange={(e) => handleFormChange("vibe", e.target.value)}
                   className="w-full bg-paper border border-line text-[13px] px-3.5 py-2 rounded-xl focus:outline-none focus:ring-1 focus:ring-ink focus:border-line-strong text-ink shadow-xs appearance-none pr-10 bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2020%2020%22%20fill%3D%22none%22%3E%3Cpath%20d%3D%22M7%209l3%203%203-3%22%20stroke%3D%22%23888888%22%20stroke-width%3D%221.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E')] bg-[length:18px_18px] bg-[right_10px_center] bg-no-repeat cursor-pointer transition-all duration-150"
                 >
-                  <option value="Professional & focused">Professional & focused</option>
-                  <option value="Casual & friendly">Casual & friendly</option>
-                  <option value="Technical & direct">Technical & direct</option>
-                  <option value="Creative & storytelling">Creative & storytelling</option>
+                  <option value="Professional & focused" className="bg-paper text-ink">Professional & focused</option>
+                  <option value="Casual & friendly" className="bg-paper text-ink">Casual & friendly</option>
+                  <option value="Technical & direct" className="bg-paper text-ink">Technical & direct</option>
+                  <option value="Creative & storytelling" className="bg-paper text-ink">Creative & storytelling</option>
                 </select>
               </div>
 
@@ -1090,9 +1082,9 @@ function PersonalizationPanel() {
                   onChange={(e) => handleFormChange("verbosity", e.target.value)}
                   className="w-full bg-paper border border-line text-[13px] px-3.5 py-2 rounded-xl focus:outline-none focus:ring-1 focus:ring-ink focus:border-line-strong text-ink shadow-xs appearance-none pr-10 bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2020%2020%22%20fill%3D%22none%22%3E%3Cpath%20d%3D%22M7%209l3%203%203-3%22%20stroke%3D%22%23888888%22%20stroke-width%3D%221.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E')] bg-[length:18px_18px] bg-[right_10px_center] bg-no-repeat cursor-pointer transition-all duration-150"
                 >
-                  <option value="Concise">Concise (Short and direct)</option>
-                  <option value="Balanced">Balanced (Medium length)</option>
-                  <option value="Thorough">Thorough (Detailed & explanatory)</option>
+                  <option value="Concise" className="bg-paper text-ink">Concise (Short and direct)</option>
+                  <option value="Balanced" className="bg-paper text-ink">Balanced (Medium length)</option>
+                  <option value="Thorough" className="bg-paper text-ink">Thorough (Detailed & explanatory)</option>
                 </select>
               </div>
             </div>

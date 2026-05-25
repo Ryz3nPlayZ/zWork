@@ -25,7 +25,6 @@ export function KeybindingsModal() {
   if (!open) return null;
 
   const cmdKey = isMac ? "⌘" : "Ctrl";
-  const altKey = isMac ? "⌥" : "Alt";
 
   const categories = [
     {
@@ -50,7 +49,7 @@ export function KeybindingsModal() {
     {
       title: "View & Controls",
       shortcuts: [
-        { keys: [`${cmdKey}`, "J"], desc: "Toggle Cockpit panel" },
+        { keys: [`${cmdKey}`, "J"], desc: "Toggle Tasks panel" },
         { keys: [`${cmdKey}`, "+"], desc: "Zoom In Page font size" },
         { keys: [`${cmdKey}`, "-"], desc: "Zoom Out Page font size" },
         { keys: [`${cmdKey}`, "0"], desc: "Reset Page Zoom font size" },
@@ -60,7 +59,7 @@ export function KeybindingsModal() {
 
   return (
     <div
-      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 animate-fade-in"
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-ink/10 backdrop-blur-sm animate-fade-in"
       onClick={() => setOpen(false)}
       role="dialog"
       aria-modal="true"

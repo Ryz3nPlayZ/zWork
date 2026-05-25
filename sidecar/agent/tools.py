@@ -685,7 +685,7 @@ TOOL_SCHEMAS: list[dict] = [
     {
         "name": "manage_tasks",
         "description": (
-            "List, create, update, or delete user tasks in the cockpit's Kanban board. "
+            "List, create, update, or delete user tasks in the Tasks board. "
             "Use this whenever the user asks to add a task, change a task's status/column "
             "(inbox, todo, doing, done), update a task, list their tasks, or delete a task."
         ),
@@ -721,7 +721,7 @@ TOOL_SCHEMAS: list[dict] = [
     {
         "name": "manage_events",
         "description": (
-            "List, create, or delete calendar events in the cockpit's Daily Agenda. "
+            "List, create, or delete calendar events in the Calendar view. "
             "Use this whenever the user asks to schedule a meeting, add an event to their calendar, "
             "list their events/schedule, or remove an event."
         ),

@@ -10,8 +10,8 @@ import {
 import {
   ArrowUp,
   Paperclip,
-  ShieldCheck,
-  ShieldAlert,
+  Lock,
+  Unlock,
   Square,
   X,
   FileText,
@@ -71,7 +71,7 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, v
   };
 
   const [focused, setFocused] = useState(false);
-  const [artifactMode, setArtifactMode] = useState(false);
+  const [documentMode, setDocumentMode] = useState(false);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [composing, setComposing] = useState(false);
@@ -285,7 +285,7 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, v
     setSlashState(null);
     onSend?.(text);
     void send(text, {
-      artifactMode,
+      artifactMode: documentMode,
       planMode: false,
       autoApproveDestructive,
       attachments: attachments
@@ -424,7 +424,7 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, v
                   <img
                     src={a.previewUrl}
                     alt={a.name}
-                    className="h-5 w-5 rounded object-cover border border-line"
+                    className="h-12 w-12 rounded-lg object-cover border border-line"
                   />
                 ) : a.kind === "image" ? (
                   <ImageIcon className="h-3.5 w-3.5 text-blue-500" />
@@ -525,15 +525,15 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, v
           />
           <IconButton
             icon={<FileText className="h-4 w-4" />}
-            label={artifactMode ? "Document mode: on" : "Document mode"}
+            label={documentMode ? "Document: on" : "Document"}
             tooltipSide="top"
             variant="ghost"
             size="md"
-            active={artifactMode}
-            onClick={() => setArtifactMode((v) => !v)}
+            active={documentMode}
+            onClick={() => setDocumentMode((v) => !v)}
           />
           <IconButton
-            icon={autoApproveDestructive ? <ShieldAlert className="text-amber-500" /> : <ShieldCheck className="text-green-500" />}
+            icon={autoApproveDestructive ? <Unlock className="text-ink" /> : <Lock className="text-ink-muted" />}
             label={autoApproveDestructive ? "Auto-approve: on" : "Auto-approve: off"}
             tooltipSide="top"
             variant="ghost"

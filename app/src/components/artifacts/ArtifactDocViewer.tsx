@@ -661,7 +661,7 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
 
       {/* Footer Info */}
       <div className="shrink-0 border-t border-line px-3 py-1.5 text-[10.5px] text-ink-faint bg-paper-soft flex items-center justify-between">
-        <span>Notion Blocks Mode: Press Enter for new line · Backspace to merge blocks</span>
+        <span>Document Blocks Mode: Press Enter for new line · Backspace to merge blocks</span>
         <span>Auto-saved</span>
       </div>
 

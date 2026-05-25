@@ -89,7 +89,7 @@ export function ConnectorsPage() {
 
   return (
     <div className="flex h-full min-w-0 flex-1 overflow-y-auto bg-paper">
-      <div className="mx-auto w-full max-w-[860px] px-6 pt-24 pb-20">
+      <div className="mx-auto w-full max-w-[860px] px-6 pt-32 pb-20">
         {/* Header */}
         <div className="mb-14 text-center flex flex-col items-center gap-4 relative">
           <div className="absolute right-0 top-0">

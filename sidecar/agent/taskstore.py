@@ -1,4 +1,4 @@
-"""Minimal task and event persistence — stores user-facing cockpit items under ~/.zwork/tasks.json."""
+"""Minimal task and event persistence — stores user-facing tasks and events under ~/.zwork/tasks.json."""
 
 from __future__ import annotations
 
@@ -22,6 +22,9 @@ class Task:
     updated_at: int
     due_date: str | None = None  # "YYYY-MM-DD"
     completed_at: int | None = None
+    description: str = ""
+    assignee: str = ""  # "me" | "zwork" | ""
+    priority: str = "medium"  # "low" | "medium" | "high"
 
 
 @dataclass
@@ -91,6 +94,9 @@ def get_tasks() -> list[Task]:
                     updated_at=t["updated_at"],
                     due_date=t.get("due_date"),
                     completed_at=t.get("completed_at"),
+                    description=t.get("description", ""),
+                    assignee=t.get("assignee", ""),
+                    priority=t.get("priority", "medium"),
                 )
             )
         except (KeyError, TypeError):
@@ -103,6 +109,9 @@ def save_task(
     column: str = "inbox",
     due_date: str | None = None,
     task_id: str | None = None,
+    description: str = "",
+    assignee: str = "",
+    priority: str = "medium",
 ) -> Task:
     data = _load_data()
     tasks_list = data["tasks"]
@@ -134,6 +143,9 @@ def save_task(
                 "due_date": due_date,
                 "completed_at": completed_at,
                 "updated_at": now,
+                "description": description or t_data.get("description", ""),
+                "assignee": assignee or t_data.get("assignee", ""),
+                "priority": priority or t_data.get("priority", "medium"),
             }
         )
         task = Task(**t_data)
@@ -148,6 +160,9 @@ def save_task(
             updated_at=now,
             due_date=due_date,
             completed_at=completed_at,
+            description=description,
+            assignee=assignee,
+            priority=priority,
         )
         tasks_list.append(asdict(task))
 

@@ -294,14 +294,14 @@ export const api = {
       body: JSON.stringify({ project_title: projectTitle, interval_days: intervalDays }),
     }).then((r) => j<{ tasks: any[] }>(r)),
 
-  createTask: (body: { title: string; column?: string; due_date?: string | null }) =>
+  createTask: (body: { title: string; column?: string; due_date?: string | null; description?: string; assignee?: string; priority?: string }) =>
     localFetch("/api/tasks", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     }).then((r) => j<{ task: any }>(r)),
 
-  updateTask: (id: string, body: { title: string; column: string; due_date?: string | null }) =>
+  updateTask: (id: string, body: { title: string; column: string; due_date?: string | null; description?: string; assignee?: string; priority?: string }) =>
     localFetch(`/api/tasks/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -545,14 +545,14 @@ export const api = {
   listProjects: () =>
     localFetch("/api/projects").then((r) => j<{ projects: Project[] }>(r)),
 
-  createProject: (name: string, description?: string) =>
+  createProject: (name: string, description?: string, icon?: string) =>
     localFetch("/api/projects", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, description: description || "" }),
+      body: JSON.stringify({ name, description: description || "", ...(icon ? { icon } : {}) }),
     }).then((r) => j<{ project: Project }>(r)),
 
-  updateProject: (id: string, data: { name?: string; description?: string }) =>
+  updateProject: (id: string, data: { name?: string; description?: string; starred?: boolean; icon?: string }) =>
     localFetch(`/api/projects/${id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
@@ -584,6 +584,23 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ content }),
     }).then((r) => j<{ ok: boolean }>(r)),
+
+  getProjectMemory: (id: string) =>
+    localFetch(`/api/projects/${id}/memory`).then((r) =>
+      j<{ content: string }>(r),
+    ),
+
+  putProjectMemory: (id: string, content: string) =>
+    localFetch(`/api/projects/${id}/memory`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content }),
+    }).then((r) => j<{ ok: boolean }>(r)),
+
+  getProjectTimeline: (id: string) =>
+    localFetch(`/api/projects/${id}/timeline`).then((r) =>
+      j<{ content: string }>(r),
+    ),
 
   refactor: (body: {
     code: string;

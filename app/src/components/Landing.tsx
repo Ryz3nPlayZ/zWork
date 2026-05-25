@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { Download, ArrowUpRight, Loader2 } from "lucide-react";
 import { ChatInput } from "./ChatInput";
-import { loadTemplates } from "../lib/templates";
 import { useApp } from "../lib/store";
 import { useResolvedTheme } from "../lib/theme";
 import { isMacOS, needsLightweightRendering } from "../lib/platform";
@@ -91,9 +90,6 @@ export function Landing({
   const [sending, setSending] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const theme = useResolvedTheme();
-  const triggerFocusChatInput = useApp((s) => s.triggerFocusChatInput);
-  const [templates] = useState(() => loadTemplates());
-
   const greeting = useMemo(() => pickGreeting(), []);
   const updateBusy = updateProgress.phase !== "idle" && updateProgress.phase !== "error";
   const macOS = isMacOS();

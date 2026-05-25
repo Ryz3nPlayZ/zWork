@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Pencil, Check, X, AlertCircle, Settings as SettingsIcon, RefreshCcw } from "lucide-react";
 import { useApp } from "../lib/store";
-import { cn } from "../lib/cn";
 import { isMacOS } from "../lib/platform";
 import { ChatInput } from "./ChatInput";
 import { Message } from "./Message";
-import { IconButton } from "./IconButton";
 import { ConcurrentWorkBanner } from "./ConcurrentWorkBanner";
 
 export function ChatView() {
@@ -231,9 +229,6 @@ export function ChatView() {
             )}
 
             <ChatInput autoFocus placeholder="Reply to zWork" />
-            <p className="mt-2 text-center text-[11px] text-ink-faint">
-              zWork can take actions on your computer. Review before approving.
-            </p>
           </div>
         </div>
       </div>

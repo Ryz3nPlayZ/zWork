@@ -140,7 +140,7 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
 
   return (
     <div className="flex h-full min-w-0 flex-1 overflow-y-auto bg-paper">
-      <div className="mx-auto w-full max-w-[1060px] px-8 pt-24 pb-20">
+      <div className="mx-auto w-full max-w-[1060px] px-8 pt-32 pb-20">
         {/* Header */}
         <header className="mb-14 text-center">
           <h1 className="font-serif text-[42px] font-bold tracking-tight text-ink">Pricing</h1>

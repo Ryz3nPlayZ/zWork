@@ -335,6 +335,7 @@ export function Message({
 }) {
   const isUser = message.role === "user";
   const [askAnswers, setAskAnswers] = useState<Record<string, string>>({});
+  const [copied, setCopied] = useState(false);
   const showWorkingPlaceholder = !isUser && !!streaming && message.content.length === 0;
 
   if (!isUser && !showWorkingPlaceholder && message.content.length === 0 && (!activities || activities.length === 0)) {
@@ -457,7 +458,16 @@ export function Message({
               {message.providerLabel || "Model"}: {message.resolvedModel}
             </span>
           )}
-          <IconButton icon={<Copy />} label="Copy" size="sm" onClick={() => navigator.clipboard.writeText(message.content).catch(() => {})} />
+          <IconButton
+            icon={copied ? <CheckIcon className="h-3.5 w-3.5 text-green-600" /> : <Copy />}
+            label={copied ? "Copied" : "Copy"}
+            size="sm"
+            onClick={() => {
+              navigator.clipboard.writeText(message.content).catch(() => {});
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1800);
+            }}
+          />
           <IconButton icon={<RefreshCcw />} label="Regenerate" size="sm" onClick={() => onRetry?.(message.id)} />
           <IconButton
             icon={<ThumbsDown className={cn(message.feedback === "bad" && "text-red-500 fill-red-500/20")} />}

@@ -3,7 +3,6 @@ import {
   ArrowLeft,
   MoreHorizontal,
   Star,
-  Lock,
   Plus,
   FileText,
   Trash2,
@@ -11,6 +10,7 @@ import {
   X,
   FolderOpen,
   Clock,
+  ScrollText,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
@@ -18,6 +18,11 @@ import { isMacOS } from "../lib/platform";
 import { ChatInput } from "./ChatInput";
 import { IconButton } from "./IconButton";
 import { api } from "../lib/api";
+
+const EMOJI_OPTIONS = [
+  "📁", "📊", "💡", "🚀", "🎯", "🔧", "💼", "📝", "🎨", "🏗️",
+  "⚡", "🌟", "🔬", "📈", "🎮", "🤝", "🏆", "📱", "🌐", "✅",
+];
 
 /**
  * Detail view for a single project. Layout:
@@ -41,6 +46,14 @@ function ProjectListPage() {
   const projects = useApp((s) => s.projects);
   const [modalOpen, setModalOpen] = useState(false);
 
+  // Sort: starred first, then by updated_at descending
+  const sorted = useMemo(() => {
+    return [...projects].sort((a, b) => {
+      if (!!a.starred !== !!b.starred) return a.starred ? -1 : 1;
+      return b.updated_at - a.updated_at;
+    });
+  }, [projects]);
+
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-paper">
       {projects.length === 0 ? (
@@ -56,12 +69,23 @@ function ProjectListPage() {
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto px-8 pt-10 pb-8">
-          <h1 className="text-[28px] font-semibold tracking-tight text-ink">Projects</h1>
+          {/* Task 1: Instrument Serif font for Projects title */}
+          <h1 className="font-['Instrument_Serif'] text-[32px] font-normal tracking-tight text-ink">
+            Projects
+          </h1>
           <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {projects.map((p) => (
+            {sorted.map((p) => (
               <ProjectCard key={p.id} project={p} />
             ))}
           </div>
+          <button
+            type="button"
+            onClick={() => setModalOpen(true)}
+            className="press mt-4 inline-flex items-center gap-1.5 rounded-lg border border-line bg-paper-raised px-3 py-2 text-[12.5px] font-medium text-ink-muted hover:bg-paper-sunken hover:text-ink"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            New project
+          </button>
         </div>
       )}
 
@@ -75,6 +99,8 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const setActiveProject = useApp((s) => s.setActiveProject);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [selectedIcon, setSelectedIcon] = useState<string | null>(null);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
 
@@ -95,7 +121,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
     if (!n || busy) return;
     setBusy(true);
     try {
-      await createProject(n, description.trim() || undefined);
+      await createProject(n, description.trim() || undefined, selectedIcon ?? undefined);
       const all = useApp.getState().projects;
       const latest = all[all.length - 1];
       if (latest) setActiveProject(latest.id);
@@ -126,6 +152,48 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="px-5 py-4 space-y-4">
+          {/* Icon picker row */}
+          <div>
+            <label className="block text-[12.5px] font-medium text-ink-muted mb-1.5">
+              Icon <span className="font-normal text-ink-faint">(optional)</span>
+            </label>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setEmojiPickerOpen((v) => !v)}
+                className="press flex h-9 w-9 items-center justify-center rounded-xl border border-line bg-paper hover:border-line-strong text-[20px]"
+              >
+                {selectedIcon ?? <FolderOpen className="h-4 w-4 text-ink-muted" />}
+              </button>
+              {selectedIcon && (
+                <button
+                  type="button"
+                  onClick={() => { setSelectedIcon(null); setEmojiPickerOpen(false); }}
+                  className="press rounded-md px-2 py-1 text-[11.5px] text-ink-faint hover:bg-paper-sunken hover:text-ink"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            {emojiPickerOpen && (
+              <div className="mt-2 flex flex-wrap gap-1 rounded-xl border border-line bg-paper p-2 animate-fade-in">
+                {EMOJI_OPTIONS.map((e) => (
+                  <button
+                    key={e}
+                    type="button"
+                    onClick={() => { setSelectedIcon(e); setEmojiPickerOpen(false); }}
+                    className={cn(
+                      "press flex h-8 w-8 items-center justify-center rounded-lg text-[18px] hover:bg-paper-sunken",
+                      selectedIcon === e && "bg-paper-sunken ring-1 ring-line-strong",
+                    )}
+                  >
+                    {e}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div>
             <label className="block text-[12.5px] font-medium text-ink-muted mb-1.5">
               Name
@@ -177,13 +245,15 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function ProjectCard({ project }: { project: { id: string; name: string; description: string; updated_at: number } }) {
+function ProjectCard({ project }: { project: { id: string; name: string; description: string; updated_at: number; starred?: boolean; icon?: string } }) {
   const setActiveProject = useApp((s) => s.setActiveProject);
   const deleteProject = useApp((s) => s.deleteProject);
+  const updateProject = useApp((s) => s.updateProject);
   const [menuOpen, setMenuOpen] = useState(false);
 
+  // Task 3: fix date — backend returns Unix seconds, Date.now() is ms
   const timeAgo = (ts: number) => {
-    const diff = Date.now() - ts;
+    const diff = Date.now() - ts * 1000;
     const mins = Math.floor(diff / 60000);
     if (mins < 1) return "just now";
     if (mins < 60) return `${mins}m ago`;
@@ -191,6 +261,11 @@ function ProjectCard({ project }: { project: { id: string; name: string; descrip
     if (hours < 24) return `${hours}h ago`;
     const days = Math.floor(hours / 24);
     return `${days}d ago`;
+  };
+
+  const handleStar = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    await updateProject(project.id, { starred: !project.starred });
   };
 
   return (
@@ -201,13 +276,32 @@ function ProjectCard({ project }: { project: { id: string; name: string; descrip
         className="text-left w-full"
       >
         <div className="flex items-start justify-between gap-2">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-paper-sunken">
-            <FolderOpen className="h-4 w-4 text-ink-muted" />
+          {/* Task 4: show emoji icon if set, otherwise FolderOpen */}
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-paper-sunken text-[20px]">
+            {project.icon ? (
+              <span>{project.icon}</span>
+            ) : (
+              <FolderOpen className="h-4 w-4 text-ink-muted" />
+            )}
           </div>
           <div
-            className="opacity-0 transition-opacity group-hover:opacity-100"
+            className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100"
             onClick={(e) => e.stopPropagation()}
           >
+            {/* Task 2: star button */}
+            <button
+              type="button"
+              onClick={(e) => void handleStar(e)}
+              className="press rounded-md p-1 hover:bg-paper-sunken"
+              aria-label={project.starred ? "Unstar" : "Star"}
+            >
+              <Star
+                className={cn(
+                  "h-3.5 w-3.5 transition-colors",
+                  project.starred ? "fill-amber-400 text-amber-400" : "text-ink-faint",
+                )}
+              />
+            </button>
             <IconButton
               icon={<MoreHorizontal />}
               label="More"
@@ -227,6 +321,9 @@ function ProjectCard({ project }: { project: { id: string; name: string; descrip
         <div className="mt-3 flex items-center gap-1 text-[10.5px] text-ink-faint">
           <Clock className="h-3 w-3" />
           <span>{timeAgo(project.updated_at)}</span>
+          {project.starred && (
+            <Star className="ml-auto h-3 w-3 fill-amber-400 text-amber-400" />
+          )}
         </div>
       </button>
 
@@ -279,7 +376,6 @@ function ProjectDetail() {
     return null;
   }
 
-  const [starred, setStarred] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
 
   // Editable name/description inline
@@ -299,6 +395,15 @@ function ProjectDetail() {
   const [instrEditing, setInstrEditing] = useState(false);
   const [instrSaving, setInstrSaving] = useState(false);
 
+  // Memory (project_memory.md)
+  const [memory, setMemory] = useState<string>("");
+  const [memoryDraft, setMemoryDraft] = useState<string>("");
+  const [memoryEditing, setMemoryEditing] = useState(false);
+  const [memorySaving, setMemorySaving] = useState(false);
+
+  // Timeline (timeline.md)
+  const [timeline, setTimeline] = useState<string>("");
+
   useEffect(() => {
     if (!activeId) return;
     void api
@@ -308,8 +413,22 @@ function ProjectDetail() {
         setInstrDraft(r.content || "");
       })
       .catch(() => {});
+    void api
+      .getProjectMemory(activeId)
+      .then((r) => {
+        setMemory(r.content || "");
+        setMemoryDraft(r.content || "");
+      })
+      .catch(() => {});
+    void api
+      .getProjectTimeline(activeId)
+      .then((r) => {
+        setTimeline(r.content || "");
+      })
+      .catch(() => {});
   }, [activeId]);
 
+  // Task 5: filter project chats by chat_ids on the project
   const projectChats = chatSummaries.filter((c) =>
     project.chat_ids?.includes(c.id),
   );
@@ -340,6 +459,17 @@ function ProjectDetail() {
       setInstrEditing(false);
     } finally {
       setInstrSaving(false);
+    }
+  };
+
+  const saveMemory = async () => {
+    setMemorySaving(true);
+    try {
+      await api.putProjectMemory(project.id, memoryDraft);
+      setMemory(memoryDraft);
+      setMemoryEditing(false);
+    } finally {
+      setMemorySaving(false);
     }
   };
 
@@ -390,6 +520,7 @@ function ProjectDetail() {
                     onClick={() => setEditingField("name")}
                     className="cursor-text font-serif text-[40px] font-medium leading-tight tracking-tight text-ink"
                   >
+                    {project.icon && <span className="mr-2 text-[36px]">{project.icon}</span>}
                     {project.name}
                   </h1>
                 )}
@@ -426,23 +557,25 @@ function ProjectDetail() {
                   onOpenChange={setMenuOpen}
                   projectId={project.id}
                 />
+                {/* Task 2: star button wired to API */}
                 <IconButton
-                  icon={<Star className={cn(starred && "fill-amber-400 text-amber-400")} />}
-                  label={starred ? "Unstar" : "Star"}
+                  icon={<Star className={cn(project.starred && "fill-amber-400 text-amber-400")} />}
+                  label={project.starred ? "Unstar" : "Star"}
                   size="md"
-                  onClick={() => setStarred((v) => !v)}
+                  onClick={() => void updateProject(project.id, { starred: !project.starred })}
                 />
               </div>
             </div>
 
-            {/* Composer */}
+            {/* Composer — sends with project_id via store.send */}
             <ChatInput
               placeholder="How can I help you today?"
               autoFocus
             />
 
-            {/* Chats card */}
+            {/* Task 5: project chats shown in left column */}
             <div className="rounded-2xl border border-line bg-paper-raised p-5">
+              <h3 className="mb-3 text-[13px] font-semibold text-ink">Past chats</h3>
               {projectChats.length === 0 ? (
                 <p className="text-center text-[13px] text-ink-muted">
                   Start a chat to keep conversations organized and re-use project knowledge.
@@ -469,24 +602,60 @@ function ProjectDetail() {
           </div>
 
           {/* RIGHT: memory / instructions / files */}
+          {/* Task 6: min-h-[200px] on all right-column cards */}
           <aside className="flex flex-col gap-5">
             {/* Memory card */}
-            <section className="rounded-2xl border border-line bg-paper-raised p-5">
+            <section className="flex-1 min-h-[200px] rounded-2xl border border-line bg-paper-raised p-5">
               <div className="flex items-start justify-between gap-3">
-                <div>
+                <div className="min-w-0 flex-1">
                   <h3 className="text-[14px] font-semibold text-ink">Memory</h3>
                   <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
-                    Project memory will show here after a few chats.
+                    Key facts and context zWork remembers for this project.
                   </p>
                 </div>
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-line bg-paper px-2 py-0.5 text-[10.5px] font-medium text-ink-muted">
-                  <Lock className="h-3 w-3" /> Only you
-                </span>
+                <IconButton
+                  icon={memoryEditing ? <X /> : <Plus />}
+                  label={memoryEditing ? "Cancel" : "Edit"}
+                  size="sm"
+                  onClick={() => {
+                    if (memoryEditing) setMemoryDraft(memory);
+                    setMemoryEditing((v) => !v);
+                  }}
+                />
               </div>
+              {memoryEditing ? (
+                <div className="mt-3">
+                  <textarea
+                    rows={6}
+                    value={memoryDraft}
+                    onChange={(e) => setMemoryDraft(e.target.value)}
+                    placeholder="e.g. Tech stack: React + TypeScript + Tailwind. Target audience: B2B SaaS founders."
+                    className="block w-full resize-y rounded-lg border border-line bg-paper px-3 py-2 font-mono text-[12px] leading-5 text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+                  />
+                  <div className="mt-2 flex justify-end">
+                    <button
+                      type="button"
+                      disabled={memorySaving}
+                      onClick={() => void saveMemory()}
+                      className="press inline-flex items-center gap-1.5 rounded-md bg-ink px-3 py-1 text-[12px] font-medium text-paper hover:bg-ink-soft disabled:opacity-40"
+                    >
+                      {memorySaving ? "Saving…" : (
+                        <>
+                          <Check className="h-3 w-3" /> Save
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ) : memory.trim() ? (
+                <pre className="mt-3 whitespace-pre-wrap rounded-lg bg-paper-sunken p-3 font-mono text-[11.5px] leading-5 text-ink-muted">
+                  {memory}
+                </pre>
+              ) : null}
             </section>
 
             {/* Instructions card */}
-            <section className="rounded-2xl border border-line bg-paper-raised p-5">
+            <section className="flex-1 min-h-[200px] rounded-2xl border border-line bg-paper-raised p-5">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <h3 className="text-[14px] font-semibold text-ink">Instructions</h3>
@@ -535,8 +704,33 @@ function ProjectDetail() {
               ) : null}
             </section>
 
+            {/* Timeline card */}
+            <section className="flex-1 min-h-[200px] rounded-2xl border border-line bg-paper-raised p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-[14px] font-semibold text-ink">Timeline</h3>
+                  <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
+                    Auto-generated history of agent interactions.
+                  </p>
+                </div>
+                <ScrollText className="h-4 w-4 text-ink-faint" />
+              </div>
+              {timeline.trim() ? (
+                <pre className="mt-3 whitespace-pre-wrap rounded-lg bg-paper-sunken p-3 font-mono text-[11px] leading-5 text-ink-muted max-h-[240px] overflow-y-auto">
+                  {timeline}
+                </pre>
+              ) : (
+                <div className="mt-3 flex flex-col items-center justify-center gap-2 rounded-xl bg-paper-sunken px-4 py-6">
+                  <Clock className="h-6 w-6 text-ink-faint" />
+                  <p className="max-w-[220px] text-center text-[11.5px] leading-5 text-ink-muted">
+                    Timeline will appear here as you interact with zWork in this project.
+                  </p>
+                </div>
+              )}
+            </section>
+
             {/* Files card */}
-            <section className="rounded-2xl border border-line bg-paper-raised p-5">
+            <section className="flex-1 min-h-[200px] rounded-2xl border border-line bg-paper-raised p-5">
               <div className="flex items-start justify-between gap-3">
                 <h3 className="text-[14px] font-semibold text-ink">Files</h3>
                 <IconButton icon={<Plus />} label="Add file" size="sm" />

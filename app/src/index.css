@@ -90,13 +90,12 @@
 html {
   height: 100%;
   overflow: hidden;
+  font-size: calc(16px * var(--zoom-level, 1));
 }
 
 body {
-  height: calc(100% / var(--zoom-level, 1)) !important;
-  width: calc(100% / var(--zoom-level, 1)) !important;
-  transform: scale(var(--zoom-level, 1));
-  transform-origin: top left;
+  height: 100% !important;
+  width: 100% !important;
   @apply bg-paper text-ink font-sans antialiased;
   font-feature-settings: "ss01", "cv11";
   -webkit-font-smoothing: antialiased;

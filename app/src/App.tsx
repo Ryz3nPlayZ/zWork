@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useState, useMemo } from "react";
-import { CheckCircle2, ExternalLink, X } from "lucide-react";
+import { CheckCircle2, ExternalLink, X, Target, AlertTriangle } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
 import { Landing } from "./components/Landing";
 import { useApp } from "./lib/store";
@@ -24,7 +24,7 @@ const AnalyticsPage = lazy(() => import("./components/AnalyticsPage").then((m) =
 const PlanPage = lazy(() => import("./components/PlanPage").then((m) => ({ default: m.PlanPage })));
 const ConnectorsPage = lazy(() => import("./components/ConnectorsPage").then((m) => ({ default: m.ConnectorsPage })));
 const AdminPage = lazy(() => import("./components/AdminPage").then((m) => ({ default: m.AdminPage })));
-const CockpitPage = lazy(() => import("./components/cockpit/CockpitPage").then((m) => ({ default: m.CockpitPage })));
+const TasksPage = lazy(() => import("./components/tasks/TasksPage").then((m) => ({ default: m.TasksPage })));
 const InboxPage = lazy(() => import("./components/InboxPage").then((m) => ({ default: m.InboxPage })));
 const OverlayChatView = lazy(() => import("./components/OverlayChatView").then((m) => ({ default: m.OverlayChatView })));
 import { Logo } from "./components/Logo";
@@ -53,8 +53,9 @@ function DailyGoalBar() {
   return (
     <div className="shrink-0 border-b border-line bg-paper-soft px-4 py-1.5 flex items-center justify-between text-[11px]">
       <div className="flex items-center gap-2">
-        <span className="font-semibold text-ink flex items-center gap-1">
-          🎯 Daily Goals:
+        <span className="font-semibold text-ink flex items-center gap-1.5">
+          <Target className="h-3.5 w-3.5 text-ink-muted" />
+          Daily Goals:
         </span>
         <span className="text-ink-muted">
           {completedTasks.length} of {todayTasks.length} tasks completed today
@@ -91,8 +92,9 @@ function OfflineBanner() {
   return (
     <div className="shrink-0 border-b border-amber-500/20 bg-amber-500/5 px-4 py-2 flex items-center justify-between text-[11px] text-amber-500 animate-in fade-in duration-200">
       <div className="flex items-center gap-2">
-        <span className="font-semibold flex items-center gap-1">
-          ⚠️ Running Offline:
+        <span className="font-semibold flex items-center gap-1.5">
+          <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+          Running Offline:
         </span>
         <span className="text-amber-500/90">
           The local backend is unreachable. Showing cached chats and local canvas editors.
@@ -132,8 +134,6 @@ export default function App() {
   const setView = useApp((s) => s.setView);
   const setSearchOpen = useApp((s) => s.setSearchOpen);
   const triggerFocusChatInput = useApp((s) => s.triggerFocusChatInput);
-  const cockpitOpen = useApp((s) => s.cockpitOpen);
-  const setCockpitOpen = useApp((s) => s.setCockpitOpen);
   const onboardingDone = useApp((s) => s.onboardingDone);
   const backendReady = useApp((s) => s.backendReady);
   const keybindingsOpen = useApp((s) => s.keybindingsOpen);
@@ -453,7 +453,7 @@ export default function App() {
         document.documentElement.style.setProperty("--zoom-level", "1");
       } else if (mod && e.key.toLowerCase() === "j") {
         e.preventDefault();
-        setCockpitOpen(!cockpitOpen);
+        setView("tasks");
       } else if (mod && e.key === "/") {
         e.preventDefault();
         setKeybindingsOpen(!keybindingsOpen);
@@ -461,7 +461,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openLanding, toggleSidebar, setView, setSearchOpen, triggerFocusChatInput, cockpitOpen, setCockpitOpen, keybindingsOpen, setKeybindingsOpen]);
+  }, [openLanding, toggleSidebar, setView, setSearchOpen, triggerFocusChatInput, keybindingsOpen, setKeybindingsOpen]);
 
   const [showLandingOverlay, setShowLandingOverlay] = useState(showLanding);
   const [particlesExiting, setParticlesExiting] = useState(false);
@@ -556,9 +556,9 @@ export default function App() {
             <Suspense fallback={panelFallback}>
               <ConnectorsPage />
             </Suspense>
-          ) : view === "cockpit" ? (
+          ) : view === "tasks" ? (
             <Suspense fallback={panelFallback}>
-              <CockpitPage />
+              <TasksPage />
             </Suspense>
           ) : view === "inbox" ? (
             <Suspense fallback={panelFallback}>

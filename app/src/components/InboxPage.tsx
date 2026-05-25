@@ -1,208 +1,96 @@
-import { useState, useEffect, useMemo } from "react";
-import { useApp } from "../lib/store";
-import { Inbox, CheckCircle2, Trash2, ArrowRight, Plus, Mail, Sparkles, Check, Loader2, MessageSquare, Copy, Search, FileText, RefreshCw } from "lucide-react";
-import { streamChat, api } from "../lib/api";
+import { useState } from "react";
+import {
+  Inbox,
+  CheckCircle2,
+  AlertTriangle,
+  HelpCircle,
+  Eye,
+  ShieldCheck,
+  MessageCircle,
+  X,
+  Clock,
+  Bot,
+} from "lucide-react";
 import { cn } from "../lib/cn";
-import { classifyFile } from "../lib/files";
+
+// ---- Mock data until backend wires up notifications ----
+
+type NotificationKind = "brief" | "approval" | "clarification";
+
+interface Notification {
+  id: string;
+  kind: NotificationKind;
+  title: string;
+  body: string;
+  timestamp: string;
+  meta?: Record<string, string>;
+  choices?: string[];
+  resolved?: boolean;
+}
+
+const MOCK_NOTIFICATIONS: Notification[] = [
+  {
+    id: "n-1",
+    kind: "brief",
+    title: "Morning Brief",
+    body: "Hey Zemu, while you were away, I reviewed your 15 real estate comps. I generated a side-by-side Sheet artifact and flagged 2 properties under market value.",
+    timestamp: "2026-05-25T08:30:00",
+    meta: { artifact: "Real Estate Comps Sheet" },
+  },
+  {
+    id: "n-2",
+    kind: "approval",
+    title: "Approval Required",
+    body: "Send 5 Drafts to Clients in Apple Mail",
+    timestamp: "2026-05-25T09:15:00",
+    meta: { count: "5", app: "Apple Mail" },
+  },
+  {
+    id: "n-3",
+    kind: "clarification",
+    title: "Clarification Needed",
+    body: "I am attempting to categorize your download receipts, but I found an image I can't read. Is this an electric bill or a restaurant receipt?",
+    timestamp: "2026-05-25T10:05:00",
+    choices: ["Electric bill", "Restaurant receipt", "Other"],
+  },
+];
+
+function timeAgo(ts: string): string {
+  const diff = Date.now() - new Date(ts).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
 
 export function InboxPage() {
-  const tasks = useApp((s) => s.tasks);
-  const addTask = useApp((s) => s.addTask);
-  const updateTaskColumn = useApp((s) => s.updateTaskColumn);
-  const deleteTask = useApp((s) => s.deleteTask);
+  const [items, setItems] = useState<Notification[]>(MOCK_NOTIFICATIONS);
+  const [revealedId, setRevealedId] = useState<string | null>(null);
+  const [dismissingId, setDismissingId] = useState<string | null>(null);
 
-  const [inputVal, setInputVal] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const inboxTasks = tasks.filter((t) => t.column === "inbox");
-
-  const handleAdd = async () => {
-    const val = inputVal.trim();
-    if (!val || busy) return;
-    setBusy(true);
-    try {
-      await addTask(val, "inbox");
-      setInputVal("");
-    } finally {
-      setBusy(false);
-    }
+  const dismiss = (id: string) => {
+    setDismissingId(id);
+    setTimeout(() => {
+      setItems((prev) => prev.filter((n) => n.id !== id));
+      setDismissingId(null);
+    }, 250);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      void handleAdd();
-    }
+  const resolve = (id: string) => {
+    setItems((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, resolved: true } : n))
+    );
   };
 
-  const [emailText, setEmailText] = useState("");
-  const [summaryText, setSummaryText] = useState("");
-  const [summarizing, setSummarizing] = useState(false);
-  const [todos, setTodos] = useState<string[]>([]);
-  const [importedCount, setImportedCount] = useState<number | null>(null);
-
-  // Uploads Search States
-  const [uploads, setUploads] = useState<Array<{ name: string; size: number; mime: string; content: string; path: string }>>([]);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [loadingUploads, setLoadingUploads] = useState(false);
-  const [copiedFileIdx, setCopiedFileIdx] = useState<number | null>(null);
-
-  const loadUploads = async () => {
-    setLoadingUploads(true);
-    try {
-      const res = await api.listUploads();
-      setUploads(res.files || []);
-    } catch (e) {
-      console.error("loadUploads failed:", e);
-    } finally {
-      setLoadingUploads(false);
-    }
-  };
-
-  useEffect(() => {
-    void loadUploads();
-  }, []);
-
-  const searchResults = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return [];
-
-    const results: Array<{
-      file: typeof uploads[0];
-      matches: string[];
-    }> = [];
-
-    for (const f of uploads) {
-      const matches: string[] = [];
-
-      if (f.name.toLowerCase().includes(q)) {
-        matches.push(`Filename matches "${f.name}"`);
-      }
-
-      if (f.content) {
-        const lines = f.content.split("\n");
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i];
-          if (line.toLowerCase().includes(q)) {
-            matches.push(`Line ${i + 1}: ...${line.trim().substring(0, 100)}...`);
-            if (matches.length >= 4) break;
-          }
-        }
-      }
-
-      if (matches.length > 0) {
-        results.push({ file: f, matches });
-      }
-    }
-    return results;
-  }, [uploads, searchQuery]);
-
-  // Slack Draft States
-  const [slackSituation, setSlackSituation] = useState("Ask for status update");
-  const [slackTo, setSlackTo] = useState("");
-  const [slackTopic, setSlackTopic] = useState("");
-  const [slackTone, setSlackTone] = useState("Friendly");
-  const [slackDraft, setSlackDraft] = useState("");
-  const [drafting, setDrafting] = useState(false);
-  const [copiedDraft, setCopiedDraft] = useState(false);
-
-  const handleCreateSlackDraft = async () => {
-    if (!slackTopic.trim() || drafting) return;
-    setDrafting(true);
-    setSlackDraft("");
-    setCopiedDraft(false);
-
-    let currentText = "";
-    try {
-      const prompt = `Draft a Slack message for the following situation:
-Situation: ${slackSituation}
-To: ${slackTo || "the team"}
-Context/Topic: ${slackTopic}
-Tone: ${slackTone}
-
-Rules:
-1. Make it suitable for Slack (friendly, clear, professional but casual, use simple formatting or bullets/emojis if appropriate).
-2. Do not wrap the output in quotes or include any extra conversational filler before/after. Return ONLY the drafted message content.`;
-
-      await streamChat(
-        { message: prompt },
-        (event) => {
-          if (event.type === "delta" && event.text) {
-            currentText += event.text;
-            setSlackDraft(currentText);
-          }
-        }
-      );
-    } catch (err) {
-      console.error(err);
-      setSlackDraft("Failed to generate Slack draft.");
-    } finally {
-      setDrafting(false);
-    }
-  };
-
-  const handleCopyDraft = () => {
-    navigator.clipboard.writeText(slackDraft);
-    setCopiedDraft(true);
-    setTimeout(() => setCopiedDraft(false), 2000);
-  };
-
-  const handleSummarize = async () => {
-    if (!emailText.trim() || summarizing) return;
-    setSummarizing(true);
-    setSummaryText("");
-    setTodos([]);
-    setImportedCount(null);
-
-    let currentText = "";
-    try {
-      await streamChat(
-        {
-          message: "Please summarize the following email in 3 clear bullet points, and extract any actionable todos as checkbox items starting with '- [ ]'. Here is the email:\n\n" + emailText,
-        },
-        (event) => {
-          if (event.type === "delta" && event.text) {
-            currentText += event.text;
-            setSummaryText(currentText);
-          }
-        }
-      );
-
-      const lines = currentText.split("\n");
-      const foundTodos: string[] = [];
-      for (const line of lines) {
-        const cleaned = line.trim();
-        if (cleaned.startsWith("- [ ]") || cleaned.startsWith("- [x]")) {
-          const content = cleaned.replace(/^-\s*\[\s*[x ]\s*\]\s*/i, "").trim();
-          if (content) foundTodos.push(content);
-        } else if (cleaned.startsWith("* ") || cleaned.startsWith("- ")) {
-          if (cleaned.toLowerCase().includes("todo") || cleaned.toLowerCase().includes("action")) {
-            const content = cleaned.replace(/^-\s*/, "").replace(/^\*\s*/, "").trim();
-            if (content) foundTodos.push(content);
-          }
-        }
-      }
-      setTodos(foundTodos);
-    } catch (err) {
-      console.error(err);
-      setSummaryText("Failed to generate summary.");
-    } finally {
-      setSummarizing(false);
-    }
-  };
-
-  const handleImportTodos = async () => {
-    if (todos.length === 0) return;
-    for (const todo of todos) {
-      await addTask(todo, "inbox");
-    }
-    setImportedCount(todos.length);
-    setTodos([]);
-    setEmailText("");
-  };
+  const pending = items.filter((n) => !n.resolved);
+  const resolved = items.filter((n) => n.resolved);
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col overflow-y-auto bg-paper">
-      <div className="mx-auto w-full max-w-[800px] px-6 py-14">
+      <div className="mx-auto w-full max-w-[720px] px-6 py-14">
         {/* Header */}
         <div className="mb-10 flex items-start gap-4">
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-line bg-paper-raised text-accent">
@@ -213,374 +101,180 @@ Rules:
               Inbox
             </h1>
             <p className="mt-2.5 text-[13.5px] leading-relaxed text-ink-muted max-w-[500px]">
-              Capture anything instantly. Organize it, set plans, or check it off when completed.
+              The Human-in-the-Loop Gateway. Review agent updates, approve sensitive actions, and clear blockers.
             </p>
           </div>
         </div>
 
-        {/* Capture Input Card */}
-        <div className="mb-8 rounded-2xl border border-line bg-paper-raised p-5 shadow-sm">
-          <label htmlFor="inbox-input" className="block text-[12px] font-semibold uppercase tracking-wider text-ink-faint mb-2">
-            Quick Capture
-          </label>
-          <div className="flex gap-2">
-            <input
-              id="inbox-input"
-              type="text"
-              value={inputVal}
-              onChange={(e) => setInputVal(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="e.g. Draft feedback for landing page design, call client at 2..."
-              disabled={busy}
-              className="flex-1 rounded-xl border border-line bg-paper px-4 py-2.5 text-[13px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
-            />
-            <button
-              onClick={() => void handleAdd()}
-              disabled={busy || !inputVal.trim()}
-              className="press flex items-center justify-center gap-1.5 rounded-xl bg-ink px-4 text-[12.5px] font-medium text-paper hover:bg-ink/90 disabled:opacity-45"
-            >
-              <Plus className="h-4 w-4" />
-              <span>Add</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Email Summarizer Card */}
-        <div className="mb-8 rounded-2xl border border-line bg-paper-raised p-5 shadow-sm">
-          <div className="flex items-center gap-2 mb-3">
-            <Mail className="h-4.5 w-4.5 text-accent" />
-            <h2 className="text-[14px] font-semibold text-ink">Smart Email Summarizer</h2>
-          </div>
-          <p className="text-[12.5px] text-ink-muted mb-4">
-            Paste an email below to generate a concise summary and extract key todos instantly.
-          </p>
-
-          <textarea
-            value={emailText}
-            onChange={(e) => setEmailText(e.target.value)}
-            placeholder="Paste your email here..."
-            disabled={summarizing}
-            className="w-full h-24 p-3 rounded-xl border border-line bg-paper text-[13px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none resize-none mb-3"
-          />
-
-          <div className="flex gap-2">
-            <button
-              onClick={handleSummarize}
-              disabled={summarizing || !emailText.trim()}
-              className="press flex items-center justify-center gap-1.5 rounded-xl bg-ink px-4 py-2 text-[12.5px] font-medium text-paper hover:bg-ink/90 disabled:opacity-45"
-            >
-              {summarizing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-              <span>{summarizing ? "Summarizing..." : "Summarize & Extract"}</span>
-            </button>
-            
-            {todos.length > 0 && (
-              <button
-                onClick={handleImportTodos}
-                className="press flex items-center justify-center gap-1.5 rounded-xl border border-line bg-paper px-4 py-2 text-[12.5px] font-medium text-ink-soft hover:bg-paper-sunken"
-              >
-                <Check className="h-4 w-4 text-emerald-500" />
-                <span>Import {todos.length} Todos</span>
-              </button>
-            )}
-          </div>
-
-          {importedCount !== null && (
-            <div className="mt-3 text-[12px] text-emerald-600 font-medium">
-              ✓ Successfully imported {importedCount} todo items into your Inbox!
-            </div>
-          )}
-
-          {summaryText && (
-            <div className="mt-4 p-4 rounded-xl border border-line/50 bg-paper-soft text-[13px] text-ink leading-relaxed">
-              <div className="font-semibold text-[11px] uppercase tracking-wider text-ink-faint mb-2">Summary & Extracted Tasks</div>
-              <div className="whitespace-pre-wrap">{summaryText}</div>
-            </div>
-          )}
-        </div>
-
-        {/* Slack Draft Creator Card */}
-        <div className="mb-8 rounded-2xl border border-line bg-paper-raised p-5 shadow-sm">
-          <div className="flex items-center gap-2 mb-3">
-            <MessageSquare className="h-4.5 w-4.5 text-amber-500" />
-            <h2 className="text-[14px] font-semibold text-ink">One-Click Slack Draft Creator</h2>
-          </div>
-          <p className="text-[12.5px] text-ink-muted mb-4">
-            Draft polished, effective Slack messages for common work situations instantly.
-          </p>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3.5">
-            <div>
-              <label className="block text-[11px] font-bold text-ink-muted uppercase tracking-wide mb-1.5">Situation</label>
-              <select
-                value={slackSituation}
-                onChange={(e) => setSlackSituation(e.target.value)}
-                className="w-full bg-paper border border-line text-[12.5px] px-3 py-2 rounded-xl focus:outline-none focus:border-accent text-ink font-medium"
-              >
-                <option value="Ask for status update">Ask for Status Update</option>
-                <option value="Report a delay politely">Report a Delay Politely</option>
-                <option value="Request feedback/review">Request Feedback/Review</option>
-                <option value="Polite follow-up on request">Polite Follow-up on Request</option>
-                <option value="Announce feature release">Announce Feature Release</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-bold text-ink-muted uppercase tracking-wide mb-1.5">To (Recipient)</label>
-              <input
-                type="text"
-                placeholder="e.g. Sarah, the product team..."
-                value={slackTo}
-                onChange={(e) => setSlackTo(e.target.value)}
-                className="w-full bg-paper border border-line text-[12.5px] px-3 py-1.5 rounded-xl focus:outline-none focus:border-accent text-ink"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-[1fr_150px] gap-4 mb-4">
-            <div>
-              <label className="block text-[11px] font-bold text-ink-muted uppercase tracking-wide mb-1.5">Context / Topic</label>
-              <input
-                type="text"
-                placeholder="e.g. status of checkout design, delay in API sync..."
-                value={slackTopic}
-                onChange={(e) => setSlackTopic(e.target.value)}
-                className="w-full bg-paper border border-line text-[12.5px] px-3 py-1.5 rounded-xl focus:outline-none focus:border-accent text-ink"
-              />
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-bold text-ink-muted uppercase tracking-wide mb-1.5">Tone</label>
-              <select
-                value={slackTone}
-                onChange={(e) => setSlackTone(e.target.value)}
-                className="w-full bg-paper border border-line text-[12.5px] px-3 py-2 rounded-xl focus:outline-none focus:border-accent text-ink font-medium"
-              >
-                <option value="Friendly">Friendly</option>
-                <option value="Direct">Direct</option>
-                <option value="Professional">Professional</option>
-              </select>
-            </div>
-          </div>
-
-          <button
-            onClick={handleCreateSlackDraft}
-            disabled={drafting || !slackTopic.trim()}
-            className="press flex items-center justify-center gap-1.5 rounded-xl bg-ink px-4 py-2 text-[12.5px] font-medium text-paper hover:bg-ink/90 disabled:opacity-45"
-          >
-            {drafting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-amber-500" />}
-            <span>{drafting ? "Drafting..." : "Generate Slack Draft"}</span>
-          </button>
-
-          {slackDraft && (
-            <div className="mt-4 p-4 rounded-xl border border-line bg-paper-soft text-[13px] text-ink relative leading-relaxed group/draft">
-              <div className="font-semibold text-[11px] uppercase tracking-wider text-ink-faint mb-2">Slack Message Draft</div>
-              <div className="whitespace-pre-wrap pr-10">{slackDraft}</div>
-              
-              <button
-                onClick={handleCopyDraft}
-                className="absolute top-3.5 right-3.5 p-1.5 rounded-lg border border-line bg-paper hover:bg-paper-sunken text-ink-muted hover:text-ink transition"
-                title="Copy to clipboard"
-              >
-                {copiedDraft ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Uploads Search Indexer Card */}
-        <div className="mb-8 rounded-2xl border border-line bg-paper-raised p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Search className="h-4.5 w-4.5 text-accent" />
-              <h2 className="text-[14px] font-semibold text-ink">Local Uploads Search Indexer</h2>
-            </div>
-            <button
-              onClick={loadUploads}
-              disabled={loadingUploads}
-              className="press p-1.5 rounded-lg border border-line bg-paper hover:bg-paper-sunken text-ink-muted hover:text-ink transition flex items-center gap-1 text-[11px]"
-              title="Refresh local index"
-            >
-              <RefreshCw className={cn("h-3.5 w-3.5", loadingUploads && "animate-spin")} />
-              <span>Refresh Index</span>
-            </button>
-          </div>
-          <p className="text-[12.5px] text-ink-muted mb-4">
-            Search case-insensitively across the filenames and text contents of your uploaded documents.
-          </p>
-
-          <div className="relative flex items-center mb-4">
-            <Search className="absolute left-3.5 h-4 w-4 text-ink-faint" />
-            <input
-              type="text"
-              placeholder="Search uploaded file names or contents..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full rounded-xl border border-line bg-paper pl-10 pr-4 py-2 text-[13px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none transition"
-            />
-          </div>
-
-          {searchQuery.trim() ? (
-            <div className="space-y-3">
-              <div className="text-[11px] font-bold text-ink-muted uppercase tracking-wider">
-                Search Results ({searchResults.length} files matched)
-              </div>
-              {searchResults.length === 0 ? (
-                <div className="text-[12.5px] text-ink-faint italic py-2">
-                  No matching files or content segments found.
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2 max-h-[300px] overflow-y-auto pr-1">
-                  {searchResults.map((res, idx) => (
-                    <div key={idx} className="p-3 rounded-xl border border-line bg-paper flex flex-col gap-2">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <FileText className="h-4 w-4 text-accent" />
-                          <span className="text-[12.5px] font-semibold text-ink truncate max-w-[200px] sm:max-w-[400px]">
-                            {res.file.name}
-                          </span>
-                          <span className="text-[10px] text-ink-faint mr-1.5">
-                            ({Math.round(res.file.size / 1024)} KB)
-                          </span>
-                          {(() => {
-                            const classification = classifyFile(res.file.name, res.file.mime);
-                            return (
-                              <span className={cn(
-                                "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[9px] font-bold uppercase tracking-wider select-none",
-                                classification.colorClass,
-                                classification.bgClass
-                              )}>
-                                <span>{classification.icon}</span>
-                                <span>{classification.category}</span>
-                              </span>
-                            );
-                          })()}
-                        </div>
-                        <button
-                          onClick={() => {
-                            navigator.clipboard.writeText(res.file.content);
-                            setCopiedFileIdx(idx);
-                            setTimeout(() => setCopiedFileIdx(null), 2000);
-                          }}
-                          className="press p-1.5 rounded-lg border border-line bg-paper hover:bg-paper-sunken text-ink-muted hover:text-ink transition flex items-center gap-1 text-[10.5px]"
-                          title="Copy file text content"
-                        >
-                          {copiedFileIdx === idx ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-                          <span>{copiedFileIdx === idx ? "Copied" : "Copy Content"}</span>
-                        </button>
-                      </div>
-                      <div className="pl-6 border-l-2 border-line/60 flex flex-col gap-1">
-                        {res.matches.map((match, mIdx) => (
-                          <div key={mIdx} className="text-[11px] text-ink-muted leading-relaxed font-mono whitespace-pre-wrap">
-                            {match}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div>
-              <div className="text-[11px] font-bold text-ink-muted uppercase tracking-wider mb-2">
-                All Indexed Files ({uploads.length})
-              </div>
-              {uploads.length === 0 ? (
-                <div className="text-[12px] text-ink-faint italic py-2">
-                  No files uploaded yet. Drag & drop or attach files in the chat composer to index them.
-                </div>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {uploads.map((f, idx) => {
-                    const classification = classifyFile(f.name, f.mime);
-                    return (
-                      <div
-                        key={idx}
-                        className="flex items-center gap-2.5 rounded-xl border border-line bg-paper px-3 py-1.5 text-[12px] text-ink-muted"
-                        title={f.path}
-                      >
-                        <FileText className="h-3.5 w-3.5 text-ink-faint" />
-                        <span className="font-medium">{f.name}</span>
-                        <span className="text-[10px] text-ink-faint mr-1">({Math.round(f.size / 1024)} KB)</span>
-                        
-                        {/* Category Tag Chip */}
-                        <span className={cn(
-                          "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[9px] font-bold uppercase tracking-wider select-none",
-                          classification.colorClass,
-                          classification.bgClass
-                        )}>
-                          <span>{classification.icon}</span>
-                          <span>{classification.category}</span>
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Task List */}
-        <div>
-          <div className="mb-4 flex items-center justify-between border-b border-line pb-2">
-            <span className="text-[12px] font-semibold uppercase tracking-wider text-ink-faint">
-              Inbox Items ({inboxTasks.length})
-            </span>
-          </div>
-
-          {inboxTasks.length === 0 ? (
-            <div className="rounded-2xl border border-line border-dashed p-10 text-center">
+        {/* Pending */}
+        <div className="flex flex-col gap-4">
+          {pending.length === 0 && resolved.length === 0 && (
+            <div className="rounded-2xl border border-dashed border-line p-12 text-center">
               <Inbox className="mx-auto h-8 w-8 text-ink-faint" />
-              <h3 className="mt-3 text-[13.5px] font-semibold text-ink">Your inbox is clean</h3>
+              <h3 className="mt-3 text-[13.5px] font-semibold text-ink">
+                All clear
+              </h3>
               <p className="mt-1 text-[12.5px] text-ink-muted max-w-[280px] mx-auto">
-                No items waiting here. Use the input above to capture ideas or tasks.
+                No notifications, approvals, or clarifications waiting for you.
               </p>
             </div>
-          ) : (
-            <div className="flex flex-col gap-2">
-              {inboxTasks.map((t) => (
-                <div
-                  key={t.id}
-                  className="group/task flex items-center gap-3 rounded-xl border border-line bg-paper-raised p-3.5 hover:border-line-strong transition-colors duration-150"
-                >
-                  {/* Mark as Done */}
-                  <button
-                    onClick={() => void updateTaskColumn(t.id, "done")}
-                    className="press text-ink-muted hover:text-emerald-600 transition-colors"
-                    title="Mark completed"
+          )}
+
+          {pending.map((n) => (
+            <div
+              key={n.id}
+              className={cn(
+                "relative rounded-2xl border bg-paper-raised p-5 shadow-sm transition-all duration-200",
+                n.kind === "approval" && "border-amber-500/20",
+                n.kind === "clarification" && "border-accent/20",
+                n.kind === "brief" && "border-line",
+                dismissingId === n.id && "opacity-0 translate-x-2"
+              )}
+            >
+              {/* Top row: icon + title + time + dismiss */}
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={cn(
+                      "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border",
+                      n.kind === "brief" && "border-line bg-paper text-accent",
+                      n.kind === "approval" && "border-amber-500/20 bg-amber-500/10 text-amber-600",
+                      n.kind === "clarification" && "border-accent/20 bg-accent/10 text-accent"
+                    )}
                   >
-                    <CheckCircle2 className="h-5 w-5" />
-                  </button>
+                    {n.kind === "brief" && <Bot className="h-4 w-4" />}
+                    {n.kind === "approval" && <ShieldCheck className="h-4 w-4" />}
+                    {n.kind === "clarification" && <HelpCircle className="h-4 w-4" />}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13px] font-semibold text-ink">
+                        {n.title}
+                      </span>
+                      <span className="flex items-center gap-1 text-[10.5px] text-ink-faint">
+                        <Clock className="h-3 w-3" />
+                        {timeAgo(n.timestamp)}
+                      </span>
+                    </div>
+                    <p className="mt-0.5 text-[12.5px] text-ink-muted leading-relaxed max-w-[520px]">
+                      {n.body}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => dismiss(n.id)}
+                  className="press rounded-lg p-1 text-ink-faint hover:bg-paper-sunken hover:text-ink"
+                  title="Dismiss"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
 
-                  {/* Title */}
-                  <span className="flex-1 text-[13px] text-ink leading-relaxed font-medium">
-                    {t.title}
-                  </span>
+              {/* Action area */}
+              <div className="mt-4">
+                {n.kind === "brief" && (
+                  <div>
+                    {revealedId === n.id ? (
+                      <div className="rounded-xl border border-line bg-paper p-3 text-[12.5px] text-ink leading-relaxed animate-fade-in">
+                        <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
+                          Summary
+                        </div>
+                        {n.body}
+                        {n.meta?.artifact && (
+                          <button
+                            type="button"
+                            className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 py-1 text-[11.5px] font-medium text-ink hover:bg-paper-sunken"
+                          >
+                            <Eye className="h-3 w-3" />
+                            Open {n.meta.artifact}
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setRevealedId(n.id)}
+                        className="press inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-paper hover:bg-ink-soft"
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                        Click to reveal
+                      </button>
+                    )}
+                  </div>
+                )}
 
-                  {/* Actions */}
-                  <div className="flex items-center gap-1">
+                {n.kind === "approval" && (
+                  <div className="flex items-center gap-2">
                     <button
-                      onClick={() => void updateTaskColumn(t.id, "todo")}
-                      className="press flex items-center gap-1 rounded-lg border border-line bg-paper px-2.5 py-1 text-[11px] font-medium text-ink-soft hover:bg-paper-sunken"
-                      title="Move to Todo list"
+                      type="button"
+                      onClick={() => resolve(n.id)}
+                      className="press inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-paper hover:bg-ink-soft"
                     >
-                      <span>To Do</span>
-                      <ArrowRight className="h-3 w-3" />
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                      Approve & Execute
                     </button>
                     <button
-                      onClick={() => void deleteTask(t.id)}
-                      className="press p-1 rounded-lg text-ink-faint hover:text-red-500 hover:bg-red-500/10 transition-colors"
-                      title="Delete item"
+                      type="button"
+                      onClick={() => dismiss(n.id)}
+                      className="press inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-paper-sunken"
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <X className="h-3.5 w-3.5" />
+                      Deny
                     </button>
                   </div>
+                )}
+
+                {n.kind === "clarification" && n.choices && (
+                  <div className="flex flex-wrap gap-2">
+                    {n.choices.map((choice) => (
+                      <button
+                        key={choice}
+                        type="button"
+                        onClick={() => resolve(n.id)}
+                        className="press inline-flex items-center gap-1.5 rounded-lg border border-line bg-paper px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-paper-sunken hover:border-line-strong"
+                      >
+                        <MessageCircle className="h-3.5 w-3.5" />
+                        {choice}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Resolved section */}
+        {resolved.length > 0 && (
+          <div className="mt-8">
+            <div className="mb-3 flex items-center gap-2 border-b border-line pb-2">
+              <CheckCircle2 className="h-3.5 w-3.5 text-ink-faint" />
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
+                Resolved ({resolved.length})
+              </span>
+            </div>
+            <div className="flex flex-col gap-3">
+              {resolved.map((n) => (
+                <div
+                  key={n.id}
+                  className="flex items-center justify-between rounded-xl border border-line bg-paper-soft px-4 py-3 opacity-70"
+                >
+                  <div className="flex items-center gap-3">
+                    {n.kind === "brief" && <Bot className="h-4 w-4 text-ink-faint" />}
+                    {n.kind === "approval" && <AlertTriangle className="h-4 w-4 text-ink-faint" />}
+                    {n.kind === "clarification" && <HelpCircle className="h-4 w-4 text-ink-faint" />}
+                    <span className="text-[12.5px] text-ink-muted line-through">
+                      {n.title}: {n.body.slice(0, 60)}
+                      {n.body.length > 60 ? "..." : ""}
+                    </span>
+                  </div>
+                  <span className="text-[10.5px] text-ink-faint">{timeAgo(n.timestamp)}</span>
                 </div>
               ))}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );

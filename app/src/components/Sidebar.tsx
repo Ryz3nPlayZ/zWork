@@ -30,6 +30,7 @@ export function Sidebar() {
   const open = useApp((s) => s.sidebarOpen);
   const toggle = useApp((s) => s.toggleSidebar);
   const summaries = useApp((s) => s.chatSummaries);
+  const projects = useApp((s) => s.projects);
   const active = useApp((s) => s.activeChatId);
   const openChat = useApp((s) => s.openChat);
   const deleteChat = useApp((s) => s.deleteChat);
@@ -41,17 +42,30 @@ export function Sidebar() {
   const setKeybindingsOpen = useApp((s) => s.setKeybindingsOpen);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
+  // Exclude chats that belong to any project from the sidebar
+  const projectChatIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const p of projects) {
+      for (const cid of p.chat_ids || []) {
+        ids.add(cid);
+      }
+    }
+    return ids;
+  }, [projects]);
+
+  const sidebarSummaries = useMemo(() => summaries.filter((c) => !projectChatIds.has(c.id)), [summaries, projectChatIds]);
+
   const grouped = useMemo(() => {
-    const buckets: Record<ChatBucket, typeof summaries> = {
+    const buckets: Record<ChatBucket, typeof sidebarSummaries> = {
       Today: [],
       "This week": [],
       Earlier: [],
     };
-    for (const c of summaries) {
+    for (const c of sidebarSummaries) {
       buckets[bucketFor(c.updated_at)].push(c);
     }
     return buckets;
-  }, [summaries]);
+  }, [sidebarSummaries]);
 
   return (
     <aside
@@ -147,10 +161,10 @@ export function Sidebar() {
         />
         <SidebarButton
           icon={<LayoutDashboard />}
-          label="Cockpit"
+          label="Tasks"
           collapsed={!open}
-          onClick={() => setView("cockpit")}
-          active={view === "cockpit"}
+          onClick={() => setView("tasks")}
+          active={view === "tasks"}
         />
         <SidebarButton
           icon={<FolderOpen />}
@@ -230,7 +244,7 @@ export function Sidebar() {
                 </div>
               );
             })}
-            {summaries.length === 0 && (
+            {sidebarSummaries.length === 0 && (
               <div className="mt-6 px-2 text-[12px] text-ink-faint">
                 No chats yet. Press{" "}
                 <kbd className="rounded border border-line bg-paper-raised px-1 py-[1px] font-mono text-[10.5px] text-ink-muted">

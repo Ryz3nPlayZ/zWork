@@ -32,7 +32,7 @@ export function SlashMenu({
 
   return (
     <div
-      className="absolute bottom-full left-3 z-30 mb-2 w-[320px] overflow-hidden rounded-xl border border-line bg-paper-raised shadow-pop"
+      className="absolute bottom-full left-0 right-0 z-30 mx-3 mb-2 overflow-hidden rounded-xl border border-line bg-paper-raised shadow-pop"
       role="listbox"
       aria-label="Prompt templates"
       onMouseDown={(e) => {

@@ -49,6 +49,9 @@ export interface Task {
   updated_at: number;
   due_date: string | null;
   completed_at: number | null;
+  description?: string;
+  assignee?: string;
+  priority?: "low" | "medium" | "high";
 }
 
 export interface CalendarEvent {
@@ -123,7 +126,7 @@ export interface Chat {
   } | null;
 }
 
-export type View = "chat" | "settings" | "projects" | "analytics" | "plan" | "connectors" | "admin" | "cockpit" | "inbox";
+export type View = "chat" | "settings" | "projects" | "analytics" | "plan" | "connectors" | "admin" | "tasks" | "inbox";
 
 export type SettingsSection =
   | "account"
@@ -417,8 +420,8 @@ interface AppState {
   activeProjectId: string | null;
   setActiveProject: (id: string | null) => void;
   refreshProjects: () => Promise<void>;
-  createProject: (name: string, description?: string) => Promise<void>;
-  updateProject: (id: string, data: { name?: string; description?: string }) => Promise<void>;
+  createProject: (name: string, description?: string, icon?: string) => Promise<void>;
+  updateProject: (id: string, data: { name?: string; description?: string; starred?: boolean; icon?: string }) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
 
   // Memory / user-md content (cached for settings editor)
@@ -488,15 +491,13 @@ interface AppState {
   upsertCustomModel: (m: Omit<CustomModel, "id"> & { id?: string }) => Promise<void>;
   deleteCustomModel: (id: string) => Promise<void>;
 
-  // Cockpit (Tasks & Calendar)
+  // Tasks & Calendar
   tasks: Task[];
   events: CalendarEvent[];
-  cockpitOpen: boolean;
-  setCockpitOpen: (v: boolean) => void;
   fetchTasks: () => Promise<void>;
   autoPlanTasks: (projectTitle: string, intervalDays?: number) => Promise<void>;
-  addTask: (title: string, column: Task["column"], due_date?: string | null) => Promise<void>;
-  updateTask: (id: string, title: string, column: Task["column"], due_date?: string | null) => Promise<void>;
+  addTask: (title: string, column: Task["column"], due_date?: string | null, description?: string, assignee?: string, priority?: string) => Promise<void>;
+  updateTask: (id: string, title: string, column: Task["column"], due_date?: string | null, description?: string, assignee?: string, priority?: string) => Promise<void>;
   updateTaskColumn: (id: string, column: Task["column"]) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
   fetchEvents: () => Promise<void>;
@@ -579,11 +580,9 @@ export const useApp = create<AppState>((set, get) => ({
   keybindingsOpen: false,
   setKeybindingsOpen: (v) => set({ keybindingsOpen: v }),
 
-  // Cockpit
+  // Tasks
   tasks: [],
   events: [],
-  cockpitOpen: false,
-  setCockpitOpen: (v) => set({ cockpitOpen: v }),
 
   onboardingDone: hasCompletedOnboardingLocally() ? true : null,
   setOnboardingDone: (v) => {
@@ -688,15 +687,17 @@ export const useApp = create<AppState>((set, get) => ({
     } catch (e) { console.warn("refreshProjects failed:", e) }
   },
 
-  createProject: async (name, description) => {
-    await api.createProject(name, description);
+  createProject: async (name, description, icon) => {
+    await api.createProject(name, description, icon);
     await get().refreshProjects();
   },
+
 
   updateProject: async (id, data) => {
     await api.updateProject(id, data);
     await get().refreshProjects();
   },
+
 
   deleteProject: async (id) => {
     await api.deleteProject(id);
@@ -741,16 +742,16 @@ export const useApp = create<AppState>((set, get) => ({
     } catch (e) { console.warn("autoPlanTasks failed:", e); }
   },
 
-  addTask: async (title, column, due_date) => {
+  addTask: async (title, column, due_date, description, assignee, priority) => {
     try {
-      const { task } = await api.createTask({ title, column, due_date });
+      const { task } = await api.createTask({ title, column, due_date, description, assignee, priority });
       set((s) => ({ tasks: [...s.tasks, task] }));
     } catch (e) { console.warn("addTask failed:", e); }
   },
 
-  updateTask: async (id, title, column, due_date) => {
+  updateTask: async (id, title, column, due_date, description, assignee, priority) => {
     try {
-      const { task } = await api.updateTask(id, { title, column, due_date });
+      const { task } = await api.updateTask(id, { title, column, due_date, description, assignee, priority });
       set((s) => ({
         tasks: s.tasks.map((t) => (t.id === id ? task : t)),
       }));
@@ -1061,7 +1062,7 @@ export const useApp = create<AppState>((set, get) => ({
           if (m.role === "assistant" && m.content.includes("[[ARTIFACT")) {
             const { cleaned, artifacts } = extractArtifacts(m.content, m.id);
             if (artifacts.length > 0) {
-              messages[i] = { ...m, content: cleaned || (artifacts.length === 1 ? "Here's the artifact:" : "Here are the artifacts:") };
+              messages[i] = { ...m, content: cleaned || (artifacts.length === 1 ? "Here's the document:" : "Here are the documents:") };
               loadedArtifacts.push(...artifacts);
             }
           }

@@ -170,6 +170,9 @@ class TaskCreateUpdate(BaseModel):
     title: str
     column: str = "inbox"
     due_date: str | None = None
+    description: str = ""
+    assignee: str = ""
+    priority: str = "medium"
 
 
 class TaskColumnUpdate(BaseModel):
@@ -256,22 +259,22 @@ def _artifact_hint(message: str) -> str:
             "make a document",
         ]
     ):
-        return "The user's request clearly wants a document artifact. Create a sidebar artifact of kind doc. Do not wrap it in code fences. Do not emit the words Text, Open, or undefined."
+        return "The user's request clearly wants a document. Create a sidebar document of kind doc. Do not wrap it in code fences. Do not emit the words Text, Open, or undefined."
     if any(
         k in t
         for k in ["table", "sheet", "spreadsheet", "csv", "tsv", "rows", "columns"]
     ):
-        return "The user's request clearly wants a table or spreadsheet artifact. Create a sidebar artifact of kind sheet. Do not wrap it in code fences. Do not emit the words Text, Open, or undefined."
+        return "The user's request clearly wants a table or spreadsheet. Create a sidebar document of kind sheet. Do not wrap it in code fences. Do not emit the words Text, Open, or undefined."
     if any(
         k in t
         for k in ["chart", "graph", "plot", "visualization", "visualise", "visualize"]
     ):
-        return "The user's request clearly wants a graph artifact. Create a sidebar artifact of kind graph. Do not wrap it in code fences. Do not emit the words Text, Open, or undefined."
+        return "The user's request clearly wants a graph. Create a sidebar document of kind graph. Do not wrap it in code fences. Do not emit the words Text, Open, or undefined."
     if any(
         k in t for k in ["code snippet", "script", "example code", "runnable example"]
     ):
-        return "The user's request clearly wants a code artifact. Create a sidebar artifact of kind code. Do not wrap it in code fences. Do not emit the words Text, Open, or undefined."
-    return "The user's request may or may not want an artifact. If the output is best represented as an editable deliverable, create one. If you create one, do not wrap it in code fences and do not emit the words Text, Open, or undefined."
+        return "The user's request clearly wants a code snippet. Create a sidebar document of kind code. Do not wrap it in code fences. Do not emit the words Text, Open, or undefined."
+    return "The user's request may or may not want a document. If the output is best represented as an editable deliverable, create one. If you create one, do not wrap it in code fences and do not emit the words Text, Open, or undefined."
 
 
 # ---------------- Health / meta ----------------
@@ -1237,6 +1240,38 @@ def put_project_context(project_id: str, body: ContentBody) -> dict:
     return {"ok": True}
 
 
+@app.get("/api/projects/{project_id}/memory")
+def get_project_memory(project_id: str) -> dict:
+    if not home_mod.is_safe_id(project_id):
+        raise HTTPException(400, "invalid project_id")
+    p = projects_mod.get(project_id)
+    if not p:
+        raise HTTPException(404, "project not found")
+    content = projects_mod.get_memory(project_id) or ""
+    return {"content": content}
+
+
+@app.put("/api/projects/{project_id}/memory")
+def put_project_memory(project_id: str, body: ContentBody) -> dict:
+    if not home_mod.is_safe_id(project_id):
+        raise HTTPException(400, "invalid project_id")
+    ok = projects_mod.set_memory(project_id, body.content)
+    if not ok:
+        raise HTTPException(404, "project not found")
+    return {"ok": True}
+
+
+@app.get("/api/projects/{project_id}/timeline")
+def get_project_timeline(project_id: str) -> dict:
+    if not home_mod.is_safe_id(project_id):
+        raise HTTPException(400, "invalid project_id")
+    p = projects_mod.get(project_id)
+    if not p:
+        raise HTTPException(404, "project not found")
+    content = projects_mod.get_timeline(project_id) or ""
+    return {"content": content}
+
+
 # ---------------- Ollama model proxy ----------------
 
 
@@ -1420,7 +1455,12 @@ def create_task(body: TaskCreateUpdate) -> dict:
     from .agent import taskstore
 
     t = taskstore.save_task(
-        title=body.title, column=body.column, due_date=body.due_date
+        title=body.title,
+        column=body.column,
+        due_date=body.due_date,
+        description=body.description,
+        assignee=body.assignee,
+        priority=body.priority,
     )
     return {"task": taskstore.asdict(t)}
 
@@ -1432,7 +1472,13 @@ def update_task(task_id: str, body: TaskCreateUpdate) -> dict:
     if not home_mod.is_safe_id(task_id):
         raise HTTPException(400, "invalid task_id")
     t = taskstore.save_task(
-        title=body.title, column=body.column, due_date=body.due_date, task_id=task_id
+        title=body.title,
+        column=body.column,
+        due_date=body.due_date,
+        task_id=task_id,
+        description=body.description,
+        assignee=body.assignee,
+        priority=body.priority,
     )
     return {"task": taskstore.asdict(t)}
 

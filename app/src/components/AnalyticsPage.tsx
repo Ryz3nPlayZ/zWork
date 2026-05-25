@@ -89,7 +89,7 @@ export function AnalyticsPage() {
 
   return (
     <div className="flex h-full min-w-0 flex-1 overflow-y-auto bg-paper">
-      <div className="mx-auto w-full max-w-[720px] px-6 pt-24 pb-20">
+      <div className="mx-auto w-full max-w-[720px] px-6 pt-32 pb-20">
         {/* Header */}
         <header className="mb-14 text-center flex flex-col items-center">
           <div className="flex items-center gap-3 justify-center">
@@ -145,6 +145,20 @@ export function AnalyticsPage() {
               loading={loading}
             />
           </div>
+          {!isPaid && !loading && (
+            <div className="mt-4 text-right">
+              <p className="text-[12px] text-ink-faint">
+                Need more capacity?{" "}
+                <button
+                  type="button"
+                  onClick={() => setView("plan")}
+                  className="font-semibold text-ink-muted hover:text-ink hover:underline underline-offset-2 transition-all"
+                >
+                  Upgrade to Pro or Max
+                </button>
+              </p>
+            </div>
+          )}
         </section>
 
         {/* Activity chart */}
@@ -293,20 +307,6 @@ export function AnalyticsPage() {
           )}
         </section>
 
-        {!isPaid && !loading && (
-          <div className="mt-16 text-center">
-            <p className="text-[12.5px] text-ink-muted">
-              Need more capacity?{" "}
-              <button
-                type="button"
-                onClick={() => setView("plan")}
-                className="font-semibold text-ink hover:underline underline-offset-2 transition-all"
-              >
-                Upgrade to Pro or Max
-              </button>
-            </p>
-          </div>
-        )}
       </div>
     </div>
   );

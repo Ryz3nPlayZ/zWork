@@ -111,3 +111,41 @@ def set_context(project_id: str, content: str) -> bool:
         return False
     (project_dir(project_id) / "project.md").write_text(content, encoding="utf-8")
     return True
+
+
+def get_memory(project_id: str) -> str | None:
+    """Read the project_memory.md file."""
+    md = project_dir(project_id) / "project_memory.md"
+    if not md.exists():
+        return None
+    return md.read_text(encoding="utf-8")
+
+
+def set_memory(project_id: str, content: str) -> bool:
+    """Write the project_memory.md file."""
+    p = get(project_id)
+    if not p:
+        return False
+    (project_dir(project_id) / "project_memory.md").write_text(content, encoding="utf-8")
+    return True
+
+
+def get_timeline(project_id: str) -> str | None:
+    """Read the timeline.md file."""
+    md = project_dir(project_id) / "timeline.md"
+    if not md.exists():
+        return None
+    return md.read_text(encoding="utf-8")
+
+
+def append_timeline(project_id: str, line: str) -> bool:
+    """Append a line to the timeline.md file."""
+    p = get(project_id)
+    if not p:
+        return False
+    md = project_dir(project_id) / "timeline.md"
+    existing = md.read_text(encoding="utf-8") if md.exists() else ""
+    timestamp = time.strftime("%Y-%m-%d %H:%M")
+    entry = f"- [{timestamp}] {line}\n"
+    md.write_text(existing + entry, encoding="utf-8")
+    return True
