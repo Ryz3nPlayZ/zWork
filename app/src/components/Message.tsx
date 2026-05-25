@@ -459,7 +459,13 @@ export function Message({
           )}
           <IconButton icon={<Copy />} label="Copy" size="sm" onClick={() => navigator.clipboard.writeText(message.content).catch(() => {})} />
           <IconButton icon={<RefreshCcw />} label="Regenerate" size="sm" onClick={() => onRetry?.(message.id)} />
-          <IconButton icon={<ThumbsDown />} label="Bad response" size="sm" onClick={() => onBadResponse?.(message.id)} />
+          <IconButton
+            icon={<ThumbsDown className={cn(message.feedback === "bad" && "text-red-500 fill-red-500/20")} />}
+            label={message.feedback === "bad" ? "Feedback logged" : "Bad response"}
+            size="sm"
+            active={message.feedback === "bad"}
+            onClick={() => onBadResponse?.(message.id)}
+          />
           <span className="ml-auto text-[10.5px] text-ink-faint">{formatTime(message.createdAt)}</span>
         </div>
       </div>

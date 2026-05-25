@@ -80,6 +80,7 @@ export interface Message {
   activities?: Activity[];
   /** Files the user attached when sending this message. */
   attachments?: MessageAttachment[];
+  feedback?: "bad" | "good";
 }
 
 export interface Activity {
@@ -163,7 +164,7 @@ function parseArtifactAttributes(src: string): Record<string, string> {
 }
 
 function extractArtifacts(text: string, sourceMessageId?: string): { cleaned: string; artifacts: Artifact[] } {
-  const re = /\[\[ARTIFACT\s+([^\]]+)\]\]([\s\S]*?)\[\[\/ARTIFACT\]\]/g;
+  const re = /\[\[(?:ARTIFACT|DOCUMENT)\s+([^\]]+)\]\]([\s\S]*?)\[\[\/(?:ARTIFACT|DOCUMENT)\]\]/g;
   const artifacts: Artifact[] = [];
   let cleaned = text;
   for (const match of text.matchAll(re)) {
@@ -472,6 +473,8 @@ interface AppState {
     },
   ) => Promise<void>;
   retry: () => Promise<void>;
+  regenerateMessage: (messageId: string) => Promise<void>;
+  flagBadResponse: (messageId: string) => void;
   /** Edit a previously sent user message and re-run the conversation from that point. */
   editAndResend: (messageId: string, newText: string) => Promise<void>;
   stop: () => void;
@@ -1192,6 +1195,66 @@ export const useApp = create<AppState>((set, get) => ({
     await get().send(last);
   },
 
+  regenerateMessage: async (messageId: string) => {
+    const id = get().activeChatId;
+    if (!id) return;
+    const chat = get().chats[id];
+    if (!chat) return;
+
+    const idx = chat.messages.findIndex((m) => m.id === messageId);
+    if (idx === -1) return;
+
+    const msg = chat.messages[idx];
+    if (msg.role !== "assistant") return;
+
+    let userMsgText = "";
+    for (let i = idx - 1; i >= 0; i--) {
+      if (chat.messages[i].role === "user") {
+        userMsgText = chat.messages[i].content;
+        break;
+      }
+    }
+    if (!userMsgText) return;
+
+    set((s) => {
+      const c = s.chats[id];
+      if (!c) return s;
+      return {
+        chats: {
+          ...s.chats,
+          [id]: {
+            ...c,
+            messages: c.messages.slice(0, idx),
+          },
+        },
+      };
+    });
+
+    await get().refreshProviders();
+    const p = get().providers;
+    const fallback = pickAvailableModel(p, get().model);
+    if (fallback !== get().model) set({ model: fallback });
+    await get().send(userMsgText);
+  },
+
+  flagBadResponse: (messageId: string) => {
+    const id = get().activeChatId;
+    if (!id) return;
+    set((s) => {
+      const chat = s.chats[id];
+      if (!chat) return s;
+      const nextMsgs = chat.messages.map((m) =>
+        m.id === messageId ? { ...m, feedback: "bad" as const } : m
+      );
+      return {
+        chats: {
+          ...s.chats,
+          [id]: { ...chat, messages: nextMsgs },
+        },
+      };
+    });
+  },
+
   editAndResend: async (messageId, newText) => {
     const trimmed = newText.trim();
     if (!trimmed) return;
@@ -1746,7 +1809,7 @@ export const useApp = create<AppState>((set, get) => ({
       .map((a) => {
         const titleAttr = a.title ? ` title="${a.title.replace(/"/g, "'")}"`  : "";
         const langAttr = a.language ? ` language="${a.language}"` : "";
-        return `[[ARTIFACT kind=${a.kind}${titleAttr}${langAttr}]]\n${a.content}\n[[/ARTIFACT]]`;
+        return `[[DOCUMENT kind=${a.kind}${titleAttr}${langAttr}]]\n${a.content}\n[[/DOCUMENT]]`;
       })
       .join("\n\n");
 

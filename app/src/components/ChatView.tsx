@@ -19,6 +19,8 @@ export function ChatView() {
   const setView = useApp((s) => s.setView);
   const artifacts = useApp((s) => s.artifacts);
   const openArtifact = useApp((s) => s.openArtifact);
+  const regenerateMessage = useApp((s) => s.regenerateMessage);
+  const flagBadResponse = useApp((s) => s.flagBadResponse);
   const endRef = useRef<HTMLDivElement>(null);
 
   const [editing, setEditing] = useState(false);
@@ -58,33 +60,49 @@ export function ChatView() {
 
   const commitRename = () => {
     const t = titleDraft.trim();
+    if (!t) return;
+    rename(chat.id, t);
     setEditing(false);
-    if (t && t !== chat.title && !chat.id.startsWith("tmp_")) {
-      void rename(chat.id, t);
-    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") commitRename();
+    if (e.key === "Escape") setEditing(false);
   };
 
   return (
-    <div className="flex h-full min-w-0 flex-1 bg-paper">
-      {/* Main chat column */}
-      <div className="flex h-full min-w-0 flex-1 flex-col">
+    <div className="flex h-full min-w-0 flex-1 flex-col bg-paper relative">
+      {/* Drag-only titlebar */}
+      {macOS && <div className="titlebar-drag absolute inset-x-0 top-0 h-10 shrink-0" />}
+
+      <div className="flex flex-1 flex-col overflow-hidden relative">
         {/* Header */}
-        <div className={cn(macOS && "titlebar-drag", "flex h-12 shrink-0 items-center justify-between border-b border-line px-4")}>
-          <div className="min-w-0 flex items-center gap-2" data-no-drag>
+        <div className="flex shrink-0 items-center justify-between border-b border-line px-5 py-3 bg-paper-soft select-none">
+          <div className="flex min-w-0 items-center gap-2">
             {editing ? (
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1" data-no-drag>
                 <input
-                  autoFocus
+                  type="text"
                   value={titleDraft}
                   onChange={(e) => setTitleDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") commitRename();
-                    if (e.key === "Escape") setEditing(false);
-                  }}
-                  className="w-[280px] rounded-md border border-line-strong bg-paper px-2 py-1 text-[13px] text-ink focus:outline-none"
+                  onKeyDown={handleKeyDown}
+                  className="rounded border border-line bg-paper px-2 py-0.5 text-[13px] text-ink focus:outline-none"
+                  autoFocus
                 />
-                <IconButton icon={<Check />} label="Save" size="sm" onClick={commitRename} />
-                <IconButton icon={<X />} label="Cancel" size="sm" onClick={() => setEditing(false)} />
+                <button
+                  type="button"
+                  onClick={commitRename}
+                  className="rounded p-0.5 text-ink-muted hover:bg-paper-sunken hover:text-ink"
+                >
+                  <Check className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditing(false)}
+                  className="rounded p-0.5 text-ink-muted hover:bg-paper-sunken hover:text-ink"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
               </div>
             ) : (
               <button
@@ -130,6 +148,8 @@ export function ChatView() {
                   streaming={isStreaming}
                   activities={activities}
                   status={isStreaming ? chat.status : undefined}
+                  onRetry={regenerateMessage}
+                  onBadResponse={flagBadResponse}
                 />
               );
             })}
