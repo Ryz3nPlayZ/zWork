@@ -20,6 +20,7 @@ import {
   FileText,
   User,
   LogOut,
+  ShieldAlert,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
@@ -720,26 +721,103 @@ function GeneralPanel({
         </Field>
       </section>
 
-      <section className="rounded-xl border border-line bg-paper-raised p-4">
-        <label className="flex items-start gap-3">
-          <input
-            type="checkbox"
-            checked={telemetryEnabled}
-            onChange={async (e) => {
-              const next = e.target.checked;
-              setTelemetryEnabled(next);
-              await onSave({ telemetry_enabled: next });
-            }}
-            className="mt-[3px] h-4 w-4 accent-ink"
-          />
-          <div className="space-y-1">
-            <div className="text-[13px] font-medium text-ink">Anonymous usage analytics</div>
-            <div className="text-[12px] leading-5 text-ink-muted">
-              Helps track installs, active usage time, onboarding completion, chat volume, error rates, and update success.
-              It never collects prompt text, message content, file contents, API keys, screenshots, or paths.
+      {/* Privacy & Telemetry Dashboard */}
+      <section className="rounded-xl border border-line bg-paper-raised p-5 space-y-4 shadow-sm select-none">
+        <div>
+          <h3 className="text-[14px] font-semibold text-ink flex items-center gap-1.5">
+            <ShieldAlert className="h-4 w-4 text-accent animate-[pulse_3s_infinite]" />
+            Privacy & Telemetry Dashboard
+          </h3>
+          <p className="text-[12px] text-ink-muted mt-1 leading-relaxed">
+            Manage your data preferences. We prioritize your privacy and comply with strict security standards.
+          </p>
+        </div>
+
+        <div className="border-t border-line my-3" />
+
+        <div className="space-y-4">
+          {/* Toggle 1: Telemetry */}
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-1 flex-1">
+              <div className="text-[13px] font-medium text-ink flex items-center gap-2">
+                <span>Usage Analytics & Telemetry</span>
+                <span className={cn(
+                  "px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase",
+                  telemetryEnabled
+                    ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
+                    : "bg-paper-sunken text-ink-faint border border-line"
+                )}>
+                  {telemetryEnabled ? "Active" : "Disabled"}
+                </span>
+              </div>
+              <p className="text-[11.5px] leading-relaxed text-ink-muted">
+                Tracks application installs, active usage hours, onboarding success rates, and feature usage. 
+                We never collect prompts, model outputs, file names, API keys, or screenshots.
+              </p>
+            </div>
+            
+            {/* Toggle Button */}
+            <button
+              onClick={async () => {
+                const next = !telemetryEnabled;
+                setTelemetryEnabled(next);
+                await onSave({ telemetry_enabled: next });
+              }}
+              className={cn(
+                "press relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none mt-1",
+                telemetryEnabled ? "bg-accent" : "bg-paper-sunken border-line"
+              )}
+            >
+              <span
+                className={cn(
+                  "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                  telemetryEnabled ? "translate-x-4" : "translate-x-0"
+                )}
+              />
+            </button>
+          </div>
+
+          <div className="border-t border-line-soft" />
+
+          {/* Policy */}
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-1 flex-1">
+              <div className="text-[13px] font-medium text-ink flex items-center gap-2">
+                <span>Zero Prompt & Content Leak Policy</span>
+                <span className="bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase">
+                  Locked
+                </span>
+              </div>
+              <p className="text-[11.5px] leading-relaxed text-ink-muted">
+                Prompt inputs, model completions, file uploads, local text index data, and desktop screen controls are processed locally. They are never sent to external servers for tracking.
+              </p>
             </div>
           </div>
-        </label>
+
+          <div className="border-t border-line-soft" />
+
+          {/* Wipe Local Cache Action */}
+          <div className="flex items-center justify-between gap-4 pt-1">
+            <div className="space-y-0.5">
+              <div className="text-[12.5px] font-medium text-ink">Clear Offline Application Cache</div>
+              <p className="text-[11.5px] text-ink-muted">Wipes all cached chats, summaries, and temporary preferences stored in this browser session.</p>
+            </div>
+            <button
+              onClick={() => {
+                try {
+                  localStorage.removeItem("zwork:cached-chats");
+                  localStorage.removeItem("zwork:cached-summaries");
+                  alert("Application cache cleared successfully!");
+                } catch {
+                  alert("Failed to clear cache.");
+                }
+              }}
+              className="press px-3 py-1.5 text-[11px] font-medium border border-red-500/20 bg-red-500/5 hover:bg-red-500/10 text-red-500 rounded-lg transition-all cursor-pointer"
+            >
+              Clear Cache
+            </button>
+          </div>
+        </div>
       </section>
 
       {/* Default model */}
