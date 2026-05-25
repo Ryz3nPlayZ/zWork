@@ -483,6 +483,7 @@ interface AppState {
   cockpitOpen: boolean;
   setCockpitOpen: (v: boolean) => void;
   fetchTasks: () => Promise<void>;
+  autoPlanTasks: (projectTitle: string, intervalDays?: number) => Promise<void>;
   addTask: (title: string, column: Task["column"], due_date?: string | null) => Promise<void>;
   updateTask: (id: string, title: string, column: Task["column"], due_date?: string | null) => Promise<void>;
   updateTaskColumn: (id: string, column: Task["column"]) => Promise<void>;
@@ -717,6 +718,13 @@ export const useApp = create<AppState>((set, get) => ({
       const { tasks } = await api.listTasks();
       set({ tasks });
     } catch (e) { console.warn("fetchTasks failed:", e); }
+  },
+
+  autoPlanTasks: async (projectTitle, intervalDays = 2) => {
+    try {
+      const { tasks } = await api.autoPlanTasks(projectTitle, intervalDays);
+      set((s) => ({ tasks: [...s.tasks, ...tasks] }));
+    } catch (e) { console.warn("autoPlanTasks failed:", e); }
   },
 
   addTask: async (title, column, due_date) => {

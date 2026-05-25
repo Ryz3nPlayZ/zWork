@@ -278,6 +278,13 @@ export const api = {
   listTasks: () =>
     localFetch("/api/tasks").then((r) => j<{ tasks: any[] }>(r)),
 
+  autoPlanTasks: (projectTitle: string, intervalDays: number = 2) =>
+    localFetch("/api/tasks/auto-plan", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ project_title: projectTitle, interval_days: intervalDays }),
+    }).then((r) => j<{ tasks: any[] }>(r)),
+
   createTask: (body: { title: string; column?: string; due_date?: string | null }) =>
     localFetch("/api/tasks", {
       method: "POST",

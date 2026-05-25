@@ -176,6 +176,11 @@ class TaskColumnUpdate(BaseModel):
     column: str
 
 
+class TaskAutoPlanRequest(BaseModel):
+    project_title: str
+    interval_days: int = 2
+
+
 class EventCreateUpdate(BaseModel):
     title: str
     date: str
@@ -1416,6 +1421,88 @@ def delete_task_endpoint(task_id: str) -> dict:
     if not ok:
         raise HTTPException(404, "task not found")
     return {"ok": True}
+
+
+@app.post("/api/tasks/auto-plan")
+async def auto_plan_tasks(body: TaskAutoPlanRequest) -> dict:
+    from .agent import taskstore, providers
+    import json
+    from datetime import datetime, timedelta
+
+    model_id = _resolve_model_id(None, s)
+    if not model_id:
+        model_id = "zwork-flash"
+
+    system = (
+        "You are zWork's project planning assistant. Generate 5 structured, sequential tasks "
+        f"for the user's project: '{body.project_title}'. Each task must have a title, "
+        "and a duration (number of days, e.g. 1, 2, or 3) representing how long it takes. "
+        "Output must be a raw JSON array of objects, each containing 'title' (string) and "
+        "'days' (integer). Do not include markdown code block syntax, just raw JSON."
+    )
+    user = f"Plan project: '{body.project_title}'"
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+
+    tasks_to_create = []
+    try:
+        text_parts = []
+        async for evt in providers.stream_chat(messages, model_id, s):
+            if evt.get("type") == "delta":
+                text_parts.append(evt.get("text", ""))
+        generated = "".join(text_parts).strip()
+        
+        # Clean potential markdown block
+        if "```" in generated:
+            parts = generated.split("```")
+            for p in parts:
+                if p.strip().startswith("[") or p.strip().startswith("{"):
+                    generated = p.strip()
+                    break
+        generated = generated.strip()
+        if generated.startswith("```json"):
+            generated = generated[7:]
+        if generated.endswith("```"):
+            generated = generated[:-3]
+        generated = generated.strip()
+
+        tasks_to_create = json.loads(generated)
+        if isinstance(tasks_to_create, dict) and "tasks" in tasks_to_create:
+            tasks_to_create = tasks_to_create["tasks"]
+        if not isinstance(tasks_to_create, list):
+            raise ValueError("LLM response is not a JSON list")
+    except Exception as e:
+        print("Failed to auto-plan via LLM, falling back:", e)
+        # Fallback to standard tasks
+        tasks_to_create = [
+            {"title": f"Plan & define requirements for {body.project_title}", "days": 1},
+            {"title": f"Design mockup & choose tech stack for {body.project_title}", "days": 2},
+            {"title": f"Implement core functionality for {body.project_title}", "days": 3},
+            {"title": f"Run tests & fix bugs for {body.project_title}", "days": 2},
+            {"title": f"Final review & launch {body.project_title}", "days": 1},
+        ]
+
+    # Save tasks sequentially
+    created_tasks = []
+    current_date = datetime.now()
+    for item in tasks_to_create:
+        if not isinstance(item, dict) or "title" not in item:
+            continue
+        title = item["title"]
+        days = int(item.get("days", body.interval_days))
+        current_date += timedelta(days=days)
+        due_date_str = current_date.strftime("%Y-%m-%d")
+        
+        t = taskstore.save_task(
+            title=title,
+            column="todo",
+            due_date=due_date_str
+        )
+        created_tasks.append(taskstore.asdict(t))
+
+    return {"tasks": created_tasks}
 
 
 @app.get("/api/events")
