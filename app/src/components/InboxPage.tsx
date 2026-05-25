@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useApp } from "../lib/store";
-import { Inbox, CheckCircle2, Trash2, ArrowRight, Plus } from "lucide-react";
+import { Inbox, CheckCircle2, Trash2, ArrowRight, Plus, Mail, Sparkles, Check, Loader2 } from "lucide-react";
+import { streamChat } from "../lib/api";
 
 export function InboxPage() {
   const tasks = useApp((s) => s.tasks);
@@ -29,6 +30,66 @@ export function InboxPage() {
     if (e.key === "Enter") {
       void handleAdd();
     }
+  };
+
+  const [emailText, setEmailText] = useState("");
+  const [summaryText, setSummaryText] = useState("");
+  const [summarizing, setSummarizing] = useState(false);
+  const [todos, setTodos] = useState<string[]>([]);
+  const [importedCount, setImportedCount] = useState<number | null>(null);
+
+  const handleSummarize = async () => {
+    if (!emailText.trim() || summarizing) return;
+    setSummarizing(true);
+    setSummaryText("");
+    setTodos([]);
+    setImportedCount(null);
+
+    let currentText = "";
+    try {
+      await streamChat(
+        {
+          message: "Please summarize the following email in 3 clear bullet points, and extract any actionable todos as checkbox items starting with '- [ ]'. Here is the email:\n\n" + emailText,
+        },
+        (event) => {
+          if (event.type === "delta" && event.text) {
+            currentText += event.text;
+            setSummaryText(currentText);
+          }
+        }
+      );
+
+      const lines = currentText.split("\n");
+      const foundTodos: string[] = [];
+      for (const line of lines) {
+        const cleaned = line.trim();
+        if (cleaned.startsWith("- [ ]") || cleaned.startsWith("- [x]")) {
+          const content = cleaned.replace(/^-\s*\[\s*[x ]\s*\]\s*/i, "").trim();
+          if (content) foundTodos.push(content);
+        } else if (cleaned.startsWith("* ") || cleaned.startsWith("- ")) {
+          if (cleaned.toLowerCase().includes("todo") || cleaned.toLowerCase().includes("action")) {
+            const content = cleaned.replace(/^-\s*/, "").replace(/^\*\s*/, "").trim();
+            if (content) foundTodos.push(content);
+          }
+        }
+      }
+      setTodos(foundTodos);
+    } catch (err) {
+      console.error(err);
+      setSummaryText("Failed to generate summary.");
+    } finally {
+      setSummarizing(false);
+    }
+  };
+
+  const handleImportTodos = async () => {
+    if (todos.length === 0) return;
+    for (const todo of todos) {
+      await addTask(todo, "inbox");
+    }
+    setImportedCount(todos.length);
+    setTodos([]);
+    setEmailText("");
   };
 
   return (
@@ -74,6 +135,59 @@ export function InboxPage() {
               <span>Add</span>
             </button>
           </div>
+        </div>
+
+        {/* Email Summarizer Card */}
+        <div className="mb-8 rounded-2xl border border-line bg-paper-raised p-5 shadow-sm">
+          <div className="flex items-center gap-2 mb-3">
+            <Mail className="h-4.5 w-4.5 text-accent" />
+            <h2 className="text-[14px] font-semibold text-ink">Smart Email Summarizer</h2>
+          </div>
+          <p className="text-[12.5px] text-ink-muted mb-4">
+            Paste an email below to generate a concise summary and extract key todos instantly.
+          </p>
+
+          <textarea
+            value={emailText}
+            onChange={(e) => setEmailText(e.target.value)}
+            placeholder="Paste your email here..."
+            disabled={summarizing}
+            className="w-full h-24 p-3 rounded-xl border border-line bg-paper text-[13px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none resize-none mb-3"
+          />
+
+          <div className="flex gap-2">
+            <button
+              onClick={handleSummarize}
+              disabled={summarizing || !emailText.trim()}
+              className="press flex items-center justify-center gap-1.5 rounded-xl bg-ink px-4 py-2 text-[12.5px] font-medium text-paper hover:bg-ink/90 disabled:opacity-45"
+            >
+              {summarizing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              <span>{summarizing ? "Summarizing..." : "Summarize & Extract"}</span>
+            </button>
+            
+            {todos.length > 0 && (
+              <button
+                onClick={handleImportTodos}
+                className="press flex items-center justify-center gap-1.5 rounded-xl border border-line bg-paper px-4 py-2 text-[12.5px] font-medium text-ink-soft hover:bg-paper-sunken"
+              >
+                <Check className="h-4 w-4 text-emerald-500" />
+                <span>Import {todos.length} Todos</span>
+              </button>
+            )}
+          </div>
+
+          {importedCount !== null && (
+            <div className="mt-3 text-[12px] text-emerald-600 font-medium">
+              ✓ Successfully imported {importedCount} todo items into your Inbox!
+            </div>
+          )}
+
+          {summaryText && (
+            <div className="mt-4 p-4 rounded-xl border border-line/50 bg-paper-soft text-[13px] text-ink leading-relaxed">
+              <div className="font-semibold text-[11px] uppercase tracking-wider text-ink-faint mb-2">Summary & Extracted Tasks</div>
+              <div className="whitespace-pre-wrap">{summaryText}</div>
+            </div>
+          )}
         </div>
 
         {/* Task List */}
