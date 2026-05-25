@@ -267,6 +267,11 @@ export const api = {
       body: JSON.stringify({ title, content })
     }).then((r) => r.blob()),
 
+  getActivityLogs: () =>
+    localFetch("/api/activity-logs").then((r) =>
+      j<{ logs: Array<{ timestamp: number; filename: string; path: string }> }>(r)
+    ),
+
   waitForBackend: waitForBackendReady,
 
   // --- Tasks & Calendar ---

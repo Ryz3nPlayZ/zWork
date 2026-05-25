@@ -897,10 +897,67 @@ async def capture_screenshot():
             check=True
         )
         import json
+        import shutil
+        import time
+        
         data = json.loads(res.stdout)
-        return {"screenshot": data.get("result", "")}
+        screenshot_base64 = data.get("result", "")
+        
+        uploads_dir = home_mod.workspace_uploads_dir()
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+        
+        temp_path = data.get("path")
+        persistent_path = ""
+        filename = ""
+        if temp_path and Path(temp_path).exists():
+            filename = f"activity-{int(time.time())}.png"
+            dest = uploads_dir / filename
+            shutil.copy(temp_path, dest)
+            persistent_path = str(dest)
+            
+            # Record in log JSON
+            log_path = home_mod.zwork_data_dir() / "state" / "activity_log.json"
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            logs = []
+            if log_path.exists():
+                try:
+                    logs = json.loads(log_path.read_text(encoding="utf-8"))
+                except Exception:
+                    logs = []
+            
+            logs.insert(0, {
+                "timestamp": int(time.time()),
+                "filename": filename,
+                "path": persistent_path,
+            })
+            log_path.write_text(json.dumps(logs[:50]), encoding="utf-8")
+            
+        return {"screenshot": screenshot_base64, "path": persistent_path, "filename": filename}
     except Exception as e:
         return {"screenshot": "", "error": str(e)}
+
+
+@app.get("/api/activity-logs")
+def get_activity_logs() -> dict:
+    import json
+    log_path = home_mod.zwork_data_dir() / "state" / "activity_log.json"
+    if not log_path.exists():
+        return {"logs": []}
+    try:
+        logs = json.loads(log_path.read_text(encoding="utf-8"))
+    except Exception:
+        logs = []
+    return {"logs": logs}
+
+
+@app.get("/api/uploads/{filename}")
+def get_uploaded_file(filename: str):
+    uploads_dir = home_mod.workspace_uploads_dir()
+    file_path = uploads_dir / filename
+    if not file_path.exists():
+        raise HTTPException(404, "File not found")
+    from fastapi.responses import FileResponse
+    return FileResponse(file_path)
 
 
 @app.post("/api/export/docx")
