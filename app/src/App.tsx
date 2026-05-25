@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState, useMemo } from "react";
 import { CheckCircle2, ExternalLink, X } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
 import { Landing } from "./components/Landing";
@@ -28,6 +28,49 @@ const CockpitPage = lazy(() => import("./components/cockpit/CockpitPage").then((
 const InboxPage = lazy(() => import("./components/InboxPage").then((m) => ({ default: m.InboxPage })));
 const OverlayChatView = lazy(() => import("./components/OverlayChatView").then((m) => ({ default: m.OverlayChatView })));
 import { Logo } from "./components/Logo";
+
+function DailyGoalBar() {
+  const tasks = useApp((s) => s.tasks);
+  
+  // Calculate today's date in local timezone YYYY-MM-DD
+  const todayStr = useMemo(() => {
+    const local = new Date();
+    const offset = local.getTimezoneOffset();
+    const localDate = new Date(local.getTime() - (offset * 60 * 1000));
+    return localDate.toISOString().split("T")[0];
+  }, [tasks]); // Re-eval when tasks change
+
+  const todayTasks = useMemo(() => {
+    return tasks.filter((t) => t.due_date === todayStr);
+  }, [tasks, todayStr]);
+
+  if (todayTasks.length === 0) return null;
+
+  const completedTasks = todayTasks.filter((t) => t.column === "done");
+  const pct = Math.round((completedTasks.length / todayTasks.length) * 100);
+
+  return (
+    <div className="shrink-0 border-b border-line bg-paper-soft px-4 py-1.5 flex items-center justify-between text-[11px]">
+      <div className="flex items-center gap-2">
+        <span className="font-semibold text-ink flex items-center gap-1">
+          🎯 Daily Goals:
+        </span>
+        <span className="text-ink-muted">
+          {completedTasks.length} of {todayTasks.length} tasks completed today
+        </span>
+      </div>
+      <div className="flex items-center gap-3 w-40 sm:w-60">
+        <div className="flex-grow h-1.5 rounded-full bg-paper-sunken overflow-hidden border border-line-soft relative">
+          <div
+            className="h-full bg-gradient-to-r from-accent to-emerald-500 rounded-full transition-all duration-500 ease-out absolute left-0 top-0"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <span className="font-mono text-ink-muted w-8 text-right font-medium">{pct}%</span>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const previewMode = getPreviewMode();
@@ -438,7 +481,9 @@ export default function App() {
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-paper">
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar />
-        <main className="relative flex min-w-0 flex-1 overflow-hidden">
+        <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+          <DailyGoalBar />
+          <div className="relative flex-grow flex min-h-0 overflow-hidden">
           {view === "settings" ? (
             <Suspense fallback={panelFallback}>
               <SettingsPage />
@@ -523,6 +568,7 @@ export default function App() {
               </div>
             </div>
           )}
+          </div>
         </main>
         {artifactPanelOpen && (
           <Suspense fallback={null}>
