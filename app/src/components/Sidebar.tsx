@@ -16,6 +16,7 @@ import {
   CreditCard,
   Plug,
   LayoutDashboard,
+  Inbox,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { isMacOS } from "../lib/platform";
@@ -138,34 +139,31 @@ export function Sidebar() {
           collapsed={!open}
           onClick={() => setSearchOpen(true)}
         />
+        <SidebarButton
+          icon={<Inbox />}
+          label="Inbox"
+          collapsed={!open}
+          onClick={() => setView("inbox")}
+          active={view === "inbox"}
+        />
+        <SidebarButton
+          icon={<LayoutDashboard />}
+          label="Cockpit"
+          collapsed={!open}
+          onClick={() => setView("cockpit")}
+          active={view === "cockpit"}
+        />
+        <SidebarButton
+          icon={<FolderOpen />}
+          label="Projects"
+          collapsed={!open}
+          onClick={() => {
+            setActiveProject(null);
+            setView("projects");
+          }}
+          active={view === "projects"}
+        />
       </nav>
-
-      {/* Projects */}
-      {SHOW_PROJECTS && open && (
-        <div className="px-2 mt-3">
-          <SectionLabel title="Projects" />
-          <ul className="mt-1 flex flex-col">
-            <li>
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveProject(null);
-                  setView("projects");
-                }}
-                className={cn(
-                  "press flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] text-ink-muted",
-                  "hover:bg-line/60 hover:text-ink",
-                  view === "projects" && !useApp.getState().activeProjectId &&
-                    "bg-paper-raised text-ink shadow-[0_0_0_1px_rgba(17,17,17,0.06)]",
-                )}
-              >
-                <FolderOpen className="h-3.5 w-3.5 shrink-0" />
-                <span>My Projects</span>
-              </button>
-            </li>
-          </ul>
-        </div>
-      )}
 
       {/* Chat history */}
       <div className="mt-3 flex-1 overflow-x-hidden overflow-y-auto pb-3">
@@ -268,14 +266,6 @@ export function Sidebar() {
           collapsed={!open}
           active={view === "connectors"}
           onClick={() => setView("connectors")}
-        />
-        <SidebarButton
-          icon={<LayoutDashboard />}
-          label="Cockpit"
-          shortcut="⌘J"
-          collapsed={!open}
-          active={cockpitOpen}
-          onClick={() => setCockpitOpen(!cockpitOpen)}
         />
         <SidebarButton
           icon={<Settings />}
