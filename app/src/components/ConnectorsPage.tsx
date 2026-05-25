@@ -122,10 +122,10 @@ export function ConnectorsPage() {
                       color: hasLogo ? app.color : "rgb(var(--ink-muted))",
                     }}
                   >
-                    {app.icon ? (
-                      <img src={app.icon} alt="" className="h-6 w-6 object-contain" />
-                    ) : hasLogo ? (
+                    {hasLogo ? (
                       <AppBrandLogo appId={app.id} size={20} />
+                    ) : app.icon ? (
+                      <img src={app.icon} alt="" className="h-6 w-6 object-contain" />
                     ) : (
                       <Plug size={18} />
                     )}
@@ -191,10 +191,10 @@ export function ConnectorsPage() {
                       : "rgb(var(--ink-muted))",
                   }}
                 >
-                  {expandedAppData.icon ? (
-                    <img src={expandedAppData.icon} alt="" className="h-7 w-7 object-contain" />
-                  ) : hasBrandLogo(expandedAppData.id) ? (
+                  {hasBrandLogo(expandedAppData.id) ? (
                     <AppBrandLogo appId={expandedAppData.id} size={26} />
+                  ) : expandedAppData.icon ? (
+                    <img src={expandedAppData.icon} alt="" className="h-7 w-7 object-contain" />
                   ) : (
                     <Plug size={22} />
                   )}
