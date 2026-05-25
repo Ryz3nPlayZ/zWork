@@ -137,10 +137,10 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
 
   return (
     <div className="flex h-full min-w-0 flex-1 overflow-y-auto bg-paper">
-      <div className="mx-auto w-full max-w-[1060px] px-8 py-14">
+      <div className="mx-auto w-full max-w-[1060px] px-8 py-20">
         {/* Header */}
         <header className="mb-14 text-center">
-          <h1 className="font-serif text-[40px] tracking-tight text-ink">Pricing</h1>
+          <h1 className="font-serif text-[42px] font-bold tracking-tight text-ink">Pricing</h1>
           <p className="mx-auto mt-4 max-w-[500px] text-[15px] leading-relaxed text-ink-soft">
             Upgrade to unlock faster models, higher concurrency, and more powerful capabilities.
           </p>

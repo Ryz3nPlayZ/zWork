@@ -89,11 +89,11 @@ export function AnalyticsPage() {
 
   return (
     <div className="flex h-full min-w-0 flex-1 overflow-y-auto bg-paper">
-      <div className="mx-auto w-full max-w-[720px] px-6 py-14">
+      <div className="mx-auto w-full max-w-[720px] px-6 py-20">
         {/* Header */}
-        <header className="mb-12">
-          <div className="flex items-center gap-3">
-            <h1 className="font-serif text-[36px] tracking-tight text-ink">Analytics</h1>
+        <header className="mb-14 text-center flex flex-col items-center">
+          <div className="flex items-center gap-3 justify-center">
+            <h1 className="font-serif text-[42px] font-bold tracking-tight text-ink">Analytics</h1>
             <span className={cn(
               "rounded-full px-2.5 py-0.5 text-[12px] font-semibold",
               tier === "max" ? "bg-amber-500/10 text-amber-600" :
@@ -103,7 +103,7 @@ export function AnalyticsPage() {
               {tier === "max" ? "Max" : tier === "pro" ? "Pro" : "Free"}
             </span>
           </div>
-          <p className="mt-3 text-[14px] leading-relaxed text-ink-soft">
+          <p className="mt-4 text-[14px] leading-relaxed text-ink-soft max-w-[500px]">
             Track your usage and activity over time.
           </p>
         </header>
@@ -115,22 +115,6 @@ export function AnalyticsPage() {
               {error.includes("401") ? "Sign in to view your usage." : error}
             </p>
           </section>
-        )}
-
-        {/* Upgrade prompt — free users only, subtle banner */}
-        {!isPaid && !loading && (
-          <div className="mb-8 flex items-center justify-between gap-3 rounded-xl border border-line bg-paper-raised px-4 py-2.5">
-            <p className="text-[12.5px] text-ink-soft">
-              Need more capacity?{" "}
-              <button
-                type="button"
-                onClick={() => setView("plan")}
-                className="font-semibold text-ink hover:underline underline-offset-2"
-              >
-                Upgrade to Pro
-              </button>
-            </p>
-          </div>
         )}
 
         {/* Usage limits */}
@@ -308,6 +292,21 @@ export function AnalyticsPage() {
             </div>
           )}
         </section>
+
+        {!isPaid && !loading && (
+          <div className="mt-16 text-center">
+            <p className="text-[12.5px] text-ink-muted">
+              Need more capacity?{" "}
+              <button
+                type="button"
+                onClick={() => setView("plan")}
+                className="font-semibold text-ink hover:underline underline-offset-2 transition-all"
+              >
+                Upgrade to Pro or Max
+              </button>
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -40,6 +40,15 @@ const APP_DETAILED_DESCRIPTIONS: Record<string, string> = {
   hubspot: "Connect HubSpot to manage contacts, deals, and your CRM pipeline.",
 };
 
+const ALLOWED_APPS = new Set([
+  "gmail",
+  "googlecalendar",
+  "notion",
+  "googledrive",
+  "github",
+  "linear"
+]);
+
 export function ConnectorsPage() {
   const composioAccounts = useApp((s) => s.composioAccounts);
   const composioApps = useApp((s) => s.composioApps);
@@ -73,39 +82,44 @@ export function ConnectorsPage() {
     }
   }
 
-  const expandedAppData = composioApps.find((a) => a.id === expandedApp);
+  const allowedComposioApps = composioApps.filter((app) => ALLOWED_APPS.has(app.id));
+  const expandedAppData = allowedComposioApps.find((a) => a.id === expandedApp);
   const isExpandedConnected = expandedApp ? connectedApps.has(expandedApp) : false;
+  const expandedAppColor = expandedAppData?.id === "notion" ? "rgb(var(--ink))" : expandedAppData?.color;
 
   return (
     <div className="flex h-full min-w-0 flex-1 overflow-y-auto bg-paper">
-      <div className="mx-auto w-full max-w-[860px] px-6 py-14">
+      <div className="mx-auto w-full max-w-[860px] px-6 py-20">
         {/* Header */}
-        <div className="mb-12 flex items-start justify-between gap-4">
-          <div>
-            <h1 className="font-serif text-[36px] tracking-tight text-ink">
+        <div className="mb-14 text-center flex flex-col items-center gap-4 relative">
+          <div className="absolute right-0 top-0">
+            <button
+              onClick={() => void refreshComposio()}
+              className="press ring-focus rounded-xl border border-line bg-paper-raised p-2.5 text-ink-soft hover:text-ink transition-colors"
+              aria-label="Refresh connectors"
+            >
+              <RefreshCw className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="mx-auto text-center flex flex-col items-center">
+            <h1 className="font-serif text-[42px] font-bold tracking-tight text-ink">
               Connectors
             </h1>
-            <p className="mt-3 text-[14px] leading-relaxed text-ink-soft max-w-[520px]">
+            <p className="mt-4 text-[14px] leading-relaxed text-ink-soft max-w-[520px] text-center">
               Connect your apps and zWork can act on your behalf — send emails,
               manage your calendar, update tasks, and more.
             </p>
           </div>
-          <button
-            onClick={() => void refreshComposio()}
-            className="press ring-focus mt-1 shrink-0 rounded-xl border border-line bg-paper-raised p-2.5 text-ink-soft hover:text-ink transition-colors"
-            aria-label="Refresh connectors"
-          >
-            <RefreshCw className="h-4 w-4" />
-          </button>
         </div>
 
         {/* App grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {composioApps.map((app) => {
+          {allowedComposioApps.map((app) => {
             const isConnected = connectedApps.has(app.id);
             const isConnecting = connecting === app.id;
             const desc = APP_DESCRIPTIONS[app.id] ?? `Use ${app.name} from zWork`;
             const hasLogo = hasBrandLogo(app.id);
+            const appColor = app.id === "notion" ? "rgb(var(--ink))" : app.color;
 
             return (
               <button
@@ -118,8 +132,8 @@ export function ConnectorsPage() {
                   <div
                     className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl overflow-hidden"
                     style={{
-                      backgroundColor: hasLogo ? `${app.color}14` : "rgb(var(--paper-sunken))",
-                      color: hasLogo ? app.color : "rgb(var(--ink-muted))",
+                      backgroundColor: app.id === "notion" ? "rgba(var(--ink), 0.08)" : hasLogo ? `${appColor}14` : "rgb(var(--paper-sunken))",
+                      color: hasLogo ? appColor : "rgb(var(--ink-muted))",
                     }}
                   >
                     {hasLogo ? (
@@ -183,11 +197,11 @@ export function ConnectorsPage() {
                 <div
                   className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl overflow-hidden"
                   style={{
-                    backgroundColor: hasBrandLogo(expandedAppData.id)
-                      ? `${expandedAppData.color}14`
+                    backgroundColor: expandedAppData.id === "notion" ? "rgba(var(--ink), 0.08)" : hasBrandLogo(expandedAppData.id)
+                      ? `${expandedAppColor}14`
                       : "rgb(var(--paper-sunken))",
                     color: hasBrandLogo(expandedAppData.id)
-                      ? expandedAppData.color
+                      ? expandedAppColor
                       : "rgb(var(--ink-muted))",
                   }}
                 >

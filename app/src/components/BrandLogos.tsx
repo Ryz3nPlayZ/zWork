@@ -10,7 +10,7 @@ interface LogoProps {
 /* Gmail — official 2020 brand mark (multi-color envelope) */
 export function GmailLogo({ className, size = 24 }: LogoProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 192 192" className={className} aria-hidden="true">
+    <svg width={size} height={size} viewBox="44 32 104 88" className={className} aria-hidden="true">
       <path fill="#4285F4" d="M58 108 h14 V74 L52 59 v43 c0 3.32 2.69 6 6 6"/>
       <path fill="#34A853" d="M120 108 h14 c3.32 0 6-2.69 6-6 V59 l-20 15"/>
       <path fill="#FBBC04" d="M120 48 v26 l20-15 v-8 c0-7.42-8.47-11.65-14.4-7.2"/>
@@ -20,11 +20,13 @@ export function GmailLogo({ className, size = 24 }: LogoProps) {
   );
 }
 
-/* Google Calendar — official simple-icons "googlecalendar" */
+/* Google Calendar — high-fidelity official brand design */
 export function GoogleCalendarLogo({ className, size = 24 }: LogoProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden="true">
-      <path fill="#4285F4" d="M18.316 5.684H24v12.632h-5.684V5.684zM5.684 24h12.632v-5.684H5.684V24zM18.316 5.684V0H1.895A1.894 1.894 0 0 0 0 1.895v16.421h5.684V5.684h12.632z"/>
+    <svg width={size} height={size} viewBox="0 0 192 192" className={className} aria-hidden="true">
+      <rect x="24" y="24" width="144" height="144" rx="28" fill="#ffffff" stroke="#4285F4" strokeWidth="12" />
+      <path d="M24 52 c0-15.46 12.54-28 28-28 h88 c15.46 0 28 12.54 28 28 v16 h-144 z" fill="#4285F4" />
+      <text x="96" y="132" fill="#4285F4" fontSize="72" fontWeight="bold" fontFamily="sans-serif" textAnchor="middle">31</text>
     </svg>
   );
 }
