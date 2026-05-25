@@ -21,6 +21,8 @@ import {
   FileText,
   Image as ImageIcon,
   Upload,
+  Mic,
+  MicOff,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { needsLightweightRendering } from "../lib/platform";
@@ -57,6 +59,43 @@ interface Props {
 
 export function ChatInput({ placeholder = "Send a message", autoFocus, onSend }: Props) {
   const [value, setValue] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
+  useEffect(() => {
+    const SpeechRecognition =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      const rec = new SpeechRecognition();
+      rec.continuous = false;
+      rec.interimResults = false;
+      rec.lang = "en-US";
+
+      rec.onstart = () => setIsRecording(true);
+      rec.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript;
+        if (transcript) {
+          setValue((prev) => (prev ? `${prev} ${transcript}` : transcript));
+        }
+      };
+      rec.onerror = (e: any) => {
+        console.error(e);
+        setIsRecording(false);
+      };
+      rec.onend = () => setIsRecording(false);
+      recognitionRef.current = rec;
+    }
+  }, []);
+
+  const toggleRecording = () => {
+    if (!recognitionRef.current) return;
+    if (isRecording) {
+      recognitionRef.current.stop();
+    } else {
+      recognitionRef.current.start();
+    }
+  };
+
   const [focused, setFocused] = useState(false);
   const [artifactMode, setArtifactMode] = useState(false);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
@@ -491,6 +530,17 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend }:
             size="md"
             onClick={() => fileInputRef.current?.click()}
           />
+          {recognitionRef.current && (
+            <IconButton
+              icon={isRecording ? <MicOff className="text-red-500 animate-pulse" /> : <Mic />}
+              label={isRecording ? "Stop recording" : "Dictate message"}
+              tooltipSide="top"
+              variant="ghost"
+              size="md"
+              active={isRecording}
+              onClick={toggleRecording}
+            />
+          )}
           <IconButton
             icon={<Layers3 />}
             label={artifactMode ? "Artifacts: on" : "Artifacts: off"}
