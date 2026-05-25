@@ -482,6 +482,32 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend }:
           }}
         />
       )}
+
+      {/* Quick Actions Shortcut Bar */}
+      <div className="flex items-center gap-1.5 overflow-x-auto px-4 pt-2.5 select-none scrollbar-none">
+        {[
+          { label: "Draft Email", icon: "✉️", template: "Draft a professional email regarding: " },
+          { label: "Summarize", icon: "📝", template: "Summarize the following text or upload: " },
+          { label: "Explain Code", icon: "💻", template: "Explain how this code works and suggest improvements:\n\n" },
+          { label: "Task Plan", icon: "📋", template: "Break down the following goal into a step-by-step checklist of tasks: " },
+          { label: "Find Bugs", icon: "🔍", template: "Review this code for errors, edge cases, and bugs:\n\n" },
+          { label: "Brainstorm", icon: "💡", template: "Brainstorm 5 innovative startup or feature ideas for: " },
+        ].map((action) => (
+          <button
+            key={action.label}
+            type="button"
+            onClick={() => {
+              setValue(action.template);
+              areaRef.current?.focus();
+            }}
+            className="press flex shrink-0 items-center gap-1 rounded-full border border-line bg-paper-sunken/45 hover:bg-paper-raised px-2.5 py-1 text-[10.5px] font-semibold text-ink-muted hover:text-ink transition-all duration-150"
+          >
+            <span>{action.icon}</span>
+            <span>{action.label}</span>
+          </button>
+        ))}
+      </div>
+
       <textarea
         ref={areaRef}
         rows={1}
