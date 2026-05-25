@@ -25,6 +25,7 @@ import {
 import type { Artifact } from "../../lib/store";
 import { useApp } from "../../lib/store";
 import { cn } from "../../lib/cn";
+import { api } from "../../lib/api";
 
 const AUTOSAVE_MS = 600;
 
@@ -260,6 +261,22 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
     URL.revokeObjectURL(url);
   };
 
+  const downloadDocx = () => {
+    const text = serializeBlocksToMarkdown(blocks);
+    api.exportDocx(artifact.title, text)
+      .then((blob: Blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${artifact.title.replace(/\s+/g, "_")}.docx`;
+        a.click();
+        URL.revokeObjectURL(url);
+      })
+      .catch((err: unknown) => {
+        console.error("Docx export failed:", err);
+      });
+  };
+
   return (
     <div className="flex h-full flex-col">
       {/* Toolbar */}
@@ -325,9 +342,19 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
         <button
           onClick={downloadMd}
           className="press flex items-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 py-1 text-[11px] text-ink-muted hover:text-ink transition-colors"
+          title="Export as Markdown file"
         >
           <Download className="h-3 w-3" />
-          <span>Export</span>
+          <span>Export MD</span>
+        </button>
+
+        <button
+          onClick={downloadDocx}
+          className="press flex items-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 py-1 text-[11px] text-ink-muted hover:text-ink transition-colors"
+          title="Export as Microsoft Word document"
+        >
+          <Download className="h-3 w-3" />
+          <span>Export Word</span>
         </button>
       </div>
 

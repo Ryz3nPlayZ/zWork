@@ -260,6 +260,13 @@ export const api = {
       method: "POST"
     }).then((r) => j<{ screenshot: string; error?: string }>(r)),
 
+  exportDocx: (title: string, content: string) =>
+    localFetch("/api/export/docx", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title, content })
+    }).then((r) => r.blob()),
+
   waitForBackend: waitForBackendReady,
 
   // --- Tasks & Calendar ---

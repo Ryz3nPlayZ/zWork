@@ -903,6 +903,43 @@ async def capture_screenshot():
         return {"screenshot": "", "error": str(e)}
 
 
+@app.post("/api/export/docx")
+async def export_docx(body: dict):
+    title = body.get("title", "Document")
+    content = body.get("content", "")
+    try:
+        import docx
+        from io import BytesIO
+        from fastapi.responses import StreamingResponse
+        
+        doc = docx.Document()
+        doc.add_heading(title, 0)
+        
+        for line in content.split("\n"):
+            if line.startswith("# "):
+                doc.add_heading(line[2:], level=1)
+            elif line.startswith("## "):
+                doc.add_heading(line[3:], level=2)
+            elif line.startswith("### "):
+                doc.add_heading(line[4:], level=3)
+            elif line.startswith("- ") or line.startswith("* "):
+                doc.add_paragraph(line[2:], style='List Bullet')
+            elif line.strip():
+                doc.add_paragraph(line)
+                
+        file_stream = BytesIO()
+        doc.save(file_stream)
+        file_stream.seek(0)
+        
+        return StreamingResponse(
+            file_stream,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f"attachment; filename={title.replace(' ', '_')}.docx"}
+        )
+    except Exception as e:
+        raise HTTPException(500, detail=str(e))
+
+
 # ---------------- Custom models ----------------
 
 
