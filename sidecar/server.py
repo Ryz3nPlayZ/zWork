@@ -1944,6 +1944,86 @@ async def _heartbeat_stream(source: Any, interval: float = 5.0):
                 await pending
 
 
+class RefactorRequest(BaseModel):
+    code: str
+    instruction: str
+    mode: str = "clean"
+    model: Optional[str] = None
+
+
+class RefactorResponse(BaseModel):
+    refactored_code: str
+    explanation: str
+    steps: list[str]
+
+
+@app.post("/api/refactor", response_model=RefactorResponse)
+async def api_refactor(req: RefactorRequest):
+    s = settings_mod.load()
+    model_id = _resolve_model_id(req.model, s)
+    if not model_id:
+        raise HTTPException(400, "No model configured. Add one in Settings → Models.")
+
+    system_prompt = (
+        "You are an expert AI refactoring helper. "
+        "Take the user's code and modify it according to their instructions.\n"
+        "Your response MUST be a valid JSON object containing exactly three fields:\n"
+        "1. \"refactored_code\": The complete, valid modified code (no markdown formatting, just the raw code text).\n"
+        "2. \"explanation\": A brief description in plain English of the changes you made.\n"
+        "3. \"steps\": A list of strings representing the structured step-by-step changes.\n\n"
+        "Example JSON output:\n"
+        "{\n"
+        "  \"refactored_code\": \"def greet():\\n    print('hello')\",\n"
+        "  \"explanation\": \"Added print statement\",\n"
+        "  \"steps\": [\"Defined greet function\", \"Added hello message\"]\n"
+        "}\n"
+        "IMPORTANT: Output ONLY the raw JSON object. Do not wrap in markdown block, just output the JSON."
+    )
+
+    user_content = (
+        f"MODE: {req.mode}\n"
+        f"INSTRUCTION: {req.instruction}\n\n"
+        f"ORIGINAL CODE:\n{req.code}"
+    )
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_content}
+    ]
+
+    full_response = ""
+    try:
+        async for evt in providers.stream_chat(messages, model_id, s):
+            if evt.get("type") == "delta" and evt.get("text"):
+                full_response += evt["text"]
+            elif evt.get("type") == "error":
+                raise HTTPException(500, evt["text"])
+    except Exception as e:
+        raise HTTPException(500, f"LLM error: {str(e)}")
+
+    raw_json = full_response.strip()
+    if raw_json.startswith("```"):
+        first_newline = raw_json.find("\n")
+        if first_newline != -1:
+            raw_json = raw_json[first_newline:].strip()
+        if raw_json.endswith("```"):
+            raw_json = raw_json[:-3].strip()
+
+    try:
+        data = json.loads(raw_json)
+        return RefactorResponse(
+            refactored_code=data.get("refactored_code", req.code),
+            explanation=data.get("explanation", ""),
+            steps=data.get("steps", [])
+        )
+    except Exception as e:
+        return RefactorResponse(
+            refactored_code=req.code,
+            explanation=f"Failed to parse AI response. Raw output was:\n{full_response}",
+            steps=["Error: could not generate structured steps."]
+        )
+
+
 # ---- SPA catch-all: serve index.html for any non-API, non-static route ----
 if _STATIC_DIR.is_dir():
 

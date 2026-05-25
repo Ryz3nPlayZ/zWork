@@ -575,6 +575,20 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ content }),
     }).then((r) => j<{ ok: boolean }>(r)),
+
+  refactor: (body: {
+    code: string;
+    instruction: string;
+    mode?: string;
+    model?: string;
+  }) =>
+    localFetch("/api/refactor", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) =>
+      j<{ refactored_code: string; explanation: string; steps: string[] }>(r)
+    ),
 };
 
 // ------ SSE streaming for chat ------

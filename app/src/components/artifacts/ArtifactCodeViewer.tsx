@@ -1,9 +1,10 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
-import { Copy, Check, Edit3, Eye, Download } from "lucide-react";
+import { Copy, Check, Edit3, Eye, Download, Sparkles } from "lucide-react";
 import type { Artifact } from "../../lib/store";
 import { useApp } from "../../lib/store";
+import { api } from "../../lib/api";
 
 const AUTOSAVE_MS = 600;
 
@@ -106,6 +107,48 @@ export function ArtifactCodeViewer({ artifact }: { artifact: Artifact }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(artifact.content);
   const [copied, setCopied] = useState(false);
+  const [showRefactor, setShowRefactor] = useState(false);
+  const [refactorPrompt, setRefactorPrompt] = useState("");
+  const [refactorMode, setRefactorMode] = useState<"clean" | "feature" | "bug" | "simplify">("clean");
+  const [refactoring, setRefactoring] = useState(false);
+  const [refactorResult, setRefactorResult] = useState<{
+    refactored_code: string;
+    explanation: string;
+    steps: string[];
+  } | null>(null);
+
+  const handleRefactor = async () => {
+    if (!refactorPrompt.trim()) return;
+    setRefactoring(true);
+    setRefactorResult(null);
+    try {
+      const res = await api.refactor({
+        code: draft,
+        instruction: refactorPrompt,
+        mode: refactorMode,
+      });
+      setRefactorResult(res);
+    } catch (err) {
+      console.error(err);
+      setRefactorResult({
+        refactored_code: draft,
+        explanation: "An error occurred during refactoring. Please try again.",
+        steps: ["Error processing your request."],
+      });
+    } finally {
+      setRefactoring(false);
+    }
+  };
+
+  const handleApplyRefactor = () => {
+    if (!refactorResult) return;
+    setDraft(refactorResult.refactored_code);
+    updateArtifact(artifact.id, { content: refactorResult.refactored_code });
+    setRefactorResult(null);
+    setRefactorPrompt("");
+    setShowRefactor(false);
+  };
+
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep draft in sync when externally updated (streaming)
@@ -205,42 +248,167 @@ export function ArtifactCodeViewer({ artifact }: { artifact: Artifact }) {
           <Download className="h-3 w-3" />
           Export
         </button>
+
+        {!isDiff && (
+          <button
+            type="button"
+            onClick={() => setShowRefactor(!showRefactor)}
+            className={`press flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium transition-colors ${
+              showRefactor
+                ? "bg-accent/10 text-accent hover:bg-accent/15"
+                : "text-ink-muted hover:bg-paper-sunken hover:text-ink"
+            }`}
+            title="AI Refactoring Helper"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            Refactor
+          </button>
+        )}
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-auto">
-        {editing ? (
-          <textarea
-            className="h-full w-full resize-none bg-paper p-4 font-mono text-[12px] leading-5 text-ink outline-none"
-            value={draft}
-            onChange={handleChange}
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                e.preventDefault();
-                commitAndPreview();
-              }
-            }}
-            spellCheck={false}
-            autoFocus
-          />
-        ) : isDiff ? (
-          <DiffView lines={parseDiff(draft)} />
-        ) : (
-          <SyntaxHighlighter
-            language={artifact.language || "text"}
-            style={oneLight as Record<string, React.CSSProperties>}
-            customStyle={{
-              margin: 0,
-              borderRadius: 0,
-              fontSize: "12px",
-              background: "transparent",
-              height: "100%",
-              padding: "12px 16px",
-            }}
-            codeTagProps={{ style: { fontFamily: "var(--font-mono, monospace)" } }}
-          >
-            {draft}
-          </SyntaxHighlighter>
+      <div className="flex-1 flex overflow-hidden min-h-0">
+        <div className="flex-1 overflow-auto border-r border-line relative">
+          {editing ? (
+            <textarea
+              className="h-full w-full resize-none bg-paper p-4 font-mono text-[12px] leading-5 text-ink outline-none"
+              value={draft}
+              onChange={handleChange}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                  e.preventDefault();
+                  commitAndPreview();
+                }
+              }}
+              spellCheck={false}
+              autoFocus
+            />
+          ) : isDiff ? (
+            <DiffView lines={parseDiff(draft)} />
+          ) : (
+            <SyntaxHighlighter
+              language={artifact.language || "text"}
+              style={oneLight as Record<string, React.CSSProperties>}
+              customStyle={{
+                margin: 0,
+                borderRadius: 0,
+                fontSize: "12px",
+                background: "transparent",
+                height: "100%",
+                padding: "12px 16px",
+              }}
+              codeTagProps={{ style: { fontFamily: "var(--font-mono, monospace)" } }}
+            >
+              {draft}
+            </SyntaxHighlighter>
+          )}
+        </div>
+
+        {showRefactor && (
+          <div className="w-80 border-l border-line bg-paper-soft p-4 flex flex-col gap-4 overflow-y-auto shrink-0 select-none animate-in slide-in-from-right-4 duration-200">
+            <div className="flex items-center justify-between border-b border-line pb-2">
+              <h3 className="font-semibold text-xs text-ink flex items-center gap-1.5">
+                <Sparkles className="h-3.5 w-3.5 text-accent" />
+                AI Refactoring Helper
+              </h3>
+              <button
+                onClick={() => {
+                  setShowRefactor(false);
+                  setRefactorResult(null);
+                }}
+                className="text-[10px] text-ink-faint hover:text-ink p-1 rounded-md hover:bg-paper-sunken transition-colors"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10.5px] font-medium text-ink-muted uppercase tracking-wider">Refactor Goal</label>
+              <textarea
+                value={refactorPrompt}
+                onChange={(e) => setRefactorPrompt(e.target.value)}
+                placeholder="Describe what changes you want to make in plain English..."
+                rows={3}
+                disabled={refactoring}
+                className="w-full text-[12px] bg-paper border border-line rounded-lg p-2 focus:outline-none focus:border-accent-soft disabled:opacity-50 text-ink resize-none placeholder:text-ink-faint"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10.5px] font-medium text-ink-muted uppercase tracking-wider">Mode Option</label>
+              <div className="grid grid-cols-2 gap-1.5">
+                {(["clean", "feature", "bug", "simplify"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    disabled={refactoring}
+                    onClick={() => setRefactorMode(m)}
+                    className={cn(
+                      "py-1 text-[11px] capitalize rounded-md border text-center transition-all",
+                      refactorMode === m
+                        ? "bg-accent/10 border-accent text-accent font-medium shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+                        : "border-line bg-paper text-ink-muted hover:text-ink"
+                    )}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button
+              onClick={handleRefactor}
+              disabled={refactoring || !refactorPrompt.trim()}
+              className="w-full py-2 px-3 text-[11.5px] font-medium rounded-lg bg-accent text-white hover:bg-accent-soft disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5 shadow-[0_1px_2px_rgba(0,0,0,0.05)] cursor-pointer"
+            >
+              {refactoring ? (
+                <>
+                  <div className="h-3 w-3 animate-spin rounded-full border border-white border-t-transparent" />
+                  Generating Plan...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Generate Refactoring Plan
+                </>
+              )}
+            </button>
+
+            {refactorResult && (
+              <div className="mt-2 border-t border-line pt-3 flex flex-col gap-3">
+                <div className="rounded-lg bg-paper border border-line-soft p-3 flex flex-col gap-2">
+                  <span className="text-[11px] font-semibold text-ink">Change Explanation:</span>
+                  <p className="text-[11.5px] text-ink-muted leading-relaxed">{refactorResult.explanation}</p>
+                </div>
+
+                {refactorResult.steps && refactorResult.steps.length > 0 && (
+                  <div className="flex flex-col gap-1.5">
+                    <span className="text-[10.5px] font-medium text-ink-muted uppercase tracking-wider">Step-by-step checklist:</span>
+                    <ul className="list-disc pl-4 text-[11.5px] text-ink-muted space-y-1.5">
+                      {refactorResult.steps.map((s, idx) => (
+                        <li key={idx} className="leading-snug">{s}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <button
+                    onClick={() => setRefactorResult(null)}
+                    className="py-1.5 px-3 text-[11px] rounded-lg border border-line bg-paper text-ink-muted hover:text-ink transition-colors cursor-pointer"
+                  >
+                    Discard
+                  </button>
+                  <button
+                    onClick={handleApplyRefactor}
+                    className="py-1.5 px-3 text-[11px] font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    Apply Changes
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
