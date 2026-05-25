@@ -40,7 +40,7 @@ export function SlashMenu({
         e.preventDefault();
       }}
     >
-      <div ref={listRef} className="max-h-[260px] overflow-y-auto py-1">
+      <div ref={listRef} className="max-h-[min(180px,30vh)] overflow-y-auto py-1">
         {matches.length === 0 ? (
           <div className="px-4 py-6 text-center text-[12.5px] text-ink-faint">
             No templates match "/{query}".
