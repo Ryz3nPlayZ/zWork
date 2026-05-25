@@ -2024,6 +2024,82 @@ async def api_refactor(req: RefactorRequest):
         )
 
 
+class ScrapeRequest(BaseModel):
+    url: str
+
+
+class ScrapeResponse(BaseModel):
+    markdown: str
+    title: str
+
+
+def html_to_markdown(html_content: str) -> str:
+    import html
+    # 1. Strip script and style elements
+    html_content = re.sub(r'<(script|style)\b[^>]*>([\s\S]*?)</\1>', '', html_content, flags=re.IGNORECASE)
+    
+    # 2. Convert headers
+    html_content = re.sub(r'<h1\b[^>]*>([\s\S]*?)</h1>', r'\n# \1\n', html_content, flags=re.IGNORECASE)
+    html_content = re.sub(r'<h2\b[^>]*>([\s\S]*?)</h2>', r'\n## \1\n', html_content, flags=re.IGNORECASE)
+    html_content = re.sub(r'<h3\b[^>]*>([\s\S]*?)</h3>', r'\n### \1\n', html_content, flags=re.IGNORECASE)
+    html_content = re.sub(r'<h4\b[^>]*>([\s\S]*?)</h4>', r'\n#### \1\n', html_content, flags=re.IGNORECASE)
+    
+    # 3. Convert paragraphs
+    html_content = re.sub(r'<p\b[^>]*>([\s\S]*?)</p>', r'\n\1\n', html_content, flags=re.IGNORECASE)
+    
+    # 4. Convert lists & list items
+    html_content = re.sub(r'<li\b[^>]*>([\s\S]*?)</li>', r'\n- \1', html_content, flags=re.IGNORECASE)
+    
+    # 5. Convert links
+    html_content = re.sub(r'<a\b[^>]*href=["\']([^"\']*)["\'][^>]*>([\s\S]*?)</a>', r'[\2](\1)', html_content, flags=re.IGNORECASE)
+    
+    # 6. Strip all other remaining tags
+    html_content = re.sub(r'<[^>]+>', '', html_content)
+    
+    # 7. Unescape HTML entities
+    html_content = html.unescape(html_content)
+    
+    # 8. Clean up whitespaces and newlines
+    lines = [line.strip() for line in html_content.split('\n')]
+    cleaned_lines = []
+    for line in lines:
+        if line:
+            cleaned_lines.append(line)
+        elif not cleaned_lines or cleaned_lines[-1] != '':
+            cleaned_lines.append('')
+            
+    return '\n'.join(cleaned_lines).strip()
+
+
+@app.post("/api/scrape", response_model=ScrapeResponse)
+async def api_scrape(req: ScrapeRequest):
+    import httpx
+    url = req.url.strip()
+    if not url.startswith("http://") and not url.startswith("https://"):
+        url = "https://" + url
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+            resp = await client.get(url, headers=headers, follow_redirects=True)
+            resp.raise_for_status()
+            html_content = resp.text
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch webpage: {str(e)}")
+
+    import html
+    title_match = re.search(r'<title>([\s\S]*?)</title>', html_content, re.IGNORECASE)
+    title = title_match.group(1).strip() if title_match else "Scraped Page"
+    title = html.unescape(title)
+    title = re.sub(r'\s+', ' ', title)
+
+    markdown = html_to_markdown(html_content)
+
+    return ScrapeResponse(markdown=markdown, title=title)
+
+
 # ---- SPA catch-all: serve index.html for any non-API, non-static route ----
 if _STATIC_DIR.is_dir():
 

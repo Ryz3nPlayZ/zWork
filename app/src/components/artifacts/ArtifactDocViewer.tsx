@@ -21,7 +21,8 @@ import {
   Square,
   CheckSquare,
   FileCode,
-  HelpCircle
+  HelpCircle,
+  Globe
 } from "lucide-react";
 import type { Artifact } from "../../lib/store";
 import { useApp } from "../../lib/store";
@@ -152,6 +153,28 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
   const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null);
   const [blockMenuId, setBlockMenuId] = useState<string | null>(null);
   const [showCheatSheet, setShowCheatSheet] = useState(false);
+  const [showScrapeInput, setShowScrapeInput] = useState(false);
+  const [scrapeUrl, setScrapeUrl] = useState("");
+  const [scraping, setScraping] = useState(false);
+
+  const handleScrapeUrl = async () => {
+    if (!scrapeUrl.trim()) return;
+    setScraping(true);
+    try {
+      const res = await api.scrape(scrapeUrl.trim());
+      const newBlocks = parseMarkdownToBlocks(res.markdown);
+      const next = [...blocks, ...newBlocks];
+      setBlocks(next);
+      triggerAutosave(next);
+      setScrapeUrl("");
+      setShowScrapeInput(false);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to import URL. Please verify the URL and try again.");
+    } finally {
+      setScraping(false);
+    }
+  };
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -372,6 +395,50 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
           <HelpCircle className="h-3 w-3" />
           <span>Guide</span>
         </button>
+
+        {showScrapeInput ? (
+          <div className="flex items-center gap-1 bg-paper border border-line rounded-lg p-0.5 animate-in fade-in zoom-in-95 duration-150">
+            <input
+              type="text"
+              placeholder="Paste website URL..."
+              value={scrapeUrl}
+              onChange={(e) => setScrapeUrl(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleScrapeUrl();
+                if (e.key === "Escape") setShowScrapeInput(false);
+              }}
+              disabled={scraping}
+              className="bg-transparent text-[11px] text-ink placeholder:text-ink-faint border-none outline-none px-2 py-0.5 w-40 sm:w-56"
+              autoFocus
+            />
+            <button
+              onClick={handleScrapeUrl}
+              disabled={scraping || !scrapeUrl.trim()}
+              className="px-2 py-0.5 text-[10.5px] font-semibold text-accent rounded hover:bg-paper-sunken disabled:opacity-50 transition-all cursor-pointer"
+            >
+              {scraping ? "Importing..." : "Go"}
+            </button>
+            <button
+              onClick={() => {
+                setShowScrapeInput(false);
+                setScrapeUrl("");
+              }}
+              disabled={scraping}
+              className="text-ink-faint hover:text-ink text-[10.5px] px-1.5 py-0.5 rounded cursor-pointer"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setShowScrapeInput(true)}
+            className="press flex items-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 py-1 text-[11px] text-ink-muted hover:text-ink transition-colors"
+            title="Fetch content from any URL and convert to Canvas blocks"
+          >
+            <Globe className="h-3 w-3" />
+            <span>Import URL</span>
+          </button>
+        )}
       </div>
 
       {/* Editor Body */}

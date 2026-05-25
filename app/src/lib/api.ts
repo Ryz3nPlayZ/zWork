@@ -589,6 +589,13 @@ export const api = {
     }).then((r) =>
       j<{ refactored_code: string; explanation: string; steps: string[] }>(r)
     ),
+
+  scrape: (url: string) =>
+    localFetch("/api/scrape", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url }),
+    }).then((r) => j<{ markdown: string; title: string }>(r)),
 };
 
 // ------ SSE streaming for chat ------
