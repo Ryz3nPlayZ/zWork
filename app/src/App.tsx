@@ -28,6 +28,7 @@ const CockpitPage = lazy(() => import("./components/cockpit/CockpitPage").then((
 const InboxPage = lazy(() => import("./components/InboxPage").then((m) => ({ default: m.InboxPage })));
 const OverlayChatView = lazy(() => import("./components/OverlayChatView").then((m) => ({ default: m.OverlayChatView })));
 import { Logo } from "./components/Logo";
+import { KeybindingsModal } from "./components/KeybindingsModal";
 
 function DailyGoalBar() {
   const tasks = useApp((s) => s.tasks);
@@ -135,6 +136,8 @@ export default function App() {
   const setCockpitOpen = useApp((s) => s.setCockpitOpen);
   const onboardingDone = useApp((s) => s.onboardingDone);
   const backendReady = useApp((s) => s.backendReady);
+  const keybindingsOpen = useApp((s) => s.keybindingsOpen);
+  const setKeybindingsOpen = useApp((s) => s.setKeybindingsOpen);
 
   const [isOverlay, setIsOverlay] = useState(false);
   useEffect(() => {
@@ -442,11 +445,14 @@ export default function App() {
       } else if (mod && e.key.toLowerCase() === "j") {
         e.preventDefault();
         setCockpitOpen(!cockpitOpen);
+      } else if (mod && e.key === "/") {
+        e.preventDefault();
+        setKeybindingsOpen(!keybindingsOpen);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openLanding, toggleSidebar, setView, setSearchOpen, triggerFocusChatInput, cockpitOpen, setCockpitOpen]);
+  }, [openLanding, toggleSidebar, setView, setSearchOpen, triggerFocusChatInput, cockpitOpen, setCockpitOpen, keybindingsOpen, setKeybindingsOpen]);
 
   const [showLandingOverlay, setShowLandingOverlay] = useState(showLanding);
   const [particlesExiting, setParticlesExiting] = useState(false);
@@ -615,6 +621,7 @@ export default function App() {
         <Suspense fallback={null}>
           <SearchModal />
         </Suspense>
+        <KeybindingsModal />
       </div>
     </div>
   );

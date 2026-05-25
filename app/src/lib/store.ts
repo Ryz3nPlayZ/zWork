@@ -369,6 +369,8 @@ interface AppState {
   me: MeResponse | null;
   searchOpen: boolean;
   setSearchOpen: (v: boolean) => void;
+  keybindingsOpen: boolean;
+  setKeybindingsOpen: (v: boolean) => void;
 
   // Onboarding UI state
   onboardingDone: boolean | null;
@@ -566,6 +568,8 @@ export const useApp = create<AppState>((set, get) => ({
   me: null,
   searchOpen: false,
   setSearchOpen: (v) => set({ searchOpen: v }),
+  keybindingsOpen: false,
+  setKeybindingsOpen: (v) => set({ keybindingsOpen: v }),
 
   // Cockpit
   tasks: [],

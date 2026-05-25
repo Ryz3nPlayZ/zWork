@@ -17,6 +17,7 @@ import {
   Plug,
   LayoutDashboard,
   Inbox,
+  Keyboard,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { isMacOS } from "../lib/platform";
@@ -37,6 +38,7 @@ export function Sidebar() {
   const setView = useApp((s) => s.setView);
   const setSearchOpen = useApp((s) => s.setSearchOpen);
   const setActiveProject = useApp((s) => s.setActiveProject);
+  const setKeybindingsOpen = useApp((s) => s.setKeybindingsOpen);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const grouped = useMemo(() => {
@@ -263,6 +265,13 @@ export function Sidebar() {
           collapsed={!open}
           active={view === "connectors"}
           onClick={() => setView("connectors")}
+        />
+        <SidebarButton
+          icon={<Keyboard />}
+          label="Shortcuts"
+          shortcut="⌘/"
+          collapsed={!open}
+          onClick={() => setKeybindingsOpen(true)}
         />
         <SidebarButton
           icon={<Settings />}
