@@ -117,6 +117,10 @@ export interface Chat {
   /** Chat-scoped artifact panel state. */
   artifactPanelOpen?: boolean;
   activeArtifactId?: string | null;
+  pendingQuestion?: {
+    question: string;
+    options: string[];
+  } | null;
 }
 
 export type View = "chat" | "settings" | "projects" | "analytics" | "plan" | "connectors" | "admin" | "cockpit" | "inbox";
@@ -454,6 +458,7 @@ interface AppState {
   openChat: (id: string) => Promise<void>;
   deleteChat: (id: string) => Promise<void>;
   renameChat: (id: string, title: string) => Promise<void>;
+  answerQuestion: (chatId: string, answer: string) => Promise<void>;
 
   send: (
     text: string,
@@ -1139,6 +1144,24 @@ export const useApp = create<AppState>((set, get) => ({
     await get().refreshChats();
   },
 
+  answerQuestion: async (chatId, answer) => {
+    set((s) => {
+      const c = s.chats[chatId];
+      if (!c) return {};
+      return {
+        chats: {
+          ...s.chats,
+          [chatId]: { ...c, pendingQuestion: null },
+        },
+      };
+    });
+    try {
+      await api.answerQuestion(chatId, answer);
+    } catch (e) {
+      console.warn("answerQuestion failed:", e);
+    }
+  },
+
   stop: () => {
     get()._abort?.abort();
     set((s) => {
@@ -1289,10 +1312,18 @@ export const useApp = create<AppState>((set, get) => ({
     const trimmed = text.trim();
     if (!trimmed) return;
 
+    const currentId = get().activeChatId;
+    if (currentId) {
+      const activeChat = get().chats[currentId];
+      if (activeChat && activeChat.pendingQuestion) {
+        await get().answerQuestion(currentId, trimmed);
+        return;
+      }
+    }
+
     // Clear any previous subagent state
     set({ subagents: [] });
 
-    const currentId = get().activeChatId;
     const model = pickAvailableModel(get().providers, get().model);
     const inferredArtifactKind = inferArtifactKind(trimmed);
     const artifactMode = (options?.artifactMode ?? get().artifactMode) || !!inferredArtifactKind;
@@ -1466,6 +1497,23 @@ export const useApp = create<AppState>((set, get) => ({
                 chats: {
                   ...s.chats,
                   [localId]: { ...c, needsSetup: true },
+                },
+              };
+            });
+          } else if (evt.type === "ask_question") {
+            set((s) => {
+              const c = s.chats[localId];
+              if (!c) return s;
+              return {
+                chats: {
+                  ...s.chats,
+                  [localId]: {
+                    ...c,
+                    pendingQuestion: {
+                      question: evt.question,
+                      options: evt.options,
+                    },
+                  },
                 },
               };
             });

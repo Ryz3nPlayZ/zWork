@@ -255,6 +255,13 @@ export interface UploadedFile {
 export const api = {
   health: healthFetch,
 
+  answerQuestion: (chatId: string, answer: string) =>
+    localFetch(`/api/chats/${chatId}/answer-question`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ answer }),
+    }).then((r) => j<{ status: string }>(r)),
+
   captureScreenshot: () =>
     localFetch("/api/screenshot", {
       method: "POST"
@@ -619,7 +626,8 @@ export type StreamEvent =
   | { type: "subagent_progress"; task_id: string; status: "pending" | "running" | "completed" | "failed" }
   | { type: "subagent_delta"; task_id: string; text: string }
   | { type: "subagent_activity"; task_id: string; event: StreamEvent }
-  | { type: "subagent_done"; task_id: string; result?: string; error?: string };
+  | { type: "subagent_done"; task_id: string; result?: string; error?: string }
+  | { type: "ask_question"; chat_id: string; question: string; options: string[] };
 
 /** Web-mode streaming: sends Anthropic-format request to the Axum API and
  *  translates Anthropic SSE chunks into the custom event format the UI expects. */

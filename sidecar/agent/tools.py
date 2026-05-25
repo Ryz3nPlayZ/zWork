@@ -38,8 +38,11 @@ READ_ONLY_TOOLS = frozenset(
         "web_search",
         "search_papers",
         "format_citation",
+        "ask_question",
     }
 )
+
+PENDING_QUESTIONS: dict[str, tuple[asyncio.Event, list[str]]] = {}
 
 READ_ONLY_DCTL_SUBCOMMANDS = frozenset(
     {
@@ -161,6 +164,29 @@ def filter_tools_for_plan_mode(schemas: list[dict]) -> list[dict]:
 
 
 TOOL_SCHEMAS: list[dict] = [
+    {
+        "name": "ask_question",
+        "description": (
+            "Ask the user a clarifying question with multiple choice options when you need clarification, "
+            "e.g., about design choices, options, or preferred approaches. This displays a card in the chatbox "
+            "and blocks until they choose an option or enter a custom reply."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "The clarifying question to display to the user",
+                },
+                "options": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Up to 4 multiple-choice options for the user to select from",
+                },
+            },
+            "required": ["question", "options"],
+        },
+    },
     {
         "name": "write_file",
         "description": (
@@ -864,6 +890,51 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                 "ok": False,
                 "message": _friendly_error(e),
             }
+        return
+
+    if tool_name == "ask_question":
+        question = params.get("question", "")
+        options = params.get("options", [])
+        run = current_run()
+        chat_id = run.chat_id if run else "global"
+        
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": "Waiting for user response...",
+            "icon": "help-circle",
+            "done": False,
+        }
+        
+        event = asyncio.Event()
+        result_box = []
+        PENDING_QUESTIONS[chat_id] = (event, result_box)
+        
+        yield {
+            "type": "ask_question",
+            "chat_id": chat_id,
+            "question": question,
+            "options": options,
+        }
+        
+        await event.wait()
+        PENDING_QUESTIONS.pop(chat_id, None)
+        user_answer = result_box[0] if result_box else "No response"
+        
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": f"Received answer: {user_answer}",
+            "icon": "help-circle",
+            "done": True,
+        }
+        
+        yield {
+            "type": "tool_result",
+            "tool": "ask_question",
+            "ok": True,
+            "message": f"User responded with: {user_answer}",
+        }
         return
 
     if tool_name == "write_file":

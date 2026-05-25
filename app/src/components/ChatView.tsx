@@ -184,6 +184,52 @@ export function ChatView() {
         {/* Composer — floating directly over the chat text */}
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-paper via-paper/95 to-transparent px-6 pb-5 pt-10 pointer-events-none z-10">
           <div className="mx-auto max-w-[960px] pointer-events-auto">
+            {chat.pendingQuestion && (
+              <div className="mb-3 rounded-xl border border-line bg-paper-raised p-4 shadow-pop flex flex-col gap-2.5 animate-scale-up">
+                <div className="flex items-start gap-2">
+                  <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent/10 text-accent mt-0.5">
+                    <span className="text-[11px] font-bold">?</span>
+                  </div>
+                  <div>
+                    <h4 className="text-[13px] font-semibold text-ink leading-tight">
+                      Clarification Required
+                    </h4>
+                    <p className="text-[12px] text-ink-muted mt-1 leading-normal">
+                      {chat.pendingQuestion.question}
+                    </p>
+                  </div>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-2 mt-1">
+                  {chat.pendingQuestion.options.map((opt, oIdx) => (
+                    <button
+                      key={oIdx}
+                      onClick={() => {
+                        if (opt.toLowerCase().includes("other")) {
+                          document.querySelector("textarea")?.focus();
+                        } else {
+                          void useApp.getState().answerQuestion(chat.id, opt);
+                        }
+                      }}
+                      className="text-left px-3 py-2 rounded-lg border border-line bg-paper hover:bg-paper-sunken hover:border-line-strong text-[12px] text-ink-muted hover:text-ink transition-colors font-medium cursor-pointer"
+                    >
+                      <span className="text-ink-faint mr-1.5 font-mono">{oIdx + 1}.</span>
+                      {opt}
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => {
+                      document.querySelector("textarea")?.focus();
+                    }}
+                    className="text-left px-3 py-2 rounded-lg border border-dashed border-line bg-paper hover:bg-paper-sunken hover:border-line-strong text-[12px] text-accent hover:text-accent-hover transition-colors font-medium cursor-pointer"
+                  >
+                    <span className="text-accent/60 mr-1.5 font-mono">*</span>
+                    Other (type below...)
+                  </button>
+                </div>
+              </div>
+            )}
+
             <ChatInput autoFocus placeholder="Reply to zWork" />
             <p className="mt-2 text-center text-[11px] text-ink-faint">
               zWork can take actions on your computer. Review before approving.

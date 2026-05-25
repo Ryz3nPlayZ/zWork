@@ -2109,6 +2109,22 @@ async def api_scrape(req: ScrapeRequest):
     return ScrapeResponse(markdown=markdown, title=title)
 
 
+class QuestionAnswer(BaseModel):
+    answer: str
+
+
+@app.post("/api/chats/{chat_id}/answer-question")
+async def answer_chat_question(chat_id: str, body: QuestionAnswer):
+    from agent.tools import PENDING_QUESTIONS
+    if chat_id in PENDING_QUESTIONS:
+        event, result_box = PENDING_QUESTIONS[chat_id]
+        result_box.clear()
+        result_box.append(body.answer)
+        event.set()
+        return {"status": "ok"}
+    raise HTTPException(404, "No pending question for this chat ID")
+
+
 # ---- SPA catch-all: serve index.html for any non-API, non-static route ----
 if _STATIC_DIR.is_dir():
 
