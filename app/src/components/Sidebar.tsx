@@ -15,8 +15,6 @@ import {
   BarChart3,
   CreditCard,
   Plug,
-  LayoutDashboard,
-  Inbox,
   Keyboard,
 } from "lucide-react";
 import { cn } from "../lib/cn";
@@ -152,6 +150,7 @@ export function Sidebar() {
           collapsed={!open}
           onClick={() => setSearchOpen(true)}
         />
+        {/* Hide Tasks and Inbox for now (deferred to backlog)
         <SidebarButton
           icon={<Inbox />}
           label="Inbox"
@@ -166,6 +165,7 @@ export function Sidebar() {
           onClick={() => setView("tasks")}
           active={view === "tasks"}
         />
+        */}
         <SidebarButton
           icon={<FolderOpen />}
           label="Projects"

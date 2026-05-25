@@ -6,7 +6,6 @@ import {
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
 import { fetchAnalyticsSummary, type AnalyticsDay, type AnalyticsSummary } from "../lib/cloud";
-import { api } from "../lib/api";
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
@@ -43,18 +42,7 @@ export function AnalyticsPage() {
   const [chartDays, setChartDays] = useState<7 | 30>(7);
   const setView = useApp((s) => s.setView);
 
-  const [logs, setLogs] = useState<Array<{ timestamp: number; filename: string; path: string }>>([]);
-  const [logsLoading, setLogsLoading] = useState(false);
 
-  useEffect(() => {
-    setLogsLoading(true);
-    api.getActivityLogs()
-      .then((res) => {
-        if (res.logs) setLogs(res.logs);
-      })
-      .catch((err) => console.error("Failed to load logs:", err))
-      .finally(() => setLogsLoading(false));
-  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -253,56 +241,6 @@ export function AnalyticsPage() {
                 <span className="flex-1 text-center">{chartData[Math.floor(chartData.length / 2)]?.date}</span>
                 <span>{chartData[chartData.length - 1]?.date}</span>
               </div>
-            </div>
-          )}
-        </section>
-
-        {/* Desk Activity Logger Section */}
-        <section className="mt-12">
-          <div className="mb-6">
-            <h2 className="text-[18px] font-semibold text-ink">Desk Activity Logger</h2>
-            <p className="text-[13px] text-ink-muted">View recent screens shared during active zWork sessions.</p>
-          </div>
-
-          {logsLoading ? (
-            <div className="flex justify-center py-10">
-              <Loader2 className="h-6 w-6 animate-spin text-ink-muted" />
-            </div>
-          ) : logs.length === 0 ? (
-            <div className="rounded-2xl border border-line bg-paper-raised p-6 text-center text-ink-muted text-[13px]">
-              No snapshots logged yet. Summon overlay (Ctrl+Shift+Space) or take screenshots to log activity.
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-4">
-              {logs.map((log) => (
-                <div key={log.timestamp} className="rounded-2xl border border-line bg-paper-raised overflow-hidden p-2 flex flex-col gap-2">
-                  <div className="aspect-[4/3] rounded-lg overflow-hidden border border-line/30 bg-paper-sunken relative group">
-                    <img
-                      src={`http://127.0.0.1:8787/api/uploads/${log.filename}`}
-                      alt="Logged activity screen"
-                      className="w-full h-full object-cover"
-                    />
-                    <a
-                      href={`http://127.0.0.1:8787/api/uploads/${log.filename}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="absolute inset-0 bg-ink/45 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-paper text-[11px] font-medium"
-                    >
-                      Open full view
-                    </a>
-                  </div>
-                  <div className="px-1 flex justify-between items-center">
-                    <span className="text-[11px] text-ink-muted">
-                      {new Date(log.timestamp * 1000).toLocaleString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </span>
-                  </div>
-                </div>
-              ))}
             </div>
           )}
         </section>

@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Check, ArrowUpRight } from "lucide-react";
-import { type CloudUser, createBillingCheckoutSession, createBillingPortalSession, redeemAccessCode } from "../lib/cloud";
+import { type CloudUser, createBillingCheckoutSession, createBillingPortalSession, redeemAccessCode, pollForPlanChange } from "../lib/cloud";
 import { cn } from "../lib/cn";
 
 const IS_TAURI = typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
@@ -80,7 +80,7 @@ const TIERS: PricingTier[] = [
   },
 ];
 
-export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
+export function PlanPage({ cloudUser, onUserChanged }: { cloudUser: CloudUser; onUserChanged?: (user: CloudUser | null) => void }) {
   const currentTier = cloudUser.tier as "free" | "pro" | "max";
   const [isAnnual, setIsAnnual] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -88,6 +88,8 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
   const [couponCode, setCouponCode] = useState("");
   const [couponBusy, setCouponBusy] = useState(false);
   const [showCoupon, setShowCoupon] = useState(false);
+  const [upgrading, setUpgrading] = useState(false);
+  const stopPollRef = useRef<(() => void) | null>(null);
 
   const handleRedeem = async () => {
     const code = couponCode.trim();
@@ -113,6 +115,16 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
       const session = await createBillingCheckoutSession(isAnnual, tierId);
       if (session?.url) {
         await openUrl(session.url);
+        // Poll for plan change after opening Stripe checkout
+        setUpgrading(true);
+        stopPollRef.current?.();
+        stopPollRef.current = pollForPlanChange(
+          currentTier,
+          (user) => {
+            setUpgrading(false);
+            onUserChanged?.(user);
+          },
+        );
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start checkout");
@@ -128,6 +140,15 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
       const session = await createBillingPortalSession();
       if (session?.url) {
         await openUrl(session.url);
+        setUpgrading(true);
+        stopPollRef.current?.();
+        stopPollRef.current = pollForPlanChange(
+          currentTier,
+          (user) => {
+            setUpgrading(false);
+            onUserChanged?.(user);
+          },
+        );
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to open billing portal");
@@ -137,6 +158,11 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
   };
 
   const isPaid = currentTier !== "free";
+
+  // Clean up polling on unmount
+  useEffect(() => {
+    return () => { stopPollRef.current?.(); };
+  }, []);
 
   return (
     <div className="flex h-full min-w-0 flex-1 overflow-y-auto bg-paper">
@@ -152,6 +178,13 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
         {error && (
           <div className="mb-8 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700">
             {error}
+          </div>
+        )}
+
+        {upgrading && (
+          <div className="mb-8 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-700 flex items-center gap-2">
+            <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
+            Waiting for payment to complete…
           </div>
         )}
 

@@ -6,11 +6,11 @@ import {
   Plus,
   FileText,
   Trash2,
-  Check,
   X,
   FolderOpen,
   Clock,
   ScrollText,
+  Loader2,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
@@ -55,7 +55,7 @@ function ProjectListPage() {
   }, [projects]);
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden bg-paper">
+    <div className="flex h-full w-full flex-col overflow-y-auto bg-paper">
       {projects.length === 0 ? (
         <div className="flex flex-1 items-center justify-center">
           <button
@@ -68,24 +68,25 @@ function ProjectListPage() {
           </button>
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto px-8 pt-10 pb-8">
-          {/* Task 1: Instrument Serif font for Projects title */}
-          <h1 className="font-['Instrument_Serif'] text-[32px] font-normal tracking-tight text-ink">
-            Projects
-          </h1>
-          <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mx-auto w-full max-w-[860px] px-6 pt-32 pb-20">
+          <div className="flex items-center justify-between border-b border-line pb-4 mb-6">
+            <h1 className="font-serif text-[32px] font-semibold tracking-tight text-ink">
+              Projects
+            </h1>
+            <button
+              type="button"
+              onClick={() => setModalOpen(true)}
+              className="press inline-flex items-center gap-1.5 rounded-lg border border-line bg-paper-raised px-3.5 py-1.5 text-[12.5px] font-medium text-ink hover:bg-paper-sunken hover:text-ink transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+              New project
+            </button>
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {sorted.map((p) => (
               <ProjectCard key={p.id} project={p} />
             ))}
           </div>
-          <button
-            type="button"
-            onClick={() => setModalOpen(true)}
-            className="press mt-4 inline-flex items-center gap-1.5 rounded-lg border border-line bg-paper-raised px-3 py-2 text-[12.5px] font-medium text-ink-muted hover:bg-paper-sunken hover:text-ink"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            New project
-          </button>
         </div>
       )}
 
@@ -389,20 +390,71 @@ function ProjectDetail() {
     setDescDraft(project.description || "");
   }, [project?.id, project?.name, project?.description]);
 
-  // Instructions (project.md)
+  // Instructions (project.md) & Memory (project_memory.md) Modals and States
   const [instructions, setInstructions] = useState<string>("");
-  const [instrDraft, setInstrDraft] = useState<string>("");
-  const [instrEditing, setInstrEditing] = useState(false);
-  const [instrSaving, setInstrSaving] = useState(false);
-
-  // Memory (project_memory.md)
   const [memory, setMemory] = useState<string>("");
-  const [memoryDraft, setMemoryDraft] = useState<string>("");
-  const [memoryEditing, setMemoryEditing] = useState(false);
-  const [memorySaving, setMemorySaving] = useState(false);
-
-  // Timeline (timeline.md)
   const [timeline, setTimeline] = useState<string>("");
+  const [editModalType, setEditModalType] = useState<"instructions" | "memory" | null>(null);
+  const [projectFiles, setProjectFiles] = useState<Array<{ name: string; size: number; mime: string; path: string }>>([]);
+  const [filesLoading, setFilesLoading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const loadProjectFiles = async () => {
+    if (!activeId) return;
+    setFilesLoading(true);
+    try {
+      const res = await api.getProjectFiles(activeId);
+      setProjectFiles(res.files || []);
+    } catch (err) {
+      console.error("Failed to load project files:", err);
+    } finally {
+      setFilesLoading(false);
+    }
+  };
+
+  const handleAddFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!activeId) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      const result = evt.target?.result;
+      if (typeof result !== "string") return;
+      const payload = {
+        files: [
+          {
+            name: file.name,
+            mime: file.type || "application/octet-stream",
+            kind: "file",
+            data_url: result,
+          }
+        ]
+      };
+      try {
+        await api.uploadProjectFiles(activeId, payload);
+        void loadProjectFiles();
+      } catch (err) {
+        console.error("Failed to upload project file:", err);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleDeleteFile = async (filename: string) => {
+    if (!activeId) return;
+    if (!confirm(`Are you sure you want to delete ${filename}?`)) return;
+    try {
+      await api.deleteProjectFile(activeId, filename);
+      void loadProjectFiles();
+    } catch (err) {
+      console.error("Failed to delete project file:", err);
+    }
+  };
+
+  const triggerAddFile = () => {
+    fileInputRef.current?.click();
+  };
 
   useEffect(() => {
     if (!activeId) return;
@@ -410,14 +462,12 @@ function ProjectDetail() {
       .getProjectContext(activeId)
       .then((r) => {
         setInstructions(r.content || "");
-        setInstrDraft(r.content || "");
       })
       .catch(() => {});
     void api
       .getProjectMemory(activeId)
       .then((r) => {
         setMemory(r.content || "");
-        setMemoryDraft(r.content || "");
       })
       .catch(() => {});
     void api
@@ -426,6 +476,7 @@ function ProjectDetail() {
         setTimeline(r.content || "");
       })
       .catch(() => {});
+    void loadProjectFiles();
   }, [activeId]);
 
   // Task 5: filter project chats by chat_ids on the project
@@ -448,28 +499,6 @@ function ProjectDetail() {
     setEditingField(null);
     if (next !== (project.description || "")) {
       await updateProject(project.id, { description: next });
-    }
-  };
-
-  const saveInstructions = async () => {
-    setInstrSaving(true);
-    try {
-      await api.putProjectContext(project.id, instrDraft);
-      setInstructions(instrDraft);
-      setInstrEditing(false);
-    } finally {
-      setInstrSaving(false);
-    }
-  };
-
-  const saveMemory = async () => {
-    setMemorySaving(true);
-    try {
-      await api.putProjectMemory(project.id, memoryDraft);
-      setMemory(memoryDraft);
-      setMemoryEditing(false);
-    } finally {
-      setMemorySaving(false);
     }
   };
 
@@ -602,153 +631,178 @@ function ProjectDetail() {
           </div>
 
           {/* RIGHT: memory / instructions / files */}
-          {/* Task 6: min-h-[200px] on all right-column cards */}
           <aside className="flex flex-col gap-5">
             {/* Memory card */}
-            <section className="flex-1 min-h-[200px] rounded-2xl border border-line bg-paper-raised p-5">
-              <div className="flex items-start justify-between gap-3">
+            <section className="flex-grow flex-shrink-0 min-h-[200px] rounded-2xl border border-line bg-paper-raised p-5 flex flex-col">
+              <div className="flex items-start justify-between gap-3 mb-2">
                 <div className="min-w-0 flex-1">
                   <h3 className="text-[14px] font-semibold text-ink">Memory</h3>
                   <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
                     Key facts and context zWork remembers for this project.
                   </p>
                 </div>
-                <IconButton
-                  icon={memoryEditing ? <X /> : <Plus />}
-                  label={memoryEditing ? "Cancel" : "Edit"}
-                  size="sm"
-                  onClick={() => {
-                    if (memoryEditing) setMemoryDraft(memory);
-                    setMemoryEditing((v) => !v);
-                  }}
-                />
+                <button
+                  type="button"
+                  onClick={() => setEditModalType("memory")}
+                  className="text-[12.5px] font-semibold text-accent hover:underline press shrink-0"
+                >
+                  edit
+                </button>
               </div>
-              {memoryEditing ? (
-                <div className="mt-3">
-                  <textarea
-                    rows={6}
-                    value={memoryDraft}
-                    onChange={(e) => setMemoryDraft(e.target.value)}
-                    placeholder="e.g. Tech stack: React + TypeScript + Tailwind. Target audience: B2B SaaS founders."
-                    className="block w-full resize-y rounded-lg border border-line bg-paper px-3 py-2 font-mono text-[12px] leading-5 text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
-                  />
-                  <div className="mt-2 flex justify-end">
-                    <button
-                      type="button"
-                      disabled={memorySaving}
-                      onClick={() => void saveMemory()}
-                      className="press inline-flex items-center gap-1.5 rounded-md bg-ink px-3 py-1 text-[12px] font-medium text-paper hover:bg-ink-soft disabled:opacity-40"
-                    >
-                      {memorySaving ? "Saving…" : (
-                        <>
-                          <Check className="h-3 w-3" /> Save
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              ) : memory.trim() ? (
-                <pre className="mt-3 whitespace-pre-wrap rounded-lg bg-paper-sunken p-3 font-mono text-[11.5px] leading-5 text-ink-muted">
+              {memory.trim() ? (
+                <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-paper-sunken p-3 font-mono text-[11.5px] leading-5 text-ink-muted overflow-y-auto max-h-[160px] flex-grow">
                   {memory}
                 </pre>
-              ) : null}
+              ) : (
+                <div className="mt-auto flex items-center justify-center py-6 text-[12px] text-ink-faint border border-dashed border-line rounded-lg flex-grow">
+                  No facts remembered yet.
+                </div>
+              )}
             </section>
 
             {/* Instructions card */}
-            <section className="flex-1 min-h-[200px] rounded-2xl border border-line bg-paper-raised p-5">
-              <div className="flex items-start justify-between gap-3">
+            <section className="flex-grow flex-shrink-0 min-h-[200px] rounded-2xl border border-line bg-paper-raised p-5 flex flex-col">
+              <div className="flex items-start justify-between gap-3 mb-2">
                 <div className="min-w-0 flex-1">
                   <h3 className="text-[14px] font-semibold text-ink">Instructions</h3>
                   <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
                     Add instructions to tailor zWork's responses
                   </p>
                 </div>
-                <IconButton
-                  icon={instrEditing ? <X /> : <Plus />}
-                  label={instrEditing ? "Cancel" : "Edit"}
-                  size="sm"
-                  onClick={() => {
-                    if (instrEditing) setInstrDraft(instructions);
-                    setInstrEditing((v) => !v);
-                  }}
-                />
+                <button
+                  type="button"
+                  onClick={() => setEditModalType("instructions")}
+                  className="text-[12.5px] font-semibold text-accent hover:underline press shrink-0"
+                >
+                  edit
+                </button>
               </div>
-              {instrEditing ? (
-                <div className="mt-3">
-                  <textarea
-                    rows={6}
-                    value={instrDraft}
-                    onChange={(e) => setInstrDraft(e.target.value)}
-                    placeholder="e.g. Always respond in markdown. Prefer concise answers."
-                    className="block w-full resize-y rounded-lg border border-line bg-paper px-3 py-2 font-mono text-[12px] leading-5 text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
-                  />
-                  <div className="mt-2 flex justify-end">
-                    <button
-                      type="button"
-                      disabled={instrSaving}
-                      onClick={() => void saveInstructions()}
-                      className="press inline-flex items-center gap-1.5 rounded-md bg-ink px-3 py-1 text-[12px] font-medium text-paper hover:bg-ink-soft disabled:opacity-40"
-                    >
-                      {instrSaving ? "Saving…" : (
-                        <>
-                          <Check className="h-3 w-3" /> Save
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              ) : instructions.trim() ? (
-                <pre className="mt-3 whitespace-pre-wrap rounded-lg bg-paper-sunken p-3 font-mono text-[11.5px] leading-5 text-ink-muted">
+              {instructions.trim() ? (
+                <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-paper-sunken p-3 font-mono text-[11.5px] leading-5 text-ink-muted overflow-y-auto max-h-[160px] flex-grow">
                   {instructions}
                 </pre>
-              ) : null}
+              ) : (
+                <div className="mt-auto flex items-center justify-center py-6 text-[12px] text-ink-faint border border-dashed border-line rounded-lg flex-grow">
+                  No instructions added yet.
+                </div>
+              )}
             </section>
 
             {/* Timeline card */}
-            <section className="flex-1 min-h-[200px] rounded-2xl border border-line bg-paper-raised p-5">
-              <div className="flex items-start justify-between gap-3">
+            <section className="flex-grow flex-shrink-0 min-h-[200px] rounded-2xl border border-line bg-paper-raised p-5 flex flex-col">
+              <div className="flex items-start justify-between gap-3 mb-2">
                 <div className="min-w-0 flex-1">
                   <h3 className="text-[14px] font-semibold text-ink">Timeline</h3>
                   <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
                     Auto-generated history of agent interactions.
                   </p>
                 </div>
-                <ScrollText className="h-4 w-4 text-ink-faint" />
+                <ScrollText className="h-4 w-4 text-ink-faint shrink-0" />
               </div>
               {timeline.trim() ? (
-                <pre className="mt-3 whitespace-pre-wrap rounded-lg bg-paper-sunken p-3 font-mono text-[11px] leading-5 text-ink-muted max-h-[240px] overflow-y-auto">
+                <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-paper-sunken p-3 font-mono text-[11px] leading-5 text-ink-muted max-h-[200px] overflow-y-auto flex-grow">
                   {timeline}
                 </pre>
               ) : (
-                <div className="mt-3 flex flex-col items-center justify-center gap-2 rounded-xl bg-paper-sunken px-4 py-6">
-                  <Clock className="h-6 w-6 text-ink-faint" />
-                  <p className="max-w-[220px] text-center text-[11.5px] leading-5 text-ink-muted">
-                    Timeline will appear here as you interact with zWork in this project.
+                <div className="mt-auto flex flex-col items-center justify-center gap-2 rounded-xl bg-paper-sunken px-4 py-6 flex-grow">
+                  <Clock className="h-5 w-5 text-ink-faint" />
+                  <p className="max-w-[200px] text-center text-[11px] leading-4 text-ink-muted">
+                    Timeline will appear here as you interact.
                   </p>
                 </div>
               )}
             </section>
 
             {/* Files card */}
-            <section className="flex-1 min-h-[200px] rounded-2xl border border-line bg-paper-raised p-5">
-              <div className="flex items-start justify-between gap-3">
-                <h3 className="text-[14px] font-semibold text-ink">Files</h3>
-                <IconButton icon={<Plus />} label="Add file" size="sm" />
-              </div>
-              <div className="mt-3 flex flex-col items-center justify-center gap-3 rounded-xl bg-paper-sunken px-4 py-8">
-                <div className="relative flex items-end gap-1 text-ink-faint">
-                  <FileText className="h-8 w-8" />
-                  <FileText className="h-10 w-10 -ml-3" />
-                  <FileText className="h-8 w-8 -ml-3" />
+            <section className="flex-grow flex-shrink-0 min-h-[200px] rounded-2xl border border-line bg-paper-raised p-5 flex flex-col">
+              <div className="flex items-start justify-between gap-3 mb-2">
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-[14px] font-semibold text-ink">Files</h3>
+                  <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
+                    Add PDFs, documents, or other text to reference in this project.
+                  </p>
                 </div>
-                <p className="max-w-[220px] text-center text-[11.5px] leading-5 text-ink-muted">
-                  Add PDFs, documents, or other text to reference in this project.
-                </p>
+                <IconButton icon={<Plus />} label="Add file" size="sm" onClick={triggerAddFile} className="shrink-0" />
               </div>
+              
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleAddFile}
+                className="hidden"
+              />
+
+              {filesLoading ? (
+                <div className="flex flex-grow items-center justify-center py-6">
+                  <Loader2 className="h-5 w-5 animate-spin text-ink-muted" />
+                </div>
+              ) : projectFiles.length === 0 ? (
+                <div className="mt-auto flex flex-col items-center justify-center gap-3 rounded-xl bg-paper-sunken px-4 py-6 flex-grow">
+                  <div className="relative flex items-end gap-1 text-ink-faint">
+                    <FileText className="h-7 w-7" />
+                    <FileText className="h-9 w-9 -ml-2" />
+                    <FileText className="h-7 w-7 -ml-2" />
+                  </div>
+                  <p className="max-w-[200px] text-center text-[11px] leading-4 text-ink-muted">
+                    No files added yet.
+                  </p>
+                </div>
+              ) : (
+                <div className="flex-grow overflow-y-auto max-h-[200px] mt-2">
+                  <ul className="flex flex-col gap-1.5">
+                    {projectFiles.map((file) => (
+                      <li key={file.name} className="flex items-center justify-between gap-3 rounded-lg border border-line bg-paper px-2.5 py-1.5 text-[11.5px] text-ink transition-all">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileText className="h-3.5 w-3.5 shrink-0 text-ink-muted" />
+                          <span className="truncate font-medium" title={file.name}>{file.name}</span>
+                          <span className="text-[9.5px] text-ink-faint shrink-0">
+                            ({(file.size / 1024).toFixed(1)} KB)
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteFile(file.name)}
+                          className="press rounded p-0.5 text-ink-faint hover:bg-line hover:text-ink shrink-0"
+                          aria-label={`Delete ${file.name}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </section>
           </aside>
         </div>
       </div>
+
+      {editModalType === "instructions" && (
+        <EditModal
+          title="Edit Instructions"
+          subtitle="Add instructions to tailor zWork's responses for this project."
+          value={instructions}
+          placeholder="e.g. Always respond in markdown. Prefer concise answers."
+          onSave={async (val) => {
+            await api.putProjectContext(project.id, val);
+            setInstructions(val);
+          }}
+          onClose={() => setEditModalType(null)}
+        />
+      )}
+      {editModalType === "memory" && (
+        <EditModal
+          title="Edit Memory"
+          subtitle="Key facts and context zWork remembers for this project."
+          value={memory}
+          placeholder="e.g. Tech stack: React + TypeScript + Tailwind."
+          onSave={async (val) => {
+            await api.putProjectMemory(project.id, val);
+            setMemory(val);
+          }}
+          onClose={() => setEditModalType(null)}
+        />
+      )}
     </div>
   );
 }
@@ -768,7 +822,6 @@ function ProjectMenu({
   const remove = async () => {
     await deleteProject(projectId);
     setActiveProject(null);
-    // Stays on projects view — list page will render
   };
 
   return (
@@ -795,6 +848,103 @@ function ProjectMenu({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function EditModal({
+  title,
+  subtitle,
+  value,
+  placeholder,
+  onSave,
+  onClose,
+}: {
+  title: string;
+  subtitle: string;
+  value: string;
+  placeholder?: string;
+  onSave: (val: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [saving, setSaving] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    setTimeout(() => textareaRef.current?.focus(), 10);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await onSave(draft);
+      onClose();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-fade-in px-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-[600px] rounded-2xl border border-line bg-paper-raised shadow-pop flex flex-col max-h-[80vh]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
+          <div>
+            <h2 className="text-[15px] font-semibold text-ink">{title}</h2>
+            <p className="text-[11.5px] text-ink-muted mt-0.5">{subtitle}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="press rounded-md p-1 text-ink-faint hover:bg-paper-sunken hover:text-ink"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="p-5 flex-grow overflow-y-auto">
+          <textarea
+            ref={textareaRef}
+            rows={12}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={placeholder}
+            className="block w-full resize-y rounded-lg border border-line bg-paper px-3 py-2 font-mono text-[12.5px] leading-5 text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+          />
+        </div>
+        <div className="flex justify-end gap-2 border-t border-line px-5 py-3 bg-paper-sunken/40">
+          <button
+            type="button"
+            onClick={onClose}
+            className="press rounded-lg border border-line px-3 py-1.5 text-[12.5px] font-medium text-ink-muted hover:bg-paper-sunken hover:text-ink"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={handleSave}
+            className="press rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-paper hover:bg-ink-soft disabled:opacity-40"
+          >
+            {saving ? "Saving…" : "Save changes"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

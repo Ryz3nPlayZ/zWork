@@ -1346,6 +1346,7 @@ async fn enforce_root_rate_limit(state: &AppState, user_id: &str, tier: &str) ->
         WHERE user_id = $1
           AND request_kind = 'root'
           AND finished_at IS NULL
+          AND created_at >= NOW() - INTERVAL '30 minutes'
         "#,
     )
     .bind(user_id)
@@ -4070,6 +4071,7 @@ async fn analytics_summary(
         WHERE user_id = $1
           AND request_kind = 'root'
           AND finished_at IS NULL
+          AND created_at >= NOW() - INTERVAL '30 minutes'
         "#,
     )
     .bind(&user.user_id)

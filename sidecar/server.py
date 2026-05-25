@@ -1272,6 +1272,91 @@ def get_project_timeline(project_id: str) -> dict:
     return {"content": content}
 
 
+@app.get("/api/projects/{project_id}/files")
+def list_project_files(project_id: str) -> dict:
+    if not home_mod.is_safe_id(project_id):
+        raise HTTPException(400, "invalid project_id")
+    p = projects_mod.get(project_id)
+    if not p:
+        raise HTTPException(404, "project not found")
+    p_dir = home_mod.project_dir(project_id)
+    files_dir = p_dir / "files"
+    if not files_dir.exists():
+        return {"files": []}
+    
+    results = []
+    for child in files_dir.iterdir():
+        if child.is_file():
+            stat = child.stat()
+            mime, _ = mimetypes.guess_type(str(child))
+            results.append({
+                "name": child.name,
+                "size": stat.st_size,
+                "mime": mime or "application/octet-stream",
+                "path": str(child),
+            })
+    return {"files": results}
+
+
+@app.post("/api/projects/{project_id}/files")
+def upload_project_files(project_id: str, body: UploadBody) -> dict:
+    if not home_mod.is_safe_id(project_id):
+        raise HTTPException(400, "invalid project_id")
+    p = projects_mod.get(project_id)
+    if not p:
+        raise HTTPException(404, "project not found")
+    p_dir = home_mod.project_dir(project_id)
+    files_dir = p_dir / "files"
+    files_dir.mkdir(parents=True, exist_ok=True)
+    
+    results = []
+    for item in body.files:
+        safe_name = Path(item.name or "upload").name
+        out = files_dir / safe_name
+        
+        if item.text_content is not None:
+            out.write_text(item.text_content, encoding="utf-8")
+            size = len(item.text_content.encode("utf-8"))
+        elif item.data_url:
+            raw = item.data_url
+            if raw.startswith("data:"):
+                raw = raw.split(",", 1)[1] if "," in raw else ""
+            try:
+                data = base64.b64decode(raw, validate=False)
+            except (ValueError, binascii.Error):
+                data = b""
+            out.write_bytes(data)
+            size = len(data)
+        else:
+            out.write_text("", encoding="utf-8")
+            size = 0
+            
+        results.append({
+            "name": safe_name,
+            "size": size,
+            "mime": item.mime,
+            "path": str(out),
+        })
+    return {"files": results}
+
+
+@app.delete("/api/projects/{project_id}/files/{filename}")
+def delete_project_file(project_id: str, filename: str) -> dict:
+    if not home_mod.is_safe_id(project_id):
+        raise HTTPException(400, "invalid project_id")
+    p = projects_mod.get(project_id)
+    if not p:
+        raise HTTPException(404, "project not found")
+    if "/" in filename or "\\" in filename or filename == ".." or filename == ".":
+        raise HTTPException(400, "invalid filename")
+    p_dir = home_mod.project_dir(project_id)
+    file_path = p_dir / "files" / filename
+    if file_path.exists() and file_path.is_file():
+        file_path.unlink()
+        return {"ok": True}
+    raise HTTPException(404, "file not found")
+
+
 # ---------------- Ollama model proxy ----------------
 
 

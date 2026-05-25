@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 const CLOUD_BASE = "https://api.tryzwork.app";
+const IS_TAURI = typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
 const TOKEN_KEY = "zwork:cloud-token";
 const AUTH_CHANGED_EVENT = "zwork:cloud-auth-changed";
 
@@ -263,23 +264,61 @@ export async function fetchAnalyticsSummary() {
 }
 
 export async function createBillingCheckoutSession(annual = false, tier = "pro") {
+  const successUrl = IS_TAURI
+    ? `${CLOUD_BASE}/billing/success`
+    : `${window.location.origin}/billing/success`;
+  const cancelUrl = IS_TAURI
+    ? `${CLOUD_BASE}/billing/cancel`
+    : `${window.location.origin}/billing/cancel`;
   return cloudFetch<BillingSession>("/api/billing/checkout", {
     method: "POST",
     body: JSON.stringify({
       annual,
       tier,
-      success_url: `${window.location.origin}/billing/success`,
-      cancel_url: `${window.location.origin}/billing/cancel`,
+      success_url: successUrl,
+      cancel_url: cancelUrl,
     }),
   });
 }
 
 export async function createBillingPortalSession() {
+  const returnUrl = IS_TAURI
+    ? `${CLOUD_BASE}/billing/portal-return`
+    : `${window.location.origin}/settings/billing`;
   return cloudFetch<BillingSession>("/api/billing/portal", {
     method: "POST",
     body: JSON.stringify({
-      return_url: `${window.location.origin}/settings/billing`,
+      return_url: returnUrl,
     }),
   });
+}
+
+/** Poll cloud session until the user's plan changes (or timeout). */
+export function pollForPlanChange(
+  currentTier: string,
+  onPlanChanged: (user: CloudUser) => void,
+  timeoutMs = 300_000,
+): () => void {
+  let stopped = false;
+  const interval = setInterval(async () => {
+    if (stopped) return;
+    try {
+      const user = await fetchCloudSession();
+      if (user && user.tier !== currentTier) {
+        stopped = true;
+        clearInterval(interval);
+        onPlanChanged(user);
+      }
+    } catch { /* ignore transient errors */ }
+  }, 3_000);
+  const timer = setTimeout(() => {
+    stopped = true;
+    clearInterval(interval);
+  }, timeoutMs);
+  return () => {
+    stopped = true;
+    clearInterval(interval);
+    clearTimeout(timer);
+  };
 }
 

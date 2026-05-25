@@ -1,5 +1,5 @@
-import { Suspense, lazy, useEffect, useState, useMemo } from "react";
-import { CheckCircle2, ExternalLink, X, Target, AlertTriangle } from "lucide-react";
+import { Suspense, lazy, useEffect, useState } from "react";
+import { CheckCircle2, ExternalLink, X, AlertTriangle } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
 import { Landing } from "./components/Landing";
 import { useApp } from "./lib/store";
@@ -30,49 +30,6 @@ const OverlayChatView = lazy(() => import("./components/OverlayChatView").then((
 import { Logo } from "./components/Logo";
 import { KeybindingsModal } from "./components/KeybindingsModal";
 
-function DailyGoalBar() {
-  const tasks = useApp((s) => s.tasks);
-  
-  // Calculate today's date in local timezone YYYY-MM-DD
-  const todayStr = useMemo(() => {
-    const local = new Date();
-    const offset = local.getTimezoneOffset();
-    const localDate = new Date(local.getTime() - (offset * 60 * 1000));
-    return localDate.toISOString().split("T")[0];
-  }, [tasks]); // Re-eval when tasks change
-
-  const todayTasks = useMemo(() => {
-    return tasks.filter((t) => t.due_date === todayStr);
-  }, [tasks, todayStr]);
-
-  if (todayTasks.length === 0) return null;
-
-  const completedTasks = todayTasks.filter((t) => t.column === "done");
-  const pct = Math.round((completedTasks.length / todayTasks.length) * 100);
-
-  return (
-    <div className="shrink-0 border-b border-line bg-paper-soft px-4 py-1.5 flex items-center justify-between text-[11px]">
-      <div className="flex items-center gap-2">
-        <span className="font-semibold text-ink flex items-center gap-1.5">
-          <Target className="h-3.5 w-3.5 text-ink-muted" />
-          Daily Goals:
-        </span>
-        <span className="text-ink-muted">
-          {completedTasks.length} of {todayTasks.length} tasks completed today
-        </span>
-      </div>
-      <div className="flex items-center gap-3 w-40 sm:w-60">
-        <div className="flex-grow h-1.5 rounded-full bg-paper-sunken overflow-hidden border border-line-soft relative">
-          <div
-            className="h-full bg-gradient-to-r from-accent to-emerald-500 rounded-full transition-all duration-500 ease-out absolute left-0 top-0"
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-        <span className="font-mono text-ink-muted w-8 text-right font-medium">{pct}%</span>
-      </div>
-    </div>
-  );
-}
 
 function OfflineBanner() {
   const offline = useApp((s) => s.backendOffline);
@@ -453,7 +410,7 @@ export default function App() {
         document.documentElement.style.setProperty("--zoom-level", "1");
       } else if (mod && e.key.toLowerCase() === "j") {
         e.preventDefault();
-        setView("tasks");
+        // setView("tasks"); // Disabled for now (deferred to backlog)
       } else if (mod && e.key === "/") {
         e.preventDefault();
         setKeybindingsOpen(!keybindingsOpen);
@@ -533,7 +490,9 @@ export default function App() {
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar />
         <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+          {/* Hide DailyGoalBar progress bar (deferred to backlog)
           <DailyGoalBar />
+          */}
           <OfflineBanner />
           <div className="relative flex-grow flex min-h-0 overflow-hidden">
           {view === "settings" ? (
@@ -546,7 +505,7 @@ export default function App() {
             </Suspense>
           ) : view === "plan" ? (
             <Suspense fallback={panelFallback}>
-              <PlanPage cloudUser={cloudUser!} />
+              <PlanPage cloudUser={cloudUser!} onUserChanged={setCloudUser} />
             </Suspense>
           ) : view === "projects" ? (
             <Suspense fallback={panelFallback}>

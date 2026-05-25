@@ -124,6 +124,7 @@ export interface Chat {
     question: string;
     options: string[];
   } | null;
+  projectId?: string | null;
 }
 
 export type View = "chat" | "settings" | "projects" | "analytics" | "plan" | "connectors" | "admin" | "tasks" | "inbox";
@@ -1018,10 +1019,15 @@ export const useApp = create<AppState>((set, get) => ({
     } catch (e) { console.warn("refreshMe failed:", e) }
   },
 
-  openLanding: () => set({ activeChatId: null, view: "chat" }),
+  openLanding: () => set({ activeChatId: null, view: "chat", activeProjectId: null }),
 
   openChat: async (id) => {
-    set({ activeChatId: id, view: "chat" });
+    const existing = get().chats[id];
+    set({
+      activeChatId: id,
+      view: "chat",
+      activeProjectId: existing?.projectId || null,
+    });
     if (get().backendOffline) {
       const cachedChats = localStorage.getItem("zwork:cached-chats");
       if (cachedChats) {
@@ -1029,6 +1035,7 @@ export const useApp = create<AppState>((set, get) => ({
           const allChats = JSON.parse(cachedChats);
           if (allChats[id]) {
             set((s) => ({
+              activeProjectId: allChats[id].projectId || null,
               chats: {
                 ...s.chats,
                 [id]: allChats[id],
@@ -1068,6 +1075,7 @@ export const useApp = create<AppState>((set, get) => ({
           }
         }
         set((s) => ({
+          activeProjectId: (full as any).project_id || null,
           artifacts: [...s.artifacts, ...loadedArtifacts],
           chats: {
             ...s.chats,
@@ -1079,6 +1087,7 @@ export const useApp = create<AppState>((set, get) => ({
               activities: latestActivities,
               artifactPanelOpen: false,
               activeArtifactId: null,
+              projectId: (full as any).project_id || null,
             },
           },
         }));
@@ -1090,6 +1099,7 @@ export const useApp = create<AppState>((set, get) => ({
             const allChats = JSON.parse(cachedChats);
             if (allChats[id]) {
               set((s) => ({
+                activeProjectId: allChats[id].projectId || null,
                 chats: {
                   ...s.chats,
                   [id]: allChats[id],
@@ -1313,7 +1323,7 @@ export const useApp = create<AppState>((set, get) => ({
     const trimmed = text.trim();
     if (!trimmed) return;
 
-    const currentId = get().activeChatId;
+    const currentId = get().view === "projects" ? null : get().activeChatId;
     if (currentId) {
       const activeChat = get().chats[currentId];
       if (activeChat && activeChat.pendingQuestion) {

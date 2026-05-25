@@ -622,6 +622,23 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ url }),
     }).then((r) => j<{ markdown: string; title: string }>(r)),
+
+  getProjectFiles: (projectId: string) =>
+    localFetch(`/api/projects/${projectId}/files`).then((r) =>
+      j<{ files: Array<{ name: string; size: number; mime: string; path: string }> }>(r),
+    ),
+
+  uploadProjectFiles: (projectId: string, body: { files: Array<{ name: string; mime: string; kind: string; data_url: string }> }) =>
+    localFetch(`/api/projects/${projectId}/files`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => j<{ files: Array<{ name: string; size: number; mime: string; path: string }> }>(r)),
+
+  deleteProjectFile: (projectId: string, filename: string) =>
+    localFetch(`/api/projects/${projectId}/files/${filename}`, {
+      method: "DELETE",
+    }).then((r) => j<{ ok: boolean }>(r)),
 };
 
 // ------ SSE streaming for chat ------

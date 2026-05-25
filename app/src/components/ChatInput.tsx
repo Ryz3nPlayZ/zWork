@@ -439,7 +439,6 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, v
                   classification.colorClass,
                   classification.bgClass
                 )}>
-                  <span>{classification.icon}</span>
                   <span>{classification.category}</span>
                 </span>
 

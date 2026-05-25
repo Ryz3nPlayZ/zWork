@@ -90,7 +90,6 @@
 html {
   height: 100%;
   overflow: hidden;
-  font-size: calc(16px * var(--zoom-level, 1));
 }
 
 body {
@@ -100,6 +99,7 @@ body {
   font-feature-settings: "ss01", "cv11";
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
+  zoom: var(--zoom-level, 1);
 }
 
 #root {
