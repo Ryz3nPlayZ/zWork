@@ -241,6 +241,8 @@ export interface Project {
   created_at: number;
   updated_at: number;
   chat_ids: string[];
+  starred?: boolean;
+  icon?: string;
 }
 
 export interface UploadedFile {

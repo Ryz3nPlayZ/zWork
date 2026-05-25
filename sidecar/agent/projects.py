@@ -23,6 +23,8 @@ class Project:
     created_at: float = 0.0
     updated_at: float = 0.0
     chat_ids: list[str] = field(default_factory=list)
+    starred: bool = False
+    icon: str = ""
 
 
 def create(name: str, description: str = "") -> Project:
@@ -45,7 +47,11 @@ def get(project_id: str) -> Project | None:
     if not p.exists():
         return None
     try:
-        return Project(**json.loads(p.read_text(encoding="utf-8")))
+        data = json.loads(p.read_text(encoding="utf-8"))
+        import dataclasses
+        valid_keys = {f.name for f in dataclasses.fields(Project)}
+        filtered = {k: v for k, v in data.items() if k in valid_keys}
+        return Project(**filtered)
     except Exception:
         return None
 

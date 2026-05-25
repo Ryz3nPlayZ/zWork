@@ -208,6 +208,8 @@ class ProjectCreate(BaseModel):
 class ProjectUpdate(BaseModel):
     name: str | None = None
     description: str | None = None
+    starred: bool | None = None
+    icon: str | None = None
 
 
 class ContentBody(BaseModel):
@@ -1194,6 +1196,10 @@ def update_project(project_id: str, body: ProjectUpdate) -> dict:
         kwargs["name"] = body.name
     if body.description is not None:
         kwargs["description"] = body.description
+    if body.starred is not None:
+        kwargs["starred"] = body.starred
+    if body.icon is not None:
+        kwargs["icon"] = body.icon
     p = projects_mod.update(project_id, **kwargs)
     if not p:
         raise HTTPException(404, "project not found")
