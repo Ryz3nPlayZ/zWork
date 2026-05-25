@@ -121,7 +121,7 @@ export interface Chat {
   activeArtifactId?: string | null;
 }
 
-export type View = "chat" | "settings" | "projects" | "analytics" | "plan" | "connectors" | "admin";
+export type View = "chat" | "settings" | "projects" | "analytics" | "plan" | "connectors" | "admin" | "cockpit" | "inbox";
 
 export type SettingsSection =
   | "account"
@@ -1183,6 +1183,7 @@ export const useApp = create<AppState>((set, get) => ({
       return {
         chats: { ...s.chats, [localId]: chat },
         activeChatId: localId,
+        view: "chat",
       };
     });
 
