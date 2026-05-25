@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useApp } from "../lib/store";
-import { Inbox, CheckCircle2, Trash2, ArrowRight, Plus, Mail, Sparkles, Check, Loader2, MessageSquare, Copy } from "lucide-react";
-import { streamChat } from "../lib/api";
+import { Inbox, CheckCircle2, Trash2, ArrowRight, Plus, Mail, Sparkles, Check, Loader2, MessageSquare, Copy, Search, FileText, RefreshCw } from "lucide-react";
+import { streamChat, api } from "../lib/api";
+import { cn } from "../lib/cn";
 
 export function InboxPage() {
   const tasks = useApp((s) => s.tasks);
@@ -37,6 +38,62 @@ export function InboxPage() {
   const [summarizing, setSummarizing] = useState(false);
   const [todos, setTodos] = useState<string[]>([]);
   const [importedCount, setImportedCount] = useState<number | null>(null);
+
+  // Uploads Search States
+  const [uploads, setUploads] = useState<Array<{ name: string; size: number; mime: string; content: string; path: string }>>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [loadingUploads, setLoadingUploads] = useState(false);
+  const [copiedFileIdx, setCopiedFileIdx] = useState<number | null>(null);
+
+  const loadUploads = async () => {
+    setLoadingUploads(true);
+    try {
+      const res = await api.listUploads();
+      setUploads(res.files || []);
+    } catch (e) {
+      console.error("loadUploads failed:", e);
+    } finally {
+      setLoadingUploads(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadUploads();
+  }, []);
+
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [];
+
+    const results: Array<{
+      file: typeof uploads[0];
+      matches: string[];
+    }> = [];
+
+    for (const f of uploads) {
+      const matches: string[] = [];
+
+      if (f.name.toLowerCase().includes(q)) {
+        matches.push(`Filename matches "${f.name}"`);
+      }
+
+      if (f.content) {
+        const lines = f.content.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          if (line.toLowerCase().includes(q)) {
+            matches.push(`Line ${i + 1}: ...${line.trim().substring(0, 100)}...`);
+            if (matches.length >= 4) break;
+          }
+        }
+      }
+
+      if (matches.length > 0) {
+        results.push({ file: f, matches });
+      }
+    }
+    return results;
+  }, [uploads, searchQuery]);
 
   // Slack Draft States
   const [slackSituation, setSlackSituation] = useState("Ask for status update");
@@ -325,6 +382,114 @@ Rules:
               >
                 {copiedDraft ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
               </button>
+            </div>
+          )}
+        </div>
+
+        {/* Uploads Search Indexer Card */}
+        <div className="mb-8 rounded-2xl border border-line bg-paper-raised p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Search className="h-4.5 w-4.5 text-accent" />
+              <h2 className="text-[14px] font-semibold text-ink">Local Uploads Search Indexer</h2>
+            </div>
+            <button
+              onClick={loadUploads}
+              disabled={loadingUploads}
+              className="press p-1.5 rounded-lg border border-line bg-paper hover:bg-paper-sunken text-ink-muted hover:text-ink transition flex items-center gap-1 text-[11px]"
+              title="Refresh local index"
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5", loadingUploads && "animate-spin")} />
+              <span>Refresh Index</span>
+            </button>
+          </div>
+          <p className="text-[12.5px] text-ink-muted mb-4">
+            Search case-insensitively across the filenames and text contents of your uploaded documents.
+          </p>
+
+          <div className="relative flex items-center mb-4">
+            <Search className="absolute left-3.5 h-4 w-4 text-ink-faint" />
+            <input
+              type="text"
+              placeholder="Search uploaded file names or contents..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full rounded-xl border border-line bg-paper pl-10 pr-4 py-2 text-[13px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none transition"
+            />
+          </div>
+
+          {searchQuery.trim() ? (
+            <div className="space-y-3">
+              <div className="text-[11px] font-bold text-ink-muted uppercase tracking-wider">
+                Search Results ({searchResults.length} files matched)
+              </div>
+              {searchResults.length === 0 ? (
+                <div className="text-[12.5px] text-ink-faint italic py-2">
+                  No matching files or content segments found.
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2 max-h-[300px] overflow-y-auto pr-1">
+                  {searchResults.map((res, idx) => (
+                    <div key={idx} className="p-3 rounded-xl border border-line bg-paper flex flex-col gap-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 text-accent" />
+                          <span className="text-[12.5px] font-semibold text-ink truncate max-w-[200px] sm:max-w-[400px]">
+                            {res.file.name}
+                          </span>
+                          <span className="text-[10px] text-ink-faint">
+                            ({Math.round(res.file.size / 1024)} KB)
+                          </span>
+                        </div>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(res.file.content);
+                            setCopiedFileIdx(idx);
+                            setTimeout(() => setCopiedFileIdx(null), 2000);
+                          }}
+                          className="press p-1.5 rounded-lg border border-line bg-paper hover:bg-paper-sunken text-ink-muted hover:text-ink transition flex items-center gap-1 text-[10.5px]"
+                          title="Copy file text content"
+                        >
+                          {copiedFileIdx === idx ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                          <span>{copiedFileIdx === idx ? "Copied" : "Copy Content"}</span>
+                        </button>
+                      </div>
+                      <div className="pl-6 border-l-2 border-line/60 flex flex-col gap-1">
+                        {res.matches.map((match, mIdx) => (
+                          <div key={mIdx} className="text-[11px] text-ink-muted leading-relaxed font-mono whitespace-pre-wrap">
+                            {match}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div>
+              <div className="text-[11px] font-bold text-ink-muted uppercase tracking-wider mb-2">
+                All Indexed Files ({uploads.length})
+              </div>
+              {uploads.length === 0 ? (
+                <div className="text-[12px] text-ink-faint italic py-2">
+                  No files uploaded yet. Drag & drop or attach files in the chat composer to index them.
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {uploads.map((f, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center gap-2 rounded-xl border border-line bg-paper px-3 py-1.5 text-[12px] text-ink-muted"
+                      title={f.path}
+                    >
+                      <FileText className="h-3.5 w-3.5 text-ink-faint" />
+                      <span>{f.name}</span>
+                      <span className="text-[10px] text-ink-faint">({Math.round(f.size / 1024)} KB)</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

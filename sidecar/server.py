@@ -1086,6 +1086,38 @@ def put_user_md(body: ContentBody) -> dict:
 # ---------------- Uploads ----------------
 
 
+@app.get("/api/uploads")
+def list_uploaded_files() -> dict:
+    uploads_dir = home_mod.workspace_uploads_dir()
+    if not uploads_dir.exists():
+        return {"files": []}
+    
+    files = []
+    for p in uploads_dir.iterdir():
+        if p.is_file() and not p.name.startswith("."):
+            mime, _ = mimetypes.guess_type(p.name)
+            mime = mime or "application/octet-stream"
+            content = ""
+            is_text = mime.startswith("text/") or mime in (
+                "application/json", "application/javascript",
+                "application/x-yaml", "text/csv", "text/markdown",
+                "application/xml"
+            )
+            if is_text:
+                try:
+                    content = p.read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    pass
+            files.append({
+                "name": p.name,
+                "size": p.stat().st_size,
+                "mime": mime,
+                "content": content,
+                "path": str(p)
+            })
+    return {"files": files}
+
+
 @app.post("/api/uploads")
 def upload_files(body: UploadBody) -> dict:
     uploads_dir = home_mod.workspace_uploads_dir()

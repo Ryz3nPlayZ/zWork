@@ -527,6 +527,11 @@ export const api = {
       body: JSON.stringify({ files }),
     }).then((r) => j<{ files: UploadedFile[] }>(r)),
 
+  listUploads: () =>
+    localFetch("/api/uploads").then((r) =>
+      j<{ files: Array<{ name: string; size: number; mime: string; content: string; path: string }> }>(r)
+    ),
+
   // ---- Projects ----
   listProjects: () =>
     localFetch("/api/projects").then((r) => j<{ projects: Project[] }>(r)),
