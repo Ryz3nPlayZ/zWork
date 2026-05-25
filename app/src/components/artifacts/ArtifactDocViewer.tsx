@@ -145,7 +145,7 @@ function serializeBlocksToMarkdown(blocks: Block[]): string {
 
 export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
   const updateArtifact = useApp((s) => s.updateArtifact);
-  const [editorMode, setEditorMode] = useState<"read" | "blocks" | "source">("read");
+  const [editorMode, setEditorMode] = useState<"read" | "blocks" | "source">("blocks");
   const [blocks, setBlocks] = useState<Block[]>(() => parseMarkdownToBlocks(artifact.content));
   const [sourceDraft, setSourceDraft] = useState(artifact.content);
   const [copied, setCopied] = useState(false);
@@ -309,21 +309,6 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
         <div className="flex rounded-lg border border-line bg-paper p-0.5">
           <button
             onClick={() => {
-              setEditorMode("read");
-              setBlocks(parseMarkdownToBlocks(artifact.content));
-            }}
-            className={cn(
-              "px-2 py-1 text-[11px] font-medium rounded-md transition-all",
-              editorMode === "read"
-                ? "bg-paper-raised text-ink shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
-                : "text-ink-muted hover:text-ink"
-            )}
-          >
-            <Eye className="inline h-3 w-3 mr-1" />
-            Read
-          </button>
-          <button
-            onClick={() => {
               setEditorMode("blocks");
               setBlocks(parseMarkdownToBlocks(artifact.content));
             }}
@@ -335,7 +320,22 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
             )}
           >
             <Edit3 className="inline h-3 w-3 mr-1" />
-            Notion Blocks
+            Editor
+          </button>
+          <button
+            onClick={() => {
+              setEditorMode("read");
+              setBlocks(parseMarkdownToBlocks(artifact.content));
+            }}
+            className={cn(
+              "px-2 py-1 text-[11px] font-medium rounded-md transition-all",
+              editorMode === "read"
+                ? "bg-paper-raised text-ink shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
+                : "text-ink-muted hover:text-ink"
+            )}
+          >
+            <Eye className="inline h-3 w-3 mr-1" />
+            Preview
           </button>
           <button
             onClick={() => {
@@ -350,7 +350,7 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
             )}
           >
             <FileText className="inline h-3 w-3 mr-1" />
-            Source
+            Markdown
           </button>
         </div>
 
@@ -442,10 +442,10 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
       </div>
 
       {/* Editor Body */}
-      <div className="flex-1 overflow-y-auto bg-paper">
+      <div className="flex-1 overflow-y-auto bg-paper-sunken p-4 sm:p-6 md:p-8 flex justify-center">
         {editorMode === "read" && (
-          <div className="h-full px-8 py-8">
-            <article className="max-w-none text-[13.5px] leading-6 text-ink">
+          <div className="w-full max-w-[720px] bg-paper p-10 md:p-14 shadow-pop border border-line rounded-xl min-h-[85vh] h-fit">
+            <article className="max-w-none text-[14px] leading-7 text-ink">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm, remarkMath]}
                 rehypePlugins={[rehypeKatex]}
@@ -480,7 +480,7 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
         )}
 
         {editorMode === "blocks" && (
-          <div className="px-10 py-8 flex flex-col gap-1 min-h-full">
+          <div className="w-full max-w-[720px] bg-paper p-10 md:p-14 shadow-pop border border-line rounded-xl min-h-[85vh] h-fit flex flex-col gap-2">
             {blocks.map((block, idx) => {
               const isHovered = hoveredBlockId === block.id;
               const isActive = activeBlockId === block.id;
@@ -646,14 +646,16 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
         )}
 
         {editorMode === "source" && (
-          <textarea
-            className="w-full h-full resize-none bg-paper p-6 font-mono text-[12.5px] leading-6 text-ink outline-none placeholder:text-ink-faint"
-            value={sourceDraft}
-            onChange={handleSourceChange}
-            placeholder="Write markdown here…"
-            spellCheck
-            autoFocus
-          />
+          <div className="w-full max-w-[720px] bg-paper shadow-pop border border-line rounded-xl min-h-[85vh] h-fit overflow-hidden">
+            <textarea
+              className="w-full min-h-[80vh] resize-none bg-paper p-10 font-mono text-[13px] leading-7 text-ink outline-none placeholder:text-ink-faint focus:outline-none"
+              value={sourceDraft}
+              onChange={handleSourceChange}
+              placeholder="Write markdown here…"
+              spellCheck
+              autoFocus
+            />
+          </div>
         )}
       </div>
 

@@ -1721,6 +1721,12 @@ async def chat_stream(req: StreamRequest):
             project_name = project.name
             project_md = projects_mod.get_context(active_project_id) or ""
 
+    # Determine plan mode from user message keywords or explicit flag
+    plan_mode = req.plan_mode
+    msg_lower = req.message.lower()
+    if any(k in msg_lower for k in ["plan a ", "plan an ", "plan feature", "create a plan", "make a plan", "plan mode", "planda", "planla"]):
+        plan_mode = True
+
     # Build a system prompt with live model identity
     model_meta = providers.lookup_model(model_id, s) or {}
     prompt = settings_mod.build_system_prompt(
@@ -1735,7 +1741,7 @@ async def chat_stream(req: StreamRequest):
         cwd=str(Path.cwd()),
         project_name=project_name,
         project_md=project_md,
-        plan_mode=req.plan_mode,
+        plan_mode=plan_mode,
         auto_approve_destructive=req.auto_approve_destructive,
     )
 
@@ -1755,7 +1761,10 @@ async def chat_stream(req: StreamRequest):
                 "Attachments: none.",
             ]
         )
-    prompt = f"{prompt}\n\n{attachment_block}\n\n## Artifact intent hint\n{_artifact_hint(req.message)}"
+    hint = _artifact_hint(req.message)
+    if req.artifact_mode:
+        hint = "The user has explicitly requested to work inside a document (Document mode is ON). You MUST create or update a document. Start your response with [[ARTIFACT kind=doc title=\"Document Title\"]] and place the full document content inside it. Keep your chat response minimal."
+    prompt = f"{prompt}\n\n{attachment_block}\n\n## Artifact intent hint\n{hint}"
 
     raw_history = [
         {"role": m.role, "content": m.content}
@@ -1818,7 +1827,7 @@ async def chat_stream(req: StreamRequest):
                     s,
                     run_ctx,
                     project_id=req.project_id,
-                    plan_mode=req.plan_mode,
+                    plan_mode=plan_mode,
                     auto_approve_destructive=req.auto_approve_destructive,
                 )
             ):

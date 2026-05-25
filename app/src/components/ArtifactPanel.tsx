@@ -55,7 +55,7 @@ export function ArtifactPanel() {
                 />
               </div>
               <div className="flex items-center gap-2" data-no-drag>
-                <IconButton icon={<X />} label="Close artifact" size="sm" onClick={close} />
+                <IconButton icon={<X />} label="Close document" size="sm" onClick={close} />
               </div>
             </div>
 
