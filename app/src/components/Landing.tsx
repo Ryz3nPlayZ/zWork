@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Download, ArrowUpRight, Loader2 } from "lucide-react";
 import { ChatInput } from "./ChatInput";
+import { loadTemplates } from "../lib/templates";
 import { useApp } from "../lib/store";
 import { useResolvedTheme } from "../lib/theme";
 import { isMacOS, needsLightweightRendering } from "../lib/platform";
@@ -88,7 +89,10 @@ export function Landing({
   const me = useApp((s) => s.me);
   const firstName = (me?.name?.split(/\s+/)[0] || "friend").trim();
   const [sending, setSending] = useState(false);
+  const [inputValue, setInputValue] = useState("");
   const theme = useResolvedTheme();
+  const triggerFocusChatInput = useApp((s) => s.triggerFocusChatInput);
+  const [templates] = useState(() => loadTemplates());
 
   const greeting = useMemo(() => pickGreeting(), []);
   const updateBusy = updateProgress.phase !== "idle" && updateProgress.phase !== "error";
@@ -151,12 +155,50 @@ export function Landing({
             <ChatInput
               autoFocus
               placeholder="What can I help with?"
+              value={inputValue}
+              onChange={setInputValue}
               onSend={() => {
                 void import("./ChatView");
                 setSending(true);
               }}
             />
           </div>
+
+          {!sending && templates.length > 0 && (
+            <div className="mt-8 grid grid-cols-2 sm:grid-cols-3 gap-3 w-full animate-fade-in px-1 select-none">
+              {templates.slice(0, 6).map((tpl) => {
+                let icon = "✨";
+                if (tpl.trigger === "summarize") icon = "📝";
+                else if (tpl.trigger === "explain-error") icon = "🔍";
+                else if (tpl.trigger === "code-review") icon = "💻";
+                else if (tpl.trigger === "refactor") icon = "⚙️";
+                else if (tpl.trigger === "plan-task") icon = "📋";
+                else if (tpl.trigger === "daily-standup") icon = "📅";
+
+                return (
+                  <button
+                    key={tpl.id}
+                    type="button"
+                    onClick={() => {
+                      setInputValue((prev) => (prev ? `${tpl.body}${prev}` : tpl.body));
+                      triggerFocusChatInput();
+                    }}
+                    className="press group flex flex-col items-start gap-1.5 rounded-xl border border-line bg-paper-raised hover:bg-paper p-3 text-left transition-all duration-200 hover:border-line-strong hover:shadow-xs"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[12px]">{icon}</span>
+                      <span className="text-[12.5px] font-semibold text-ink group-hover:text-ink-strong transition-colors">
+                        {tpl.title}
+                      </span>
+                    </div>
+                    <span className="text-[10.5px] text-ink-muted line-clamp-2 leading-relaxed">
+                      {tpl.body}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {updateCard && (
             <div className={cn(
