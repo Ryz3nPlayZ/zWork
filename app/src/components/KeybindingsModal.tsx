@@ -31,7 +31,7 @@ export function KeybindingsModal() {
     {
       title: "Global Navigation",
       shortcuts: [
-        { keys: [`${altKey}`, "Space"], desc: "Toggle Glass Chatbox Overlay", note: "Summons AI overlay over any app" },
+        { keys: [`${cmdKey}`, "Shift", "Space"], desc: "Toggle Glass Chatbox Overlay", note: "Summons AI overlay over any app" },
         { keys: [`${cmdKey}`, "K"], desc: "Open Global Search Command Bar" },
         { keys: [`${cmdKey}`, "\\"], desc: "Toggle Sidebar panel" },
         { keys: [`${cmdKey}`, ","], desc: "Open Settings dashboard" },
@@ -60,7 +60,7 @@ export function KeybindingsModal() {
 
   return (
     <div
-      className="fixed inset-0 z-[1000] flex items-center justify-center bg-ink/35 backdrop-blur-md animate-fade-in"
+      className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/40 animate-fade-in"
       onClick={() => setOpen(false)}
       role="dialog"
       aria-modal="true"

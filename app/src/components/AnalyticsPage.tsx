@@ -256,7 +256,7 @@ export function AnalyticsPage() {
             </div>
           ) : logs.length === 0 ? (
             <div className="rounded-2xl border border-line bg-paper-raised p-6 text-center text-ink-muted text-[13px]">
-              No snapshots logged yet. Summon overlay (Alt+Space) or take screenshots to log activity.
+              No snapshots logged yet. Summon overlay (Ctrl+Shift+Space) or take screenshots to log activity.
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-4">

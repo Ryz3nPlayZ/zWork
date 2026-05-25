@@ -733,7 +733,7 @@ fn main() {
         .plugin(UpdaterBuilder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &tauri::AppHandle, shortcut, event| {
             use tauri_plugin_global_shortcut::ShortcutState;
-            if event.state() == ShortcutState::Pressed && shortcut.to_string() == "alt+space" {
+            if event.state() == ShortcutState::Pressed && shortcut.to_string() == "ctrl+shift+space" {
                 if let Some(window) = app.get_webview_window("overlay") {
                     let is_visible = window.is_visible().unwrap_or(false);
                     if is_visible {
@@ -753,7 +753,7 @@ fn main() {
         ])
         .setup(|app| {
             use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
-            let shortcut: Shortcut = "Alt+Space".parse().unwrap();
+            let shortcut: Shortcut = "Ctrl+Shift+Space".parse().unwrap();
             let _ = app.global_shortcut().register(shortcut);
             Ok(())
         })

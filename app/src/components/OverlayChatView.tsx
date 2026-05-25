@@ -16,7 +16,7 @@ export function OverlayChatView() {
     {
       id: "welcome",
       role: "assistant",
-      content: "Hello! I'm your zWork Overlay assistant. Use Alt+Space to toggle me, or click below to show me your screen.",
+      content: "Hello! I'm your zWork Overlay assistant. Use Ctrl+Shift+Space to toggle me, or click below to show me your screen.",
     },
   ]);
   const [inputValue, setInputValue] = useState("");
