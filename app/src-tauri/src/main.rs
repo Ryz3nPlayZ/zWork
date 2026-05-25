@@ -715,12 +715,32 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(process_init())
         .plugin(UpdaterBuilder::new().build())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &tauri::AppHandle, shortcut, event| {
+            use tauri_plugin_global_shortcut::ShortcutState;
+            if event.state() == ShortcutState::Pressed && shortcut.to_string() == "alt+space" {
+                if let Some(window) = app.get_webview_window("overlay") {
+                    let is_visible = window.is_visible().unwrap_or(false);
+                    if is_visible {
+                        let _ = window.hide();
+                    } else {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                }
+            }
+        }).build())
         .invoke_handler(tauri::generate_handler![
             open_external,
             ensure_backend,
             restart_backend,
             begin_desktop_auth
         ])
+        .setup(|app| {
+            use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+            let shortcut: Shortcut = "Alt+Space".parse().unwrap();
+            let _ = app.global_shortcut().register(shortcut);
+            Ok(())
+        })
         .manage(Backend(Mutex::new(BackendState { child: None, spawned_at: None })))
         .build(tauri::generate_context!())
         .expect("error while building zWork");

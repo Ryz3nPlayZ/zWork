@@ -255,6 +255,11 @@ export interface UploadedFile {
 export const api = {
   health: healthFetch,
 
+  captureScreenshot: () =>
+    localFetch("/api/screenshot", {
+      method: "POST"
+    }).then((r) => j<{ screenshot: string; error?: string }>(r)),
+
   waitForBackend: waitForBackendReady,
 
   // --- Tasks & Calendar ---

@@ -26,6 +26,7 @@ const ConnectorsPage = lazy(() => import("./components/ConnectorsPage").then((m)
 const AdminPage = lazy(() => import("./components/AdminPage").then((m) => ({ default: m.AdminPage })));
 const CockpitPage = lazy(() => import("./components/cockpit/CockpitPage").then((m) => ({ default: m.CockpitPage })));
 const InboxPage = lazy(() => import("./components/InboxPage").then((m) => ({ default: m.InboxPage })));
+const OverlayChatView = lazy(() => import("./components/OverlayChatView").then((m) => ({ default: m.OverlayChatView })));
 import { Logo } from "./components/Logo";
 
 export default function App() {
@@ -55,6 +56,31 @@ export default function App() {
   const setCockpitOpen = useApp((s) => s.setCockpitOpen);
   const onboardingDone = useApp((s) => s.onboardingDone);
   const backendReady = useApp((s) => s.backendReady);
+
+  const [isOverlay, setIsOverlay] = useState(false);
+  useEffect(() => {
+    if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__) {
+      import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+        try {
+          const win = getCurrentWindow();
+          if (win.label === "overlay") {
+            setIsOverlay(true);
+          }
+        } catch (err) {
+          console.error(err);
+        }
+      });
+    }
+  }, []);
+
+  if (isOverlay) {
+    return (
+      <Suspense fallback={<div className="h-screen w-screen bg-paper/10 backdrop-blur-xl" />}>
+        <OverlayChatView />
+      </Suspense>
+    );
+  }
+
   // Skip onboarding in browser preview mode (non-Tauri environment)
   const skipOnboarding = typeof window !== "undefined" && !((window as any).__TAURI_INTERNALS__);
   const [updateCard, setUpdateCard] = useState<UpdateCardState | null>(null);

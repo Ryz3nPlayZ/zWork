@@ -13,6 +13,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
+        "label": "main",
         "title": "zWork",
         "width": 1180,
         "height": 760,
@@ -24,6 +25,18 @@
         "transparent": false,
         "resizable": true,
         "fullscreen": false
+      },
+      {
+        "label": "overlay",
+        "title": "zWork Overlay",
+        "width": 500,
+        "height": 650,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "visible": false,
+        "resizable": true,
+        "skipTaskbar": true
       }
     ],
     "security": {

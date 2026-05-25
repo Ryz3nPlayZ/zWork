@@ -21,6 +21,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dirs = "6"
 tokio = { version = "1", features = ["net", "time"] }
+tauri-plugin-global-shortcut = "2"
 
 [features]
 default = ["custom-protocol"]

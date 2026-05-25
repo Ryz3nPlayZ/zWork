@@ -887,6 +887,22 @@ async def telemetry_event(body: TelemetryEventBody) -> dict:
     return {"ok": True}
 
 
+@app.post("/api/screenshot")
+async def capture_screenshot():
+    try:
+        res = subprocess.run(
+            [sys.executable, "-m", "dctl", "screenshot", "--base64"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        import json
+        data = json.loads(res.stdout)
+        return {"screenshot": data.get("result", "")}
+    except Exception as e:
+        return {"screenshot": "", "error": str(e)}
+
+
 # ---------------- Custom models ----------------
 
 
