@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useApp } from "../../lib/store";
 import {
   Calendar,
@@ -8,7 +8,27 @@ import {
   Trash2,
   X,
   PlusCircle,
+  AlertTriangle,
 } from "lucide-react";
+
+function timeToMinutes(timeStr: string): number {
+  if (!timeStr) return 0;
+  const [h, m] = timeStr.split(":").map(Number);
+  return h * 60 + m;
+}
+
+function checkOverlap(
+  s1: string,
+  e1: string,
+  s2: string,
+  e2: string
+): boolean {
+  const start1 = timeToMinutes(s1);
+  const end1 = timeToMinutes(e1 || "23:59");
+  const start2 = timeToMinutes(s2);
+  const end2 = timeToMinutes(e2 || "23:59");
+  return start1 < end2 && start2 < end1;
+}
 
 export function DailyAgenda() {
   const events = useApp((s) => s.events);
@@ -48,8 +68,37 @@ export function DailyAgenda() {
   };
 
   // Filter events and tasks for the currently navigated date
-  const todaysEvents = events.filter((e) => e.date === formattedDate);
-  const todaysTasks = tasks.filter((t) => t.due_date === formattedDate);
+  const todaysEvents = useMemo(() => events.filter((e) => e.date === formattedDate), [events, formattedDate]);
+  const todaysTasks = useMemo(() => tasks.filter((t) => t.due_date === formattedDate), [tasks, formattedDate]);
+
+  // Compute conflicts
+  const conflicts = useMemo(() => {
+    const pairs: Array<[string, string]> = [];
+    for (let i = 0; i < todaysEvents.length; i++) {
+      for (let j = i + 1; j < todaysEvents.length; j++) {
+        const ev1 = todaysEvents[i];
+        const ev2 = todaysEvents[j];
+        if (
+          ev1.start_time &&
+          ev2.start_time &&
+          checkOverlap(ev1.start_time, ev1.end_time || "23:59", ev2.start_time, ev2.end_time || "23:59")
+        ) {
+          pairs.push([ev1.title, ev2.title]);
+        }
+      }
+    }
+    return pairs;
+  }, [todaysEvents]);
+
+  // Check form conflict
+  const formConflict = useMemo(() => {
+    if (!startTime || !endTime) return null;
+    return todaysEvents.find(
+      (e) =>
+        e.start_time &&
+        checkOverlap(startTime, endTime, e.start_time, e.end_time || "23:59")
+    );
+  }, [startTime, endTime, todaysEvents]);
 
   // Hours array for timeline view (8:00 AM to 7:00 PM)
   const HOURS = Array.from({ length: 12 }, (_, i) => i + 8); // 8 to 19
@@ -96,6 +145,20 @@ export function DailyAgenda() {
         </div>
       </div>
 
+      {/* Conflict Warnings */}
+      {conflicts.length > 0 && (
+        <div className="flex flex-col gap-1.5 p-3 rounded-xl border border-rose-500/20 bg-rose-500/5 text-rose-400 text-[11.5px] animate-fade-in">
+          {conflicts.map(([t1, t2], idx) => (
+            <div key={idx} className="flex items-center gap-2">
+              <AlertTriangle className="h-3.5 w-3.5 text-rose-500 flex-shrink-0" />
+              <span>
+                <strong>Double Booking:</strong> "{t1}" overlaps with "{t2}"
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Event Form Toggle */}
       <button
         onClick={() => setShowAddEvent(true)}
@@ -140,9 +203,22 @@ export function DailyAgenda() {
                         className="group flex items-center justify-between p-2 rounded-lg border border-amber-500/20 bg-amber-500/5 hover:bg-amber-500/10 transition-all duration-150 animate-scale-up"
                       >
                         <div className="flex flex-col gap-0.5">
-                          <span className="text-[12px] font-semibold text-ink leading-none">
-                            {evt.title}
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[12px] font-semibold text-ink leading-none">
+                              {evt.title}
+                            </span>
+                            {todaysEvents.some(
+                              (other) =>
+                                other.id !== evt.id &&
+                                evt.start_time &&
+                                other.start_time &&
+                                checkOverlap(evt.start_time, evt.end_time || "23:59", other.start_time, other.end_time || "23:59")
+                            ) && (
+                              <span title="Scheduling conflict detected">
+                                <AlertTriangle className="h-3 w-3 text-rose-500 flex-shrink-0 animate-pulse" />
+                              </span>
+                            )}
+                          </div>
                           <span className="text-[10px] text-amber-500/80 flex items-center gap-1 font-medium mt-0.5">
                             <Clock className="h-2.5 w-2.5" />
                             <span>
@@ -221,6 +297,13 @@ export function DailyAgenda() {
                   />
                 </div>
               </div>
+
+              {formConflict && (
+                <div className="flex items-center gap-1.5 text-[11px] text-rose-500 font-semibold mt-2 p-2.5 rounded-lg border border-rose-500/20 bg-rose-500/5 animate-slide-down">
+                  <AlertTriangle className="h-3.5 w-3.5 text-rose-500 flex-shrink-0" />
+                  <span>Conflict: Overlaps with "{formConflict.title}"</span>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center justify-end gap-2 border-t border-line mt-4 pt-3">
