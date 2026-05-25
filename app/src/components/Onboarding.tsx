@@ -10,8 +10,8 @@ import { isMacOS, needsLightweightRendering } from "../lib/platform";
 import { api, type OnboardingAnswer, type OnboardingCredential } from "../lib/api";
 import LightRays from "./LightRays";
 
-const ZWORK_ROUTER_MODEL_ID = "zwork-router";
-const ZWORK_ROUTER_TARGET_MODEL_ID = "deepseek-v4-flash";
+const ZWORK_ROUTER_MODEL_ID = "zwork-flash";
+const ZWORK_ROUTER_TARGET_MODEL_ID = "zwork-flash";
 
 /* ------------------------------------------------------------------ *
  *  Question model
@@ -198,8 +198,8 @@ interface CredentialPreset {
 const PRESETS: CredentialPreset[] = [
   {
     id: "zwork_managed",
-    label: "zWork Router",
-    subtitle: "Use the hosted zWork router pinned to DeepSeek V4 Flash",
+    label: "zWork Flash / Pro",
+    subtitle: "Use the hosted zWork router with high-speed DeepSeek V4 Flash or Pro",
     shape: "anthropic",
     credential: "zwork_router",
     defaultBaseUrl: "https://api.tryzwork.app/api",
@@ -255,9 +255,15 @@ export interface ModelChoice {
 export const MODEL_CATALOG: Record<CredentialPreset["id"], ModelChoice[]> = {
   zwork_managed: [
     {
-      id: ZWORK_ROUTER_MODEL_ID,
-      label: "zWork Router",
+      id: "zwork-flash",
+      label: "zWork Flash",
       description: "Hosted through the zWork router and pinned to DeepSeek V4 Flash.",
+      cost: "Managed by zWork",
+    },
+    {
+      id: "zwork-pro",
+      label: "zWork Pro",
+      description: "Hosted through the zWork router and pinned to DeepSeek V4 Pro (advanced reasoning).",
       cost: "Managed by zWork",
     },
   ],

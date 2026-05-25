@@ -48,11 +48,13 @@ from .subagent import SubagentSpawner
 
 
 MAX_TURNS = 24
-ZWORK_ROUTER_MODEL_ID = "zwork-router"
-ZWORK_ROUTER_ZWORK_ID = "zwork-router"
-ZWORK_ROUTER_MODEL_NAME = "zWork Router"
+ZWORK_ROUTER_MODEL_ID = "zwork-flash"
+ZWORK_ROUTER_ZWORK_ID = "zwork-flash"
+ZWORK_ROUTER_MODEL_NAME = "zWork Flash"
 ZWORK_ROUTER_BASE_URL = "https://api.tryzwork.app/api"
 ZWORK_ROUTER_TARGET_MODEL_ID = "deepseek-v4-flash"
+ZWORK_PRO_MODEL_ID = "zwork-pro"
+ZWORK_PRO_MODEL_NAME = "zWork Pro"
 DEEPSEEK_ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic"
 PREV1_OLLAMA_MODEL_ID = "qwen3.5:cloud"
 PREV1_OLLAMA_ZWORK_ID = "qwen3-5-cloud-ollama"

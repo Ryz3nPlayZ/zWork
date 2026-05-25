@@ -689,9 +689,9 @@ async def onboard_complete(body: OnboardBody) -> dict:
             s.provider_config.setdefault(credkey, {})["base_url"] = base_url
         if model_id:
             custom_id = (
-                providers.ZWORK_ROUTER_ZWORK_ID
+                model_id
                 if credkey == "zwork_router"
-                or model_id == providers.ZWORK_ROUTER_MODEL_ID
+                or model_id in (providers.ZWORK_ROUTER_MODEL_ID, providers.ZWORK_PRO_MODEL_ID)
                 else None
             )
             if custom_id and not home_mod.is_safe_id(custom_id):

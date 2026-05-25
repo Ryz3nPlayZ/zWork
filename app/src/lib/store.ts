@@ -24,8 +24,8 @@ const LEGACY_MANAGED_MODEL_IDS = new Set([
   "zwork-managed-proxy",
   "minimax-m2.7:cloud",
 ]);
-const ROUTER_MODEL_ID = "zwork-router";
-const ROUTER_MODEL_NAME = "zWork Router";
+const ROUTER_MODEL_ID = "zwork-flash";
+const ROUTER_MODEL_NAME = "zWork Flash";
 const ROUTER_BASE_URL = "https://api.tryzwork.app/api";
 const ROUTER_TARGET_MODEL_ID = "deepseek-v4-flash";
 const ONBOARDING_DONE_KEY = "zwork:onboarding-completed";
@@ -248,20 +248,19 @@ function stripArtifactJunk(text: string): string {
 function needsManagedRouterMigration(settings: SettingsPublic): boolean {
   const defaultModel = settings.default_model || "";
   const customModels = settings.custom_models || [];
-  const routerModel = customModels.find((model) => model.id === ROUTER_MODEL_ID);
+  const hasFlash = customModels.some((model) => model.id === "zwork-flash");
+  const hasPro = customModels.some((model) => model.id === "zwork-pro");
+  const hasOldRouter = customModels.some((model) => model.id === "zwork-router");
   const hasLegacyCustomModel = customModels.some((model) => LEGACY_MANAGED_MODEL_IDS.has(model.id) || LEGACY_MANAGED_MODEL_IDS.has(model.model_id));
-  const routerNeedsUpgrade = !!routerModel && (
-    routerModel.credential !== "zwork_router" ||
-    routerModel.shape !== "anthropic" ||
-    routerModel.model_id !== ROUTER_TARGET_MODEL_ID ||
-    routerModel.base_url_override !== ROUTER_BASE_URL
-  );
+
   return (
     LEGACY_MANAGED_BASE_URLS.has(settings.provider_config?.openai?.base_url || "") ||
     LEGACY_MANAGED_BASE_URLS.has(settings.provider_config?.zwork_router?.base_url || "") ||
     LEGACY_MANAGED_MODEL_IDS.has(defaultModel) ||
     hasLegacyCustomModel ||
-    routerNeedsUpgrade
+    hasOldRouter ||
+    !hasFlash ||
+    !hasPro
   );
 }
 
@@ -272,21 +271,34 @@ async function migrateManagedRouterSettings(settings: SettingsPublic): Promise<S
     provider_config: {
       zwork_router: { base_url: ROUTER_BASE_URL },
     },
-    default_model: ROUTER_MODEL_ID,
+    default_model: "zwork-flash",
   });
 
   for (const model of settings.custom_models || []) {
-    if (LEGACY_MANAGED_MODEL_IDS.has(model.id) || LEGACY_MANAGED_MODEL_IDS.has(model.model_id)) {
+    if (
+      model.id === "zwork-router" ||
+      LEGACY_MANAGED_MODEL_IDS.has(model.id) ||
+      LEGACY_MANAGED_MODEL_IDS.has(model.model_id)
+    ) {
       await api.deleteCustomModel(model.id);
     }
   }
 
   await api.upsertCustomModel({
-    id: ROUTER_MODEL_ID,
-    name: ROUTER_MODEL_NAME,
+    id: "zwork-flash",
+    name: "zWork Flash",
     shape: "anthropic",
     credential: "zwork_router",
-    model_id: ROUTER_TARGET_MODEL_ID,
+    model_id: "deepseek-v4-flash",
+    base_url_override: ROUTER_BASE_URL,
+  });
+
+  await api.upsertCustomModel({
+    id: "zwork-pro",
+    name: "zWork Pro",
+    shape: "anthropic",
+    credential: "zwork_router",
+    model_id: "deepseek-v4-pro",
     base_url_override: ROUTER_BASE_URL,
   });
 
@@ -302,13 +314,22 @@ async function syncManagedRouterToken() {
       zwork_router: { base_url: ROUTER_BASE_URL },
     },
   });
-  // Ensure the custom model entry exists so it shows in the model picker.
+  
   await api.upsertCustomModel({
-    id: ROUTER_MODEL_ID,
-    name: ROUTER_MODEL_NAME,
+    id: "zwork-flash",
+    name: "zWork Flash",
     shape: "anthropic",
     credential: "zwork_router",
-    model_id: ROUTER_TARGET_MODEL_ID,
+    model_id: "deepseek-v4-flash",
+    base_url_override: ROUTER_BASE_URL,
+  });
+
+  await api.upsertCustomModel({
+    id: "zwork-pro",
+    name: "zWork Pro",
+    shape: "anthropic",
+    credential: "zwork_router",
+    model_id: "deepseek-v4-pro",
     base_url_override: ROUTER_BASE_URL,
   });
 }
@@ -779,25 +800,35 @@ export const useApp = create<AppState>((set, get) => ({
       // Mark onboarding done in web (no local sidecar)
       rememberOnboardingDone(true);
 
-      // Provide a synthetic providers object so the model picker shows zwork-router
+      // Provide a synthetic providers object so the model picker shows zWork Flash/Pro
       const webProviders: ProvidersResponse = {
         credentials: {},
-        default_model: "zwork-router",
+        default_model: "zwork-flash",
         models: [
           {
-            id: "zwork-router",
-            name: "zWork Router",
+            id: "zwork-flash",
+            name: "zWork Flash",
             subtitle: "Managed AI router",
             shape: "openai",
             credential: "managed",
-            model_id: "zwork-router",
+            model_id: "zwork-flash",
+            configured: true,
+            synthesized: false,
+          },
+          {
+            id: "zwork-pro",
+            name: "zWork Pro",
+            subtitle: "Managed AI router (Pro/Max)",
+            shape: "openai",
+            credential: "managed",
+            model_id: "zwork-pro",
             configured: true,
             synthesized: false,
           },
         ],
       };
 
-      set({ onboardingDone: true, model: "zwork-router", providers: webProviders, backendReady: true });
+      set({ onboardingDone: true, model: "zwork-flash", providers: webProviders, backendReady: true });
       return;
     }
 
