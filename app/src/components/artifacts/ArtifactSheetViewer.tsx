@@ -1,5 +1,5 @@
-import { useState, useCallback, useRef, useEffect } from "react";
-import { Plus, Trash2, Download } from "lucide-react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { Plus, Trash2, Download, Search, ArrowUpDown, ChevronUp, ChevronDown } from "lucide-react";
 import { useApp } from "../../lib/store";
 import type { Artifact } from "../../lib/store";
 
@@ -31,6 +31,11 @@ export function ArtifactSheetViewer({ artifact }: { artifact: Artifact }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Sorting & Filtering State
+  const [filterQuery, setFilterQuery] = useState("");
+  const [sortCol, setSortCol] = useState<number | null>(null);
+  const [sortAsc, setSortAsc] = useState(true);
+
   useEffect(() => {
     if (editingCell && inputRef.current) {
       inputRef.current.focus();
@@ -51,7 +56,9 @@ export function ArtifactSheetViewer({ artifact }: { artifact: Artifact }) {
     (r: number, c: number, value: string) => {
       setRows((prev) => {
         const next = prev.map((row) => [...row]);
-        next[r][c] = value;
+        if (next[r]) {
+          next[r][c] = value;
+        }
         return next;
       });
     },
@@ -102,16 +109,61 @@ export function ArtifactSheetViewer({ artifact }: { artifact: Artifact }) {
     URL.revokeObjectURL(url);
   }, [rows, artifact.title]);
 
+  const handleHeaderClick = useCallback((c: number) => {
+    setSortCol((prev) => {
+      if (prev === c) {
+        setSortAsc((asc) => !asc);
+        return c;
+      }
+      setSortAsc(true);
+      return c;
+    });
+  }, []);
+
+  // Compute filtered and sorted rows with original index mapping
+  const filteredAndSortedData = useMemo(() => {
+    let mapped = rows.map((row, index) => ({ row, originalIndex: index }));
+
+    // Apply text filter case-insensitive
+    if (filterQuery.trim()) {
+      const q = filterQuery.toLowerCase();
+      mapped = mapped.filter(({ row }) =>
+        row.some((cell) => cell.toLowerCase().includes(q))
+      );
+    }
+
+    // Apply sorting
+    if (sortCol !== null) {
+      mapped.sort((a, b) => {
+        const valA = a.row[sortCol] ?? "";
+        const valB = b.row[sortCol] ?? "";
+        
+        const numA = parseFloat(valA);
+        const numB = parseFloat(valB);
+
+        if (!isNaN(numA) && !isNaN(numB)) {
+          return sortAsc ? numA - numB : numB - numA;
+        }
+
+        return sortAsc
+          ? valA.localeCompare(valB)
+          : valB.localeCompare(valA);
+      });
+    }
+
+    return mapped;
+  }, [rows, filterQuery, sortCol, sortAsc]);
+
   const colCount = rows[0]?.length ?? 0;
 
   return (
     <div className="flex h-full flex-col">
       {/* Toolbar */}
-      <div className="flex shrink-0 items-center gap-1 border-b border-line px-2 py-1">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line px-2 py-1.5 bg-paper-sunken/40">
         <button
           type="button"
           onClick={addRow}
-          className="press flex items-center gap-1 rounded px-2 py-1 text-[11px] text-ink-muted hover:bg-paper-sunken hover:text-ink"
+          className="press flex items-center gap-1 rounded px-2.5 py-1 text-[11px] text-ink-muted hover:bg-paper-sunken hover:text-ink font-medium transition"
           title="Add row"
         >
           <Plus className="h-3 w-3" /> Row
@@ -119,7 +171,7 @@ export function ArtifactSheetViewer({ artifact }: { artifact: Artifact }) {
         <button
           type="button"
           onClick={addCol}
-          className="press flex items-center gap-1 rounded px-2 py-1 text-[11px] text-ink-muted hover:bg-paper-sunken hover:text-ink"
+          className="press flex items-center gap-1 rounded px-2.5 py-1 text-[11px] text-ink-muted hover:bg-paper-sunken hover:text-ink font-medium transition"
           title="Add column"
         >
           <Plus className="h-3 w-3" /> Col
@@ -128,17 +180,31 @@ export function ArtifactSheetViewer({ artifact }: { artifact: Artifact }) {
           <button
             type="button"
             onClick={() => deleteRow(selectedCell[0])}
-            className="press flex items-center gap-1 rounded px-2 py-1 text-[11px] text-red-600 hover:bg-red-500/8"
+            className="press flex items-center gap-1 rounded px-2 py-1 text-[11px] text-red-600 hover:bg-red-500/10 font-medium transition"
             title="Delete row"
           >
-            <Trash2 className="h-3 w-3" />
+            <Trash2 className="h-3 w-3" /> Delete Row
           </button>
         )}
+
+        {/* Filter Input */}
+        <div className="relative flex items-center ml-2">
+          <Search className="absolute left-2.5 h-3 w-3 text-ink-faint" />
+          <input
+            type="text"
+            placeholder="Filter data..."
+            value={filterQuery}
+            onChange={(e) => setFilterQuery(e.target.value)}
+            className="rounded border border-line bg-paper pl-7 pr-2.5 py-1 text-[11px] outline-none focus:border-accent focus:ring-1 focus:ring-accent transition w-36 sm:w-48"
+          />
+        </div>
+
         <div className="flex-1" />
+        
         <button
           type="button"
           onClick={exportCSV}
-          className="press flex items-center gap-1 rounded px-2 py-1 text-[11px] text-ink-muted hover:bg-paper-sunken hover:text-ink"
+          className="press flex items-center gap-1 rounded px-2.5 py-1 text-[11px] text-ink-muted hover:bg-paper-sunken hover:text-ink font-medium transition"
         >
           <Download className="h-3 w-3" /> Export CSV
         </button>
@@ -149,18 +215,33 @@ export function ArtifactSheetViewer({ artifact }: { artifact: Artifact }) {
         <table className="w-full border-collapse text-[12px]">
           <thead>
             <tr>
-              {Array.from({ length: colCount }).map((_, c) => (
-                <th
-                  key={c}
-                  className="sticky top-0 z-10 border border-line bg-paper-sunken px-3 py-1.5 text-left text-[10.5px] font-semibold uppercase tracking-wide text-ink-faint"
-                >
-                  {String.fromCharCode(65 + c)}
-                </th>
-              ))}
+              {Array.from({ length: colCount }).map((_, c) => {
+                const isSorted = sortCol === c;
+                return (
+                  <th
+                    key={c}
+                    onClick={() => handleHeaderClick(c)}
+                    className="sticky top-0 z-10 border border-line bg-paper-sunken px-3 py-2 text-left text-[10.5px] font-semibold uppercase tracking-wide text-ink-faint hover:text-ink hover:bg-paper cursor-pointer select-none transition"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>{String.fromCharCode(65 + c)}</span>
+                      {isSorted ? (
+                        sortAsc ? (
+                          <ChevronUp className="h-3 w-3 text-accent" />
+                        ) : (
+                          <ChevronDown className="h-3 w-3 text-accent" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="h-2.5 w-2.5 text-ink-faint group-hover:text-ink-muted opacity-0 group-hover:opacity-100 transition-opacity" />
+                      )}
+                    </div>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, r) => (
+            {filteredAndSortedData.map(({ row, originalIndex: r }) => (
               <tr key={r} className="group/row">
                 {row.map((cell, c) => {
                   const isSelected =
@@ -173,15 +254,15 @@ export function ArtifactSheetViewer({ artifact }: { artifact: Artifact }) {
                       key={c}
                       onClick={() => {
                         setSelectedCell([r, c]);
-                        if (editingCell && editingCell[0] !== r && editingCell[1] !== c) {
+                        if (editingCell && (editingCell[0] !== r || editingCell[1] !== c)) {
                           commitEdit();
                         }
                       }}
                       onDoubleClick={() => startEdit(r, c)}
-                      className={`border border-line px-3 py-1.5 ${
+                      className={`border border-line px-3 py-1.5 transition ${
                         isSelected
                           ? "ring-1 ring-inset ring-accent bg-accent/5"
-                          : "hover:bg-paper-sunken"
+                          : "hover:bg-paper-sunken/50"
                       }`}
                     >
                       {isEditing ? (
@@ -217,12 +298,19 @@ export function ArtifactSheetViewer({ artifact }: { artifact: Artifact }) {
       </div>
 
       {/* Status */}
-      <div className="shrink-0 border-t border-line px-3 py-1 text-[10.5px] text-ink-faint">
-        {rows.length} rows &times; {colCount} cols
-        {selectedCell && (
-          <span className="ml-2">
-            &middot; Cell {String.fromCharCode(65 + selectedCell[1])}{selectedCell[0] + 1}
-          </span>
+      <div className="shrink-0 border-t border-line px-3 py-1 text-[10.5px] text-ink-faint bg-paper-sunken/20 flex items-center justify-between">
+        <div>
+          {rows.length} rows &times; {colCount} cols
+          {selectedCell && (
+            <span className="ml-2 font-medium">
+              &middot; Cell {String.fromCharCode(65 + selectedCell[1])}{selectedCell[0] + 1}
+            </span>
+          )}
+        </div>
+        {filterQuery && (
+          <div className="text-[10px] text-accent font-medium">
+            Filtered: showing {filteredAndSortedData.length} of {rows.length} rows
+          </div>
         )}
       </div>
     </div>
