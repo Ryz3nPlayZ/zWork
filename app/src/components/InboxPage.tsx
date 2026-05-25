@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useApp } from "../lib/store";
-import { Inbox, CheckCircle2, Trash2, ArrowRight, Plus, Mail, Sparkles, Check, Loader2 } from "lucide-react";
+import { Inbox, CheckCircle2, Trash2, ArrowRight, Plus, Mail, Sparkles, Check, Loader2, MessageSquare, Copy } from "lucide-react";
 import { streamChat } from "../lib/api";
 
 export function InboxPage() {
@@ -37,6 +37,56 @@ export function InboxPage() {
   const [summarizing, setSummarizing] = useState(false);
   const [todos, setTodos] = useState<string[]>([]);
   const [importedCount, setImportedCount] = useState<number | null>(null);
+
+  // Slack Draft States
+  const [slackSituation, setSlackSituation] = useState("Ask for status update");
+  const [slackTo, setSlackTo] = useState("");
+  const [slackTopic, setSlackTopic] = useState("");
+  const [slackTone, setSlackTone] = useState("Friendly");
+  const [slackDraft, setSlackDraft] = useState("");
+  const [drafting, setDrafting] = useState(false);
+  const [copiedDraft, setCopiedDraft] = useState(false);
+
+  const handleCreateSlackDraft = async () => {
+    if (!slackTopic.trim() || drafting) return;
+    setDrafting(true);
+    setSlackDraft("");
+    setCopiedDraft(false);
+
+    let currentText = "";
+    try {
+      const prompt = `Draft a Slack message for the following situation:
+Situation: ${slackSituation}
+To: ${slackTo || "the team"}
+Context/Topic: ${slackTopic}
+Tone: ${slackTone}
+
+Rules:
+1. Make it suitable for Slack (friendly, clear, professional but casual, use simple formatting or bullets/emojis if appropriate).
+2. Do not wrap the output in quotes or include any extra conversational filler before/after. Return ONLY the drafted message content.`;
+
+      await streamChat(
+        { message: prompt },
+        (event) => {
+          if (event.type === "delta" && event.text) {
+            currentText += event.text;
+            setSlackDraft(currentText);
+          }
+        }
+      );
+    } catch (err) {
+      console.error(err);
+      setSlackDraft("Failed to generate Slack draft.");
+    } finally {
+      setDrafting(false);
+    }
+  };
+
+  const handleCopyDraft = () => {
+    navigator.clipboard.writeText(slackDraft);
+    setCopiedDraft(true);
+    setTimeout(() => setCopiedDraft(false), 2000);
+  };
 
   const handleSummarize = async () => {
     if (!emailText.trim() || summarizing) return;
@@ -186,6 +236,95 @@ export function InboxPage() {
             <div className="mt-4 p-4 rounded-xl border border-line/50 bg-paper-soft text-[13px] text-ink leading-relaxed">
               <div className="font-semibold text-[11px] uppercase tracking-wider text-ink-faint mb-2">Summary & Extracted Tasks</div>
               <div className="whitespace-pre-wrap">{summaryText}</div>
+            </div>
+          )}
+        </div>
+
+        {/* Slack Draft Creator Card */}
+        <div className="mb-8 rounded-2xl border border-line bg-paper-raised p-5 shadow-sm">
+          <div className="flex items-center gap-2 mb-3">
+            <MessageSquare className="h-4.5 w-4.5 text-amber-500" />
+            <h2 className="text-[14px] font-semibold text-ink">One-Click Slack Draft Creator</h2>
+          </div>
+          <p className="text-[12.5px] text-ink-muted mb-4">
+            Draft polished, effective Slack messages for common work situations instantly.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3.5">
+            <div>
+              <label className="block text-[11px] font-bold text-ink-muted uppercase tracking-wide mb-1.5">Situation</label>
+              <select
+                value={slackSituation}
+                onChange={(e) => setSlackSituation(e.target.value)}
+                className="w-full bg-paper border border-line text-[12.5px] px-3 py-2 rounded-xl focus:outline-none focus:border-accent text-ink font-medium"
+              >
+                <option value="Ask for status update">Ask for Status Update</option>
+                <option value="Report a delay politely">Report a Delay Politely</option>
+                <option value="Request feedback/review">Request Feedback/Review</option>
+                <option value="Polite follow-up on request">Polite Follow-up on Request</option>
+                <option value="Announce feature release">Announce Feature Release</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-ink-muted uppercase tracking-wide mb-1.5">To (Recipient)</label>
+              <input
+                type="text"
+                placeholder="e.g. Sarah, the product team..."
+                value={slackTo}
+                onChange={(e) => setSlackTo(e.target.value)}
+                className="w-full bg-paper border border-line text-[12.5px] px-3 py-1.5 rounded-xl focus:outline-none focus:border-accent text-ink"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-[1fr_150px] gap-4 mb-4">
+            <div>
+              <label className="block text-[11px] font-bold text-ink-muted uppercase tracking-wide mb-1.5">Context / Topic</label>
+              <input
+                type="text"
+                placeholder="e.g. status of checkout design, delay in API sync..."
+                value={slackTopic}
+                onChange={(e) => setSlackTopic(e.target.value)}
+                className="w-full bg-paper border border-line text-[12.5px] px-3 py-1.5 rounded-xl focus:outline-none focus:border-accent text-ink"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-bold text-ink-muted uppercase tracking-wide mb-1.5">Tone</label>
+              <select
+                value={slackTone}
+                onChange={(e) => setSlackTone(e.target.value)}
+                className="w-full bg-paper border border-line text-[12.5px] px-3 py-2 rounded-xl focus:outline-none focus:border-accent text-ink font-medium"
+              >
+                <option value="Friendly">Friendly</option>
+                <option value="Direct">Direct</option>
+                <option value="Professional">Professional</option>
+              </select>
+            </div>
+          </div>
+
+          <button
+            onClick={handleCreateSlackDraft}
+            disabled={drafting || !slackTopic.trim()}
+            className="press flex items-center justify-center gap-1.5 rounded-xl bg-ink px-4 py-2 text-[12.5px] font-medium text-paper hover:bg-ink/90 disabled:opacity-45"
+          >
+            {drafting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 text-amber-500" />}
+            <span>{drafting ? "Drafting..." : "Generate Slack Draft"}</span>
+          </button>
+
+          {slackDraft && (
+            <div className="mt-4 p-4 rounded-xl border border-line bg-paper-soft text-[13px] text-ink relative leading-relaxed group/draft">
+              <div className="font-semibold text-[11px] uppercase tracking-wider text-ink-faint mb-2">Slack Message Draft</div>
+              <div className="whitespace-pre-wrap pr-10">{slackDraft}</div>
+              
+              <button
+                onClick={handleCopyDraft}
+                className="absolute top-3.5 right-3.5 p-1.5 rounded-lg border border-line bg-paper hover:bg-paper-sunken text-ink-muted hover:text-ink transition"
+                title="Copy to clipboard"
+              >
+                {copiedDraft ? <Check className="h-4 w-4 text-emerald-500" /> : <Copy className="h-4 w-4" />}
+              </button>
             </div>
           )}
         </div>
