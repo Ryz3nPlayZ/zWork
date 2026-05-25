@@ -134,10 +134,35 @@ fn configure_linux_webview_env() {
         if std::env::var_os("WAYLAND_DISPLAY").is_some() {
             std::env::set_var("GDK_BACKEND", "x11");
         }
+
         // Force WebKitGTK to use system/host paths for its helper binaries
-        // (WebKitNetworkProcess / WebKitWebProcess) since they were removed
-        // from the AppImage bundle during the patching process.
-        std::env::remove_var("WEBKIT_EXEC_PATH");
+        // since they were removed from the AppImage bundle. We scan the host system
+        // for standard WebKitGTK directories containing WebKitNetworkProcess.
+        let candidates = [
+            "/usr/lib/webkit2gtk-4.1",
+            "/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1",
+            "/usr/lib/aarch64-linux-gnu/webkit2gtk-4.1",
+            "/usr/libexec/webkit2gtk-4.1",
+            "/usr/lib/webkit2gtk-4.0",
+            "/usr/lib/x86_64-linux-gnu/webkit2gtk-4.0",
+            "/usr/libexec/webkit2gtk-4.0",
+            "/usr/lib/webkitgtk-6.0",
+            "/usr/lib/x86_64-linux-gnu/webkitgtk-6.0",
+        ];
+
+        let mut found = false;
+        for path_str in &candidates {
+            let path = std::path::Path::new(path_str);
+            if path.join("WebKitNetworkProcess").exists() {
+                std::env::set_var("WEBKIT_EXEC_PATH", path_str);
+                found = true;
+                break;
+            }
+        }
+
+        if !found {
+            std::env::remove_var("WEBKIT_EXEC_PATH");
+        }
         return;
     }
 
