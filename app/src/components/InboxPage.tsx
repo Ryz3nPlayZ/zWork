@@ -3,6 +3,7 @@ import { useApp } from "../lib/store";
 import { Inbox, CheckCircle2, Trash2, ArrowRight, Plus, Mail, Sparkles, Check, Loader2, MessageSquare, Copy, Search, FileText, RefreshCw } from "lucide-react";
 import { streamChat, api } from "../lib/api";
 import { cn } from "../lib/cn";
+import { classifyFile } from "../lib/files";
 
 export function InboxPage() {
   const tasks = useApp((s) => s.tasks);
@@ -437,9 +438,22 @@ Rules:
                           <span className="text-[12.5px] font-semibold text-ink truncate max-w-[200px] sm:max-w-[400px]">
                             {res.file.name}
                           </span>
-                          <span className="text-[10px] text-ink-faint">
+                          <span className="text-[10px] text-ink-faint mr-1.5">
                             ({Math.round(res.file.size / 1024)} KB)
                           </span>
+                          {(() => {
+                            const classification = classifyFile(res.file.name, res.file.mime);
+                            return (
+                              <span className={cn(
+                                "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[9px] font-bold uppercase tracking-wider select-none",
+                                classification.colorClass,
+                                classification.bgClass
+                              )}>
+                                <span>{classification.icon}</span>
+                                <span>{classification.category}</span>
+                              </span>
+                            );
+                          })()}
                         </div>
                         <button
                           onClick={() => {
@@ -477,17 +491,30 @@ Rules:
                 </div>
               ) : (
                 <div className="flex flex-wrap gap-2">
-                  {uploads.map((f, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-center gap-2 rounded-xl border border-line bg-paper px-3 py-1.5 text-[12px] text-ink-muted"
-                      title={f.path}
-                    >
-                      <FileText className="h-3.5 w-3.5 text-ink-faint" />
-                      <span>{f.name}</span>
-                      <span className="text-[10px] text-ink-faint">({Math.round(f.size / 1024)} KB)</span>
-                    </div>
-                  ))}
+                  {uploads.map((f, idx) => {
+                    const classification = classifyFile(f.name, f.mime);
+                    return (
+                      <div
+                        key={idx}
+                        className="flex items-center gap-2.5 rounded-xl border border-line bg-paper px-3 py-1.5 text-[12px] text-ink-muted"
+                        title={f.path}
+                      >
+                        <FileText className="h-3.5 w-3.5 text-ink-faint" />
+                        <span className="font-medium">{f.name}</span>
+                        <span className="text-[10px] text-ink-faint mr-1">({Math.round(f.size / 1024)} KB)</span>
+                        
+                        {/* Category Tag Chip */}
+                        <span className={cn(
+                          "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[9px] font-bold uppercase tracking-wider select-none",
+                          classification.colorClass,
+                          classification.bgClass
+                        )}>
+                          <span>{classification.icon}</span>
+                          <span>{classification.category}</span>
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

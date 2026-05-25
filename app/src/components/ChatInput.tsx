@@ -38,6 +38,7 @@ import {
   type PromptTemplate,
 } from "../lib/templates";
 import { IconButton } from "./IconButton";
+import { classifyFile } from "../lib/files";
 import { ModelPicker } from "./ModelPicker";
 import { SlashMenu } from "./SlashMenu";
 
@@ -55,10 +56,25 @@ interface Props {
   placeholder?: string;
   autoFocus?: boolean;
   onSend?: (text: string) => void;
+  value?: string;
+  onChange?: (val: string) => void;
 }
 
-export function ChatInput({ placeholder = "Send a message", autoFocus, onSend }: Props) {
-  const [value, setValue] = useState("");
+export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, value: propValue, onChange: propOnChange }: Props) {
+  const [localValue, setLocalValue] = useState("");
+  const isControlled = propValue !== undefined;
+  const value = isControlled ? propValue : localValue;
+  const setValue = (val: string | ((prev: string) => string)) => {
+    if (isControlled) {
+      if (typeof val === "function") {
+        propOnChange?.(val(propValue ?? ""));
+      } else {
+        propOnChange?.(val);
+      }
+    } else {
+      setLocalValue(val);
+    }
+  };
   const [isRecording, setIsRecording] = useState(false);
   const recognitionRef = useRef<any>(null);
 
@@ -443,30 +459,44 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend }:
     >
       {attachments.length > 0 && (
         <div className="flex flex-wrap gap-2 px-4 pt-3">
-          {attachments.map((a) => (
-            <div
-              key={a.id}
-              className="flex items-center gap-2 rounded-full border border-line bg-paper px-2.5 py-1 text-[11.5px] text-ink-muted"
-            >
-              {a.kind === "image" ? (
-                <ImageIcon className="h-3.5 w-3.5" />
-              ) : (
-                <FileText className="h-3.5 w-3.5" />
-              )}
-              <span className="max-w-[180px] truncate">{a.name}</span>
-              <button
-                type="button"
-                onClick={() => {
-                  if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
-                  setAttachments((prev) => prev.filter((x) => x.id !== a.id));
-                }}
-                className="rounded-full p-0.5 text-ink-faint hover:bg-line/60 hover:text-ink"
-                aria-label={`Remove ${a.name}`}
+          {attachments.map((a) => {
+            const classification = classifyFile(a.name, a.mime);
+            return (
+              <div
+                key={a.id}
+                className="flex items-center gap-2 rounded-xl border border-line bg-paper px-3 py-1.5 text-[12px] text-ink-muted transition-all"
               >
-                <X className="h-3 w-3" />
-              </button>
-            </div>
-          ))}
+                {a.kind === "image" ? (
+                  <ImageIcon className="h-3.5 w-3.5 text-blue-500" />
+                ) : (
+                  <FileText className="h-3.5 w-3.5 text-ink-faint" />
+                )}
+                <span className="max-w-[180px] truncate font-medium">{a.name}</span>
+
+                {/* Category Tag Chip */}
+                <span className={cn(
+                  "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[9px] font-bold uppercase tracking-wider select-none",
+                  classification.colorClass,
+                  classification.bgClass
+                )}>
+                  <span>{classification.icon}</span>
+                  <span>{classification.category}</span>
+                </span>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+                    setAttachments((prev) => prev.filter((x) => x.id !== a.id));
+                  }}
+                  className="rounded-full p-0.5 text-ink-faint hover:bg-line/60 hover:text-ink ml-1"
+                  aria-label={`Remove ${a.name}`}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
       {slashOpen && slashState && (
