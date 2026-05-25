@@ -990,6 +990,7 @@ def put_user_md(body: ContentBody) -> dict:
 @app.post("/api/uploads")
 def upload_files(body: UploadBody) -> dict:
     uploads_dir = home_mod.workspace_uploads_dir()
+    uploads_dir.mkdir(parents=True, exist_ok=True)
     results: list[dict[str, Any]] = []
     for item in body.files:
         safe_name = Path(item.name or "upload").name
