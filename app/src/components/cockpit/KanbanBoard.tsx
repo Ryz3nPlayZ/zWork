@@ -22,26 +22,26 @@ const COLUMNS: Array<{
   {
     id: "inbox",
     title: "Inbox",
-    icon: <Inbox className="h-4 w-4 text-blue-400" />,
-    color: "border-blue-500/20 bg-blue-500/5",
+    icon: <Inbox className="h-4 w-4 text-ink-muted" />,
+    color: "border-line bg-paper-soft text-ink",
   },
   {
     id: "todo",
     title: "To Do",
-    icon: <ListTodo className="h-4 w-4 text-amber-400" />,
-    color: "border-amber-500/20 bg-amber-500/5",
+    icon: <ListTodo className="h-4 w-4 text-ink-muted" />,
+    color: "border-line bg-paper-soft text-ink-soft",
   },
   {
     id: "doing",
     title: "Doing",
-    icon: <Flame className="h-4 w-4 text-rose-500 animate-pulse" />,
-    color: "border-rose-500/20 bg-rose-500/5",
+    icon: <Flame className="h-4 w-4 text-ink animate-pulse" />,
+    color: "border-line-strong bg-paper-raised text-ink font-semibold",
   },
   {
     id: "done",
     title: "Done",
-    icon: <CheckCircle2 className="h-4 w-4 text-emerald-400" />,
-    color: "border-emerald-500/20 bg-emerald-500/5",
+    icon: <CheckCircle2 className="h-4 w-4 text-ink-faint" />,
+    color: "border-line-soft bg-paper-raised/40 opacity-75 text-ink-muted",
   },
 ];
 

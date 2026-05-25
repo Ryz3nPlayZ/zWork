@@ -24,8 +24,9 @@ const AnalyticsPage = lazy(() => import("./components/AnalyticsPage").then((m) =
 const PlanPage = lazy(() => import("./components/PlanPage").then((m) => ({ default: m.PlanPage })));
 const ConnectorsPage = lazy(() => import("./components/ConnectorsPage").then((m) => ({ default: m.ConnectorsPage })));
 const AdminPage = lazy(() => import("./components/AdminPage").then((m) => ({ default: m.AdminPage })));
+const CockpitPage = lazy(() => import("./components/cockpit/CockpitPage").then((m) => ({ default: m.CockpitPage })));
+const InboxPage = lazy(() => import("./components/InboxPage").then((m) => ({ default: m.InboxPage })));
 import { Logo } from "./components/Logo";
-import { CockpitPanel } from "./components/cockpit/CockpitPanel";
 
 export default function App() {
   const previewMode = getPreviewMode();
@@ -432,6 +433,14 @@ export default function App() {
             <Suspense fallback={panelFallback}>
               <ConnectorsPage />
             </Suspense>
+          ) : view === "cockpit" ? (
+            <Suspense fallback={panelFallback}>
+              <CockpitPage />
+            </Suspense>
+          ) : view === "inbox" ? (
+            <Suspense fallback={panelFallback}>
+              <InboxPage />
+            </Suspense>
           ) : view === "admin" ? (
             <Suspense fallback={panelFallback}>
               <AdminPage />
@@ -497,7 +506,6 @@ export default function App() {
         <Suspense fallback={null}>
           <SearchModal />
         </Suspense>
-        <CockpitPanel />
       </div>
     </div>
   );

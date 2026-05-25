@@ -72,7 +72,7 @@ export function DailyAgenda() {
         </button>
 
         <div className="flex items-center gap-1.5">
-          <Calendar className="h-4 w-4 text-amber-500" />
+          <Calendar className="h-4 w-4 text-ink-soft" />
           <span className="text-[12.5px] font-bold text-ink">{displayDateStr}</span>
         </div>
 
@@ -88,18 +88,18 @@ export function DailyAgenda() {
       <div className="flex gap-2">
         <div className="flex-1 p-2 rounded-xl border border-line bg-paper text-center">
           <div className="text-[10px] uppercase font-bold text-ink-muted">Agenda Events</div>
-          <div className="text-[18px] font-bold text-amber-500 mt-0.5">{todaysEvents.length}</div>
+          <div className="text-[18px] font-bold text-ink mt-0.5">{todaysEvents.length}</div>
         </div>
         <div className="flex-1 p-2 rounded-xl border border-line bg-paper text-center">
           <div className="text-[10px] uppercase font-bold text-ink-muted">Tasks Due</div>
-          <div className="text-[18px] font-bold text-blue-500 mt-0.5">{todaysTasks.length}</div>
+          <div className="text-[18px] font-bold text-ink-soft mt-0.5">{todaysTasks.length}</div>
         </div>
       </div>
 
       {/* Event Form Toggle */}
       <button
         onClick={() => setShowAddEvent(true)}
-        className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-dashed border-amber-500/30 text-amber-500/90 text-[11px] font-bold hover:bg-amber-500/5 transition-all duration-200"
+        className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl border border-dashed border-line text-ink-soft text-[11px] font-bold hover:bg-paper-sunken transition-all duration-200"
       >
         <PlusCircle className="h-4 w-4" />
         <span>Schedule Event</span>
