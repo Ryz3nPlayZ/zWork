@@ -845,51 +845,231 @@ function MemoryPanel() {
 
 // ---------------- Personalization ----------------
 
+interface PersonalizationData {
+  persona: string;
+  vibe: string;
+  verbosity: string;
+  customInstructions: string;
+}
+
+function parsePersonalization(md: string): PersonalizationData {
+  const data = {
+    persona: "Default Assistant",
+    vibe: "Professional & focused",
+    verbosity: "Balanced",
+    customInstructions: ""
+  };
+
+  if (!md) return data;
+
+  const personaMatch = md.match(/-\s+\*\*Persona\*\*:\s*([^\n]+)/i);
+  if (personaMatch) data.persona = personaMatch[1].trim();
+
+  const vibeMatch = md.match(/-\s+\*\*Vibe\*\*:\s*([^\n]+)/i);
+  if (vibeMatch) data.vibe = vibeMatch[1].trim();
+
+  const verbosityMatch = md.match(/-\s+\*\*Verbosity\*\*:\s*([^\n]+)/i);
+  if (verbosityMatch) data.verbosity = verbosityMatch[1].trim();
+
+  // Find where Custom Instructions start
+  const customIdx = md.indexOf("## Custom Instructions");
+  if (customIdx !== -1) {
+    data.customInstructions = md.substring(customIdx + "## Custom Instructions".length).trim();
+  } else {
+    // If not found, check How to talk to me
+    const talkIdx = md.indexOf("## How to talk to me");
+    if (talkIdx !== -1) {
+      data.customInstructions = md.substring(talkIdx + "## How to talk to me".length).trim();
+    } else {
+      if (!personaMatch && !vibeMatch && !verbosityMatch) {
+        data.customInstructions = md;
+      }
+    }
+  }
+
+  return data;
+}
+
+function buildPersonalization(data: PersonalizationData): string {
+  return `# zWork personalization
+
+## Preferences
+
+- **Persona**: ${data.persona}
+- **Vibe**: ${data.vibe}
+- **Verbosity**: ${data.verbosity}
+
+## Custom Instructions
+
+${data.customInstructions}`;
+}
+
 function PersonalizationPanel() {
   const userMdContent = useApp((s) => s.userMdContent);
   const refreshUserMd = useApp((s) => s.refreshUserMd);
   const saveUserMd = useApp((s) => s.saveUserMd);
-  const [draft, setDraft] = useState(userMdContent);
+
+  const [rawMode, setRawMode] = useState(false);
+  const [formData, setFormData] = useState<PersonalizationData>(() => parsePersonalization(userMdContent));
+  const [rawDraft, setRawDraft] = useState(userMdContent);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => { void refreshUserMd(); }, [refreshUserMd]);
-  useEffect(() => { setDraft(userMdContent); setDirty(false); }, [userMdContent]);
+
+  useEffect(() => {
+    setFormData(parsePersonalization(userMdContent));
+    setRawDraft(userMdContent);
+    setDirty(false);
+  }, [userMdContent]);
+
+  const handleFormChange = (key: keyof PersonalizationData, value: string) => {
+    setFormData(prev => {
+      const next = { ...prev, [key]: value };
+      setRawDraft(buildPersonalization(next));
+      setDirty(true);
+      return next;
+    });
+  };
+
+  const handleRawChange = (value: string) => {
+    setRawDraft(value);
+    setDirty(true);
+    setFormData(parsePersonalization(value));
+  };
 
   const save = async () => {
     setSaving(true);
-    try { await saveUserMd(draft); setDirty(false); }
-    finally { setSaving(false); }
+    try {
+      await saveUserMd(rawDraft);
+      setDirty(false);
+    } finally {
+      setSaving(false);
+    }
   };
+
+  const personas = [
+    { name: "Default Assistant", desc: "Standard helpful, friendly, and structured assistant." },
+    { name: "Executive Coach", desc: "Goal-oriented, focusing on execution, prioritization, and business metrics." },
+    { name: "Creative Writer", desc: "Expressive, engaging, specializing in copy, marketing, and design thinking." },
+    { name: "Brutal Critic", desc: "Direct, pointing out flaws, security vulnerabilities, and code bloat." },
+    { name: "Friendly Peer", desc: "Casual, collaborative, acts like a startup co-founder bouncing ideas." }
+  ];
 
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h2 className="text-[17px] font-semibold tracking-tight text-ink">Personalization</h2>
+        <h2 className="text-[17px] font-semibold tracking-tight text-ink">AI Persona & Personalization</h2>
         <p className="mt-1 text-[13px] leading-5 text-ink-muted">
-          Your <code className="font-mono text-[11.5px]">zwork.md</code> file. Generated from onboarding, editable anytime.
+          Customize how your zWork AI behaves, speaks, and aligns with your goals.
         </p>
       </div>
 
-      <section className="rounded-xl border border-line bg-paper-raised p-4">
-        <textarea
-          value={draft}
-          onChange={(e) => { setDraft(e.target.value); setDirty(true); }}
-          rows={16}
-          className="block w-full resize-y rounded-lg border border-line bg-paper px-3 py-2.5 font-mono text-[12.5px] leading-5 text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
-          placeholder="# zWork personalization"
-        />
-        <div className="mt-3 flex items-center justify-between">
-          <p className="text-[11.5px] text-ink-faint">
-            {dirty ? "Unsaved changes" : draft ? "Saved" : "No personalization file yet"}
+      <section className="rounded-xl border border-line bg-paper-raised p-4 flex flex-col gap-4">
+        {/* Toggle Mode */}
+        <div className="flex items-center justify-between border-b border-line pb-3">
+          <span className="text-[12.5px] font-semibold text-ink">Visual Persona Settings</span>
+          <button
+            type="button"
+            onClick={() => setRawMode(!rawMode)}
+            className="text-[11.5px] text-accent hover:underline font-medium"
+          >
+            {rawMode ? "Back to Visual Settings" : "Edit Raw zwork.md Profile"}
+          </button>
+        </div>
+
+        {rawMode ? (
+          <textarea
+            value={rawDraft}
+            onChange={(e) => handleRawChange(e.target.value)}
+            rows={16}
+            className="block w-full resize-y rounded-lg border border-line bg-paper px-3 py-2.5 font-mono text-[12.5px] leading-5 text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+            placeholder="# zWork personalization"
+          />
+        ) : (
+          <div className="space-y-4">
+            {/* Persona Grid */}
+            <div>
+              <label className="block text-[12px] font-bold text-ink mb-2">Select AI Persona</label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {personas.map((p) => {
+                  const isSelected = formData.persona === p.name;
+                  return (
+                    <div
+                      key={p.name}
+                      onClick={() => handleFormChange("persona", p.name)}
+                      className={`cursor-pointer rounded-lg border p-3 transition flex flex-col justify-between ${
+                        isSelected
+                          ? "border-amber-500/40 bg-amber-500/5 text-amber-500 shadow-sm"
+                          : "border-line bg-paper hover:bg-paper-sunken/40 text-ink-muted hover:text-ink"
+                      }`}
+                    >
+                      <span className={`text-[12.5px] font-semibold ${isSelected ? "text-amber-500" : "text-ink"}`}>
+                        {p.name}
+                      </span>
+                      <span className="text-[11px] text-ink-faint leading-normal mt-1">{p.desc}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Vibe */}
+              <div>
+                <label className="block text-[12px] font-bold text-ink mb-1.5">Vibe / Tone</label>
+                <select
+                  value={formData.vibe}
+                  onChange={(e) => handleFormChange("vibe", e.target.value)}
+                  className="w-full bg-paper border border-line text-[12px] px-3 py-2 rounded-lg focus:outline-none focus:border-accent text-ink"
+                >
+                  <option value="Professional & focused">Professional & focused</option>
+                  <option value="Casual & friendly">Casual & friendly</option>
+                  <option value="Technical & direct">Technical & direct</option>
+                  <option value="Creative & storytelling">Creative & storytelling</option>
+                </select>
+              </div>
+
+              {/* Verbosity */}
+              <div>
+                <label className="block text-[12px] font-bold text-ink mb-1.5">Verbosity</label>
+                <select
+                  value={formData.verbosity}
+                  onChange={(e) => handleFormChange("verbosity", e.target.value)}
+                  className="w-full bg-paper border border-line text-[12px] px-3 py-2 rounded-lg focus:outline-none focus:border-accent text-ink"
+                >
+                  <option value="Concise">Concise (Short and direct)</option>
+                  <option value="Balanced">Balanced (Medium length)</option>
+                  <option value="Thorough">Thorough (Detailed & explanatory)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Custom Instructions */}
+            <div>
+              <label className="block text-[12px] font-bold text-ink mb-1.5">Custom Persona Instructions</label>
+              <textarea
+                value={formData.customInstructions}
+                onChange={(e) => handleFormChange("customInstructions", e.target.value)}
+                rows={5}
+                className="block w-full resize-y rounded-lg border border-line bg-paper px-3 py-2 text-[12.5px] leading-5 text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none"
+                placeholder="e.g. Always keep in mind I am building a B2B SaaS startup. Use clean, visual metaphors..."
+              />
+            </div>
+          </div>
+        )}
+
+        <div className="mt-1 flex items-center justify-between border-t border-line pt-3">
+          <p className="text-[11.5px] text-ink-faint font-medium">
+            {dirty ? "Unsaved changes" : "Persona settings saved"}
           </p>
           <button
             type="button"
             disabled={!dirty || saving}
             onClick={save}
-            className="press ring-focus inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-paper hover:bg-ink-soft disabled:opacity-40 disabled:cursor-not-allowed"
+            className="press ring-focus inline-flex items-center gap-1.5 rounded-lg bg-ink px-4 py-2 text-[12px] font-bold text-paper hover:bg-ink-soft disabled:opacity-40 disabled:cursor-not-allowed transition"
           >
-            {saving ? "Saving…" : "Save"}
+            {saving ? "Saving…" : "Save Changes"}
           </button>
         </div>
       </section>
