@@ -432,7 +432,7 @@ function ModelsPanel({
                   const shape = cred === "anthropic" || cred === "claude_code" || cred === "zwork_router" ? "anthropic" : "openai";
                   setForm((f) => ({ ...f, credential: cred, shape }));
                 }}
-                className="block w-full rounded-lg border border-line bg-paper px-3 py-2 text-[12.5px] text-ink focus:border-line-strong focus:outline-none"
+                className="w-full bg-paper border border-line text-[13px] px-3.5 py-2 rounded-xl focus:outline-none focus:ring-1 focus:ring-ink focus:border-line-strong text-ink shadow-xs appearance-none pr-10 bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2020%2020%22%20fill%3D%22none%22%3E%3Cpath%20d%3D%22M7%209l3%203%203-3%22%20stroke%3D%22%23888888%22%20stroke-width%3D%221.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E')] bg-[length:18px_18px] bg-[right_10px_center] bg-no-repeat cursor-pointer transition-all duration-150"
                 >
                   {deprecatedCredentialLabel && (
                     <option value={form.credential}>
@@ -829,7 +829,7 @@ function GeneralPanel({
               setDefaultModel(e.target.value);
               await onSave({ default_model: e.target.value });
             }}
-            className="block w-full rounded-lg border border-line bg-paper px-3 py-2 text-[12.5px] text-ink focus:border-line-strong focus:outline-none"
+            className="w-full bg-paper border border-line text-[13px] px-3.5 py-2 rounded-xl focus:outline-none focus:ring-1 focus:ring-ink focus:border-line-strong text-ink shadow-xs appearance-none pr-10 bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2020%2020%22%20fill%3D%22none%22%3E%3Cpath%20d%3D%22M7%209l3%203%203-3%22%20stroke%3D%22%23888888%22%20stroke-width%3D%221.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E')] bg-[length:18px_18px] bg-[right_10px_center] bg-no-repeat cursor-pointer transition-all duration-150"
           >
             {models.map((m) => (
               <option key={m.id} value={m.id}>
@@ -1046,13 +1046,13 @@ function PersonalizationPanel() {
       <section className="rounded-xl border border-line bg-paper-raised p-4 flex flex-col gap-4">
         {/* Toggle Mode */}
         <div className="flex items-center justify-between border-b border-line pb-3">
-          <span className="text-[12.5px] font-semibold text-ink">Visual Persona Settings</span>
+          <span className="text-[12.5px] font-semibold text-ink">Personalization Settings</span>
           <button
             type="button"
             onClick={() => setRawMode(!rawMode)}
             className="text-[11.5px] text-accent hover:underline font-medium"
           >
-            {rawMode ? "Back to Visual Settings" : "Edit Raw zwork.md Profile"}
+            {rawMode ? "Back to Custom Vibe Settings" : "Edit Raw zwork.md Profile"}
           </button>
         </div>
 
@@ -1066,32 +1066,6 @@ function PersonalizationPanel() {
           />
         ) : (
           <div className="space-y-4">
-            {/* Persona Grid */}
-            <div>
-              <label className="block text-[12px] font-bold text-ink mb-2">Select AI Persona</label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {personas.map((p) => {
-                  const isSelected = formData.persona === p.name;
-                  return (
-                    <div
-                      key={p.name}
-                      onClick={() => handleFormChange("persona", p.name)}
-                      className={`cursor-pointer rounded-lg border p-3 transition flex flex-col justify-between ${
-                        isSelected
-                          ? "border-amber-500/40 bg-amber-500/5 text-amber-500 shadow-sm"
-                          : "border-line bg-paper hover:bg-paper-sunken/40 text-ink-muted hover:text-ink"
-                      }`}
-                    >
-                      <span className={`text-[12.5px] font-semibold ${isSelected ? "text-amber-500" : "text-ink"}`}>
-                        {p.name}
-                      </span>
-                      <span className="text-[11px] text-ink-faint leading-normal mt-1">{p.desc}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Vibe */}
               <div>
@@ -1099,7 +1073,7 @@ function PersonalizationPanel() {
                 <select
                   value={formData.vibe}
                   onChange={(e) => handleFormChange("vibe", e.target.value)}
-                  className="w-full bg-paper border border-line text-[12px] px-3 py-2 rounded-lg focus:outline-none focus:border-accent text-ink"
+                  className="w-full bg-paper border border-line text-[13px] px-3.5 py-2 rounded-xl focus:outline-none focus:ring-1 focus:ring-ink focus:border-line-strong text-ink shadow-xs appearance-none pr-10 bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2020%2020%22%20fill%3D%22none%22%3E%3Cpath%20d%3D%22M7%209l3%203%203-3%22%20stroke%3D%22%23888888%22%20stroke-width%3D%221.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E')] bg-[length:18px_18px] bg-[right_10px_center] bg-no-repeat cursor-pointer transition-all duration-150"
                 >
                   <option value="Professional & focused">Professional & focused</option>
                   <option value="Casual & friendly">Casual & friendly</option>
@@ -1114,7 +1088,7 @@ function PersonalizationPanel() {
                 <select
                   value={formData.verbosity}
                   onChange={(e) => handleFormChange("verbosity", e.target.value)}
-                  className="w-full bg-paper border border-line text-[12px] px-3 py-2 rounded-lg focus:outline-none focus:border-accent text-ink"
+                  className="w-full bg-paper border border-line text-[13px] px-3.5 py-2 rounded-xl focus:outline-none focus:ring-1 focus:ring-ink focus:border-line-strong text-ink shadow-xs appearance-none pr-10 bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2020%2020%22%20fill%3D%22none%22%3E%3Cpath%20d%3D%22M7%209l3%203%203-3%22%20stroke%3D%22%23888888%22%20stroke-width%3D%221.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E')] bg-[length:18px_18px] bg-[right_10px_center] bg-no-repeat cursor-pointer transition-all duration-150"
                 >
                   <option value="Concise">Concise (Short and direct)</option>
                   <option value="Balanced">Balanced (Medium length)</option>
