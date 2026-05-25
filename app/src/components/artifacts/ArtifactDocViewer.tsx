@@ -384,7 +384,10 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
                     setHoveredBlockId(null);
                     if (!isMenuOpen) setBlockMenuId(null);
                   }}
-                  className="group/block relative flex items-start gap-2 py-0.5 rounded-lg"
+                  className={cn(
+                    "group/block relative flex items-start gap-2 py-0.5 rounded-lg border-l-2 transition-all",
+                    isActive ? "border-accent pl-1 bg-paper-soft" : "border-transparent"
+                  )}
                 >
                   {/* Hover Actions / Drag handle */}
                   <div

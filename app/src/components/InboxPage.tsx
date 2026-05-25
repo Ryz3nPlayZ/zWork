@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useApp } from "../lib/store";
 import { Inbox, CheckCircle2, Trash2, ArrowRight, Plus } from "lucide-react";
-import { cn } from "../lib/cn";
 
 export function InboxPage() {
   const tasks = useApp((s) => s.tasks);

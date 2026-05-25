@@ -10,7 +10,6 @@ import { isMacOS, needsLightweightRendering } from "../lib/platform";
 import { api, type OnboardingAnswer, type OnboardingCredential } from "../lib/api";
 import LightRays from "./LightRays";
 
-const ZWORK_ROUTER_MODEL_ID = "zwork-flash";
 const ZWORK_ROUTER_TARGET_MODEL_ID = "zwork-flash";
 
 /* ------------------------------------------------------------------ *

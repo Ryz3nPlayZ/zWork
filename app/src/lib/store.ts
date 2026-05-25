@@ -24,10 +24,7 @@ const LEGACY_MANAGED_MODEL_IDS = new Set([
   "zwork-managed-proxy",
   "minimax-m2.7:cloud",
 ]);
-const ROUTER_MODEL_ID = "zwork-flash";
-const ROUTER_MODEL_NAME = "zWork Flash";
 const ROUTER_BASE_URL = "https://api.tryzwork.app/api";
-const ROUTER_TARGET_MODEL_ID = "deepseek-v4-flash";
 const ONBOARDING_DONE_KEY = "zwork:onboarding-completed";
 
 function hasCompletedOnboardingLocally(): boolean {

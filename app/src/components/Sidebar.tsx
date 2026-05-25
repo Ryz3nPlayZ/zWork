@@ -25,7 +25,6 @@ import { IconButton } from "./IconButton";
 import { useApp, bucketFor, type ChatBucket } from "../lib/store";
 
 export function Sidebar() {
-  const SHOW_PROJECTS = false;
   const macOS = isMacOS();
   const open = useApp((s) => s.sidebarOpen);
   const toggle = useApp((s) => s.toggleSidebar);
@@ -38,8 +37,6 @@ export function Sidebar() {
   const setView = useApp((s) => s.setView);
   const setSearchOpen = useApp((s) => s.setSearchOpen);
   const setActiveProject = useApp((s) => s.setActiveProject);
-  const cockpitOpen = useApp((s) => s.cockpitOpen);
-  const setCockpitOpen = useApp((s) => s.setCockpitOpen);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   const grouped = useMemo(() => {
