@@ -89,7 +89,7 @@ export function AnalyticsPage() {
 
   return (
     <div className="flex h-full min-w-0 flex-1 overflow-y-auto bg-paper">
-      <div className="mx-auto w-full max-w-[720px] px-6 py-20">
+      <div className="mx-auto w-full max-w-[720px] px-6 pt-24 pb-20">
         {/* Header */}
         <header className="mb-14 text-center flex flex-col items-center">
           <div className="flex items-center gap-3 justify-center">

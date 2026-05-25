@@ -89,7 +89,7 @@ export function ConnectorsPage() {
 
   return (
     <div className="flex h-full min-w-0 flex-1 overflow-y-auto bg-paper">
-      <div className="mx-auto w-full max-w-[860px] px-6 py-20">
+      <div className="mx-auto w-full max-w-[860px] px-6 pt-24 pb-20">
         {/* Header */}
         <div className="mb-14 text-center flex flex-col items-center gap-4 relative">
           <div className="absolute right-0 top-0">
@@ -132,7 +132,7 @@ export function ConnectorsPage() {
                   <div
                     className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl overflow-hidden"
                     style={{
-                      backgroundColor: app.id === "notion" ? "rgba(var(--ink), 0.08)" : hasLogo ? `${appColor}14` : "rgb(var(--paper-sunken))",
+                    backgroundColor: app.id === "notion" ? "rgb(var(--ink) / 0.08)" : hasLogo ? `${appColor}14` : "rgb(var(--paper-sunken))",
                       color: hasLogo ? appColor : "rgb(var(--ink-muted))",
                     }}
                   >
@@ -197,7 +197,7 @@ export function ConnectorsPage() {
                 <div
                   className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl overflow-hidden"
                   style={{
-                    backgroundColor: expandedAppData.id === "notion" ? "rgba(var(--ink), 0.08)" : hasBrandLogo(expandedAppData.id)
+                    backgroundColor: expandedAppData.id === "notion" ? "rgb(var(--ink) / 0.08)" : hasBrandLogo(expandedAppData.id)
                       ? `${expandedAppColor}14`
                       : "rgb(var(--paper-sunken))",
                     color: hasBrandLogo(expandedAppData.id)

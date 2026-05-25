@@ -39,6 +39,7 @@ const TIERS: PricingTier[] = [
       "100 requests per week",
       "Standard processing",
       "Local backend only",
+      "Single agent worker only",
     ],
     cta: "Current plan",
   },
@@ -53,6 +54,7 @@ const TIERS: PricingTier[] = [
       "200 root requests per 5 hours",
       "2,000 requests per week",
       "Hosted AI gateway access",
+      "Up to 5 multi-agent workers",
       "Advanced analytics",
       "Priority support",
     ],
@@ -69,6 +71,7 @@ const TIERS: PricingTier[] = [
     features: [
       "1,000 root requests per 5 hours",
       "10,000 requests per week",
+      "Up to 10 multi-agent workers",
       "Everything in Pro",
       "Priority processing",
       "Dedicated support",
@@ -137,7 +140,7 @@ export function PlanPage({ cloudUser }: { cloudUser: CloudUser }) {
 
   return (
     <div className="flex h-full min-w-0 flex-1 overflow-y-auto bg-paper">
-      <div className="mx-auto w-full max-w-[1060px] px-8 py-20">
+      <div className="mx-auto w-full max-w-[1060px] px-8 pt-24 pb-20">
         {/* Header */}
         <header className="mb-14 text-center">
           <h1 className="font-serif text-[42px] font-bold tracking-tight text-ink">Pricing</h1>

@@ -7,15 +7,13 @@ interface LogoProps {
   size?: number;
 }
 
-/* Gmail — official 2020 brand mark (multi-color envelope) */
+/* Gmail — clean official layout */
 export function GmailLogo({ className, size = 24 }: LogoProps) {
   return (
-    <svg width={size} height={size} viewBox="44 32 104 88" className={className} aria-hidden="true">
-      <path fill="#4285F4" d="M58 108 h14 V74 L52 59 v43 c0 3.32 2.69 6 6 6"/>
-      <path fill="#34A853" d="M120 108 h14 c3.32 0 6-2.69 6-6 V59 l-20 15"/>
-      <path fill="#FBBC04" d="M120 48 v26 l20-15 v-8 c0-7.42-8.47-11.65-14.4-7.2"/>
-      <path fill="#EA4335" d="M72 74 V48 l24 18 24-18 v26 L96 92"/>
-      <path fill="#C5221F" d="M52 51 v8 l20 15 V48 l-5.6-4.2 c-5.94-4.45-14.4-.22-14.4 7.2"/>
+    <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden="true">
+      <path fill="#EA4335" d="M20 4H4C2.9 4 2 4.9 2 6v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2z" />
+      <path fill="#FFF" d="M20 6l-8 5-8-5v12h16V6z" />
+      <path fill="#EA4335" d="M4 6v12h3V8.5l5 3.5 5-3.5V18h3V6l-8 5.5L4 6z" />
     </svg>
   );
 }
@@ -23,24 +21,12 @@ export function GmailLogo({ className, size = 24 }: LogoProps) {
 /* Google Calendar — high-fidelity official brand design */
 export function GoogleCalendarLogo({ className, size = 24 }: LogoProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 192 192" className={className} aria-hidden="true">
-      <rect x="24" y="24" width="144" height="144" rx="28" fill="#ffffff" stroke="#4285F4" strokeWidth="12" />
-      <path d="M24 52 c0-15.46 12.54-28 28-28 h88 c15.46 0 28 12.54 28 28 v16 h-144 z" fill="#4285F4" />
-      <text x="96" y="132" fill="#4285F4" fontSize="72" fontWeight="bold" fontFamily="sans-serif" textAnchor="middle">31</text>
-    </svg>
-  );
-}
-
-/* Slack — official brand mark (4 lozenges) */
-export function SlackLogo({ className, size = 24 }: LogoProps) {
-  return (
     <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden="true">
-      <g fill="none">
-        <path d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.13v2.52Z" fill="#36C5F0"/>
-        <path d="M9 6.5a2 2 0 1 1 2-2v2H9ZM9 7.5a2 2 0 0 1 2 2 2 2 0 0 1-2 2H4a2 2 0 0 1-2-2 2 2 0 0 1 2-2h5Z" fill="#2EB67D"/>
-        <path d="M17.5 9a2 2 0 0 1 2-2 2 2 0 0 1 2 2 2 2 0 0 1-2 2h-2V9ZM16.5 9a2 2 0 0 1-2 2 2 2 0 0 1-2-2V4a2 2 0 0 1 2-2 2 2 0 0 1 2 2v5Z" fill="#ECB22E"/>
-        <path d="M15 17.5a2 2 0 1 1-2 2v-2h2ZM15 16.5a2 2 0 0 1-2-2 2 2 0 0 1 2-2h5a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-5Z" fill="#E01E5A"/>
-      </g>
+      <path fill="#4285F4" d="M19.5 3h-3V1.5c0-.28-.22-.5-.5-.5h-2c-.28 0-.5.22-.5.5V3H10.5V1.5c0-.28-.22-.5-.5-.5h-2c-.28 0-.5.22-.5.5V3h-3C3.67 3 3 3.67 3 4.5v15c0 .83.67 1.5 1.5 1.5h15c.83 0 1.5-.67 1.5-1.5v-15c0-.83-.67-1.5-1.5-1.5z" />
+      <path fill="#FFF" d="M19.5 19.5h-15V7.5h15v12z" />
+      <text x="12" y="16.5" fill="#4285F4" fontSize="9" fontWeight="bold" fontFamily="sans-serif" textAnchor="middle">31</text>
+      <circle cx="6.5" cy="5" r="1" fill="#FFF" />
+      <circle cx="17.5" cy="5" r="1" fill="#FFF" />
     </svg>
   );
 }
@@ -74,33 +60,6 @@ export function GitHubLogo({ className, size = 24 }: LogoProps) {
   );
 }
 
-/* Jira — official simple-icons "jira" */
-export function JiraLogo({ className, size = 24 }: LogoProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden="true">
-      <path fill="#0052CC" d="M11.571 11.513H0a5.218 5.218 0 0 0 5.232 5.215h2.13v2.057A5.215 5.215 0 0 0 12.575 24V12.518a1.005 1.005 0 0 0-1.005-1.005zm5.723-5.756H5.736a5.215 5.215 0 0 0 5.215 5.214h2.129v2.058a5.218 5.218 0 0 0 5.215 5.214V6.758a1.001 1.001 0 0 0-1.001-1.001zM23.013 0H11.455a5.215 5.215 0 0 0 5.215 5.215h2.129v2.057A5.215 5.215 0 0 0 24 12.483V1.005A1.001 1.001 0 0 0 23.013 0Z"/>
-    </svg>
-  );
-}
-
-/* Trello — official simple-icons "trello" */
-export function TrelloLogo({ className, size = 24 }: LogoProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden="true">
-      <path fill="#0079BF" d="M21.147 0H2.853A2.86 2.86 0 0 0 0 2.853v18.294A2.86 2.86 0 0 0 2.853 24h18.294A2.86 2.86 0 0 0 24 21.147V2.853A2.86 2.86 0 0 0 21.147 0zM10.34 17.287a.953.953 0 0 1-.953.953h-4a.954.954 0 0 1-.954-.953V5.38a.953.953 0 0 1 .954-.953h4a.954.954 0 0 1 .953.953zm9.233-5.467a.944.944 0 0 1-.953.947h-4a.947.947 0 0 1-.953-.947V5.38a.953.953 0 0 1 .953-.953h4a.954.954 0 0 1 .953.953z"/>
-    </svg>
-  );
-}
-
-/* Todoist — official simple-icons "todoist" */
-export function TodoistLogo({ className, size = 24 }: LogoProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden="true">
-      <path fill="#E44332" d="M21 0H3C1.35 0 0 1.35 0 3v3.858s3.854 2.24 4.098 2.38c.31.18.694.177 1.004 0 .26-.147 8.02-4.608 8.136-4.675.279-.161.58-.107.748-.01.164.097.606.348.84.48.232.134.221.502.013.622l-9.712 5.59c-.346.2-.69.204-1.048.002C3.478 10.907.998 9.463 0 8.882v2.02l4.098 2.38c.31.18.694.177 1.004 0 .26-.147 8.02-4.609 8.136-4.676.279-.16.58-.106.748-.008.164.096.606.347.84.48.232.133.221.5.013.62-.208.121-9.288 5.346-9.712 5.59-.346.2-.69.205-1.048.002C3.478 14.951.998 13.506 0 12.926v2.02l4.098 2.38c.31.18.694.177 1.004 0 .26-.147 8.02-4.609 8.136-4.676.279-.16.58-.106.748-.009.164.097.606.348.84.48.232.133.221.502.013.622l-9.712 5.59c-.346.199-.69.204-1.048.001C3.478 18.994.998 17.55 0 16.97V21c0 1.65 1.35 3 3 3h18c1.65 0 3-1.35 3-3V3c0-1.65-1.35-3-3-3z"/>
-    </svg>
-  );
-}
-
 /* Linear — official simple-icons "linear" */
 export function LinearLogo({ className, size = 24 }: LogoProps) {
   return (
@@ -110,41 +69,13 @@ export function LinearLogo({ className, size = 24 }: LogoProps) {
   );
 }
 
-/* Asana — official simple-icons "asana" */
-export function AsanaLogo({ className, size = 24 }: LogoProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden="true">
-      <g fill="none">
-        <circle cx="12" cy="6.128" r="5.22" fill="#F06A6A"/>
-        <circle cx="5.22" cy="12.653" r="5.22" fill="#F06A6A"/>
-        <circle cx="18.78" cy="12.653" r="5.22" fill="#F06A6A"/>
-      </g>
-    </svg>
-  );
-}
-
-/* HubSpot — official simple-icons "hubspot" */
-export function HubSpotLogo({ className, size = 24 }: LogoProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" className={className} aria-hidden="true">
-      <path fill="#FF7A59" d="M18.164 7.93V5.084a2.198 2.198 0 0 0 1.267-1.978v-.067A2.2 2.2 0 0 0 17.238.845h-.067a2.2 2.2 0 0 0-2.193 2.193v.067a2.196 2.196 0 0 0 1.252 1.973l.013.006v2.852a6.22 6.22 0 0 0-2.969 1.31l.012-.01-7.828-6.095A2.497 2.497 0 1 0 4.3 4.656l-.012.006 7.697 5.991a6.176 6.176 0 0 0-1.038 3.446c0 1.343.425 2.588 1.147 3.607l-.013-.02-2.342 2.343a1.968 1.968 0 0 0-.58-.095h-.002a2.033 2.033 0 1 0 2.033 2.033 1.978 1.978 0 0 0-.1-.595l.005.014 2.317-2.317a6.247 6.247 0 1 0 4.782-11.134l-.036-.005zm-.964 9.378a3.206 3.206 0 1 1 3.215-3.207v.002a3.206 3.206 0 0 1-3.207 3.207z"/>
-    </svg>
-  );
-}
-
 const LOGO_MAP: Record<string, React.FC<LogoProps>> = {
   gmail: GmailLogo,
   googlecalendar: GoogleCalendarLogo,
-  slack: SlackLogo,
   notion: NotionLogo,
   googledrive: GoogleDriveLogo,
   github: GitHubLogo,
-  jira: JiraLogo,
-  trello: TrelloLogo,
-  todoist: TodoistLogo,
   linear: LinearLogo,
-  asana: AsanaLogo,
-  hubspot: HubSpotLogo,
 };
 
 export function AppBrandLogo({ appId, className, size = 24 }: { appId: string } & LogoProps) {
