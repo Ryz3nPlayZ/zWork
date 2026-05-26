@@ -2,6 +2,26 @@
 
 *This document focuses on implementation priorities and technical milestones. For product direction, see [ROADMAP.md](ROADMAP.md).*
 
+---
+
+## Shipped: Academic Research Pipeline (Q2 2026)
+
+**Goal:** Enable end-to-end paper generation — from idea to finished draft — using AutoResearchClaw-inspired tooling.
+
+### Research Tools (Completed)
+- [x] `detect_hardware` — profile local GPU/CPU, VRAM, OS, Python version
+- [x] `check_novelty` — semantic search via Semantic Scholar and arXiv APIs
+- [x] `write_research_paper` — multi-stage section drafting (abstract → intro → methods → results → conclusion)
+- [x] `review_paper` — quality audit for structure, citations, and completeness
+- [x] `_diagnose_command_failure` — self-healing diagnostics in `run_command`
+
+### Success criteria
+- Agent can produce a full draft paper from a single research idea prompt
+- Novelty check surfaces relevant prior work before drafting begins
+- Review tool provides actionable feedback on draft quality
+
+---
+
 ## Q2 2026: Artifact Foundation
 
 **Goal:** Establish the storage and data model for persistent work artifacts.
@@ -53,6 +73,7 @@
 **Goal:** Improve agent capabilities for artifact creation.
 
 ### Tool Expansion
+- [x] Self-healing command failure diagnostics (`_diagnose_command_failure`)
 - [ ] Web scraping with content extraction
 - [ ] Email API integration (IMAP/SMTP)
 - [ ] Calendar API integration
