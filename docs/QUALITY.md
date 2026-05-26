@@ -53,6 +53,29 @@ The code path is improved, but release quality still depends on:
 
 `cloud-src/` is the current deployment source of truth. `cloud/` should either be retired or kept synchronized to avoid future drift and false security findings.
 
+## 4. Test coverage gaps addressed (May 2026)
+
+The following test files were added to expand coverage:
+
+| File | What it covers |
+|------|----------------|
+| `tests/test_utils.py` | `now_ms`, `uid`, `new_id` |
+| `tests/test_runtime.py` | `RunContext`, timeouts, tool budget |
+| `tests/test_home.py` | Path helpers, `is_safe_id` |
+| `tests/test_runlog.py` | JSONL append, sanitize, path |
+| `tests/test_detect.py` | Integration detection, credential env vars |
+| `tests/test_chatstore.py` | Chat CRUD, message append/truncate |
+| `tests/test_taskstore.py` | Task CRUD, complete, reopen |
+| `tests/test_projects.py` | Project CRUD |
+| `tests/test_compaction.py` | Token estimation, compaction decision |
+| `tests/test_academic.py` | Research helpers: format, word count, citations |
+| `tests/test_skills.py` | Skill indexing and metadata parsing |
+| `tests/test_secretstore.py` | Encrypted secret set/get/delete |
+| `tests/test_version.py` | Package version string format |
+| `tests/test_imports.py` | Module import smoke tests |
+| `tests/test_env_loader.py` | .env file loading |
+| `tests/conftest.py` | Shared `zwork_home` and `clean_env` fixtures |
+
 ## Minimum release gate
 
 Before calling a build user-test-ready:
@@ -60,8 +83,9 @@ Before calling a build user-test-ready:
 1. `npm run build` passes in `app/`
 2. `cargo check` passes in `app/src-tauri`
 3. `cargo check` passes in `cloud-src/api`
-4. Python unit tests pass, including `tests/test_security.py`
-5. live auth start endpoint returns `200`
-6. unauthenticated session endpoint returns `401`
-7. public db host returns `403`
-8. updater artifacts publish successfully for the tagged release
+4. Python unit tests pass: `.venv/bin/pytest`
+5. Security regression tests pass: `.venv/bin/pytest tests/test_security.py`
+6. live auth start endpoint returns `200`
+7. unauthenticated session endpoint returns `401`
+8. public db host returns `403`
+9. updater artifacts publish successfully for the tagged release
