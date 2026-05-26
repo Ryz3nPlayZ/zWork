@@ -23,7 +23,7 @@ zWork has two backend layers:
 | `sidecar/agent/chatstore.py` | chat persistence and retrieval |
 | `sidecar/agent/projects.py` | project-oriented persistence |
 | `sidecar/agent/skills.py` | skill discovery/indexing |
-| `sidecar/agent/tools.py` | tool definitions exposed to the model loop |
+| `sidecar/agent/tools.py` | tool definitions exposed to the model loop; includes academic research pipeline tools (see [RESEARCH_TOOLS.md](RESEARCH_TOOLS.md)) |
 
 ## Core orchestration
 
@@ -116,3 +116,7 @@ That means any cloud change with auth, rate limiting, or gateway logic should be
 - live endpoint probes
 - one real desktop sign-in test
 - one managed-mode end-to-end run
+
+## See also
+
+- [RESEARCH_TOOLS.md](RESEARCH_TOOLS.md) — reference documentation for `detect_hardware`, `check_novelty`, `write_research_paper`, and `review_paper`

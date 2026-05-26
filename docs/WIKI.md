@@ -25,6 +25,10 @@ This is the quickest entry point for understanding the codebase, product directi
 - [Design System](DESIGN.md) — Visual system and design direction
 - [Harness Notes](HARNESS.md) — Agent harness architecture and implementation notes
 
+## Research & agent capabilities
+
+- [Research Tools Reference](RESEARCH_TOOLS.md) — `detect_hardware`, `check_novelty`, `write_research_paper`, `review_paper`
+
 ## Operational notes
 
 - [Quality and security review](QUALITY.md) — Testing and security practices
