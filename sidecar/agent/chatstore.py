@@ -35,10 +35,12 @@ class Chat:
 
 
 def _path(chat_id: str):
+    """Return the JSONL storage path for the given *chat_id*."""
     return chats_dir() / f"{chat_id}.json"
 
 
 def create(title: str = "New chat", model: str = "", project_id: str = "") -> Chat:
+    """Create and persist a new chat record, returning its ID."""
     now = now_ms()
     c = Chat(
         id=uid(),
@@ -53,6 +55,7 @@ def create(title: str = "New chat", model: str = "", project_id: str = "") -> Ch
 
 
 def list_all() -> list[dict[str, Any]]:
+    """Return all stored chat records ordered by creation time descending."""
     out = []
     for p in chats_dir().glob("*.json"):
         try:
@@ -75,6 +78,7 @@ def list_all() -> list[dict[str, Any]]:
 
 
 def get(chat_id: str) -> Chat | None:
+    """Load and return the chat record for *chat_id*, or None if not found."""
     p = _path(chat_id)
     if not p.exists():
         return None
@@ -94,6 +98,7 @@ def get(chat_id: str) -> Chat | None:
 
 
 def save(chat: Chat) -> None:
+    """Persist the settings dict to disk as JSON."""
     p = _path(chat.id)
     data = json.dumps(asdict(chat), indent=2)
     fd, tmp = tempfile.mkstemp(dir=p.parent, suffix=".tmp")
@@ -113,6 +118,7 @@ def save(chat: Chat) -> None:
 
 
 def delete(chat_id: str) -> bool:
+    """Remove the JSONL file for *chat_id* if it exists."""
     p = _path(chat_id)
     if p.exists():
         p.unlink()
@@ -131,6 +137,7 @@ def rename(chat_id: str, title: str) -> Chat | None:
 
 
 def append_message(chat_id: str, role: str, content: str) -> ChatMessage | None:
+    """Append a message dict to the chat's message log."""
     c = get(chat_id)
     if not c:
         return None
