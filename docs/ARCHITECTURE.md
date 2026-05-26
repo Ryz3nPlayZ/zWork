@@ -12,7 +12,7 @@ flowchart LR
     User[User]
     App[Tauri desktop app<br/>React + TypeScript]
     Sidecar[Local sidecar<br/>FastAPI + Python]
-    LocalTools[Local tools<br/>files / commands / browser]
+    LocalTools[Local tools<br/>files / commands / browser / research]
     CloudAPI[Cloud API<br/>Axum + Rust]
     BetterAuth[Better Auth<br/>Google OAuth + sessions]
     Postgres[(Postgres)]
@@ -71,6 +71,7 @@ In managed mode:
 | Desktop UI | `app/src` | screens, settings, analytics, updater UX |
 | Tauri shell | `app/src-tauri` | window shell, packaged backend, native auth helpers |
 | Local agent backend | `sidecar` | chat execution, settings, skills, local tool access |
+| Research pipeline | `sidecar/agent/tools.py` | academic research tools: novelty check, hardware detection, paper drafting |
 | Cloud deployment source | `cloud-src` | auth, API, schema, reverse proxy, compose config |
 | Tests | `tests` | local backend and security regression coverage |
 
@@ -98,9 +99,19 @@ In managed mode:
 3. Native update downloads and installs the signed platform artifact.
 4. Manual GitHub fallback is only used when native install is unavailable.
 
+## 4. Academic research pipeline
+
+1. User prompts the agent with a research idea.
+2. `detect_hardware` profiles the local environment (GPU/CPU, VRAM, OS).
+3. `check_novelty` runs a semantic search over Semantic Scholar and arXiv to validate the idea against existing literature.
+4. The agent drafts an outline and iterates through sections using `write_research_paper`.
+5. `review_paper` audits the full draft for quality, citation gaps, and structural completeness.
+6. The final paper is saved as a local artifact (Markdown or LaTeX).
+
 ## Design constraints
 
 - The app must stay useful in local mode.
 - Account identity is still required for telemetry, analytics, and plan logic.
 - Rate limiting should apply to **user-initiated root requests**, not every internal model/tool continuation.
 - Release correctness matters as much as product capability; a broken updater poisons the whole loop.
+- Research tools must degrade gracefully when external APIs (Semantic Scholar, arXiv) are unavailable.
