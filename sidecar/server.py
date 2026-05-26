@@ -844,6 +844,7 @@ def provider_status() -> dict:
 
 @app.get("/api/settings")
 def get_settings() -> dict:
+    """Return the current agent settings as a JSON response."""
     return settings_mod.public_view(settings_mod.load())
 
 
@@ -1012,6 +1013,7 @@ async def export_docx(body: dict):
 
 @app.get("/api/custom-models")
 def list_custom_models() -> dict:
+    """Return the list of user-defined custom model configurations."""
     return {"custom_models": settings_mod.load().custom_models}
 
 
@@ -1171,17 +1173,20 @@ def upload_files(body: UploadBody) -> dict:
 
 @app.get("/api/projects")
 def list_projects() -> dict:
+    """Return all project records ordered by creation time descending."""
     return {"projects": projects_mod.list_all()}
 
 
 @app.post("/api/projects")
 def create_project(body: ProjectCreate) -> dict:
+    """Create a new project record and return its ID."""
     p = projects_mod.create(name=body.name, description=body.description)
     return {"project": asdict(p)}
 
 
 @app.get("/api/projects/{project_id}")
 def get_project(project_id: str) -> dict:
+    """Load and return the project record for *project_id*, or None."""
     if not home_mod.is_safe_id(project_id):
         raise HTTPException(400, "invalid project_id")
     p = projects_mod.get(project_id)
@@ -1192,6 +1197,7 @@ def get_project(project_id: str) -> dict:
 
 @app.patch("/api/projects/{project_id}")
 def update_project(project_id: str, body: ProjectUpdate) -> dict:
+    """Merge *fields* into the stored project record."""
     if not home_mod.is_safe_id(project_id):
         raise HTTPException(400, "invalid project_id")
     kwargs = {}
@@ -1211,6 +1217,7 @@ def update_project(project_id: str, body: ProjectUpdate) -> dict:
 
 @app.delete("/api/projects/{project_id}")
 def delete_project(project_id: str) -> dict:
+    """Remove the project record file for *project_id*."""
     if not home_mod.is_safe_id(project_id):
         raise HTTPException(400, "invalid project_id")
     ok = projects_mod.delete(project_id)
@@ -1448,11 +1455,13 @@ async def ollama_models(body: OllamaModelsBody) -> dict:
 
 @app.get("/api/chats")
 def list_chats() -> dict:
+    """Return a paginated list of all stored chat summaries."""
     return {"chats": chatstore.list_all()}
 
 
 @app.post("/api/chats")
 def create_chat(body: ChatCreate) -> dict:
+    """Create a new chat and return its ID and metadata."""
     if body.project_id and not home_mod.is_safe_id(body.project_id):
         raise HTTPException(400, "invalid project_id")
     c = chatstore.create(title=body.title, model=body.model, project_id=body.project_id)
@@ -1461,6 +1470,7 @@ def create_chat(body: ChatCreate) -> dict:
 
 @app.get("/api/chats/{chat_id}")
 def get_chat(chat_id: str) -> dict:
+    """Return the full chat record including messages for *chat_id*."""
     if not home_mod.is_safe_id(chat_id):
         raise HTTPException(400, "invalid chat_id")
     c = chatstore.get(chat_id)
@@ -1481,6 +1491,7 @@ def rename_chat(chat_id: str, body: ChatRename) -> dict:
 
 @app.delete("/api/chats/{chat_id}")
 def delete_chat(chat_id: str) -> dict:
+    """Delete the chat record and all associated messages for *chat_id*."""
     if not home_mod.is_safe_id(chat_id):
         raise HTTPException(400, "invalid chat_id")
     ok = chatstore.delete(chat_id)
@@ -1530,6 +1541,7 @@ def _chat_public(c: chatstore.Chat) -> dict[str, Any]:
 
 @app.get("/api/tasks")
 def list_tasks() -> dict:
+    """Return all task records filtered optionally by project and status."""
     from .agent import taskstore
 
     return {"tasks": [taskstore.asdict(t) for t in taskstore.get_tasks()]}
@@ -1537,6 +1549,7 @@ def list_tasks() -> dict:
 
 @app.post("/api/tasks")
 def create_task(body: TaskCreateUpdate) -> dict:
+    """Create and persist a new task record, returning its ID."""
     from .agent import taskstore
 
     t = taskstore.save_task(
@@ -1552,6 +1565,7 @@ def create_task(body: TaskCreateUpdate) -> dict:
 
 @app.patch("/api/tasks/{task_id}")
 def update_task(task_id: str, body: TaskCreateUpdate) -> dict:
+    """Merge *fields* into the stored task record."""
     from .agent import taskstore
 
     if not home_mod.is_safe_id(task_id):
@@ -1582,6 +1596,7 @@ def update_task_column_endpoint(task_id: str, body: TaskColumnUpdate) -> dict:
 
 @app.delete("/api/tasks/{task_id}")
 def delete_task_endpoint(task_id: str) -> dict:
+    """Delete the task identified by *task_id*."""
     from .agent import taskstore
 
     if not home_mod.is_safe_id(task_id):
