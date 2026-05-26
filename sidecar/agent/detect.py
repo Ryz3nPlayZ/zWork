@@ -30,6 +30,7 @@ class Integration:
 
 
 def _claude_code() -> Integration:
+    """Probe the local Claude Code CLI installation and return an Integration record with credential reuse status."""
     settings = Path("~/.claude/settings.json").expanduser()
     profile = Path("~/.claude.json").expanduser()
     present = settings.exists() or profile.exists()
@@ -60,6 +61,7 @@ def _claude_code() -> Integration:
 
 
 def _codex() -> Integration:
+    """Probe the local OpenAI Codex CLI installation and return an Integration record."""
     d = Path("~/.codex").expanduser()
     present = d.exists() and d.is_dir()
     detail = "Installed (OAuth-based; credential reuse WIP)" if present else ""
@@ -74,6 +76,7 @@ def _codex() -> Integration:
 
 
 def _copilot() -> Integration:
+    """Probe the local GitHub Copilot CLI installation and return an Integration record."""
     d = Path("~/.config/github-copilot").expanduser()
     present = d.exists() and d.is_dir()
     detail = (
@@ -126,6 +129,7 @@ def _mlx() -> Integration:
 
 
 def detect_all() -> list[Integration]:
+    """Run all integration probes and return the full list of Integration records."""
     return [_claude_code(), _codex(), _copilot(), _mlx()]
 
 
