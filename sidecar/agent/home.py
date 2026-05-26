@@ -13,16 +13,19 @@ def zwork_home() -> Path:
 
 
 def settings_path() -> Path:
+    """Return the path to the main agent settings JSON file."""
     return zwork_home() / "settings.json"
 
 
 def chats_dir() -> Path:
+    """Return the directory that stores chat JSONL files."""
     d = zwork_home() / "chats"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def runs_dir() -> Path:
+    """Return the directory that stores per-run event logs."""
     d = zwork_home() / "runs"
     d.mkdir(parents=True, exist_ok=True)
     return d
@@ -109,6 +112,7 @@ def workspace_scratch_dir() -> Path:
 
 
 def projects_dir() -> Path:
+    """Return the directory that stores project metadata files."""
     d = zwork_home() / "projects"
     d.mkdir(parents=True, exist_ok=True)
     return d
@@ -121,6 +125,7 @@ def project_dir(project_id: str) -> Path:
 
 
 def skills_dir() -> Path:
+    """Return the directory that stores user-installed skill folders."""
     return repo_root() / "zWork-Skills"
 
 
