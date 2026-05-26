@@ -15,6 +15,9 @@ interface Metrics {
   mrr: number;
   arpu: number;
   free_to_paid_conversion: number;
+  total_prompt_tokens: number;
+  total_completion_tokens: number;
+  estimated_cost_usd: number;
 }
 
 interface AdminUser {
@@ -25,7 +28,9 @@ interface AdminUser {
   created_at: string;
   last_activity: string | null;
   total_requests: number;
-  total_tokens: number;
+  total_prompt_tokens: number;
+  total_completion_tokens: number;
+  estimated_cost_usd: number;
   stripe_customer_id: string | null;
   subscription_status: string | null;
 }
@@ -262,7 +267,7 @@ export function AdminPage() {
               <MetricCard icon={Users} label="New (Week)" value={metrics.new_users_this_week.toString()} />
               <MetricCard icon={Users} label="New (Month)" value={metrics.new_users_this_month.toString()} />
               <MetricCard icon={Activity} label="Churn Rate" value={`${(metrics.churn_rate * 100).toFixed(1)}%`} />
-              <MetricCard icon={DollarSign} label="ARPU" value={`$${metrics.arpu.toFixed(2)}`} />
+              <MetricCard icon={DollarSign} label="API Cost (est.)" value={`$${metrics.estimated_cost_usd.toFixed(2)}`} sub={`${formatNumber(metrics.total_prompt_tokens + metrics.total_completion_tokens)} tokens total`} />
             </div>
           </div>
         )}
@@ -276,6 +281,7 @@ export function AdminPage() {
                   <th className="px-3 py-2 font-medium text-ink-muted">Tier</th>
                   <th className="px-3 py-2 font-medium text-ink-muted">Requests</th>
                   <th className="px-3 py-2 font-medium text-ink-muted">Tokens</th>
+                  <th className="px-3 py-2 font-medium text-ink-muted">Est. Cost</th>
                   <th className="px-3 py-2 font-medium text-ink-muted">Sub Status</th>
                   <th className="px-3 py-2 font-medium text-ink-muted">Last Active</th>
                   <th className="px-3 py-2 font-medium text-ink-muted">Joined</th>
@@ -300,7 +306,8 @@ export function AdminPage() {
                       </span>
                     </td>
                     <td className="px-3 py-2 text-ink">{formatNumber(u.total_requests)}</td>
-                    <td className="px-3 py-2 text-ink">{formatNumber(u.total_tokens)}</td>
+                    <td className="px-3 py-2 text-ink">{formatNumber(u.total_prompt_tokens + u.total_completion_tokens)}</td>
+                    <td className="px-3 py-2 text-ink font-medium">${u.estimated_cost_usd.toFixed(2)}</td>
                     <td className="px-3 py-2 text-ink-muted">{u.subscription_status || "—"}</td>
                     <td className="px-3 py-2 text-ink-muted whitespace-nowrap">{formatDate(u.last_activity)}</td>
                     <td className="px-3 py-2 text-ink-muted whitespace-nowrap">{formatDate(u.created_at)}</td>

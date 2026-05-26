@@ -145,7 +145,7 @@ function serializeBlocksToMarkdown(blocks: Block[]): string {
 
 export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
   const updateArtifact = useApp((s) => s.updateArtifact);
-  const [editorMode, setEditorMode] = useState<"read" | "blocks" | "source">("blocks");
+  const [editorMode, setEditorMode] = useState<"read" | "blocks" | "source">("read");
   const [blocks, setBlocks] = useState<Block[]>(() => parseMarkdownToBlocks(artifact.content));
   const [sourceDraft, setSourceDraft] = useState(artifact.content);
   const [copied, setCopied] = useState(false);
@@ -309,23 +309,7 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
         <div className="flex rounded-lg border border-line bg-paper p-0.5">
           <button
             onClick={() => {
-              setEditorMode("blocks");
-              setBlocks(parseMarkdownToBlocks(artifact.content));
-            }}
-            className={cn(
-              "px-2 py-1 text-[11px] font-medium rounded-md transition-all",
-              editorMode === "blocks"
-                ? "bg-paper-raised text-ink shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
-                : "text-ink-muted hover:text-ink"
-            )}
-          >
-            <Edit3 className="inline h-3 w-3 mr-1" />
-            Editor
-          </button>
-          <button
-            onClick={() => {
               setEditorMode("read");
-              setBlocks(parseMarkdownToBlocks(artifact.content));
             }}
             className={cn(
               "px-2 py-1 text-[11px] font-medium rounded-md transition-all",
@@ -340,7 +324,7 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
           <button
             onClick={() => {
               setEditorMode("source");
-              setSourceDraft(serializeBlocksToMarkdown(blocks));
+              setSourceDraft(artifact.content);
             }}
             className={cn(
               "px-2 py-1 text-[11px] font-medium rounded-md transition-all",
@@ -349,8 +333,23 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
                 : "text-ink-muted hover:text-ink"
             )}
           >
-            <FileText className="inline h-3 w-3 mr-1" />
+            <Edit3 className="inline h-3 w-3 mr-1" />
             Markdown
+          </button>
+          <button
+            onClick={() => {
+              setEditorMode("blocks");
+              setBlocks(parseMarkdownToBlocks(artifact.content));
+            }}
+            className={cn(
+              "px-2 py-1 text-[11px] font-medium rounded-md transition-all",
+              editorMode === "blocks"
+                ? "bg-paper-raised text-ink shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
+                : "text-ink-muted hover:text-ink"
+            )}
+          >
+            <FileText className="inline h-3 w-3 mr-1" />
+            Blocks
           </button>
         </div>
 

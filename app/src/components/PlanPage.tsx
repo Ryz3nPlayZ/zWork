@@ -35,13 +35,13 @@ const TIERS: PricingTier[] = [
     annualPerMonth: 0,
     description: "For getting started with AI-powered development.",
     features: [
-      "20 root requests per 5 hours",
-      "100 requests per week",
+      "Shared request pool (up to 200 per 5 hours)",
+      "Up to 1,000 requests per week",
       "Standard processing",
       "Local backend only",
       "Single agent worker only",
     ],
-    cta: "Current plan",
+    cta: "Get started",
   },
   {
     id: "pro",
@@ -52,7 +52,7 @@ const TIERS: PricingTier[] = [
     description: "Higher limits and hosted access for serious work.",
     features: [
       "200 root requests per 5 hours",
-      "2,000 requests per week",
+      "1,000 requests per week",
       "Hosted AI gateway access",
       "Up to 5 multi-agent workers",
       "Advanced analytics",
@@ -70,7 +70,7 @@ const TIERS: PricingTier[] = [
     description: "Maximum capacity for power users and teams.",
     features: [
       "1,000 root requests per 5 hours",
-      "10,000 requests per week",
+      "5,000 requests per week",
       "Up to 10 multi-agent workers",
       "Everything in Pro",
       "Priority processing",
@@ -361,7 +361,7 @@ function PricingCard({
           disabled
           className="mb-6 w-full rounded-xl border border-line bg-paper px-4 py-3 text-[13px] font-semibold text-ink-muted opacity-60 cursor-default"
         >
-          {tier.cta}
+          Current plan
         </button>
       ) : (
         <button

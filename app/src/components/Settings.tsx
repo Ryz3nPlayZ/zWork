@@ -931,7 +931,7 @@ interface PersonalizationData {
 }
 
 function parsePersonalization(md: string): PersonalizationData {
-  const data = {
+  const data: PersonalizationData = {
     persona: "Default Assistant",
     vibe: "Professional & focused",
     verbosity: "Balanced",
@@ -940,28 +940,33 @@ function parsePersonalization(md: string): PersonalizationData {
 
   if (!md) return data;
 
-  const personaMatch = md.match(/-\s+\*\*Persona\*\*:\s*([^\n]+)/i);
-  if (personaMatch) data.persona = personaMatch[1].trim();
+  // Match both "**Vibe**: value" and "Vibe: **value**" formats
+  const matchField = (field: string): string | null => {
+    const m1 = md.match(new RegExp(`-\\s+\\*\\*${field}\\*\\*:\\s*([^\n]+)`, "i"));
+    if (m1) return m1[1].trim().replace(/\*\*/g, "");
+    const m2 = md.match(new RegExp(`-\\s+${field}:\\s*\\*\\*([^*]+)\\*\\*`, "i"));
+    if (m2) return m2[1].trim();
+    return null;
+  };
 
-  const vibeMatch = md.match(/-\s+\*\*Vibe\*\*:\s*([^\n]+)/i);
-  if (vibeMatch) data.vibe = vibeMatch[1].trim();
+  const persona = matchField("Persona");
+  if (persona) data.persona = persona;
+  const vibe = matchField("Vibe");
+  if (vibe) data.vibe = vibe;
+  const verbosity = matchField("Verbosity");
+  if (verbosity) data.verbosity = verbosity;
 
-  const verbosityMatch = md.match(/-\s+\*\*Verbosity\*\*:\s*([^\n]+)/i);
-  if (verbosityMatch) data.verbosity = verbosityMatch[1].trim();
-
-  // Find where Custom Instructions start
-  const customIdx = md.indexOf("## Custom Instructions");
-  if (customIdx !== -1) {
-    data.customInstructions = md.substring(customIdx + "## Custom Instructions".length).trim();
+  // Find custom instructions — prefer "How to talk to me" section (onboarding format)
+  const talkIdx = md.indexOf("## How to talk to me");
+  if (talkIdx !== -1) {
+    // Extract until the next ## section or end of file
+    const rest = md.substring(talkIdx + "## How to talk to me".length);
+    const nextSection = rest.indexOf("\n## ");
+    data.customInstructions = (nextSection !== -1 ? rest.substring(0, nextSection) : rest).trim();
   } else {
-    // If not found, check How to talk to me
-    const talkIdx = md.indexOf("## How to talk to me");
-    if (talkIdx !== -1) {
-      data.customInstructions = md.substring(talkIdx + "## How to talk to me".length).trim();
-    } else {
-      if (!personaMatch && !vibeMatch && !verbosityMatch) {
-        data.customInstructions = md;
-      }
+    const customIdx = md.indexOf("## Custom Instructions");
+    if (customIdx !== -1) {
+      data.customInstructions = md.substring(customIdx + "## Custom Instructions".length).trim();
     }
   }
 
@@ -977,7 +982,7 @@ function buildPersonalization(data: PersonalizationData): string {
 - **Vibe**: ${data.vibe}
 - **Verbosity**: ${data.verbosity}
 
-## Custom Instructions
+## How to talk to me
 
 ${data.customInstructions}`;
 }
