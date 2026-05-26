@@ -2,6 +2,19 @@
 
 All notable changes to zWork are documented here.
 
+## v0.4.0-alpha.19
+
+**Project chat embedding, UI cleanup, and connector logo fixes.**
+
+- Fixed project chats to render inline within the project page instead of navigating to the normal chat view
+- Added `ProjectChatThread` component with full message rendering, activities, error banners, and retry/settings buttons
+- Removed per-project Memory card — global memory in Settings is now the single source of truth
+- Removed per-project Timeline card to reduce clutter
+- Replaced generic browser `confirm()` with a custom styled delete confirmation modal for project files
+- Fixed connector brand logos to use Simple Icons CDN via jsDelivr for accurate, up-to-date brand marks
+- Added admin dashboard cost tracking (prompt/completion tokens and estimated API cost per user)
+- Added web mode Pro model support (`zwork-pro` → `deepseek-v4-pro` routing)
+
 ## v0.4.0-alpha.18
 
 **Auto-diagnosing command runner, hardware detection, and academic research paper writing tools.**
