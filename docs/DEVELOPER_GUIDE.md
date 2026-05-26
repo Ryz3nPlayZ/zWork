@@ -8,7 +8,7 @@ This guide covers common development tasks and workflows for contributing to zWo
 |------|---------|
 | Start dev server | `./run.sh` |
 | Run frontend tests | `cd app && npm test` |
-| Run backend tests | `cd sidecar && pytest` |
+| Run backend tests | `.venv/bin/pytest` |
 | Build release | `./scripts/build-linux-release.sh` (Linux) |
 | Format code | `cd app && npm run format` |
 | Lint code | `cd app && npm run lint` |
@@ -49,13 +49,16 @@ Closes #123
 ### 3. Testing Before Committing
 
 ```bash
-# Run all tests
-npm test && pytest
+# Run all backend tests
+.venv/bin/pytest
 
 # Run specific test file
-pytest tests/test_auth.py
+.venv/bin/pytest tests/test_home.py
 
-# Run tests in watch mode
+# Run tests with verbose output
+.venv/bin/pytest -v
+
+# Run frontend tests
 npm test -- --watch
 ```
 
@@ -79,22 +82,39 @@ app/
 
 ```
 sidecar/
-├── agents/           # Agent orchestration logic
-├── tools/            # Tool implementations
-├── api/              # FastAPI endpoints
-├── models/           # Pydantic models
-└── main.py           # Application entry point
+├── agent/
+│   ├── academic.py       # Academic research pipeline tools
+│   ├── chatstore.py      # Chat persistence (JSONL)
+│   ├── compaction.py     # Context compaction helpers
+│   ├── composio.py       # Composio integration
+│   ├── detect.py         # Local AI tool detection
+│   ├── home.py           # Filesystem path helpers
+│   ├── mcp.py            # MCP server management
+│   ├── projects.py       # Project CRUD
+│   ├── providers.py      # Model provider abstraction
+│   ├── runlog.py         # Per-run JSONL event log
+│   ├── runtime.py        # RunContext and timeouts
+│   ├── secretstore.py    # Encrypted secret storage
+│   ├── settings.py       # Persisted agent settings
+│   ├── skills.py         # Skill discovery and loading
+│   ├── streaming.py      # SSE streaming helpers
+│   ├── subagent.py       # Sub-agent spawning
+│   ├── taskstore.py      # Task CRUD
+│   ├── tools.py          # All tool schemas and handlers
+│   └── utils.py          # Shared utility functions
+└── server.py             # FastAPI server entry point
 ```
 
 ## Common Tasks
 
 ### Adding a New Tool
 
-1. Create tool file in `sidecar/tools/`
-2. Implement the `Tool` protocol
-3. Add tool to registry in `sidecar/tools/__init__.py`
-4. Add tests in `tests/test_tools.py`
-5. Document usage in agent instructions
+1. Open `sidecar/agent/tools.py`
+2. Add a schema dict to `TOOL_SCHEMAS` with `name`, `description`, and `input_schema`
+3. Write an async generator handler `_handle_<tool_name>` that yields `status`, `activity`, and `tool_result` events
+4. Register the handler in the `execute_tool` dispatch block
+5. Add tests in `tests/test_tools.py` or a dedicated `tests/test_<tool_name>.py`
+6. Document the tool in `docs/RESEARCH_TOOLS.md` or the relevant docs file
 
 ### Adding a New Screen
 
