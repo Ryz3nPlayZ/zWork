@@ -3642,7 +3642,7 @@ async def _generate_text(prompt: str, system: str = "") -> str:
     import httpx
     
     s = settings_mod.load()
-    model_id = s.active_model_id or "zwork-flash"
+    model_id = s.default_model or "zwork-flash"
     model = providers_mod.lookup_model(model_id, s)
     if not model:
         model = {
