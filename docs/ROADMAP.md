@@ -1,18 +1,18 @@
-# update this on 05-15
 # zWork Roadmap
 
 This document tracks the high-level direction of zWork. For archived implementation notes, see [PLAN.md](archive/PLAN.md). For a brainstorm of possible future features, see [FUTURE_FEATURES.md](archive/FUTURE_FEATURES.md).
 
 ---
 
-## Current Release: v0.3.x
+## Current Release: v0.4.x
 
-Cross-platform desktop AI assistant with chat, file operations, web research, and local execution.
+Cross-platform desktop AI assistant with chat, file operations, web research, local execution, and academic research capabilities.
 
 - macOS (Intel + Apple Silicon), Windows, and Linux (AppImage)
 - Chat-first interface with streaming responses and activity updates
 - Local file management, command execution, and browser automation
 - Reusable skills library
+- **Academic research pipeline**: novelty check, hardware detection, full paper drafting, and review
 - Anonymous telemetry (opt-out) and in-app updater
 - BYOK: bring your own OpenAI or Anthropic API key
 
@@ -48,6 +48,22 @@ Building zWork Cloud (Pro) — zero-config AI endpoints, cross-device sync, and 
 | Infrastructure | Caddy reverse proxy, Docker Compose | Deployed |
 | Billing | Stripe integration | Planned |
 | Analytics | PostHog | Planned |
+
+---
+
+## Academic Research Pipeline
+
+**Goal:** Enable the agent to go from research idea → finished academic paper, end-to-end.
+
+| Feature | Tool | Status |
+|---------|------|--------|
+| Hardware detection | `detect_hardware` | Shipped |
+| Novelty & prior-art search | `check_novelty` (Semantic Scholar + arXiv) | Shipped |
+| Multi-section paper drafting | `write_research_paper` | Shipped |
+| Draft review & quality audit | `review_paper` | Shipped |
+| Self-healing command failures | `_diagnose_command_failure` in `run_command` | Shipped |
+| LaTeX export | Planned | Planned |
+| Citation formatting (APA/IEEE) | Planned | Planned |
 
 ---
 
