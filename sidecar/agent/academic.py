@@ -73,6 +73,7 @@ class SemanticScholarClient:
             self._last_request = time.monotonic()
 
     async def search(self, query: str, limit: int = 20) -> list[PaperResult]:
+        """Return chats whose title or message content matches the query string."""
         await self._rate_limit()
         headers = {"x-api-key": self.api_key} if self.api_key else {}
         fields = "paperId,title,abstract,authors,year,citationCount,url,openAccessPdf,externalIds,journal"
@@ -133,6 +134,7 @@ class ArxivClient:
         return self._http
 
     async def search(self, query: str, limit: int = 20) -> list[PaperResult]:
+        """Return chats whose title or message content matches the query string."""
         import xml.etree.ElementTree as ET
 
         try:
@@ -227,6 +229,7 @@ class OpenAlexClient:
         return " ".join(w for _, w in positions)
 
     async def search(self, query: str, limit: int = 20) -> list[PaperResult]:
+        """Return chats whose title or message content matches the query string."""
         try:
             params: dict[str, Any] = {
                 "filter": f"title_and_abstract.search:{query}",
@@ -308,6 +311,7 @@ class CrossrefClient:
         return {"User-Agent": ua}
 
     async def search(self, query: str, limit: int = 20) -> list[PaperResult]:
+        """Return chats whose title or message content matches the query string."""
         try:
             client = await self._get_client()
             r = await client.get(
