@@ -41,6 +41,7 @@ READ_ONLY_TOOLS = frozenset(
         "ask_question",
         "detect_hardware",
         "check_novelty",
+        "review_paper",
     }
 )
 
@@ -784,6 +785,20 @@ TOOL_SCHEMAS: list[dict] = [
                 },
             },
             "required": ["topic", "hypotheses"],
+        },
+    },
+    {
+        "name": "review_paper",
+        "description": "Scan and assess the quality of an academic paper draft on disk, checking for placeholder template content, section completeness (Abstract, Introduction, Methodology, Experiments, Related Work, Conclusion, References), word count, and template ratio.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Path to the paper draft file (.txt, .md, .tex, or extracted document)",
+                },
+            },
+            "required": ["path"],
         },
     },
 ]
@@ -2076,6 +2091,134 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                 "id": tool_id,
                 "label": f"Failed: {label}",
                 "icon": "search",
+                "done": True,
+            }
+            if run is not None:
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=False,
+                    output=_friendly_error(e),
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": False,
+                "message": _friendly_error(e),
+            }
+        return
+
+    if tool_name == "review_paper":
+        path = str(params.get("path") or "").strip()
+        label = f"Review paper: {os.path.basename(path)}" if path else "Review paper"
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": label,
+            "icon": "file",
+            "done": False,
+        }
+        try:
+            # 1. Read the file
+            full_path = Path(path).expanduser()
+            if not full_path.exists():
+                raise FileNotFoundError(f"File {path} not found.")
+            
+            content = full_path.read_text(encoding="utf-8", errors="replace")
+            
+            # 2. Section detection
+            sections = {
+                "Abstract": bool(re.search(r"(?i)\babstract\b", content)),
+                "Introduction": bool(re.search(r"(?i)\bintroduction\b", content)),
+                "Methodology/Model": bool(re.search(r"(?i)\b(method|methodology|model|proposed method)\b", content)),
+                "Experiments/Results": bool(re.search(r"(?i)\b(experiments|results|evaluation)\b", content)),
+                "Related Work": bool(re.search(r"(?i)\b(related work|literature review)\b", content)),
+                "Conclusion": bool(re.search(r"(?i)\bconclusion\b", content)),
+                "References": bool(re.search(r"(?i)\b(references|bibliography)\b", content)),
+            }
+            
+            # 3. Scan for placeholder/template content
+            template_patterns = [
+                (r"(?i)template\s+(abstract|introduction|method|methodology|conclusion|discussion|results|related\s+work)", "Template section header"),
+                (r"(?i)\[INSERT\s+.*?\]", "Insert placeholder"),
+                (r"(?i)\[TODO\s*:?\s*.*?\]", "TODO placeholder"),
+                (r"(?i)\[PLACEHOLDER\s*:?\s*.*?\]", "Explicit placeholder"),
+                (r"(?i)lorem\s+ipsum", "Lorem ipsum filler"),
+                (r"(?i)this\s+section\s+will\s+(describe|discuss|present|outline|explain)", "Future-tense placeholder"),
+                (r"(?i)add\s+(your|the)\s+(content|text|description)\s+here", "Add content placeholder"),
+                (r"(?i)replace\s+this\s+(text|content|section)", "Replace placeholder"),
+            ]
+            
+            matches = []
+            lines = content.split("\n")
+            total_chars = sum(len(line.strip()) for line in lines if line.strip())
+            template_chars = 0
+            
+            for line_num, line in enumerate(lines, start=1):
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                for pattern, desc in template_patterns:
+                    if re.search(pattern, stripped):
+                        excerpt = stripped[:100]
+                        matches.append({
+                            "type": desc,
+                            "line": line_num,
+                            "excerpt": excerpt
+                        })
+                        template_chars += len(stripped)
+                        break
+            
+            template_ratio = template_chars / total_chars if total_chars > 0 else 0.0
+            word_count = len(content.split())
+            
+            # Formulate score
+            rigor_score = 5.0
+            if sections["Experiments/Results"]:
+                rigor_score += 2.0
+            if sections["References"]:
+                rigor_score += 1.0
+            if word_count > 3000:
+                rigor_score += 1.0
+            
+            report = {
+                "word_count": word_count,
+                "character_count": len(content),
+                "sections_found": sections,
+                "sections_completeness_ratio": round(sum(1 for v in sections.values() if v) / len(sections), 2),
+                "template_ratio": round(template_ratio, 4),
+                "template_matches_count": len(matches),
+                "template_matches": matches[:10], # Show top 10 matches
+                "estimated_quality_score": round(max(1.0, rigor_score - (template_ratio * 10)), 1),
+                "passed_quality_gate": template_ratio <= 0.05,
+            }
+            
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": label,
+                "icon": "file",
+                "done": True,
+            }
+            if run is not None:
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=True,
+                    output=f"Reviewed paper {path}, word count: {word_count}, score: {report['estimated_quality_score']}",
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": True,
+                "message": json.dumps(report, ensure_ascii=False, indent=2),
+            }
+        except Exception as e:
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": f"Failed: {label}",
+                "icon": "file",
                 "done": True,
             }
             if run is not None:
