@@ -2,6 +2,17 @@
 
 All notable changes to zWork are documented here.
 
+## v0.4.0-alpha.18
+
+**Auto-diagnosing command runner, hardware detection, and academic research paper writing tools.**
+
+- Added command failure auto-diagnostics (`_diagnose_command_failure`) inside the `run_command` tool to detect and recommend fixes for missing packages, binary path failures, blocked ports, permission issues, and out-of-memory errors.
+- Added `detect_hardware` tool to query GPU (NVIDIA CUDA, Apple MPS) and CPU thread count.
+- Added `check_novelty` tool to compute Jaccard keyword overlap similarity against literature databases for a research hypothesis.
+- Added `review_paper` tool to analyze structure, count placeholders, and score paper quality.
+- Added `write_research_paper` tool to autonomously execute literature search, build verified bibliographies, and compile structured Markdown/LaTeX paper drafts.
+- Fixed unit test suites (`test_chatstore`, `test_compaction`, `test_projects`, `test_secretstore`, `test_skills`, `test_taskstore`) to align with actual Python module API signatures.
+
 ## v0.4.0-alpha.9
 
 **Fix auto-updater relaunch WebKit crash on Linux.**
