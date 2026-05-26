@@ -24,6 +24,7 @@ def estimate_chars(messages: list[dict]) -> int:
 
 
 def estimate_tokens(messages: list[dict]) -> int:
+    """Return a rough token estimate for a string using character-count heuristics."""
     return estimate_chars(messages) // _CHARS_PER_TOKEN
 
 
@@ -49,6 +50,7 @@ def should_compact(
     threshold_chars: int = DEFAULT_COMPACT_THRESHOLD_CHARS,
     keep_recent: int = DEFAULT_KEEP_RECENT,
 ) -> bool:
+    """Return True if the message list is large enough to warrant compaction."""
     if estimate_chars(messages) < threshold_chars:
         return False
     if len(messages) <= keep_recent + 2:
