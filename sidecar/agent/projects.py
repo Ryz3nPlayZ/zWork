@@ -28,6 +28,7 @@ class Project:
 
 
 def create(name: str, description: str = "") -> Project:
+    """Create and persist a new chat record, returning its ID."""
     p = Project(
         id=uid(),
         name=name,
@@ -43,6 +44,7 @@ def create(name: str, description: str = "") -> Project:
 
 
 def get(project_id: str) -> Project | None:
+    """Load and return the chat record for *chat_id*, or None if not found."""
     p = project_dir(project_id) / "project.json"
     if not p.exists():
         return None
@@ -57,6 +59,7 @@ def get(project_id: str) -> Project | None:
 
 
 def list_all() -> list[dict]:
+    """Return all stored chat records ordered by creation time descending."""
     results: list[dict] = []
     base = projects_dir()
     for child in sorted(base.iterdir()):
@@ -73,6 +76,7 @@ def list_all() -> list[dict]:
 
 
 def update(project_id: str, **kwargs) -> Project | None:
+    """Merge *fields* into the stored chat record for *chat_id* and persist."""
     p = get(project_id)
     if not p:
         return None
@@ -87,6 +91,7 @@ def update(project_id: str, **kwargs) -> Project | None:
 
 
 def delete(project_id: str) -> bool:
+    """Remove the JSONL file for *chat_id* if it exists."""
     d = project_dir(project_id)
     if not (d / "project.json").exists():
         return False
