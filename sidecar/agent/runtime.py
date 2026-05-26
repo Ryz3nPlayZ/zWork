@@ -1,3 +1,5 @@
+"""Runtime context, process tracking, and timeout constants for agent runs."""
+
 from __future__ import annotations
 
 import contextlib
