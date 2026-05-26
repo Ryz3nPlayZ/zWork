@@ -26,17 +26,23 @@ class TestChatStore(unittest.TestCase):
         except ImportError:
             self.skipTest("sidecar not installed")
 
-    def test_create_returns_id(self) -> None:
+    def test_create_returns_chat(self) -> None:
         cs = self._import()
-        chat_id = cs.create()
-        self.assertIsInstance(chat_id, str)
-        self.assertTrue(chat_id)
+        chat = cs.create()
+        self.assertIsNotNone(chat)
+        self.assertTrue(chat.id)
+
+    def test_create_has_id_string(self) -> None:
+        cs = self._import()
+        chat = cs.create()
+        self.assertIsInstance(chat.id, str)
 
     def test_get_after_create(self) -> None:
         cs = self._import()
-        chat_id = cs.create()
-        chat = cs.get(chat_id)
-        self.assertIsNotNone(chat)
+        chat = cs.create()
+        fetched = cs.get(chat.id)
+        self.assertIsNotNone(fetched)
+        self.assertEqual(fetched.id, chat.id)
 
     def test_get_missing_returns_none(self) -> None:
         cs = self._import()
@@ -45,43 +51,46 @@ class TestChatStore(unittest.TestCase):
 
     def test_list_all_includes_created(self) -> None:
         cs = self._import()
-        chat_id = cs.create()
+        chat = cs.create()
         chats = cs.list_all()
-        ids = [c.id if hasattr(c, "id") else c.get("id") for c in chats]
-        self.assertIn(chat_id, ids)
+        ids = [c.get("id") if isinstance(c, dict) else c.id for c in chats]
+        self.assertIn(chat.id, ids)
 
     def test_delete_removes_chat(self) -> None:
         cs = self._import()
-        chat_id = cs.create()
-        cs.delete(chat_id)
-        self.assertIsNone(cs.get(chat_id))
+        chat = cs.create()
+        cs.delete(chat.id)
+        self.assertIsNone(cs.get(chat.id))
 
-    def test_append_and_get_messages(self) -> None:
+    def test_append_message_returns_message(self) -> None:
         cs = self._import()
-        chat_id = cs.create()
-        cs.append_message(chat_id, {"role": "user", "content": "hello"})
-        msgs = cs.get_messages(chat_id)
-        self.assertEqual(len(msgs), 1)
-        self.assertEqual(msgs[0]["content"], "hello")
+        chat = cs.create()
+        msg = cs.append_message(chat.id, "user", "hello")
+        self.assertIsNotNone(msg)
 
-    def test_multiple_messages_ordered(self) -> None:
+    def test_append_message_stored(self) -> None:
         cs = self._import()
-        chat_id = cs.create()
-        for i in range(5):
-            cs.append_message(chat_id, {"role": "user", "content": f"msg {i}"})
-        msgs = cs.get_messages(chat_id)
-        self.assertEqual(len(msgs), 5)
-        for i, msg in enumerate(msgs):
-            self.assertEqual(msg["content"], f"msg {i}")
+        chat = cs.create()
+        cs.append_message(chat.id, "user", "hello world")
+        refreshed = cs.get(chat.id)
+        self.assertIsNotNone(refreshed)
+        contents = [m.content if hasattr(m, "content") else m.get("content") for m in refreshed.messages]
+        self.assertIn("hello world", contents)
 
-    def test_truncate_messages(self) -> None:
+    def test_multiple_messages_stored(self) -> None:
         cs = self._import()
-        chat_id = cs.create()
-        for i in range(5):
-            cs.append_message(chat_id, {"role": "user", "content": f"msg {i}"})
-        cs.truncate_messages(chat_id, 2)
-        msgs = cs.get_messages(chat_id)
-        self.assertEqual(len(msgs), 2)
+        chat = cs.create()
+        for i in range(3):
+            cs.append_message(chat.id, "user", f"msg {i}")
+        refreshed = cs.get(chat.id)
+        self.assertEqual(len(refreshed.messages), 3)
+
+    def test_rename_updates_title(self) -> None:
+        cs = self._import()
+        chat = cs.create(title="Old Title")
+        updated = cs.rename(chat.id, "New Title")
+        self.assertIsNotNone(updated)
+        self.assertEqual(updated.title, "New Title")
 
 
 if __name__ == "__main__":

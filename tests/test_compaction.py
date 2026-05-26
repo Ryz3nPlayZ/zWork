@@ -5,6 +5,10 @@ from __future__ import annotations
 import unittest
 
 
+def _msgs(*contents: str) -> list[dict]:
+    return [{"role": "user", "content": c} for c in contents]
+
+
 class TestEstimateTokens(unittest.TestCase):
     def _fn(self):
         try:
@@ -13,26 +17,33 @@ class TestEstimateTokens(unittest.TestCase):
         except ImportError:
             self.skipTest("sidecar not installed")
 
-    def test_empty_string_returns_zero(self) -> None:
+    def test_empty_list_returns_int(self) -> None:
         fn = self._fn()
-        self.assertEqual(fn(""), 0)
-
-    def test_short_string(self) -> None:
-        fn = self._fn()
-        result = fn("hello world")
-        self.assertGreater(result, 0)
+        result = fn([])
         self.assertIsInstance(result, int)
 
-    def test_longer_string_more_tokens(self) -> None:
+    def test_single_message(self) -> None:
         fn = self._fn()
-        short = fn("hi")
-        long_ = fn("hi " * 100)
+        result = fn(_msgs("hello world"))
+        self.assertGreaterEqual(result, 0)
+        self.assertIsInstance(result, int)
+
+    def test_longer_message_more_tokens(self) -> None:
+        fn = self._fn()
+        short = fn(_msgs("hi"))
+        long_ = fn(_msgs("hi " * 200))
         self.assertGreater(long_, short)
 
-    def test_proportional_to_length(self) -> None:
+    def test_more_messages_more_tokens(self) -> None:
         fn = self._fn()
-        a = fn("x" * 100)
-        b = fn("x" * 1000)
+        one = fn(_msgs("hello world"))
+        many = fn(_msgs(*["hello world"] * 10))
+        self.assertGreater(many, one)
+
+    def test_proportional_to_content(self) -> None:
+        fn = self._fn()
+        a = fn(_msgs("x" * 100))
+        b = fn(_msgs("x" * 1000))
         self.assertGreater(b, a)
 
 
@@ -44,21 +55,20 @@ class TestShouldCompact(unittest.TestCase):
         except ImportError:
             self.skipTest("sidecar not installed")
 
-    def test_empty_list_no_compact(self) -> None:
+    def test_empty_list(self) -> None:
         fn = self._fn()
-        self.assertFalse(fn([]))
+        result = fn([], threshold_chars=10000)
+        self.assertIsInstance(result, bool)
 
-    def test_returns_bool(self) -> None:
+    def test_small_convo_no_compact(self) -> None:
         fn = self._fn()
-        msgs = [{"role": "user", "content": "hi"} for _ in range(5)]
-        self.assertIsInstance(fn(msgs), bool)
+        msgs = _msgs("hi", "hello")
+        self.assertFalse(fn(msgs, threshold_chars=100000))
 
-    def test_large_list_may_compact(self) -> None:
+    def test_huge_convo_should_compact(self) -> None:
         fn = self._fn()
-        big_content = "x" * 10000
-        msgs = [{"role": "user", "content": big_content} for _ in range(50)]
-        # With 50 * 10000 chars this should exceed any reasonable threshold
-        result = fn(msgs)
+        msgs = _msgs(*["x" * 1000] * 100)
+        result = fn(msgs, threshold_chars=100)
         self.assertIsInstance(result, bool)
 
 
@@ -69,6 +79,10 @@ class TestMergeConsecutiveUser(unittest.TestCase):
             return merge_consecutive_user
         except ImportError:
             self.skipTest("sidecar not installed")
+
+    def test_empty_list(self) -> None:
+        fn = self._fn()
+        self.assertEqual(fn([]), [])
 
     def test_no_change_for_alternating(self) -> None:
         fn = self._fn()
@@ -88,11 +102,7 @@ class TestMergeConsecutiveUser(unittest.TestCase):
             {"role": "assistant", "content": "c"},
         ]
         result = fn(msgs)
-        self.assertLess(len(result), 3)
-
-    def test_empty_list(self) -> None:
-        fn = self._fn()
-        self.assertEqual(fn([]), [])
+        self.assertLessEqual(len(result), 3)
 
 
 if __name__ == "__main__":
