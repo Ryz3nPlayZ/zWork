@@ -85,6 +85,35 @@ Why it sells:
 - differentiates from generic chat
 - pairs well with local file and command access
 
+## 6. Literature novelty check
+
+Prompt:
+
+```text
+I have an idea for a paper on federated learning applied to medical imaging. Search for existing work and tell me if there is a clear research gap I can exploit.
+```
+
+Why it sells:
+
+- saves researchers hours of manual literature review
+- checks Semantic Scholar and arXiv automatically
+- produces a structured gap analysis the user can act on immediately
+
+## 7. End-to-end research paper
+
+Prompt:
+
+```text
+Write a full research paper on using LLMs as automatic code review agents. Include an abstract, introduction, methodology, results, and conclusion with placeholders for experiments.
+```
+
+Why it sells:
+
+- enables a complete research writing workflow inside one tool
+- differentiates strongly from generic writing assistants
+- appeals to academic users, grad students, and research engineers
+- produces a local artifact (Markdown draft) in a single session
+
 ## Product packaging rule
 
 When deciding what to ship next, ask:
