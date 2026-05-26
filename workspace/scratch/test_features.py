@@ -64,6 +64,16 @@ async def test_async_tools():
             print("Review paper result returned:", event["message"])
             assert event["ok"] is True
 
+    print("--- Testing execute_tool for write_research_paper ---")
+    async for event in execute_tool("write_research_paper", {
+        "topic": "self-attention mechanism scaling",
+        "hypotheses": "Scaling dimension improves representation quality",
+        "experiment_results": "Baseline: 0.85, Proposed: 0.92"
+    }):
+        if event["type"] == "tool_result":
+            print("Write research paper result returned:", event["message"][:400] + "...")
+            assert event["ok"] is True
+
     print("Async tool tests PASSED!\n")
 
 if __name__ == "__main__":
