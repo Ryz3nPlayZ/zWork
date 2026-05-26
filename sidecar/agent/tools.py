@@ -39,6 +39,8 @@ READ_ONLY_TOOLS = frozenset(
         "search_papers",
         "format_citation",
         "ask_question",
+        "detect_hardware",
+        "check_novelty",
     }
 )
 
@@ -757,6 +759,33 @@ TOOL_SCHEMAS: list[dict] = [
             "required": ["action"],
         },
     },
+    {
+        "name": "detect_hardware",
+        "description": "Detect the local system's hardware capabilities including CPU cores, operating system, and GPU capability (e.g. NVIDIA CUDA, Apple Silicon MPS). Use this to check hardware capabilities before running computationally heavy/GPU processes.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "name": "check_novelty",
+        "description": "Assess the novelty of a proposed research topic and key hypotheses by comparing them with academic literature. Returns a novelty rating, similarity score, and a list of overlapping papers.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "topic": {
+                    "type": "string",
+                    "description": "The research topic to analyze (e.g. 'Low-rank adaptation for diffusion models')",
+                },
+                "hypotheses": {
+                    "type": "string",
+                    "description": "Key research hypotheses or description of proposed methodologies",
+                },
+            },
+            "required": ["topic", "hypotheses"],
+        },
+    },
 ]
 
 
@@ -1307,11 +1336,16 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                         ok=result["ok"],
                         output=result["output"] or f"exit {result['returncode']}",
                     )
+                msg = result["output"] or f"exit {result['returncode']}"
+                if not result["ok"]:
+                    diag = _diagnose_command_failure(command, result["returncode"], msg, cwd)
+                    if diag:
+                        msg += diag
                 yield {
                     "type": "tool_result",
                     "tool": tool_name,
                     "ok": result["ok"],
-                    "message": result["output"] or (f"exit {result['returncode']}"),
+                    "message": msg,
                 }
         except Exception as e:
             yield {
@@ -1874,6 +1908,188 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                 "tool": tool_name,
                 "ok": False,
                 "message": _friendly_error(e, "Check the query and try again. "),
+            }
+        return
+
+    if tool_name == "detect_hardware":
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": "Detecting hardware capabilities",
+            "icon": "computer",
+            "done": False,
+        }
+        try:
+            profile = _detect_hardware_profile()
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": "Hardware capabilities detected",
+                "icon": "computer",
+                "done": True,
+            }
+            if run is not None:
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=True,
+                    output=f"Hardware profile: {profile['gpu_name']} (GPU) | {profile['cpu_count']} CPUs",
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": True,
+                "message": json.dumps(profile, ensure_ascii=False, indent=2),
+            }
+        except Exception as e:
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": "Failed to detect hardware capabilities",
+                "icon": "computer",
+                "done": True,
+            }
+            if run is not None:
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=False,
+                    output=_friendly_error(e),
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": False,
+                "message": _friendly_error(e),
+            }
+        return
+
+    if tool_name == "check_novelty":
+        topic = str(params.get("topic") or "").strip()
+        hypotheses = str(params.get("hypotheses") or "").strip()
+        label = f"Check novelty: {topic[:50]}" if topic else "Check novelty"
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": label,
+            "icon": "search",
+            "done": False,
+        }
+        try:
+            # 1. Keyword extraction from topic and hypotheses
+            stop_words = {"a", "an", "the", "and", "or", "but", "in", "on", "of", "for", "to", "with", "by", "at", "from", "as", "is", "are", "was", "were", "be", "been", "using", "method", "approach", "novel"}
+            def get_keywords(text: str) -> set[str]:
+                tokens = re.findall(r"\b[a-zA-Z]{3,}\b", text.lower())
+                return {t for t in tokens if t not in stop_words}
+            
+            topic_keywords = get_keywords(topic)
+            hyp_keywords = get_keywords(hypotheses)
+            all_keywords = topic_keywords.union(hyp_keywords)
+            
+            # Formulate query from top 5 keywords or topic
+            query = topic if topic else " ".join(list(all_keywords)[:5])
+            
+            # 2. Search academic literature
+            papers = await academic_mod.search_academic_literature(query, max_results=15)
+            
+            # If no papers found, try search with a subset of keywords
+            if not papers and len(all_keywords) > 0:
+                fallback_query = " ".join(list(all_keywords)[:3])
+                papers = await academic_mod.search_academic_literature(fallback_query, max_results=15)
+                
+            # 3. Compute similarity and overlap
+            results = []
+            max_sim = 0.0
+            similar_papers = []
+            
+            for p in papers:
+                title = p.get("title", "")
+                abstract = p.get("abstract", "")
+                
+                # Combine title and abstract for paper keywords
+                paper_text = f"{title} {abstract}"
+                paper_keywords = get_keywords(paper_text)
+                
+                # Jaccard overlap
+                intersection = all_keywords.intersection(paper_keywords)
+                union = all_keywords.union(paper_keywords)
+                similarity = len(intersection) / len(union) if union else 0.0
+                
+                if similarity > 0.05:
+                    similar_papers.append({
+                        "title": title,
+                        "authors": p.get("authors", []),
+                        "year": p.get("year"),
+                        "similarity": round(similarity, 3),
+                        "url": p.get("url", ""),
+                        "pdf_url": p.get("pdf_url", ""),
+                    })
+                    if similarity > max_sim:
+                        max_sim = similarity
+            
+            # Sort by similarity desc
+            similar_papers.sort(key=lambda x: x["similarity"], reverse=True)
+            
+            # Determine recommendation
+            if max_sim > 0.25:
+                recommendation = "High overlap detected. Suggest differentiating your hypotheses or focusing on a different niche."
+                rating = "Low Novelty"
+            elif max_sim > 0.12:
+                recommendation = "Moderate overlap. Ensure your implementation details and specific validation distinguish your work."
+                rating = "Medium Novelty"
+            else:
+                recommendation = "No significant overlap found in the top retrieved literature. The idea appears novel."
+                rating = "High Novelty"
+                
+            report = {
+                "novelty_rating": rating,
+                "max_similarity_score": round(max_sim, 3),
+                "recommendation": recommendation,
+                "similar_papers": similar_papers[:5],
+                "topic_keywords_analyzed": list(topic_keywords),
+                "hypotheses_keywords_analyzed": list(hyp_keywords),
+            }
+            
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": label,
+                "icon": "search",
+                "done": True,
+            }
+            if run is not None:
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=True,
+                    output=f"Checked novelty for '{topic}', rating: {rating}",
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": True,
+                "message": json.dumps(report, ensure_ascii=False, indent=2),
+            }
+        except Exception as e:
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": f"Failed: {label}",
+                "icon": "search",
+                "done": True,
+            }
+            if run is not None:
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=False,
+                    output=_friendly_error(e),
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": False,
+                "message": _friendly_error(e),
             }
         return
 
@@ -2947,3 +3163,123 @@ def parse_tool_calls(text: str) -> list[dict[str, Any]]:
         except (json.JSONDecodeError, KeyError):
             continue
     return calls
+
+
+def _diagnose_command_failure(command: str, returncode: int, output: str, cwd: str) -> str:
+    """Analyze the output/error of a failed command to suggest a fix."""
+    diagnosis = []
+    
+    # 1. Missing python packages
+    if "ModuleNotFoundError:" in output or "ImportError:" in output:
+        match = re.search(r"(?:ModuleNotFoundError|ImportError): No module named ['\"]([^'\"]+)['\"]", output)
+        module_name = match.group(1) if match else "the required module"
+        diagnosis.append(
+            f"**Deficiency**: Python module '{module_name}' is not installed.\n"
+            f"**Suggested Fix**: Install the module using `pip install {module_name}` or `poetry add {module_name}`."
+        )
+        
+    # 2. Command not found
+    elif "command not found" in output or "not recognized as an internal or external command" in output or ("sh: 1: " in output and "not found" in output):
+        cmd_name = command.split()[0] if command.split() else "command"
+        diagnosis.append(
+            f"**Deficiency**: Command '{cmd_name}' is not available in the system path or not installed.\n"
+            f"**Suggested Fix**: Install the tool or verify its path. (e.g. for npm/npx tools, run `npm install -g {cmd_name}` or `npm install` in your project folder)."
+        )
+        
+    # 3. Port conflict
+    elif any(x in output.lower() for x in ["eaddrinuse", "address already in use", "port already in use"]):
+        port_match = re.search(r"\b\d{2,5}\b", output)
+        port = port_match.group(0) if port_match else "the configured port"
+        diagnosis.append(
+            f"**Deficiency**: Port {port} is already in use by another process.\n"
+            f"**Suggested Fix**: Free up port {port} or change the port configuration. "
+            f"On Linux/macOS, you can find the process using `lsof -i :{port}` and terminate it."
+        )
+        
+    # 4. Permission Denied
+    elif any(x in output.lower() for x in ["permission denied", "eacces"]):
+        diagnosis.append(
+            f"**Deficiency**: Permission denied during execution.\n"
+            f"**Suggested Fix**: Check ownership and permission bits of the target files/directories. "
+            f"You may need to run `chmod +x <file>` to make a script executable, or run with appropriate user permissions."
+        )
+        
+    # 5. Out of Memory (OOM)
+    elif "out of memory" in output.lower() or "cuda error: out of memory" in output.lower() or "oom-killer" in output.lower():
+        diagnosis.append(
+            f"**Deficiency**: Process ran out of memory (OOM).\n"
+            f"**Suggested Fix**: Reduce batch size, optimize memory utilization, or run on a system/GPU with more memory capability."
+        )
+        
+    # 6. Node/npm missing module
+    elif "Error: Cannot find module" in output:
+        match = re.search(r"Cannot find module ['\"]([^'\"]+)['\"]", output)
+        module_name = match.group(1) if match else "the required package"
+        diagnosis.append(
+            f"**Deficiency**: Node/JS module '{module_name}' is missing.\n"
+            f"**Suggested Fix**: Run `npm install {module_name}` or `npm install` to restore dependencies."
+        )
+
+    # 7. File/Directory not found
+    elif "no such file or directory" in output.lower() or "directory not found" in output.lower():
+        diagnosis.append(
+            f"**Deficiency**: A referenced file or directory does not exist.\n"
+            f"**Suggested Fix**: Verify the paths in your command and check the current directory (cwd: {cwd})."
+        )
+        
+    if diagnosis:
+        return "\n\n--- [COMMAND FAILURE DIAGNOSIS] ---\n" + "\n".join(diagnosis)
+    return ""
+
+
+def _detect_hardware_profile() -> dict:
+    import platform
+    import shutil
+    import subprocess
+    
+    has_gpu = False
+    gpu_type = "cpu"
+    gpu_name = "CPU only"
+    vram_mb = None
+    
+    # 1. Try local NVIDIA GPU
+    nvidia_smi = shutil.which("nvidia-smi")
+    if nvidia_smi:
+        try:
+            res = subprocess.run(
+                [nvidia_smi, "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=5, check=False
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                line = res.stdout.strip().splitlines()[0]
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) >= 2:
+                    gpu_name = parts[0]
+                    gpu_type = "cuda"
+                    has_gpu = True
+                    try:
+                        vram_mb = int(float(parts[1]))
+                    except Exception:
+                        vram_mb = 0
+        except Exception:
+            pass
+            
+    # 2. Try macOS Apple Silicon MPS
+    if not has_gpu and platform.system() == "Darwin" and platform.machine() == "arm64":
+        has_gpu = True
+        gpu_type = "mps"
+        gpu_name = "Apple Silicon (MPS)"
+
+    # Get CPU info
+    cpu_count = os.cpu_count() or 1
+    
+    return {
+        "has_gpu": has_gpu,
+        "gpu_type": gpu_type,
+        "gpu_name": gpu_name,
+        "vram_mb": vram_mb,
+        "cpu_count": cpu_count,
+        "os": platform.system(),
+        "architecture": platform.machine(),
+    }
+
