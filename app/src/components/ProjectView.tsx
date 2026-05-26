@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import {
   ArrowLeft,
   MoreHorizontal,
@@ -9,8 +9,10 @@ import {
   X,
   FolderOpen,
   Clock,
-  ScrollText,
   Loader2,
+  AlertCircle,
+  Settings as SettingsIcon,
+  RefreshCcw,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
@@ -18,6 +20,8 @@ import { isMacOS } from "../lib/platform";
 import { ChatInput } from "./ChatInput";
 import { IconButton } from "./IconButton";
 import { api } from "../lib/api";
+import { Message } from "./Message";
+import { ConcurrentWorkBanner } from "./ConcurrentWorkBanner";
 
 const EMOJI_OPTIONS = [
   "📁", "📊", "💡", "🚀", "🎯", "🔧", "💼", "📝", "🎨", "🏗️",
@@ -365,6 +369,9 @@ function ProjectDetail() {
   const updateProject = useApp((s) => s.updateProject);
   const openChat = useApp((s) => s.openChat);
 
+  // Chat state for inline project chat
+  const activeChat = useApp((s) => s.activeChatId ? s.chats[s.activeChatId] : undefined);
+
   const project = useMemo(
     () => projects.find((p) => p.id === activeId) || null,
     [projects, activeId],
@@ -390,14 +397,13 @@ function ProjectDetail() {
     setDescDraft(project.description || "");
   }, [project?.id, project?.name, project?.description]);
 
-  // Instructions (project.md) & Memory (project_memory.md) Modals and States
+  // Instructions (project.md) Modal and State
   const [instructions, setInstructions] = useState<string>("");
-  const [memory, setMemory] = useState<string>("");
-  const [timeline, setTimeline] = useState<string>("");
-  const [editModalType, setEditModalType] = useState<"instructions" | "memory" | null>(null);
+  const [editModalType, setEditModalType] = useState<"instructions" | null>(null);
   const [projectFiles, setProjectFiles] = useState<Array<{ name: string; size: number; mime: string; path: string }>>([]);
   const [filesLoading, setFilesLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [deleteModal, setDeleteModal] = useState<{ open: boolean; filename: string }>({ open: false, filename: "" });
 
   const loadProjectFiles = async () => {
     if (!activeId) return;
@@ -443,12 +449,18 @@ function ProjectDetail() {
 
   const handleDeleteFile = async (filename: string) => {
     if (!activeId) return;
-    if (!confirm(`Are you sure you want to delete ${filename}?`)) return;
+    setDeleteModal({ open: true, filename });
+  };
+
+  const confirmDeleteFile = async () => {
+    if (!activeId || !deleteModal.filename) return;
     try {
-      await api.deleteProjectFile(activeId, filename);
+      await api.deleteProjectFile(activeId, deleteModal.filename);
       void loadProjectFiles();
     } catch (err) {
       console.error("Failed to delete project file:", err);
+    } finally {
+      setDeleteModal({ open: false, filename: "" });
     }
   };
 
@@ -464,24 +476,11 @@ function ProjectDetail() {
         setInstructions(r.content || "");
       })
       .catch(() => {});
-    void api
-      .getProjectMemory(activeId)
-      .then((r) => {
-        setMemory(r.content || "");
-      })
-      .catch(() => {});
-    void api
-      .getProjectTimeline(activeId)
-      .then((r) => {
-        setTimeline(r.content || "");
-      })
-      .catch(() => {});
     void loadProjectFiles();
   }, [activeId]);
 
-  // Task 5: filter project chats by chat_ids on the project
   const projectChats = chatSummaries.filter((c) =>
-    project.chat_ids?.includes(c.id),
+    c.project_id === project.id,
   );
 
   const commitName = async () => {
@@ -602,64 +601,40 @@ function ProjectDetail() {
               autoFocus
             />
 
-            {/* Task 5: project chats shown in left column */}
-            <div className="rounded-2xl border border-line bg-paper-raised p-5">
-              <h3 className="mb-3 text-[13px] font-semibold text-ink">Past chats</h3>
-              {projectChats.length === 0 ? (
-                <p className="text-center text-[13px] text-ink-muted">
-                  Start a chat to keep conversations organized and re-use project knowledge.
-                </p>
-              ) : (
-                <ul className="flex flex-col gap-1">
-                  {projectChats.map((c) => (
-                    <li key={c.id}>
-                      <button
-                        type="button"
-                        onClick={() => void openChat(c.id)}
-                        className="press flex w-full items-center justify-between rounded-md px-2 py-2 text-left text-[13px] text-ink hover:bg-paper-sunken"
-                      >
-                        <span className="truncate">{c.title}</span>
-                        <span className="ml-3 shrink-0 text-[11px] text-ink-faint">
-                          {c.message_count} msgs
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            {/* Project chat thread or past chats list */}
+            {activeChat && activeChat.projectId === project.id ? (
+              <ProjectChatThread chat={activeChat} />
+            ) : (
+              <div className="rounded-2xl border border-line bg-paper-raised p-5">
+                <h3 className="mb-3 text-[13px] font-semibold text-ink">Past chats</h3>
+                {projectChats.length === 0 ? (
+                  <p className="text-center text-[13px] text-ink-muted">
+                    Start a chat to keep conversations organized and re-use project knowledge.
+                  </p>
+                ) : (
+                  <ul className="flex flex-col gap-1">
+                    {projectChats.map((c) => (
+                      <li key={c.id}>
+                        <button
+                          type="button"
+                          onClick={() => void openChat(c.id)}
+                          className="press flex w-full items-center justify-between rounded-md px-2 py-2 text-left text-[13px] text-ink hover:bg-paper-sunken"
+                        >
+                          <span className="truncate">{c.title}</span>
+                          <span className="ml-3 shrink-0 text-[11px] text-ink-faint">
+                            {c.message_count} msgs
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* RIGHT: memory / instructions / files */}
+          {/* RIGHT: instructions / files */}
           <aside className="flex flex-col gap-5">
-            {/* Memory card */}
-            <section className="flex-grow flex-shrink-0 min-h-[200px] rounded-2xl border border-line bg-paper-raised p-5 flex flex-col">
-              <div className="flex items-start justify-between gap-3 mb-2">
-                <div className="min-w-0 flex-1">
-                  <h3 className="text-[14px] font-semibold text-ink">Memory</h3>
-                  <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
-                    Key facts and context zWork remembers for this project.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setEditModalType("memory")}
-                  className="text-[12.5px] font-semibold text-accent hover:underline press shrink-0"
-                >
-                  edit
-                </button>
-              </div>
-              {memory.trim() ? (
-                <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-paper-sunken p-3 font-mono text-[11.5px] leading-5 text-ink-muted overflow-y-auto max-h-[160px] flex-grow">
-                  {memory}
-                </pre>
-              ) : (
-                <div className="mt-auto flex items-center justify-center py-6 text-[12px] text-ink-faint border border-dashed border-line rounded-lg flex-grow">
-                  No facts remembered yet.
-                </div>
-              )}
-            </section>
-
             {/* Instructions card */}
             <section className="flex-grow flex-shrink-0 min-h-[200px] rounded-2xl border border-line bg-paper-raised p-5 flex flex-col">
               <div className="flex items-start justify-between gap-3 mb-2">
@@ -684,31 +659,6 @@ function ProjectDetail() {
               ) : (
                 <div className="mt-auto flex items-center justify-center py-6 text-[12px] text-ink-faint border border-dashed border-line rounded-lg flex-grow">
                   No instructions added yet.
-                </div>
-              )}
-            </section>
-
-            {/* Timeline card */}
-            <section className="flex-grow flex-shrink-0 min-h-[200px] rounded-2xl border border-line bg-paper-raised p-5 flex flex-col">
-              <div className="flex items-start justify-between gap-3 mb-2">
-                <div className="min-w-0 flex-1">
-                  <h3 className="text-[14px] font-semibold text-ink">Timeline</h3>
-                  <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
-                    Auto-generated history of agent interactions.
-                  </p>
-                </div>
-                <ScrollText className="h-4 w-4 text-ink-faint shrink-0" />
-              </div>
-              {timeline.trim() ? (
-                <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-paper-sunken p-3 font-mono text-[11px] leading-5 text-ink-muted max-h-[200px] overflow-y-auto flex-grow">
-                  {timeline}
-                </pre>
-              ) : (
-                <div className="mt-auto flex flex-col items-center justify-center gap-2 rounded-xl bg-paper-sunken px-4 py-6 flex-grow">
-                  <Clock className="h-5 w-5 text-ink-faint" />
-                  <p className="max-w-[200px] text-center text-[11px] leading-4 text-ink-muted">
-                    Timeline will appear here as you interact.
-                  </p>
                 </div>
               )}
             </section>
@@ -790,18 +740,52 @@ function ProjectDetail() {
           onClose={() => setEditModalType(null)}
         />
       )}
-      {editModalType === "memory" && (
-        <EditModal
-          title="Edit Memory"
-          subtitle="Key facts and context zWork remembers for this project."
-          value={memory}
-          placeholder="e.g. Tech stack: React + TypeScript + Tailwind."
-          onSave={async (val) => {
-            await api.putProjectMemory(project.id, val);
-            setMemory(val);
-          }}
-          onClose={() => setEditModalType(null)}
-        />
+
+      {/* Delete file confirmation modal */}
+      {deleteModal.open && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-fade-in px-4"
+          onClick={() => setDeleteModal({ open: false, filename: "" })}
+        >
+          <div
+            className="w-full max-w-[360px] rounded-2xl border border-line bg-paper-raised shadow-pop"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
+              <h2 className="text-[15px] font-semibold text-ink">Delete file</h2>
+              <button
+                type="button"
+                onClick={() => setDeleteModal({ open: false, filename: "" })}
+                className="press rounded-md p-1 text-ink-faint hover:bg-paper-sunken hover:text-ink"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="px-5 py-4">
+              <p className="text-[13px] text-ink-muted leading-relaxed">
+                Are you sure you want to delete{" "}
+                <span className="font-medium text-ink">{deleteModal.filename}</span>?
+                This action cannot be undone.
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-line px-5 py-3.5">
+              <button
+                type="button"
+                onClick={() => setDeleteModal({ open: false, filename: "" })}
+                className="press rounded-md border border-line px-3 py-1.5 text-[12.5px] font-medium text-ink hover:bg-paper-sunken"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDeleteFile()}
+                className="press rounded-md bg-red-600 px-4 py-1.5 text-[12.5px] font-medium text-white hover:bg-red-700"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -944,6 +928,116 @@ function EditModal({
             {saving ? "Saving…" : "Save changes"}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ProjectChatThread({ chat }: { chat: import("../lib/store").Chat }) {
+  const endRef = useRef<HTMLDivElement>(null);
+  const artifacts = useApp((s) => s.artifacts);
+  const send = useApp((s) => s.send);
+  const retry = useApp((s) => s.retry);
+  const regenerateMessage = useApp((s) => s.regenerateMessage);
+  const flagBadResponse = useApp((s) => s.flagBadResponse);
+  const openArtifact = useApp((s) => s.openArtifact);
+  const setView = useApp((s) => s.setView);
+
+  useEffect(() => {
+    const el = endRef.current;
+    if (!el) return;
+    const container = el.parentElement;
+    if (!container) return;
+    const scrollEl = container.parentElement as HTMLElement | null;
+    if (!scrollEl) return;
+    const distance = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
+    if (distance <= 0) return;
+    if (distance < 300) {
+      scrollEl.scrollBy({ top: distance, behavior: "smooth" });
+    } else {
+      scrollEl.scrollTo({ top: scrollEl.scrollHeight, behavior: "instant" });
+    }
+  }, [chat.messages.length, chat.working, chat.status]);
+
+  const handleAskSubmit = useCallback(
+    (_msgId: string, choice: string) => {
+      void send(choice);
+    },
+    [send],
+  );
+
+  const handleOpenArtifact = useCallback(
+    (artifact: Parameters<typeof openArtifact>[0]) => {
+      openArtifact(artifact);
+    },
+    [openArtifact],
+  );
+
+  const handleBack = () => {
+    useApp.setState({ activeChatId: null });
+  };
+
+  return (
+    <div className="flex flex-col gap-4 rounded-2xl border border-line bg-paper-raised p-5 min-h-[400px]">
+      <div className="flex items-center justify-between">
+        <h3 className="text-[13px] font-semibold text-ink truncate">{chat.title}</h3>
+        <button
+          type="button"
+          onClick={handleBack}
+          className="press rounded-md px-2 py-1 text-[11.5px] text-ink-muted hover:bg-paper-sunken hover:text-ink"
+        >
+          Back to project
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto max-h-[600px] flex flex-col gap-5 pr-2">
+        <ConcurrentWorkBanner />
+        {chat.messages.map((m, idx) => {
+          const isLast = idx === chat.messages.length - 1;
+          const isStreaming = !!chat.working && isLast;
+          const activities = isStreaming && m.role === "assistant"
+            ? chat.activities
+            : m.activities;
+          return (
+            <Message
+              key={m.id}
+              message={m}
+              onAskSubmit={handleAskSubmit}
+              onOpenArtifact={handleOpenArtifact}
+              artifacts={artifacts}
+              streaming={isStreaming}
+              activities={activities}
+              status={isStreaming ? chat.status : undefined}
+              onRetry={regenerateMessage}
+              onBadResponse={flagBadResponse}
+            />
+          );
+        })}
+        {chat.error && (
+          <div className="flex animate-fade-in items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12.5px] text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span className="break-words">{chat.error}</span>
+          </div>
+        )}
+        {chat.needsSetup && !chat.working && (
+          <div className="flex animate-fade-in items-center gap-2 rounded-lg border border-line bg-paper-sunken px-3 py-2">
+            <button
+              type="button"
+              onClick={() => setView("settings")}
+              className="press inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-[12.5px] font-medium text-ink hover:bg-paper-sunken"
+            >
+              <SettingsIcon className="h-3.5 w-3.5" /> Open Settings
+            </button>
+            <button
+              type="button"
+              onClick={() => void retry()}
+              className="press inline-flex items-center gap-1.5 rounded-md border border-line bg-paper-sunken px-2.5 py-1 text-[12.5px] font-medium text-ink hover:bg-paper hover:border-line-strong"
+            >
+              <RefreshCcw className="h-3.5 w-3.5" /> Retry
+            </button>
+          </div>
+        )}
+        <div ref={endRef} />
       </div>
     </div>
   );
