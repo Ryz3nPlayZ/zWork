@@ -498,6 +498,7 @@ class Settings:
 
 
 def load() -> Settings:
+    """Read and return the persisted settings dict from disk, applying defaults for missing keys."""
     p = settings_path()
     if not p.exists():
         return Settings()
@@ -538,6 +539,7 @@ def load() -> Settings:
 
 
 def save(settings: Settings) -> None:
+    """Persist the settings dict to disk as JSON."""
     if settings.telemetry_enabled and not settings.telemetry_install_id:
         settings.telemetry_install_id = uuid.uuid4().hex
     placeholders = secretstore.persist_api_keys(settings.api_keys)
@@ -609,6 +611,7 @@ def upsert_custom_model(
 
 
 def remove_custom_model(settings: Settings, model_id: str) -> bool:
+    """Remove a custom model by ID and persist."""
     before = len(settings.custom_models)
     settings.custom_models = [
         m for m in settings.custom_models if m.get("id") != model_id
