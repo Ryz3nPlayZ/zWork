@@ -1023,10 +1023,11 @@ export const useApp = create<AppState>((set, get) => ({
 
   openChat: async (id) => {
     const existing = get().chats[id];
+    const projectId = existing?.projectId || null;
     set({
       activeChatId: id,
-      view: "chat",
-      activeProjectId: existing?.projectId || null,
+      view: projectId ? "projects" : "chat",
+      activeProjectId: projectId,
     });
     if (get().backendOffline) {
       const cachedChats = localStorage.getItem("zwork:cached-chats");
@@ -1074,8 +1075,10 @@ export const useApp = create<AppState>((set, get) => ({
             }
           }
         }
+        const fetchedProjectId = (full as any).project_id || null;
         set((s) => ({
-          activeProjectId: (full as any).project_id || null,
+          activeProjectId: fetchedProjectId,
+          view: fetchedProjectId ? "projects" : s.view,
           artifacts: [...s.artifacts, ...loadedArtifacts],
           chats: {
             ...s.chats,
@@ -1087,7 +1090,7 @@ export const useApp = create<AppState>((set, get) => ({
               activities: latestActivities,
               artifactPanelOpen: false,
               activeArtifactId: null,
-              projectId: (full as any).project_id || null,
+              projectId: fetchedProjectId,
             },
           },
         }));
@@ -1391,10 +1394,11 @@ export const useApp = create<AppState>((set, get) => ({
           artifactPanelOpen: false,
           activeArtifactId: null,
         };
+      const wasInProject = !!get().activeProjectId;
       return {
         chats: { ...s.chats, [localId]: chat },
         activeChatId: localId,
-        view: "chat",
+        view: wasInProject ? "projects" : "chat",
       };
     });
 

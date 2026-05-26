@@ -28,7 +28,6 @@ export function Sidebar() {
   const open = useApp((s) => s.sidebarOpen);
   const toggle = useApp((s) => s.toggleSidebar);
   const summaries = useApp((s) => s.chatSummaries);
-  const projects = useApp((s) => s.projects);
   const active = useApp((s) => s.activeChatId);
   const openChat = useApp((s) => s.openChat);
   const deleteChat = useApp((s) => s.deleteChat);
@@ -43,13 +42,11 @@ export function Sidebar() {
   // Exclude chats that belong to any project from the sidebar
   const projectChatIds = useMemo(() => {
     const ids = new Set<string>();
-    for (const p of projects) {
-      for (const cid of p.chat_ids || []) {
-        ids.add(cid);
-      }
+    for (const s of summaries) {
+      if (s.project_id) ids.add(s.id);
     }
     return ids;
-  }, [projects]);
+  }, [summaries]);
 
   const sidebarSummaries = useMemo(() => summaries.filter((c) => !projectChatIds.has(c.id)), [summaries, projectChatIds]);
 
