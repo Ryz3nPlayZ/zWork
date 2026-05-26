@@ -34,6 +34,7 @@ class MCPServerSpec:
 
 
 def mcp_config_path() -> Path:
+    """Return the path to the MCP server configuration JSON file."""
     return zwork_home() / MCP_CONFIG_FILENAME
 
 
