@@ -38,6 +38,7 @@ class CalendarEvent:
 
 
 def _path() -> Path:
+    """Return the JSONL storage path for the given *chat_id*."""
     return zwork_home() / "tasks.json"
 
 
@@ -199,6 +200,7 @@ def update_task_column(task_id: str, column: str) -> Task | None:
 
 
 def delete_task(task_id: str) -> bool:
+    """Remove the task record file for *task_id*."""
     data = _load_data()
     tasks_list = data["tasks"]
     filtered = [t for t in tasks_list if t["id"] != task_id]
