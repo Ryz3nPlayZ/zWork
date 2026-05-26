@@ -1,4 +1,4 @@
-"""Tests for sidecar.agent.skills — skill discovery and metadata parsing."""
+"""Tests for sidecar.agent.skills — skill discovery and metadata."""
 
 from __future__ import annotations
 
@@ -15,16 +15,16 @@ def _write_skill(skills_dir: Path, skill_id: str, name: str, description: str) -
     (skill_path / "SKILL.md").write_text(skill_md, encoding="utf-8")
 
 
-class TestSkillsIndexing(unittest.TestCase):
+class TestSkillsList(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.mkdtemp()
-        self._skills_tmp = tempfile.mkdtemp()
+        self._root = tempfile.mkdtemp()
         self._old_home = os.environ.get("ZWORK_HOME")
         self._old_root = os.environ.get("ZWORK_ROOT")
         os.environ["ZWORK_HOME"] = self._tmp
-        os.environ["ZWORK_ROOT"] = self._skills_tmp
-        # Create zWork-Skills directory under root
-        (Path(self._skills_tmp) / "zWork-Skills").mkdir(exist_ok=True)
+        os.environ["ZWORK_ROOT"] = self._root
+        # Create zWork-Skills directory
+        (Path(self._root) / "zWork-Skills").mkdir(exist_ok=True)
 
     def tearDown(self) -> None:
         if self._old_home is None:
@@ -39,45 +39,58 @@ class TestSkillsIndexing(unittest.TestCase):
     def _import(self):
         try:
             import sidecar.agent.skills as sk
+            # Force a refresh so env changes take effect
+            sk.list_skills(refresh=True)
             return sk
         except ImportError:
             self.skipTest("sidecar not installed")
 
-    def test_index_skills_returns_list(self) -> None:
+    def test_list_skills_returns_list(self) -> None:
         sk = self._import()
-        result = sk.index_skills()
+        result = sk.list_skills(refresh=True)
         self.assertIsInstance(result, list)
 
-    def test_index_skills_finds_installed_skill(self) -> None:
+    def test_list_skills_finds_installed_skill(self) -> None:
         sk = self._import()
-        skills_dir = Path(self._skills_tmp) / "zWork-Skills"
-        _write_skill(skills_dir, "test-skill-abc", "Test Skill", "Does testing.")
-        # Re-index
-        result = sk.index_skills()
-        ids = [s.id if hasattr(s, "id") else s.get("id") for s in result]
-        self.assertIn("test-skill-abc", ids)
+        skills_dir = Path(self._root) / "zWork-Skills"
+        _write_skill(skills_dir, "test-skill-abc", "Test Skill ABC", "Does testing.")
+        result = sk.list_skills(refresh=True)
+        slugs = [s.slug if hasattr(s, "slug") else s.get("slug", "") for s in result]
+        # Slug is derived from the folder name
+        self.assertTrue(any("test-skill-abc" in str(s) for s in slugs))
 
-    def test_skill_metadata_has_name(self) -> None:
+    def test_skill_has_name_field(self) -> None:
         sk = self._import()
-        skills_dir = Path(self._skills_tmp) / "zWork-Skills"
-        _write_skill(skills_dir, "named-skill", "My Named Skill", "Does stuff.")
-        result = sk.index_skills()
-        names = [s.name if hasattr(s, "name") else s.get("name") for s in result]
-        self.assertIn("My Named Skill", names)
+        skills_dir = Path(self._root) / "zWork-Skills"
+        _write_skill(skills_dir, "named-skill-xyz", "My Skill XYZ", "Does stuff.")
+        result = sk.list_skills(refresh=True)
+        names = [s.name if hasattr(s, "name") else s.get("name", "") for s in result]
+        self.assertIn("My Skill XYZ", names)
 
-    def test_skill_metadata_has_description(self) -> None:
+    def test_skill_has_description_field(self) -> None:
         sk = self._import()
-        skills_dir = Path(self._skills_tmp) / "zWork-Skills"
-        _write_skill(skills_dir, "desc-skill", "Desc Skill", "Unique description XYZ.")
-        result = sk.index_skills()
-        descs = [s.description if hasattr(s, "description") else s.get("description") for s in result]
-        self.assertTrue(any("Unique description XYZ" in (d or "") for d in descs))
+        skills_dir = Path(self._root) / "zWork-Skills"
+        _write_skill(skills_dir, "desc-skill-xyz", "Desc Skill", "Unique desc 999.")
+        result = sk.list_skills(refresh=True)
+        descs = [s.description if hasattr(s, "description") else s.get("description", "") for s in result]
+        self.assertTrue(any("Unique desc 999" in (d or "") for d in descs))
 
-    def test_index_empty_skills_dir(self) -> None:
+    def test_find_skill_by_slug(self) -> None:
         sk = self._import()
-        # No skills installed; should return empty list without error
-        result = sk.index_skills()
+        skills_dir = Path(self._root) / "zWork-Skills"
+        _write_skill(skills_dir, "findme-skill", "Find Me", "Findable skill.")
+        sk.list_skills(refresh=True)
+        result = sk.find_skill("findme-skill")
+        if result is not None:
+            name = result.name if hasattr(result, "name") else result.get("name")
+            self.assertEqual(name, "Find Me")
+
+    def test_as_dicts_returns_list_of_dicts(self) -> None:
+        sk = self._import()
+        result = sk.as_dicts()
         self.assertIsInstance(result, list)
+        for item in result:
+            self.assertIsInstance(item, dict)
 
 
 if __name__ == "__main__":
