@@ -500,6 +500,9 @@ struct AdminMetricsOverview {
     mrr: f64,
     arpu: f64,
     free_to_paid_conversion: f64,
+    total_prompt_tokens: i64,
+    total_completion_tokens: i64,
+    estimated_cost_usd: f64,
 }
 
 #[derive(Clone, Serialize)]
@@ -511,7 +514,9 @@ struct AdminUserRow {
     created_at: DateTime<Utc>,
     last_activity: Option<DateTime<Utc>>,
     total_requests: i64,
-    total_tokens: i64,
+    total_prompt_tokens: i64,
+    total_completion_tokens: i64,
+    estimated_cost_usd: f64,
     stripe_customer_id: Option<String>,
     subscription_status: Option<String>,
 }
@@ -2094,7 +2099,7 @@ async fn ai_proxy_anthropic(
         );
         response.headers_mut().insert(
             HeaderName::from_static("x-zwork-router-model"),
-            HeaderValue::from_str(&provider.primary_model)
+            HeaderValue::from_str(&requested_model)
                 .unwrap_or_else(|_| HeaderValue::from_static("unknown")),
         );
         response.headers_mut().insert(
@@ -2938,6 +2943,17 @@ async fn admin_metrics_overview(
         0.0
     };
 
+    let (total_prompt, total_completion): (i64, i64) = sqlx::query_as(
+        r#"SELECT COALESCE(SUM(prompt_tokens), 0)::bigint, COALESCE(SUM(completion_tokens), 0)::bigint FROM gateway_requests"#
+    )
+    .fetch_one(&state.db)
+    .await
+    .map(|(p, c): (i64, i64)| (p, c))
+    .unwrap_or((0, 0));
+
+    // DeepSeek v4-flash pricing (cache miss): /bin/bash.14/M input, /bin/bash.28/M output
+    let estimated_cost = (total_prompt as f64 / 1_000_000.0) * 0.14 + (total_completion as f64 / 1_000_000.0) * 0.28;
+
     Ok(Json(AdminMetricsOverview {
         total_users,
         active_users_30d,
@@ -2949,6 +2965,9 @@ async fn admin_metrics_overview(
         mrr,
         arpu,
         free_to_paid_conversion,
+        total_prompt_tokens: total_prompt,
+        total_completion_tokens: total_completion,
+        estimated_cost_usd: (estimated_cost * 100.0).round() / 100.0,
     }))
 }
 
@@ -2968,7 +2987,8 @@ async fn admin_list_users(
             u.created_at,
             MAX(g.created_at) as last_activity,
             COUNT(g.id) as total_requests,
-            COALESCE(SUM(g.total_tokens), 0)::bigint as total_tokens,
+            COALESCE(SUM(g.prompt_tokens), 0)::bigint as total_prompt_tokens,
+            COALESCE(SUM(g.completion_tokens), 0)::bigint as total_completion_tokens,
             u.stripe_customer_id,
             u.subscription_status
         FROM app_users u
@@ -2981,17 +3001,33 @@ async fn admin_list_users(
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     .into_iter()
-    .map(|row| AdminUserRow {
-        user_id: row.get("user_id"),
-        email: row.get("email"),
-        name: row.get("name"),
-        tier: row.get("tier"),
-        created_at: row.get("created_at"),
-        last_activity: row.get("last_activity"),
-        total_requests: row.get("total_requests"),
-        total_tokens: row.get("total_tokens"),
-        stripe_customer_id: row.get("stripe_customer_id"),
-        subscription_status: row.get("subscription_status"),
+    .map(|row| {
+        let prompt: i64 = row.get("total_prompt_tokens");
+        let completion: i64 = row.get("total_completion_tokens");
+        let model: String = row.get("tier");
+        // DeepSeek pricing per 1M tokens (cache miss, conservative)
+        let (input_rate, output_rate) = if model == "max" {
+            (0.435, 0.87) // pro model rates for max users
+        } else if model == "pro" {
+            (0.435, 0.87) // deepseek-v4-pro rates
+        } else {
+            (0.14, 0.28) // deepseek-v4-flash rates
+        };
+        let cost = (prompt as f64 / 1_000_000.0) * input_rate + (completion as f64 / 1_000_000.0) * output_rate;
+        AdminUserRow {
+            user_id: row.get("user_id"),
+            email: row.get("email"),
+            name: row.get("name"),
+            tier: row.get("tier"),
+            created_at: row.get("created_at"),
+            last_activity: row.get("last_activity"),
+            total_requests: row.get("total_requests"),
+            total_prompt_tokens: prompt,
+            total_completion_tokens: completion,
+            estimated_cost_usd: (cost * 100.0).round() / 100.0,
+            stripe_customer_id: row.get("stripe_customer_id"),
+            subscription_status: row.get("subscription_status"),
+        }
     })
     .collect();
 

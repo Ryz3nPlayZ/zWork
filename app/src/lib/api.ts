@@ -60,6 +60,7 @@ export interface ApiChatSummary {
   updated_at: number;
   message_count: number;
   model: string;
+  project_id?: string;
 }
 
 export interface Integration {
@@ -691,9 +692,11 @@ async function streamChatWeb(
     ? window.localStorage.getItem("zwork:cloud-token") || ""
     : "";
 
+  const isPro = body.model === "zwork-pro";
+  const resolvedModel = isPro ? "deepseek-v4-pro" : "deepseek-v4-flash";
   const anthropicBody = {
-    model: "deepseek-v4-flash",
-    system: "You are zWork, an action-oriented AI work assistant created by Zemu Liu. Respond in the same language the user writes in. Be concise, direct, and helpful. If the user writes in English, respond in English. Under the hood you are deepseek-v4-flash from DeepSeek.",
+    model: resolvedModel,
+    system: `You are zWork, an action-oriented AI work assistant created by Zemu Liu. Respond in the same language the user writes in. Be concise, direct, and helpful. If the user writes in English, respond in English. Under the hood you are ${resolvedModel} from DeepSeek.`,
     messages: [{ role: "user" as const, content: body.message }],
     stream: true,
     max_tokens: 16384,
@@ -745,8 +748,8 @@ async function streamChatWeb(
 
   // Extract provider/model from response headers
   const provider = resp.headers.get("x-zwork-router-provider") || "zwork-router";
-  const resolvedModel = resp.headers.get("x-zwork-router-model") || "deepseek-v4-flash";
-  onEvent({ type: "meta", provider, resolved_model: resolvedModel, upstream_provider: provider });
+  const routerModel = resp.headers.get("x-zwork-router-model") || resolvedModel;
+  onEvent({ type: "meta", provider, resolved_model: routerModel, upstream_provider: provider });
 
   onEvent({ type: "status", text: "Drafting" });
 

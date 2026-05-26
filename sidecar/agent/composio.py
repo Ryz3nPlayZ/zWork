@@ -133,8 +133,13 @@ class ComposioManager:
         except httpx.TimeoutError:
             raise RuntimeError(f"Timeout connecting to {app_name}") from None
         except httpx.HTTPStatusError as e:
+            detail = e.response.text[:200] if e.response.text else ""
+            if "auth_config_not_found" in detail or e.response.status_code == 404:
+                raise RuntimeError(
+                    f"{app_name} is not yet configured. Please contact support to enable this integration."
+                ) from None
             raise RuntimeError(
-                f"Failed to get connect link for {app_name}: {e.response.status_code}"
+                f"Failed to get connect link for {app_name}: {e.response.status_code} {detail}"
             ) from None
 
     async def get_connected_accounts(self) -> list[dict]:

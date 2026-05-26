@@ -137,6 +137,8 @@ async function checkGitHubReleases(
 }
 
 export async function detectUpdate(currentVersion: string): Promise<UpdateCardState | null> {
+  const IS_TAURI = typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
+  if (!IS_TAURI) return null;
   const currentVersionParts = parseVersion(currentVersion);
   const fromUpdater = await checkTauriUpdater(currentVersionParts);
   if (fromUpdater) return fromUpdater;
@@ -206,7 +208,12 @@ export async function installUpdate(
 }
 
 export async function openReleaseUrl(url: string): Promise<void> {
-  await invoke("open_external", { url });
+  const IS_TAURI = typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
+  if (IS_TAURI) {
+    await invoke("open_external", { url });
+  } else {
+    window.open(url, "_blank");
+  }
 }
 
 export function consumeInstalledUpdateNotice(currentVersion: string): {

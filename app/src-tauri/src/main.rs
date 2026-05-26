@@ -756,7 +756,9 @@ fn main() {
         .setup(|app| {
             use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
             let shortcut: Shortcut = "Ctrl+Shift+Space".parse().unwrap();
-            let _ = app.global_shortcut().register(shortcut);
+            if let Err(e) = app.global_shortcut().register(shortcut) {
+                eprintln!("zWork: failed to register global shortcut Ctrl+Shift+Space: {e}");
+            }
 
             // System tray
             let show_item = MenuItemBuilder::with_id("show", "Show zWork").build(app)?;
