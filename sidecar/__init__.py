@@ -1,9 +1,12 @@
+"""zWork sidecar — local FastAPI backend for the zWork desktop agent."""
+
 from __future__ import annotations
 
 __all__ = ["__version__"]
 
 
 def _read_version() -> str:
+    """Read the package version from importlib.metadata or pyproject.toml."""
     try:
         from importlib.metadata import version
 
