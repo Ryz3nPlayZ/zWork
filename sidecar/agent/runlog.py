@@ -1,3 +1,5 @@
+"""Append-only JSONL event log for per-run agent activity."""
+
 from __future__ import annotations
 
 import json
