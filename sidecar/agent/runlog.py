@@ -9,10 +9,12 @@ from .utils import now_ms
 
 
 def _path(run_id: str) -> Path:
+    """Return the JSONL storage path for the given *chat_id*."""
     return runs_dir() / f"{run_id}.jsonl"
 
 
 def _sanitize(value: Any) -> Any:
+    """Recursively sanitise a log payload: truncate long strings, strip null bytes, stringify dict keys."""
     if isinstance(value, dict):
         return {str(k): _sanitize(v) for k, v in value.items()}
     if isinstance(value, list):
@@ -26,6 +28,7 @@ def _sanitize(value: Any) -> Any:
 
 
 def append(run_id: str, event: str, **fields: Any) -> None:
+    """Append a timestamped event record to the run log for *run_id*."""
     payload = {
         "ts": now_ms(),
         "event": event,
