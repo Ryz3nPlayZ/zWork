@@ -1,3 +1,5 @@
+"""Filesystem path helpers for the zWork user-data home directory and workspace."""
+
 from __future__ import annotations
 
 import os
@@ -78,34 +80,40 @@ def zwork_md_path() -> Path:
 
 
 def memory_path() -> Path:
+    """Return the path to the agent's persistent memory Markdown file."""
     return zwork_home() / "memory.md"
 
 
 def workspace_root() -> Path:
+    """Return the root workspace directory, creating it if necessary."""
     d = zwork_home() / "workspace"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def workspace_apps_dir() -> Path:
+    """Return the workspace directory for generated application files."""
     d = workspace_root() / "apps"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def workspace_outputs_dir() -> Path:
+    """Return the workspace directory for agent output artifacts."""
     d = workspace_root() / "outputs"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def workspace_uploads_dir() -> Path:
+    """Return the workspace directory for user-uploaded files."""
     d = workspace_root() / "uploads"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
 
 def workspace_scratch_dir() -> Path:
+    """Return the workspace scratch directory for temporary working files."""
     d = workspace_root() / "scratch"
     d.mkdir(parents=True, exist_ok=True)
     return d
@@ -119,6 +127,7 @@ def projects_dir() -> Path:
 
 
 def project_dir(project_id: str) -> Path:
+    """Return the per-project subdirectory, creating it if necessary."""
     d = projects_dir() / project_id
     d.mkdir(parents=True, exist_ok=True)
     return d
