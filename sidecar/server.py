@@ -1540,17 +1540,28 @@ def _chat_public(c: chatstore.Chat) -> dict[str, Any]:
 
 
 @app.get("/api/tasks")
+def _taskstore():
+    try:
+        from .agent import taskstore
+    except ImportError:  # PyInstaller/script entrypoint fallback
+        from sidecar.agent import taskstore  # type: ignore[no-redef]
+    return taskstore
+
+
+def _taskstore_asdict(t):
+    return _taskstore().asdict(t)
+
+
+@app.get("/api/tasks")
 def list_tasks() -> dict:
     """Return all task records filtered optionally by project and status."""
-    from .agent import taskstore
-
-    return {"tasks": [taskstore.asdict(t) for t in taskstore.get_tasks()]}
+    return {"tasks": [_taskstore_asdict(t) for t in _taskstore().get_tasks()]}
 
 
 @app.post("/api/tasks")
 def create_task(body: TaskCreateUpdate) -> dict:
     """Create and persist a new task record, returning its ID."""
-    from .agent import taskstore
+    taskstore = _taskstore()
 
     t = taskstore.save_task(
         title=body.title,
@@ -1566,7 +1577,7 @@ def create_task(body: TaskCreateUpdate) -> dict:
 @app.patch("/api/tasks/{task_id}")
 def update_task(task_id: str, body: TaskCreateUpdate) -> dict:
     """Merge *fields* into the stored task record."""
-    from .agent import taskstore
+    taskstore = _taskstore()
 
     if not home_mod.is_safe_id(task_id):
         raise HTTPException(400, "invalid task_id")
@@ -1584,7 +1595,7 @@ def update_task(task_id: str, body: TaskCreateUpdate) -> dict:
 
 @app.patch("/api/tasks/{task_id}/column")
 def update_task_column_endpoint(task_id: str, body: TaskColumnUpdate) -> dict:
-    from .agent import taskstore
+    taskstore = _taskstore()
 
     if not home_mod.is_safe_id(task_id):
         raise HTTPException(400, "invalid task_id")
@@ -1597,7 +1608,7 @@ def update_task_column_endpoint(task_id: str, body: TaskColumnUpdate) -> dict:
 @app.delete("/api/tasks/{task_id}")
 def delete_task_endpoint(task_id: str) -> dict:
     """Delete the task identified by *task_id*."""
-    from .agent import taskstore
+    taskstore = _taskstore()
 
     if not home_mod.is_safe_id(task_id):
         raise HTTPException(400, "invalid task_id")
@@ -1609,10 +1620,10 @@ def delete_task_endpoint(task_id: str) -> dict:
 
 @app.post("/api/tasks/auto-plan")
 async def auto_plan_tasks(body: TaskAutoPlanRequest) -> dict:
-    from .agent import taskstore, providers
-    import json
+    taskstore = _taskstore()
     from datetime import datetime, timedelta
 
+    s = settings_mod.load()
     model_id = _resolve_model_id(None, s)
     if not model_id:
         model_id = "zwork-flash"
@@ -1691,14 +1702,12 @@ async def auto_plan_tasks(body: TaskAutoPlanRequest) -> dict:
 
 @app.get("/api/events")
 def list_events() -> dict:
-    from .agent import taskstore
-
-    return {"events": [taskstore.asdict(e) for e in taskstore.get_events()]}
+    return {"events": [_taskstore_asdict(e) for e in _taskstore().get_events()]}
 
 
 @app.post("/api/events")
 def create_event(body: EventCreateUpdate) -> dict:
-    from .agent import taskstore
+    taskstore = _taskstore()
 
     e = taskstore.save_event(
         title=body.title,
@@ -1711,7 +1720,7 @@ def create_event(body: EventCreateUpdate) -> dict:
 
 @app.delete("/api/events/{event_id}")
 def delete_event_endpoint(event_id: str) -> dict:
-    from .agent import taskstore
+    taskstore = _taskstore()
 
     if not home_mod.is_safe_id(event_id):
         raise HTTPException(400, "invalid event_id")
@@ -2267,7 +2276,10 @@ class QuestionAnswer(BaseModel):
 
 @app.post("/api/chats/{chat_id}/answer-question")
 async def answer_chat_question(chat_id: str, body: QuestionAnswer):
-    from agent.tools import PENDING_QUESTIONS
+    try:
+        from .agent.tools import PENDING_QUESTIONS
+    except ImportError:
+        from sidecar.agent.tools import PENDING_QUESTIONS
     if chat_id in PENDING_QUESTIONS:
         event, result_box = PENDING_QUESTIONS[chat_id]
         result_box.clear()

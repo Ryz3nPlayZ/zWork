@@ -856,7 +856,7 @@ export const useApp = create<AppState>((set, get) => ({
     // Wait for the backend to be fully healthy before loading any data.
     // The Rust side already spawned the backend; this polls until it responds.
     try {
-      await api.waitForBackend(15);
+      await api.waitForBackend(60);
       set({ backendReady: true, backendOffline: false });
     } catch (e) {
       console.warn("Backend failed to start. Running in offline fallback mode.");
