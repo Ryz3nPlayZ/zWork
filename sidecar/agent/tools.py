@@ -469,6 +469,14 @@ TOOL_SCHEMAS: list[dict] = [
                 },
                 "x": {"type": "integer", "description": "X coordinate for 'describe'."},
                 "y": {"type": "integer", "description": "Y coordinate for 'describe'."},
+                "timeout": {
+                    "type": "number",
+                    "description": "Timeout in seconds for 'wait' operation (default: 10.0).",
+                },
+                "interval": {
+                    "type": "integer",
+                    "description": "Polling interval in milliseconds for 'wait' operation (default: 250).",
+                },
                 "cwd": {
                     "type": "string",
                     "description": "Working directory for the command (default: '.')",
@@ -534,6 +542,43 @@ TOOL_SCHEMAS: list[dict] = [
                 "session": {
                     "type": "string",
                     "description": "Optional session name for persistent browser state.",
+                },
+                "app": {
+                    "type": "string",
+                    "description": "The browser application name (e.g. 'chrome', 'brave') used with action='start'.",
+                },
+                "headless": {
+                    "type": "boolean",
+                    "description": "Start the browser in headless mode (used with action='start').",
+                },
+                "port": {
+                    "type": "integer",
+                    "description": "The remote debugging port (used with action='start').",
+                },
+                "exec_path": {
+                    "type": "string",
+                    "description": "Path to a custom browser executable (used with action='start').",
+                },
+                "button": {
+                    "type": "string",
+                    "enum": ["left", "right", "middle"],
+                    "description": "Mouse button for click (used with action='click').",
+                },
+                "click_count": {
+                    "type": "integer",
+                    "description": "Number of clicks (used with action='click'). Double click is click_count=2.",
+                },
+                "visible": {
+                    "type": "boolean",
+                    "description": "Wait until element is visible (used with action='wait-selector').",
+                },
+                "timeout": {
+                    "type": "number",
+                    "description": "Timeout in seconds for wait operations (default: 10.0).",
+                },
+                "interval": {
+                    "type": "integer",
+                    "description": "Polling interval in milliseconds for wait operations (default: 250).",
                 },
                 "cwd": {
                     "type": "string",
@@ -3223,8 +3268,19 @@ def _dctl_env() -> dict[str, str]:
 
 def _dctl_path() -> str:
     """Find the dctl standalone binary in dev or bundle layouts."""
+    import sys
     this_file = Path(__file__).resolve()
     candidates = []
+
+    # PyInstaller bundle directory
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        p = Path(bundle_root)
+        candidates.extend([
+            p / "usr" / "bin" / "dctl",
+            p / "bin" / "dctl",
+            p / "dctl",
+        ])
 
     # Bundled: same directory as the backend binary
     if "extracted" in str(this_file):
@@ -3239,11 +3295,14 @@ def _dctl_path() -> str:
             ]
         )
 
-    # Dev: zWork repo root
+    # Active Python environment bin folder (e.g. .venv/bin/dctl)
+    if sys.executable:
+        candidates.append(Path(sys.executable).parent / "dctl")
+
+    # Dev: zWork repo root / sibling dctl dist
     for parent in this_file.parents:
         if (parent / "zWork-Skills").exists() or (parent / "sidecar").exists():
-            candidates.append(parent.parent / "dctl" / "dctl")
-            candidates.append(parent.parent / "dctl")
+            candidates.append(parent.parent / "dctl" / "dist" / "dctl")
             break
 
     # Installed via install.sh
@@ -3257,7 +3316,7 @@ def _dctl_path() -> str:
         candidates.append(Path(system_dctl))
 
     for candidate in candidates:
-        if candidate.exists() and os.access(candidate, os.X_OK):
+        if candidate.exists() and candidate.is_file() and os.access(candidate, os.X_OK):
             return str(candidate)
 
     # Fallback: hope it's in PATH
@@ -3286,6 +3345,13 @@ def _map_dctl_ui(params: dict[str, Any]) -> tuple[str, list[str]]:
                 args.extend(["--button", button])
             if params.get("double"):
                 args.append("--double")
+        elif action == "wait":
+            timeout = params.get("timeout")
+            if timeout is not None:
+                args.extend(["--timeout", str(timeout)])
+            interval = params.get("interval")
+            if interval is not None:
+                args.extend(["--interval", str(interval)])
     elif action == "type":
         text = params.get("text", "")
         args.append(text)
@@ -3362,8 +3428,40 @@ def _map_dctl_browser(params: dict[str, Any]) -> tuple[str, list[str]]:
 
     if action == "open" and url:
         args.append(url)
-    elif action == "start" and url:
-        args.extend(["--url", url])
+    elif action == "start":
+        app = params.get("app")
+        if app:
+            args.extend(["--app", app])
+        if params.get("headless"):
+            args.append("--headless")
+        port = params.get("port")
+        if port is not None:
+            args.extend(["--port", str(port)])
+        exec_path = params.get("exec_path")
+        if exec_path:
+            args.extend(["--exec", exec_path])
+        if url:
+            args.extend(["--url", url])
+
+    if action == "click":
+        button = params.get("button")
+        if button and button != "left":
+            args.extend(["--button", button])
+        click_count = params.get("click_count")
+        if click_count is not None:
+            args.extend(["--click-count", str(click_count)])
+
+    if action == "wait-selector":
+        if params.get("visible"):
+            args.append("--visible")
+
+    if action in ("wait-url", "wait-selector"):
+        timeout = params.get("timeout")
+        if timeout is not None:
+            args.extend(["--timeout", str(timeout)])
+        interval = params.get("interval")
+        if interval is not None:
+            args.extend(["--interval", str(interval)])
 
     if action in ("type", "press", "eval", "send", "batch") and text:
         args.append(text)

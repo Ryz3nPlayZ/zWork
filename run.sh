@@ -17,6 +17,15 @@ fi
 source .venv/bin/activate
 python3 -m pip install -q -e .
 
+if [[ -d "../dctl" ]]; then
+  echo "Installing sibling dctl repository into virtual environment..."
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    python3 -m pip install -q -e "../dctl[macos]"
+  else
+    python3 -m pip install -q -e "../dctl"
+  fi
+fi
+
 # ---- Frontend deps ----
 if [[ ! -d "app/node_modules" ]]; then
   (cd app && npm install)

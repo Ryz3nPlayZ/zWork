@@ -918,6 +918,7 @@ async def _openai_turn(
 
 
 def _dctl_addon_prompt() -> str:
+    base_prompt = ""
     try:
         from pathlib import Path
 
@@ -926,11 +927,13 @@ def _dctl_addon_prompt() -> str:
             if (parent / "zWork-Skills").exists() or (parent / "sidecar").exists():
                 candidate = parent.parent / "dctl" / "agents" / "system_prompt_addon.md"
                 if candidate.exists():
-                    return candidate.read_text(encoding="utf-8")
+                    base_prompt = candidate.read_text(encoding="utf-8")
                 break
     except Exception:
         pass
-    return """# Instructions for using `dctl` Desktop Control
+
+    if not base_prompt:
+        base_prompt = """# Instructions for using `dctl` Desktop Control
 
 You have access to `dctl`, a tool suite for controlling the user's desktop environment.
 
@@ -964,6 +967,40 @@ You have access to `dctl`, a tool suite for controlling the user's desktop envir
 - **Verify after edits.** Always check the result of a mutation — don't assume it succeeded.
 - **Use the right backend.** `dctl_docx` for `.docx` files, `dctl_xlsx` for `.xlsx` files, `dctl_browser` for web apps. Don't route through the GUI when a direct path exists.
 - **Coordinate fallback.** If an element has no name or role, use `dctl_ui(action='describe', x=..., y=...)` to find what's at that position."""
+
+    try:
+        from sidecar.agent.tools import _dctl_path
+        import subprocess
+        import json
+        dctl_bin = _dctl_path()
+        res = subprocess.run([dctl_bin, "capabilities"], capture_output=True, text=True, timeout=2)
+        if res.returncode == 0:
+            caps = json.loads(res.stdout)
+            caps_data = caps.get("data", {})
+            warnings = caps_data.get("warnings", [])
+            providers = caps_data.get("providers", {})
+            platform = caps_data.get("platform", "unknown")
+            session_type = caps_data.get("session_type", "unknown")
+
+            lines = [
+                "",
+                "## Local System & Desktop Control Capabilities",
+                f"- **Platform**: {platform} ({session_type})",
+            ]
+            for key, val in providers.items():
+                status = f"Available ({val})" if val else "Unavailable"
+                lines.append(f"- **{key.title()}**: {status}")
+
+            if warnings:
+                lines.append("\n**Warnings & Missing Permissions**:")
+                for w in warnings:
+                    lines.append(f"- {w}")
+
+            base_prompt += "\n" + "\n".join(lines)
+    except Exception:
+        pass
+
+    return base_prompt
 
 
 def _build_system_prompt(

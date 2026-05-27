@@ -26,6 +26,15 @@ fi
 
 "$PYTHON_BIN" -m pip install -q -e .
 
+if [[ -d "../dctl" ]]; then
+  echo "Installing sibling dctl repository into virtual environment..."
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    "$PYTHON_BIN" -m pip install -q -e "../dctl[macos]"
+  else
+    "$PYTHON_BIN" -m pip install -q -e "../dctl"
+  fi
+fi
+
 # ---- Frontend build ----
 if [[ ! -d "app/node_modules" ]]; then
   (cd app && npm install)

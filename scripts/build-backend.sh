@@ -15,6 +15,7 @@ python3 -m pip install -q pyinstaller
 
 HOST_TRIPLE="${1:-$(rustc -vV | awk '/host:/ {print $2}')}"
 RELEASE_DIR="$ROOT_DIR/.release"
+export PYINSTALLER_CACHE_DIR="$RELEASE_DIR/pyinstaller-cache"
 DIST_DIR="$RELEASE_DIR/backend"
 WORK_DIR="$RELEASE_DIR/pyinstaller-work"
 SPEC_DIR="$RELEASE_DIR/pyinstaller-spec"
@@ -22,11 +23,22 @@ STAGE_DIR="$ROOT_DIR/app/src-tauri/binaries"
 
 mkdir -p "$DIST_DIR" "$WORK_DIR" "$SPEC_DIR" "$STAGE_DIR"
 
+ADD_BINARY_ARGS=()
+if [[ -d "$ROOT_DIR/../dctl" ]]; then
+  echo "Building standalone dctl executable..."
+  (
+    cd "$ROOT_DIR/../dctl"
+    python3 -m PyInstaller --noconfirm --onefile dctl/__main__.py --name dctl --distpath dist
+  )
+  ADD_BINARY_ARGS+=("--add-binary" "$ROOT_DIR/../dctl/dist/dctl:.")
+fi
+
 python3 -m PyInstaller \
   --noconfirm \
   --onefile \
   --name zwork-backend \
   --add-data "$ROOT_DIR/zWork-Skills:zWork-Skills" \
+  "${ADD_BINARY_ARGS[@]}" \
   --collect-submodules keyring \
   --collect-submodules keyring.backends \
   --collect-submodules sidecar \
