@@ -440,6 +440,10 @@ interface AppState {
   setPlanMode: (v: boolean) => void;
   autoApproveDestructive: boolean;
   setAutoApproveDestructive: (v: boolean) => void;
+  webSearchEnabled: boolean;
+  setWebSearchEnabled: (v: boolean) => void;
+  persona: string | null;
+  setPersona: (v: string | null) => void;
 
   // Subagent state
   subagents: SubagentTask[];
@@ -668,6 +672,10 @@ export const useApp = create<AppState>((set, get) => ({
   setPlanMode: (v) => set({ planMode: v }),
   autoApproveDestructive: false,
   setAutoApproveDestructive: (v) => set({ autoApproveDestructive: v }),
+  webSearchEnabled: false,
+  setWebSearchEnabled: (v) => set({ webSearchEnabled: v }),
+  persona: null,
+  setPersona: (v) => set({ persona: v }),
 
   // Subagent state
   subagents: [],
@@ -1253,13 +1261,21 @@ export const useApp = create<AppState>((set, get) => ({
     if (msg.role !== "assistant") return;
 
     let userMsgText = "";
+    let userMsgId = "";
     for (let i = idx - 1; i >= 0; i--) {
       if (chat.messages[i].role === "user") {
         userMsgText = chat.messages[i].content;
+        userMsgId = chat.messages[i].id;
         break;
       }
     }
     if (!userMsgText) return;
+
+    try {
+      await api.truncateMessage(id, userMsgId, userMsgText);
+    } catch (e) {
+      console.warn("truncateMessage failed:", e);
+    }
 
     set((s) => {
       const c = s.chats[id];
@@ -1311,6 +1327,12 @@ export const useApp = create<AppState>((set, get) => ({
     // Find the index of the target message.
     const idx = c.messages.findIndex((m) => m.id === messageId);
     if (idx === -1) return;
+
+    try {
+      await api.truncateMessage(id, messageId, trimmed);
+    } catch (e) {
+      console.warn("truncateMessage failed:", e);
+    }
 
     // Drop the target user message + everything after (assistant reply, etc.)
     const trimmedMessages = c.messages.slice(0, idx);
@@ -1447,6 +1469,8 @@ export const useApp = create<AppState>((set, get) => ({
           plan_mode: planMode,
           auto_approve_destructive: autoApproveDestructive,
           attachments,
+          web_search_enabled: get().webSearchEnabled,
+          persona: get().persona,
         },
         (evt) => {
           if (evt.type === "chat") {
