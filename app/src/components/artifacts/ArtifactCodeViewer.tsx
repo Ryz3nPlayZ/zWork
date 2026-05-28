@@ -117,6 +117,46 @@ export function ArtifactCodeViewer({ artifact }: { artifact: Artifact }) {
     steps: string[];
   } | null>(null);
 
+  const [activeTab, setActiveTab] = useState<"code" | "preview">("code");
+  const [runOutput, setRunOutput] = useState<{ stdout: string; stderr: string } | null>(null);
+  const [running, setRunning] = useState(false);
+
+  const langLower = (artifact.language || "").toLowerCase();
+  const isPreviewable = ["html", "svg"].includes(langLower);
+  const isExecutable = ["javascript", "js", "python", "py"].includes(langLower);
+  const hasPreviewTab = isPreviewable || isExecutable;
+
+  const runCode = async () => {
+    setRunning(true);
+    setRunOutput(null);
+    if (langLower === "python" || langLower === "py") {
+      try {
+        const res = await api.runPythonCode(draft);
+        setRunOutput(res);
+      } catch (e: any) {
+        setRunOutput({ stdout: "", stderr: e.message || "Failed to execute Python code" });
+      }
+    } else if (langLower === "javascript" || langLower === "js") {
+      const logs: string[] = [];
+      const originalLog = console.log;
+      console.log = (...args) => {
+        logs.push(args.map(x => typeof x === "object" ? JSON.stringify(x) : String(x)).join(" "));
+      };
+      try {
+        const result = new Function(draft)();
+        if (result !== undefined) {
+          logs.push(`Returned: ${typeof result === "object" ? JSON.stringify(result) : String(result)}`);
+        }
+        setRunOutput({ stdout: logs.join("\n"), stderr: "" });
+      } catch (e: any) {
+        setRunOutput({ stdout: logs.join("\n"), stderr: e.message || "Runtime Error" });
+      } finally {
+        console.log = originalLog;
+      }
+    }
+    setRunning(false);
+  };
+
   const handleRefactor = async () => {
     if (!refactorPrompt.trim()) return;
     setRefactoring(true);
@@ -179,6 +219,7 @@ export function ArtifactCodeViewer({ artifact }: { artifact: Artifact }) {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     updateArtifact(artifact.id, { content: draft });
     setEditing(false);
+    setRunOutput(null); // Reset code execution output when edited
   }, [artifact.id, draft, updateArtifact]);
 
   const copy = useCallback(() => {
@@ -210,7 +251,14 @@ export function ArtifactCodeViewer({ artifact }: { artifact: Artifact }) {
         {!isDiff && (
           <button
             type="button"
-            onClick={() => (editing ? commitAndPreview() : setEditing(true))}
+            onClick={() => {
+              if (editing) {
+                commitAndPreview();
+              } else {
+                setEditing(true);
+                setActiveTab("code");
+              }
+            }}
             className={`press flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium transition-colors ${
               editing
                 ? "bg-accent/10 text-accent hover:bg-accent/15"
@@ -218,11 +266,43 @@ export function ArtifactCodeViewer({ artifact }: { artifact: Artifact }) {
             }`}
           >
             {editing ? (
-              <><Eye className="h-3 w-3" /> Preview</>
+              <><Eye className="h-3 w-3" /> Preview Code</>
             ) : (
               <><Edit3 className="h-3 w-3" /> Edit</>
             )}
           </button>
+        )}
+
+        {hasPreviewTab && !editing && (
+          <div className="flex border-l border-line pl-2 gap-1">
+            <button
+              type="button"
+              onClick={() => setActiveTab("code")}
+              className={`px-2 py-0.5 rounded text-[10.5px] font-medium transition-colors cursor-pointer ${
+                activeTab === "code"
+                  ? "bg-accent/15 text-accent font-semibold"
+                  : "text-ink-muted hover:bg-paper-sunken hover:text-ink"
+              }`}
+            >
+              Code
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab("preview");
+                if (isExecutable && !runOutput) {
+                  void runCode();
+                }
+              }}
+              className={`px-2 py-0.5 rounded text-[10.5px] font-medium transition-colors cursor-pointer ${
+                activeTab === "preview"
+                  ? "bg-accent/15 text-accent font-semibold"
+                  : "text-ink-muted hover:bg-paper-sunken hover:text-ink"
+              }`}
+            >
+              {isPreviewable ? "Preview" : "Run Output"}
+            </button>
+          </div>
         )}
 
         <div className="flex-1" />
@@ -285,6 +365,59 @@ export function ArtifactCodeViewer({ artifact }: { artifact: Artifact }) {
             />
           ) : isDiff ? (
             <DiffView lines={parseDiff(draft)} />
+          ) : activeTab === "preview" ? (
+            <div className="bg-paper p-4 overflow-auto h-full min-h-[300px]">
+              {isPreviewable ? (
+                <iframe
+                  srcDoc={
+                    langLower === "svg"
+                      ? `<html><body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;">${draft}</body></html>`
+                      : draft
+                  }
+                  title="HTML Sandbox"
+                  sandbox="allow-scripts"
+                  className="w-full h-full min-h-[400px] border border-line bg-white rounded-lg shadow-sm"
+                />
+              ) : (
+                <div className="font-mono text-[12px] whitespace-pre-wrap leading-relaxed">
+                  <div className="flex justify-between items-center mb-4">
+                    <span className="text-[11px] font-bold text-ink-muted uppercase">Execution Console</span>
+                    <button
+                      type="button"
+                      disabled={running}
+                      onClick={runCode}
+                      className="rounded bg-accent/10 hover:bg-accent/20 text-accent px-2.5 py-1 text-[11px] font-medium cursor-pointer transition-colors"
+                    >
+                      {running ? "Running..." : "Re-run"}
+                    </button>
+                  </div>
+                  {running ? (
+                    <div className="flex items-center gap-2 text-ink-muted animate-pulse py-4">
+                      <span className="h-2 w-2 rounded-full bg-accent animate-ping" />
+                      Running script...
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {runOutput?.stdout && (
+                        <div>
+                          <div className="text-[10px] text-ink-faint font-semibold uppercase tracking-wider mb-1">STDOUT</div>
+                          <div className="bg-paper-sunken p-2.5 rounded border border-line font-mono">{runOutput.stdout}</div>
+                        </div>
+                      )}
+                      {runOutput?.stderr && (
+                        <div className="text-red-500">
+                          <div className="text-[10px] text-red-400 font-semibold uppercase tracking-wider mb-1">STDERR</div>
+                          <div className="bg-red-50/50 p-2.5 rounded border border-red-200/50 font-mono">{runOutput.stderr}</div>
+                        </div>
+                      )}
+                      {!runOutput?.stdout && !runOutput?.stderr && (
+                        <div className="text-ink-faint italic py-4">Execution finished with no output.</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           ) : (
             <SyntaxHighlighter
               language={artifact.language || "text"}
