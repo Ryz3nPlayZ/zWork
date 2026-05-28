@@ -270,6 +270,22 @@ export const api = {
       method: "POST",
     }).then((r) => j<{ ok: boolean; message?: string }>(r)),
 
+  truncateMessage: (chatId: string, messageId: string, content: string) => {
+    return localFetch(`/api/chats/${chatId}/messages/${messageId}/truncate`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ content }),
+    }).then((r) => j<{ ok: boolean; chat: any }>(r));
+  },
+
+  runPythonCode: (code: string) => {
+    return localFetch("/api/run-python", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code }),
+    }).then((r) => j<{ stdout: string; stderr: string }>(r));
+  },
+
   captureScreenshot: () =>
     localFetch("/api/screenshot", {
       method: "POST"
@@ -689,6 +705,8 @@ async function streamChatWeb(
       mime: string;
       kind: string;
     }>;
+    web_search_enabled?: boolean;
+    persona?: string | null;
   },
   onEvent: (evt: StreamEvent) => void,
   signal?: AbortSignal,
@@ -836,6 +854,8 @@ export async function streamChat(
       mime: string;
       kind: string;
     }>;
+    web_search_enabled?: boolean;
+    persona?: string | null;
   },
   onEvent: (evt: StreamEvent) => void,
   signal?: AbortSignal,
