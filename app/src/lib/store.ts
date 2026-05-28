@@ -1176,18 +1176,26 @@ export const useApp = create<AppState>((set, get) => ({
     }
   },
 
-  stop: () => {
+  stop: async () => {
+    const id = get().activeChatId;
+    if (id && !id.startsWith("tmp_")) {
+      try {
+        await api.stopChat(id);
+      } catch (e) {
+        console.warn("stopChat failed:", e);
+      }
+    }
     get()._abort?.abort();
     set((s) => {
-      const id = s.activeChatId;
-      if (!id) return { _abort: null };
-      const c = s.chats[id];
+      const activeId = s.activeChatId;
+      if (!activeId) return { _abort: null };
+      const c = s.chats[activeId];
       if (!c) return { _abort: null };
       return {
         _abort: null,
         chats: {
           ...s.chats,
-          [id]: { ...c, working: false, status: undefined },
+          [activeId]: { ...c, working: false, status: undefined },
         },
       };
     });

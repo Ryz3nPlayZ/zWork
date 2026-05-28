@@ -38,6 +38,7 @@ try:
     from .agent.env_loader import load_dotenv
     from .agent.runtime import RunContext, active_process_pids
     from .agent.utils import new_id
+    from .agent.tools import _terminate_process_tree
 except ImportError:  # pragma: no cover - PyInstaller/script entrypoint fallback
     from sidecar import __version__
     from sidecar.agent import (
@@ -53,6 +54,11 @@ except ImportError:  # pragma: no cover - PyInstaller/script entrypoint fallback
     from sidecar.agent.env_loader import load_dotenv
     from sidecar.agent.runtime import RunContext, active_process_pids
     from sidecar.agent.utils import new_id
+    from sidecar.agent.tools import _terminate_process_tree
+
+# Global registry tracking running agent tasks for reconnects and manual cancellation
+# Maps chat_id -> (asyncio.Task, asyncio.Queue, RunContext, assistant_msg_id)
+ACTIVE_RUNS: dict[str, tuple[asyncio.Task, asyncio.Queue, RunContext, str]] = {}
 
 # Load .env from repo root (optional).
 load_dotenv()
@@ -1500,6 +1506,19 @@ def delete_chat(chat_id: str) -> dict:
     return {"ok": True}
 
 
+@app.post("/api/chats/{chat_id}/stop")
+async def chat_stop(chat_id: str) -> dict:
+    """Cancel the active background agent task for *chat_id*."""
+    if not home_mod.is_safe_id(chat_id):
+        raise HTTPException(400, "invalid chat_id")
+    if chat_id in ACTIVE_RUNS:
+        task, _, _, _ = ACTIVE_RUNS[chat_id]
+        task.cancel()
+        ACTIVE_RUNS.pop(chat_id, None)
+        return {"ok": True}
+    return {"ok": False, "message": "No active run found for this chat."}
+
+
 @app.patch("/api/chats/{chat_id}/messages/{message_id}")
 def patch_message(chat_id: str, message_id: str, body: MessagePatch) -> dict:
     """Partially update a stored message (content and/or activities).
@@ -1804,6 +1823,147 @@ async def _maybe_compact_history(
         "summary_chars": len(summary),
     }
 
+async def _background_agent_runner(
+    chat_id: str,
+    queue: asyncio.Queue,
+    prompt: str,
+    history: list[dict],
+    compaction_evt: Optional[dict],
+    model_id: str,
+    s: Any,
+    run_ctx: RunContext,
+    project_id: Optional[str],
+    plan_mode: bool,
+    auto_approve_destructive: bool,
+    assistant_msg_id: str,
+    started_at: float,
+):
+    full_text = ""
+    activities: list[dict[str, Any]] = []
+    saw_terminal = False
+    terminal_status = "empty"
+
+    if compaction_evt is not None:
+        await queue.put(compaction_evt)
+
+    try:
+        async for evt in _heartbeat_stream(
+            providers.stream_chat(
+                [{"role": "system", "content": prompt}, *history],
+                model_id,
+                s,
+                run_ctx,
+                project_id=project_id,
+                plan_mode=plan_mode,
+                auto_approve_destructive=auto_approve_destructive,
+            )
+        ):
+            await queue.put(evt)
+            et = evt.get("type")
+            run_ctx.last_event_type = str(et or "")
+            if et == "delta":
+                full_text += evt.get("text", "")
+                chatstore.update_message(
+                    chat_id,
+                    assistant_msg_id,
+                    content=full_text,
+                    activities=activities,
+                )
+            elif et == "activity":
+                existing = next(
+                    (
+                        idx
+                        for idx, item in enumerate(activities)
+                        if item.get("id") == evt.get("id")
+                    ),
+                    None,
+                )
+                entry = {
+                    "id": evt.get("id"),
+                    "label": evt.get("label"),
+                    "icon": evt.get("icon"),
+                    "done": bool(evt.get("done")),
+                }
+                if existing is None:
+                    activities.append(entry)
+                else:
+                    activities[existing] = entry
+                chatstore.update_message(
+                    chat_id,
+                    assistant_msg_id,
+                    content=full_text,
+                    activities=activities,
+                )
+            elif et == "error":
+                terminal_status = "error"
+            elif et in ("done", "end"):
+                saw_terminal = True
+
+    except asyncio.CancelledError:
+        terminal_status = "cancelled"
+        run_ctx.last_error = "Agent task cancelled."
+        run_ctx.log("run_cancelled", error=run_ctx.last_error)
+        await queue.put({"type": "error", "text": "Task cancelled by user."})
+        await queue.put({"type": "end"})
+        chatstore.update_message(
+            chat_id, assistant_msg_id, content=full_text, activities=activities
+        )
+        # Terminate active subprocesses spawned by the agent
+        for pid in list(run_ctx._active_processes):
+            _terminate_process_tree(pid)
+        await _record_telemetry_event(
+            "chat_turn_finished",
+            properties={
+                "chat_id": chat_id,
+                "status": terminal_status,
+                "duration_ms": int((time.time() - started_at) * 1000),
+                "resolved_model": model_id,
+            },
+        )
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        terminal_status = "backend_failure"
+        run_ctx.last_error = str(e)
+        run_ctx.log("run_failed", error=run_ctx.last_error)
+        await queue.put({"type": "error", "text": str(e)})
+        await queue.put({"type": "end"})
+        await _record_telemetry_event(
+            "agent_task_error",
+            properties={"chat_id": chat_id, "error": str(e), "model": model_id},
+        )
+    finally:
+        # Schedule registry cleanup after 120 seconds in case the consumer never drains it
+        async def delayed_cleanup():
+            await asyncio.sleep(120)
+            ACTIVE_RUNS.pop(chat_id, None)
+        asyncio.create_task(delayed_cleanup())
+
+        if full_text and terminal_status == "empty":
+            terminal_status = "ok"
+        if not saw_terminal:
+            await queue.put({"type": "end"})
+        chatstore.update_message(
+            chat_id, assistant_msg_id, content=full_text, activities=activities
+        )
+        run_ctx.log(
+            "run_finished",
+            status=terminal_status,
+            duration_ms=int((time.time() - started_at) * 1000),
+            assistant_chars=len(full_text),
+        )
+        await _record_telemetry_event(
+            "chat_turn_finished",
+            properties={
+                "chat_id": chat_id,
+                "status": terminal_status,
+                "duration_ms": int((time.time() - started_at) * 1000),
+                "resolved_model": model_id,
+            },
+        )
+        # Signal queue end
+        await queue.put(None)
+
 
 @app.post("/api/chat/stream")
 async def chat_stream(req: StreamRequest):
@@ -1826,7 +1986,61 @@ async def chat_stream(req: StreamRequest):
         )
     elif req.project_id and req.project_id != chat.project_id:
         chatstore.set_project(chat.id, req.project_id)
-    chatstore.append_message(chat.id, "user", req.message)
+
+    # Reconnect to an active background run if one exists
+    if chat.id in ACTIVE_RUNS:
+        task, queue, run_ctx, assistant_msg_id = ACTIVE_RUNS[chat.id]
+
+        async def sse_reconnect() -> Any:
+            yield _sse({"type": "chat", "id": chat.id, "title": chat.title})
+            while True:
+                evt = await queue.get()
+                if evt is None:
+                    ACTIVE_RUNS.pop(chat.id, None)
+                    break
+                yield _sse(evt)
+
+        return StreamingResponse(
+            sse_reconnect(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    # If the user reconnected but the run already finished in the background:
+    if (
+        chat.messages
+        and chat.messages[-1].role == "assistant"
+        and len(chat.messages) >= 2
+        and chat.messages[-2].role == "user"
+        and chat.messages[-2].content.strip() == req.message.strip()
+    ):
+        async def sse_finished() -> Any:
+            yield _sse({"type": "chat", "id": chat.id, "title": chat.title})
+            yield _sse({"type": "done"})
+            yield _sse({"type": "end"})
+
+        return StreamingResponse(
+            sse_finished(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    # Only append the user message if it is not already the last message (avoiding duplicate appends on reconnect)
+    if not (
+        chat.messages
+        and chat.messages[-1].role == "user"
+        and chat.messages[-1].content.strip() == req.message.strip()
+    ):
+        chatstore.append_message(chat.id, "user", req.message)
+
     chat = chatstore.get(chat.id)
     assert chat is not None
 
@@ -1954,130 +2168,38 @@ async def chat_stream(req: StreamRequest):
         credential=model_meta.get("credential", ""),
     )
 
-    async def sse() -> Any:
+    async def sse_consumer() -> Any:
         yield _sse({"type": "chat", "id": chat.id, "title": chat.title})
-        if compaction_evt is not None:
-            yield _sse(compaction_evt)
-        full_text = ""
-        activities: list[dict[str, Any]] = []
-        saw_terminal = False
-        terminal_status = "empty"
-        last_flush = time.monotonic()
+        while True:
+            evt = await queue.get()
+            if evt is None:
+                ACTIVE_RUNS.pop(chat.id, None)
+                break
+            yield _sse(evt)
 
-        def flush_partial(force: bool = False) -> None:
-            nonlocal last_flush
-            if (
-                not force
-                and len(full_text) < 64
-                and (time.monotonic() - last_flush) < 0.75
-            ):
-                return
-            chatstore.update_message(
-                chat.id,
-                assistant_msg.id,
-                content=full_text,
-                activities=activities,
-            )
-            last_flush = time.monotonic()
-
-        try:
-            async for evt in _heartbeat_stream(
-                providers.stream_chat(
-                    [{"role": "system", "content": prompt}, *history],
-                    model_id,
-                    s,
-                    run_ctx,
-                    project_id=req.project_id,
-                    plan_mode=plan_mode,
-                    auto_approve_destructive=req.auto_approve_destructive,
-                )
-            ):
-                et = evt.get("type")
-                run_ctx.last_event_type = str(et or "")
-                if et == "delta":
-                    full_text += evt.get("text", "")
-                    flush_partial()
-                elif et == "activity":
-                    existing = next(
-                        (
-                            idx
-                            for idx, item in enumerate(activities)
-                            if item.get("id") == evt.get("id")
-                        ),
-                        None,
-                    )
-                    entry = {
-                        "id": evt.get("id"),
-                        "label": evt.get("label"),
-                        "icon": evt.get("icon"),
-                        "done": bool(evt.get("done")),
-                    }
-                    if existing is None:
-                        activities.append(entry)
-                    else:
-                        activities[existing] = entry
-                    chatstore.update_message(
-                        chat.id, assistant_msg.id, activities=activities
-                    )
-                elif et == "error":
-                    terminal_status = "error"
-                elif et in ("done", "end"):
-                    saw_terminal = True
-                yield _sse(evt)
-        except asyncio.CancelledError:
-            terminal_status = "cancelled"
-            run_ctx.last_error = "Client stream cancelled."
-            run_ctx.log("run_cancelled", error=run_ctx.last_error)
-            flush_partial(force=True)
-            chatstore.update_message(
-                chat.id, assistant_msg.id, content=full_text, activities=activities
-            )
-            await _record_telemetry_event(
-                "chat_turn_finished",
-                properties={
-                    "chat_id": chat.id,
-                    "status": terminal_status,
-                    "duration_ms": int((time.time() - started_at) * 1000),
-                    "resolved_model": model_id,
-                },
-            )
-            raise
-        except Exception as e:  # pragma: no cover
-            traceback.print_exc()
-            terminal_status = "backend_failure"
-            run_ctx.last_error = str(e)
-            run_ctx.log("run_failed", error=run_ctx.last_error)
-            yield _sse({"type": "error", "text": str(e)})
-            await _record_telemetry_event(
-                "agent_task_error",
-                properties={"chat_id": chat.id, "error": str(e), "model": model_id},
-            )
-        if full_text and terminal_status == "empty":
-            terminal_status = "ok"
-        if not saw_terminal:
-            yield _sse({"type": "end"})
-        flush_partial(force=True)
-        chatstore.update_message(
-            chat.id, assistant_msg.id, content=full_text, activities=activities
+    # Spawn the background task
+    queue = asyncio.Queue()
+    task = asyncio.create_task(
+        _background_agent_runner(
+            chat_id=chat.id,
+            queue=queue,
+            prompt=prompt,
+            history=history,
+            compaction_evt=compaction_evt,
+            model_id=model_id,
+            s=s,
+            run_ctx=run_ctx,
+            project_id=req.project_id,
+            plan_mode=plan_mode,
+            auto_approve_destructive=req.auto_approve_destructive,
+            assistant_msg_id=assistant_msg.id,
+            started_at=started_at,
         )
-        run_ctx.log(
-            "run_finished",
-            status=terminal_status,
-            duration_ms=int((time.time() - started_at) * 1000),
-            assistant_chars=len(full_text),
-        )
-        await _record_telemetry_event(
-            "chat_turn_finished",
-            properties={
-                "chat_id": chat.id,
-                "status": terminal_status,
-                "duration_ms": int((time.time() - started_at) * 1000),
-                "resolved_model": model_id,
-            },
-        )
+    )
+    ACTIVE_RUNS[chat.id] = (task, queue, run_ctx, assistant_msg.id)
 
     return StreamingResponse(
-        sse(),
+        sse_consumer(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",

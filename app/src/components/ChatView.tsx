@@ -203,7 +203,8 @@ export function ChatView() {
                     <button
                       key={oIdx}
                       onClick={() => {
-                        if (opt.toLowerCase().includes("other")) {
+                        const optLower = opt.toLowerCase();
+                        if (optLower.includes("other") || optLower.includes("instead")) {
                           document.querySelector("textarea")?.focus();
                         } else {
                           void useApp.getState().answerQuestion(chat.id, opt);

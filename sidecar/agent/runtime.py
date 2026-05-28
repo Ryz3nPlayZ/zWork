@@ -41,6 +41,7 @@ class RunContext:
     last_event_type: str = ""
     last_error: str = ""
     _active_processes: set[int] = field(default_factory=set)
+    approved_commands: set[str] = field(default_factory=set)
 
     def log(self, event: str, **fields: object) -> None:
         """Append a structured event to the run log, merging the current run context fields."""

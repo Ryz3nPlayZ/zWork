@@ -39,6 +39,9 @@ READ_ONLY_TOOLS = frozenset(
         "search_papers",
         "format_citation",
         "ask_question",
+        "ask_user",
+        "ask_user_for_permission",
+        "ask_user_for_permisson",
         "detect_hardware",
         "check_novelty",
         "review_paper",
@@ -188,6 +191,73 @@ TOOL_SCHEMAS: list[dict] = [
                 },
             },
             "required": ["question", "options"],
+        },
+    },
+    {
+        "name": "ask_user",
+        "description": (
+            "Ask the user a clarifying question with multiple choice options when you need clarification "
+            "about preferences, design choices, or how to proceed. Displays an interactive card in the chat "
+            "and blocks until they choose an option or enter a custom reply."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "The clarifying question to display to the user",
+                },
+                "options": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Up to 4 multiple-choice options for the user to select from",
+                },
+            },
+            "required": ["question", "options"],
+        },
+    },
+    {
+        "name": "ask_user_for_permission",
+        "description": (
+            "Ask the user for explicit permission before performing a sensitive or destructive action "
+            "(e.g. running terminal commands, deleting files). Blocks execution until the user responds "
+            "with Approve, Deny, or custom instructions on what to do instead."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "explanation": {
+                    "type": "string",
+                    "description": "A detailed explanation of what action is being performed and why permission is needed (e.g. 'deleting npm caches to reclaim 980MB of storage')",
+                },
+                "command": {
+                    "type": "string",
+                    "description": "Optional terminal command to approve, so that subsequent calls to run_command with this exact command will not be blocked.",
+                },
+            },
+            "required": ["explanation"],
+        },
+    },
+    {
+        "name": "ask_user_for_permisson",
+        "description": (
+            "Ask the user for explicit permission before performing a sensitive or destructive action "
+            "(e.g. running terminal commands, deleting files). Blocks execution until the user responds "
+            "with Approve, Deny, or custom instructions on what to do instead."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "explanation": {
+                    "type": "string",
+                    "description": "A detailed explanation of what action is being performed and why permission is needed (e.g. 'deleting npm caches to reclaim 980MB of storage')",
+                },
+                "command": {
+                    "type": "string",
+                    "description": "Optional terminal command to approve, so that subsequent calls to run_command with this exact command will not be blocked.",
+                },
+            },
+            "required": ["explanation"],
         },
     },
     {
@@ -1011,7 +1081,7 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
             }
         return
 
-    if tool_name == "ask_question":
+    if tool_name in ("ask_question", "ask_user"):
         question = params.get("question", "")
         options = params.get("options", [])
         run = current_run()
@@ -1050,9 +1120,79 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
         
         yield {
             "type": "tool_result",
-            "tool": "ask_question",
+            "tool": tool_name,
             "ok": True,
             "message": f"User responded with: {user_answer}",
+        }
+        return
+
+    if tool_name in ("ask_user_for_permission", "ask_user_for_permisson"):
+        explanation = params.get("explanation", "")
+        question = f"Permission Required:\n\n{explanation}\n\nDo you want to proceed?"
+        options = ["Approve", "Deny", "Tell me what to do instead"]
+        
+        run = current_run()
+        chat_id = run.chat_id if run else "global"
+        
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": "Requesting user permission...",
+            "icon": "shield-alert",
+            "done": False,
+        }
+        
+        event = asyncio.Event()
+        result_box = []
+        PENDING_QUESTIONS[chat_id] = (event, result_box)
+        
+        yield {
+            "type": "ask_question",
+            "chat_id": chat_id,
+            "question": question,
+            "options": options,
+        }
+        
+        await event.wait()
+        PENDING_QUESTIONS.pop(chat_id, None)
+        user_answer = result_box[0] if result_box else "Deny"
+        
+        user_answer_lower = user_answer.strip().lower()
+        if user_answer_lower == "approve":
+            ok = True
+            msg = "Permission granted by user."
+            label = "Permission granted"
+            icon = "shield-check"
+            if run is not None and "command" in params:
+                cmd = str(params["command"])
+                normalized_cmd = _normalized_command(cmd)
+                if hasattr(run, "approved_commands"):
+                    run.approved_commands.add(normalized_cmd)
+                    msg = f"Permission granted by user for command: {cmd}"
+        elif user_answer_lower == "deny":
+            ok = False
+            msg = "Permission denied by user."
+            label = "Permission denied"
+            icon = "shield-alert"
+        else:
+            ok = False
+            msg = f"Permission denied. User provided the following instructions instead: '{user_answer}'"
+            label = "Instructions received"
+            icon = "help-circle"
+            
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": label,
+            "icon": icon,
+            "done": True,
+        }
+        
+        yield {
+            "type": "tool_result",
+            "tool": tool_name,
+            "ok": ok,
+            "message": msg,
         }
         return
 

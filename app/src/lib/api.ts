@@ -265,6 +265,11 @@ export const api = {
       body: JSON.stringify({ answer }),
     }).then((r) => j<{ status: string }>(r)),
 
+  stopChat: (chatId: string) =>
+    localFetch(`/api/chats/${chatId}/stop`, {
+      method: "POST",
+    }).then((r) => j<{ ok: boolean; message?: string }>(r)),
+
   captureScreenshot: () =>
     localFetch("/api/screenshot", {
       method: "POST"
@@ -843,6 +848,7 @@ export async function streamChat(
   let sawTerminal = false;
   let sawServerError = false;
   let attemptedRecovery = false;
+  let retryCount = 0;
   const parseFrame = (frame: string) => {
     for (const line of frame.split("\n")) {
       if (!line.startsWith("data:")) continue;
@@ -894,12 +900,8 @@ export async function streamChat(
     if (buf.trim()) {
       parseFrame(buf);
     }
-    if (sawEvent && !sawTerminal && !sawServerError) {
-      onEvent({
-        type: "error",
-        text: "The local backend ended this response without a terminal event. Partial progress is preserved above.",
-      });
-      onEvent({ type: "end" });
+    if (!sawTerminal && !sawServerError) {
+      throw new Error("Stream closed before terminal event.");
     }
   };
 
@@ -914,15 +916,7 @@ export async function streamChat(
       if (error instanceof DOMException && error.name === "AbortError") {
         throw error;
       }
-      if (sawTerminal) {
-        return;
-      }
-      if (sawEvent && !sawServerError) {
-        onEvent({
-          type: "error",
-          text: "The local backend ended this response unexpectedly. Partial progress is preserved above.",
-        });
-        onEvent({ type: "end" });
+      if (sawTerminal || sawServerError) {
         return;
       }
       if (IS_TAURI && !sawEvent && !attemptedRecovery) {
@@ -932,15 +926,27 @@ export async function streamChat(
         await api.waitForBackend(30).catch(() => {});
         continue;
       }
-      const detail =
-        error instanceof Error && error.message
-          ? error.message
-          : String(error || "unknown error");
+      
+      if (retryCount >= 5) {
+        const detail =
+          error instanceof Error && error.message
+            ? error.message
+            : String(error || "unknown error");
+        onEvent({
+          type: "error",
+          text: `Lost connection to the local backend. ${detail}`,
+        });
+        onEvent({ type: "end" });
+        return;
+      }
+
+      retryCount++;
       onEvent({
-        type: "error",
-        text: `Lost connection to the local backend. Partial progress may be shown above. ${detail}`,
+        type: "status",
+        text: `Lost connection. Reconnecting (attempt ${retryCount}/5)...`,
       });
-      return;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(1000 * retryCount, 5000)));
+      continue;
     }
   }
 }

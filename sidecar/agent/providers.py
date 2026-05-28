@@ -1223,17 +1223,35 @@ async def _gated_execute_tool(
     auto_approve_destructive: bool,
 ) -> AsyncIterator[dict]:
     risk, reason = tool_risk(name, params)
+    
+    is_approved = False
+    try:
+        from .runtime import current_run
+    except ImportError:
+        from sidecar.agent.runtime import current_run
+        
+    run = current_run()
+    if run is not None and name == "run_command":
+        cmd = str(params.get("command") or "")
+        try:
+            from .tools import _normalized_command
+        except ImportError:
+            from sidecar.agent.tools import _normalized_command
+        normalized_cmd = _normalized_command(cmd)
+        if hasattr(run, "approved_commands") and normalized_cmd in run.approved_commands:
+            is_approved = True
+
     yield {
         "type": "permission",
         "tool": name,
         "risk": risk,
         "reason": reason,
-        "blocked": risk == "destructive" and not auto_approve_destructive,
+        "blocked": risk == "destructive" and not auto_approve_destructive and not is_approved,
     }
-    if risk == "destructive" and not auto_approve_destructive:
+    if risk == "destructive" and not auto_approve_destructive and not is_approved:
         msg = (
             f"[REFUSED: requires user approval - {reason}]. "
-            "Stop and ask the user to approve in plain text before retrying."
+            "Stop and ask the user to approve using the 'ask_user_for_permission' tool before retrying."
         )
         yield {
             "type": "activity",
