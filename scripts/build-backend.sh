@@ -38,7 +38,7 @@ python3 -m PyInstaller \
   --onefile \
   --name zwork-backend \
   --add-data "$ROOT_DIR/zWork-Skills:zWork-Skills" \
-  "${ADD_BINARY_ARGS[@]}" \
+  ${ADD_BINARY_ARGS[@]+"${ADD_BINARY_ARGS[@]}"} \
   --collect-submodules keyring \
   --collect-submodules keyring.backends \
   --collect-submodules sidecar \
