@@ -17,6 +17,7 @@ import {
   FileText,
   Image as ImageIcon,
   Upload,
+  Globe,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { needsLightweightRendering } from "../lib/platform";
@@ -91,6 +92,10 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, v
   const openSettings = useApp((s) => s.openSettings);
   const autoApproveDestructive = useApp((s) => s.autoApproveDestructive);
   const setAutoApproveDestructive = useApp((s) => s.setAutoApproveDestructive);
+  const webSearchEnabled = useApp((s) => s.webSearchEnabled);
+  const setWebSearchEnabled = useApp((s) => s.setWebSearchEnabled);
+  const persona = useApp((s) => s.persona);
+  const setPersona = useApp((s) => s.setPersona);
   const working = useApp((s) => {
     const id = s.activeChatId;
     return id ? (s.chats[id]?.working ?? false) : false;
@@ -540,6 +545,28 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, v
             active={autoApproveDestructive}
             onClick={() => setAutoApproveDestructive(!autoApproveDestructive)}
           />
+          <IconButton
+            icon={<Globe className="h-4 w-4" />}
+            label={webSearchEnabled ? "Web Search: on" : "Web Search: off"}
+            tooltipSide="top"
+            variant="ghost"
+            size="md"
+            active={webSearchEnabled}
+            onClick={() => setWebSearchEnabled(!webSearchEnabled)}
+          />
+          <div className="flex items-center ml-1 border-l border-line pl-2.5">
+            <select
+              value={persona || ""}
+              onChange={(e) => setPersona(e.target.value || null)}
+              className="text-[11.5px] bg-paper-sunken border border-line rounded-lg px-2 py-1 text-ink-muted hover:text-ink outline-none cursor-pointer font-medium"
+            >
+              <option value="">Default Persona</option>
+              <option value="engineer">Software Engineer</option>
+              <option value="designer">UI/UX Designer</option>
+              <option value="writer">Technical Writer</option>
+              <option value="auditor">Code Auditor</option>
+            </select>
+          </div>
         </div>
       <div className="flex items-center gap-2">
         <ModelPicker />
