@@ -31,13 +31,14 @@ import { Logo } from "./Logo";
 import { IconButton } from "./IconButton";
 import { AskCard, splitAroundAsk, parseAskPayload } from "./AskCard";
 import type { Message as Msg } from "../lib/store";
+import { api } from "../lib/api";
 
 function formatTime(ts: number): string {
   if (!ts) return "";
   return new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-// ---- Code block with copy + "open in panel" ----
+// ---- Code block with copy, preview tabs, and running capabilities ----
 function CodeBlock({
   language,
   code,
@@ -48,22 +49,97 @@ function CodeBlock({
   onOpenPanel?: (code: string, lang: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [activeTab, setActiveTab] = useState<"code" | "preview">("code");
+  const [runOutput, setRunOutput] = useState<{ stdout: string; stderr: string } | null>(null);
+  const [running, setRunning] = useState(false);
+
   const copy = useCallback(() => {
     navigator.clipboard.writeText(code).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
   }, [code]);
 
+  const langLower = (language || "").toLowerCase();
+  const isPreviewable = ["html", "svg"].includes(langLower);
+  const isExecutable = ["javascript", "js", "python", "py"].includes(langLower);
+  const hasPreviewTab = isPreviewable || isExecutable;
+
+  const runCode = async () => {
+    setRunning(true);
+    setRunOutput(null);
+    if (langLower === "python" || langLower === "py") {
+      try {
+        const res = await api.runPythonCode(code);
+        setRunOutput(res);
+      } catch (e: any) {
+        setRunOutput({ stdout: "", stderr: e.message || "Failed to execute Python code" });
+      }
+    } else if (langLower === "javascript" || langLower === "js") {
+      const logs: string[] = [];
+      const originalLog = console.log;
+      console.log = (...args) => {
+        logs.push(args.map(x => typeof x === "object" ? JSON.stringify(x) : String(x)).join(" "));
+      };
+      try {
+        const result = new Function(code)();
+        if (result !== undefined) {
+          logs.push(`Returned: ${typeof result === "object" ? JSON.stringify(result) : String(result)}`);
+        }
+        setRunOutput({ stdout: logs.join("\n"), stderr: "" });
+      } catch (e: any) {
+        setRunOutput({ stdout: logs.join("\n"), stderr: e.message || "Runtime Error" });
+      } finally {
+        console.log = originalLog;
+      }
+    }
+    setRunning(false);
+  };
+
   return (
     <div className="group/code relative my-2 rounded-xl border border-line overflow-hidden">
-      <div className="flex items-center justify-between bg-paper-sunken px-3 py-1.5 border-b border-line">
-        <span className="text-[11px] font-mono text-ink-faint">{language || "code"}</span>
-        <div className="flex items-center gap-1">
+      <div className="flex items-center justify-between bg-paper-sunken px-3 py-1 border-b border-line">
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] font-mono text-ink-faint uppercase">{language || "code"}</span>
+          {hasPreviewTab && (
+            <div className="flex border-l border-line pl-2 gap-1">
+              <button
+                type="button"
+                onClick={() => setActiveTab("code")}
+                className={cn(
+                  "px-2 py-0.5 rounded text-[10.5px] font-medium transition-colors cursor-pointer",
+                  activeTab === "code"
+                    ? "bg-accent/15 text-accent"
+                    : "text-ink-muted hover:bg-paper hover:text-ink"
+                )}
+              >
+                Code
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab("preview");
+                  if (isExecutable && !runOutput) {
+                    void runCode();
+                  }
+                }}
+                className={cn(
+                  "px-2 py-0.5 rounded text-[10.5px] font-medium transition-colors cursor-pointer",
+                  activeTab === "preview"
+                    ? "bg-accent/15 text-accent"
+                    : "text-ink-muted hover:bg-paper hover:text-ink"
+                )}
+              >
+                {isPreviewable ? "Preview" : "Run Output"}
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5">
           {onOpenPanel && (
             <button
               type="button"
               onClick={() => onOpenPanel(code, language)}
-              className="press rounded border border-line bg-paper px-1.5 py-0.5 text-[10px] text-ink-muted hover:bg-paper-sunken hover:text-ink"
+              className="press rounded border border-line bg-paper px-1.5 py-0.5 text-[10px] text-ink-muted hover:bg-paper-sunken hover:text-ink cursor-pointer"
             >
               Open
             </button>
@@ -71,26 +147,82 @@ function CodeBlock({
           <button
             type="button"
             onClick={copy}
-            className="press rounded p-1 text-ink-muted hover:bg-paper hover:text-ink"
+            className="press rounded p-1 text-ink-muted hover:bg-paper hover:text-ink cursor-pointer"
           >
             {copied ? <CheckIcon className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
           </button>
         </div>
       </div>
-      <SyntaxHighlighter
-        language={language || "text"}
-        style={oneLight as Record<string, React.CSSProperties>}
-        customStyle={{
-          margin: 0,
-          borderRadius: 0,
-          fontSize: "12.5px",
-          background: "transparent",
-          padding: "12px 16px",
-        }}
-        codeTagProps={{ style: { fontFamily: "var(--font-mono, monospace)" } }}
-      >
-        {code}
-      </SyntaxHighlighter>
+
+      {activeTab === "code" ? (
+        <SyntaxHighlighter
+          language={language || "text"}
+          style={oneLight as Record<string, React.CSSProperties>}
+          customStyle={{
+            margin: 0,
+            borderRadius: 0,
+            fontSize: "12.5px",
+            background: "transparent",
+            padding: "12px 16px",
+          }}
+          codeTagProps={{ style: { fontFamily: "var(--font-mono, monospace)" } }}
+        >
+          {code}
+        </SyntaxHighlighter>
+      ) : (
+        <div className="bg-paper p-4 overflow-auto min-h-[150px] max-h-[400px]">
+          {isPreviewable ? (
+            <iframe
+              srcDoc={
+                langLower === "svg"
+                  ? `<html><body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;">${code}</body></html>`
+                  : code
+              }
+              title="HTML Sandbox"
+              sandbox="allow-scripts"
+              className="w-full h-[250px] border-0 bg-white rounded-lg shadow-sm"
+            />
+          ) : (
+            <div className="font-mono text-[12px] whitespace-pre-wrap leading-relaxed">
+              {running ? (
+                <div className="flex items-center gap-2 text-ink-muted animate-pulse">
+                  <span className="h-2 w-2 rounded-full bg-accent animate-ping" />
+                  Running script...
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {isExecutable && (
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={runCode}
+                        className="rounded bg-accent/10 hover:bg-accent/20 text-accent px-2 py-1 text-[11px] font-medium cursor-pointer"
+                      >
+                        Re-run
+                      </button>
+                    </div>
+                  )}
+                  {runOutput?.stdout && (
+                    <div className="text-ink-muted">
+                      <div className="text-[10px] text-ink-faint font-semibold uppercase tracking-wider mb-1">STDOUT</div>
+                      <div className="bg-paper-sunken p-2.5 rounded border border-line font-mono">{runOutput.stdout}</div>
+                    </div>
+                  )}
+                  {runOutput?.stderr && (
+                    <div className="text-red-500">
+                      <div className="text-[10px] text-red-400 font-semibold uppercase tracking-wider mb-1">STDERR</div>
+                      <div className="bg-red-50/50 p-2.5 rounded border border-red-200/50 font-mono">{runOutput.stderr}</div>
+                    </div>
+                  )}
+                  {!runOutput?.stdout && !runOutput?.stderr && (
+                    <div className="text-ink-faint italic">Execution finished with no output.</div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
