@@ -61,3 +61,8 @@ intro-page/
 # ===== Local ops notes =====
 serverdetails.md
 research/
+
+# ===== Local build/cache overrides =====
+.cargo_cache/
+app/dist_old/
+
