@@ -2030,6 +2030,14 @@ async def _background_agent_runner(
         await queue.put(None)
 
 
+PERSONAS = {
+    "engineer": "You are a Senior Software Engineer. You write clean, performant, documented code and focus on technical details, design patterns, and edge cases.",
+    "designer": "You are a Senior Product Designer & UI Developer. You focus on beautiful visual layouts, typography, Tailwind styles, visual hierarchy, animations, and user experience.",
+    "writer": "You are a Professional Technical Writer. You write clear, concise, engaging, and well-structured markdown documentation, manuals, and explanations.",
+    "auditor": "You are a Security Auditor and Code Reviewer. You analyze code for performance bottlenecks, security vulnerabilities, code smells, and compliance issues."
+}
+
+
 @app.post("/api/chat/stream")
 async def chat_stream(req: StreamRequest):
     if req.chat_id and not home_mod.is_safe_id(req.chat_id):
@@ -2184,6 +2192,21 @@ async def chat_stream(req: StreamRequest):
         plan_mode=plan_mode,
         auto_approve_destructive=req.auto_approve_destructive,
     )
+
+    # Apply persona preset if specified
+    if req.persona and req.persona in PERSONAS:
+        prompt = f"{PERSONAS[req.persona]}\n\n{prompt}"
+
+    # Apply web search news grounding context if enabled
+    if req.web_search_enabled:
+        try:
+            from .agent.tools import _web_search
+            search_query = req.message.strip().splitlines()[0][:80]
+            search_results = _web_search(search_query, max_results=5)
+            if search_results:
+                prompt = f"{prompt}\n\n## Web Search Results (Grounding Context)\nThe user has enabled web search. Here are the latest search results for '{search_query}'. Apply this context when answering the user query:\n\n{search_results}"
+        except Exception as e:
+            prompt = f"{prompt}\n\n## Web Search Results\nFailed to perform web search: {e}"
 
     attachment_block = ""
     if req.attachments:
