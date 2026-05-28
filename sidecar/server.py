@@ -1547,6 +1547,65 @@ def patch_message(chat_id: str, message_id: str, body: MessagePatch) -> dict:
     return {"ok": True, "message": asdict(updated)}
 
 
+@app.post("/api/chats/{chat_id}/messages/{message_id}/truncate")
+def truncate_message(chat_id: str, message_id: str, body: MessagePatch) -> dict:
+    """Truncate conversation history at message_id and update its content."""
+    if not home_mod.is_safe_id(chat_id):
+        raise HTTPException(400, "invalid chat_id")
+    if not home_mod.is_safe_id(message_id):
+        raise HTTPException(400, "invalid message_id")
+    c = chatstore.get(chat_id)
+    if not c:
+        raise HTTPException(404, "chat not found")
+    
+    new_messages = []
+    found = False
+    for msg in c.messages:
+        new_messages.append(msg)
+        if msg.id == message_id:
+            if body.content is not None:
+                msg.content = body.content
+            found = True
+            break
+            
+    if not found:
+        raise HTTPException(404, "message not found")
+        
+    c.messages = new_messages
+    c.updated_at = chatstore.now_ms()
+    chatstore.save(c)
+    return {"ok": True, "chat": _chat_public(c)}
+
+
+@app.post("/api/run-python")
+async def run_python_code(body: PythonRunRequest) -> dict:
+    """Safely run python code locally and return stdout/stderr."""
+    import tempfile
+    import subprocess
+    import contextlib
+    
+    code = body.code
+    with tempfile.NamedTemporaryFile(suffix=".py", delete=False) as f:
+        f.write(code.encode("utf-8"))
+        f.flush()
+        path = f.name
+    try:
+        res = subprocess.run(
+            ["python3", path],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return {"stdout": res.stdout, "stderr": res.stderr}
+    except subprocess.TimeoutExpired:
+        return {"stdout": "", "stderr": "Execution timeout (10s)"}
+    except Exception as e:
+        return {"stdout": "", "stderr": str(e)}
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(path)
+
+
 def _chat_public(c: chatstore.Chat) -> dict[str, Any]:
     return {
         "id": c.id,
