@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Pencil, Check, X, AlertCircle, Settings as SettingsIcon, RefreshCcw } from "lucide-react";
+import { Pencil, Check, X, AlertCircle, Settings as SettingsIcon, RefreshCcw, Download, ChevronDown } from "lucide-react";
 import { useApp } from "../lib/store";
 import { isMacOS } from "../lib/platform";
 import { ChatInput } from "./ChatInput";
@@ -23,6 +23,53 @@ export function ChatView() {
 
   const [editing, setEditing] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!exportOpen) return;
+    const close = (e: MouseEvent) => {
+      if (!exportRef.current?.contains(e.target as Node)) setExportOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setExportOpen(false); };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [exportOpen]);
+
+  const exportToMarkdown = () => {
+    if (!chat) return;
+    const markdown = chat.messages
+      .map((m) => `### ${m.role === "user" ? "User" : "Assistant"}\n\n${m.content}\n`)
+      .join("\n---\n\n");
+    
+    const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `${chat.title.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "chat"}.md`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const exportToJSON = () => {
+    if (!chat) return;
+    const jsonString = JSON.stringify(chat.messages, null, 2);
+    const blob = new Blob([jsonString], { type: "application/json;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `${chat.title.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "chat"}.json`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   useEffect(() => {
     const el = endRef.current;
@@ -119,10 +166,46 @@ export function ChatView() {
               </button>
             )}
           </div>
-          <div className="flex items-center gap-1" data-no-drag>
-            <span className="text-[10.5px] text-ink-faint font-mono">
+          <div className="flex items-center gap-2" data-no-drag>
+            <span className="text-[10.5px] text-ink-faint font-mono mr-1">
               {chat.messages.length} msgs
             </span>
+            <div ref={exportRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setExportOpen((v) => !v)}
+                className="press inline-flex items-center gap-1 rounded-md border border-line bg-paper px-2 py-1 text-[11px] font-medium text-ink hover:bg-paper-sunken"
+                title="Export chat history"
+              >
+                <Download className="h-3 w-3" />
+                <span>Export</span>
+                <ChevronDown className="h-3 w-3 text-ink-muted" />
+              </button>
+              {exportOpen && (
+                <div className="absolute top-[calc(100%+4px)] right-0 z-40 w-[170px] animate-fade-in rounded-lg border border-line bg-paper p-1 shadow-pop">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      exportToMarkdown();
+                      setExportOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-[12px] text-ink hover:bg-paper-sunken font-medium transition-colors"
+                  >
+                    Export as Markdown (.md)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      exportToJSON();
+                      setExportOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-[12px] text-ink hover:bg-paper-sunken font-medium transition-colors"
+                  >
+                    Export as JSON (.json)
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
