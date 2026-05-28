@@ -207,6 +207,12 @@ class StreamRequest(BaseModel):
     project_id: str | None = None
     plan_mode: bool = False
     auto_approve_destructive: bool = False
+    web_search_enabled: bool = False
+    persona: str | None = None
+
+
+class PythonRunRequest(BaseModel):
+    code: str
 
 
 class ProjectCreate(BaseModel):
