@@ -133,14 +133,14 @@ fi
 
 cp "$src" "$out"
 if [[ "$PLATFORM" == "macos" ]]; then
-  if [[ -z "${updater_src:-}" || ! -f "$updater_src" ]]; then
-    echo "updater bundle not found under $macos_dir" >&2
-    exit 1
-  fi
-  cp "$updater_src" "$updater_out"
-  updater_sig_src="${updater_src}.sig"
-  if [[ -f "$updater_sig_src" ]]; then
-    cp "$updater_sig_src" "$updater_sig_out"
+  if [[ -n "${updater_src:-}" && -f "$updater_src" ]]; then
+    cp "$updater_src" "$updater_out"
+    updater_sig_src="${updater_src}.sig"
+    if [[ -f "$updater_sig_src" ]]; then
+      cp "$updater_sig_src" "$updater_sig_out"
+    fi
+  else
+    echo "warning: updater bundle not found under $macos_dir (skipping updater package)" >&2
   fi
 fi
 sig_src="${src}.sig"
