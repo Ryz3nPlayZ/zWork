@@ -1,0 +1,9 @@
+/* App styles reset */
+.chart-bar-group:hover rect {
+  fill: var(--accent-hover) !important;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .5; }
+}

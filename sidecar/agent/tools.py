@@ -445,6 +445,28 @@ TOOL_SCHEMAS: list[dict] = [
         },
     },
     {
+        "name": "get_stock_data",
+        "description": (
+            "Retrieve historical price candlestick values and calculated technical indicators "
+            "(SMA 20, EMA 20, RSI 14, MACD 12,26,9) for a stock ticker. Returns a structured JSON "
+            "string with date, open, high, low, close, volume, and technical indicator lines."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "ticker": {
+                    "type": "string",
+                    "description": "Stock ticker symbol (e.g. AAPL, TSLA, NVDA)",
+                },
+                "period": {
+                    "type": "string",
+                    "description": "Time range of data (e.g. '30d', '60d', '90d'); default '60d'",
+                },
+            },
+            "required": ["ticker"],
+        },
+    },
+    {
         "name": "dctl_system",
         "description": "General system control and discovery. Use this to list open windows, find launchable apps, or start new processes. Returns JSON describing windows, apps, or execution status.",
         "parameters": {
@@ -1653,6 +1675,59 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
             }
         return
 
+    if tool_name == "get_stock_data":
+        ticker = str(params.get("ticker") or "").strip().upper()
+        period = str(params.get("period") or "60d").strip().lower()
+        label = f"Fetch stock data: {ticker}"
+        yield {
+            "type": "activity",
+            "id": tool_id,
+            "label": label,
+            "icon": "trending-up",
+            "done": False,
+        }
+        try:
+            text = await asyncio.to_thread(_get_stock_data, ticker, period)
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": label,
+                "icon": "trending-up",
+                "done": True,
+            }
+            if run is not None:
+                run.log(
+                    "tool_finished", tool_name=tool_name, ok=True, output=text[:1000]
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": True,
+                "message": text,
+            }
+        except Exception as e:
+            yield {
+                "type": "activity",
+                "id": tool_id,
+                "label": f"Failed: {label}",
+                "icon": "trending-up",
+                "done": True,
+            }
+            if run is not None:
+                run.log(
+                    "tool_finished",
+                    tool_name=tool_name,
+                    ok=False,
+                    output=_friendly_error(e),
+                )
+            yield {
+                "type": "tool_result",
+                "tool": tool_name,
+                "ok": False,
+                "message": _friendly_error(e),
+            }
+        return
+
     if tool_name == "read_skill":
         slug = params.get("slug", "")
         label = f"Read skill {slug}"
@@ -2816,6 +2891,182 @@ def _web_search(query: str, max_results: int = 6) -> str:
         return "No web/news results found."
     heading = f"Results for: {query}" if query else "Top current headlines"
     return heading + "\n\n" + "\n".join(rows)
+
+
+def _calc_sma(prices: list[float], period: int) -> list[float | None]:
+    sma = []
+    for i in range(len(prices)):
+        if i < period - 1:
+            sma.append(None)
+        else:
+            sma.append(sum(prices[i - period + 1 : i + 1]) / period)
+    return sma
+
+
+def _calc_ema(prices: list[float], period: int) -> list[float | None]:
+    ema = []
+    k = 2 / (period + 1)
+    prev_ema = None
+    for i in range(len(prices)):
+        if i < period - 1:
+            ema.append(None)
+        elif i == period - 1:
+            prev_ema = sum(prices[:period]) / period
+            ema.append(prev_ema)
+        else:
+            if prev_ema is not None:
+                prev_ema = prices[i] * k + prev_ema * (1 - k)
+                ema.append(prev_ema)
+            else:
+                ema.append(None)
+    return ema
+
+
+def _calc_rsi(prices: list[float], period: int = 14) -> list[float | None]:
+    if len(prices) < period:
+        return [None] * len(prices)
+    rsi = []
+    gains = []
+    losses = []
+    for i in range(1, len(prices)):
+        diff = prices[i] - prices[i - 1]
+        gains.append(diff if diff > 0 else 0)
+        losses.append(-diff if diff < 0 else 0)
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    for _ in range(period):
+        rsi.append(None)
+    rs = avg_gain / avg_loss if avg_loss != 0 else float("inf")
+    rsi.append(100 - 100 / (1 + rs))
+    for i in range(period + 1, len(prices)):
+        avg_gain = (avg_gain * (period - 1) + gains[i - 1]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i - 1]) / period
+        rs = avg_gain / avg_loss if avg_loss != 0 else float("inf")
+        rsi.append(100 - 100 / (1 + rs))
+    return rsi
+
+
+def _calc_macd(prices: list[float]) -> tuple[list[float | None], list[float | None], list[float | None]]:
+    ema12 = _calc_ema(prices, 12)
+    ema26 = _calc_ema(prices, 26)
+    macd = []
+    for i in range(len(prices)):
+        e12 = ema12[i]
+        e26 = ema26[i]
+        if e12 is not None and e26 is not None:
+            macd.append(e12 - e26)
+        else:
+            macd.append(None)
+    valid_macd = [x for x in macd if x is not None]
+    valid_signal = _calc_ema(valid_macd, 9)
+    signal = []
+    hist = []
+    valid_idx = 0
+    for i in range(len(prices)):
+        if macd[i] is None:
+            signal.append(None)
+            hist.append(None)
+        else:
+            sig_val = valid_signal[valid_idx] if valid_idx < len(valid_signal) else None
+            macd_val = macd[i]
+            if sig_val is not None and macd_val is not None:
+                signal.append(sig_val)
+                hist.append(macd_val - sig_val)
+            else:
+                signal.append(None)
+                hist.append(None)
+            valid_idx += 1
+    return macd, signal, hist
+
+
+def _get_stock_data(ticker: str, period: str = "60d") -> str:
+    range_param = "3mo"
+    if period in ("30d", "1mo"):
+        range_param = "1mo"
+    elif period in ("60d", "2mo"):
+        range_param = "3mo"
+    elif period in ("90d", "3mo"):
+        range_param = "3mo"
+    elif period == "ytd":
+        range_param = "ytd"
+    elif period in ("1y", "2y", "5y", "max"):
+        range_param = period
+
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range={range_param}&interval=1d"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+    with httpx.Client(timeout=10.0, follow_redirects=True) as client:
+        resp = client.get(url, headers=headers)
+        resp.raise_for_status()
+        res_data = resp.json()
+
+    result = res_data["chart"]["result"][0]
+    meta = result.get("meta", {})
+    timestamps = result.get("timestamp", [])
+    quotes = result.get("indicators", {}).get("quote", [{}])[0]
+    
+    opens = quotes.get("open", [])
+    highs = quotes.get("high", [])
+    lows = quotes.get("low", [])
+    closes = quotes.get("close", [])
+    volumes = quotes.get("volume", [])
+
+    valid_candles = []
+    for i in range(len(timestamps)):
+        if (
+            opens[i] is not None
+            and highs[i] is not None
+            and lows[i] is not None
+            and closes[i] is not None
+            and volumes[i] is not None
+        ):
+            import datetime
+            date_str = datetime.datetime.fromtimestamp(timestamps[i], datetime.timezone.utc).strftime("%Y-%m-%d")
+            valid_candles.append({
+                "date": date_str,
+                "open": round(float(opens[i]), 2),
+                "high": round(float(highs[i]), 2),
+                "low": round(float(lows[i]), 2),
+                "close": round(float(closes[i]), 2),
+                "volume": int(volumes[i]),
+            })
+
+    target_count = 60
+    if "30" in period:
+        target_count = 30
+    elif "90" in period:
+        target_count = 90
+    
+    close_prices = [c["close"] for c in valid_candles]
+    sma20 = _calc_sma(close_prices, 20)
+    ema20 = _calc_ema(close_prices, 20)
+    rsi14 = _calc_rsi(close_prices, 14)
+    macd, macd_signal, macd_hist = _calc_macd(close_prices)
+
+    for i in range(len(valid_candles)):
+        valid_candles[i]["sma_20"] = round(sma20[i], 2) if sma20[i] is not None else None
+        valid_candles[i]["ema_20"] = round(ema20[i], 2) if ema20[i] is not None else None
+        valid_candles[i]["rsi_14"] = round(rsi14[i], 2) if rsi14[i] is not None else None
+        valid_candles[i]["macd"] = round(macd[i], 2) if macd[i] is not None else None
+        valid_candles[i]["macd_signal"] = round(macd_signal[i], 2) if macd_signal[i] is not None else None
+        valid_candles[i]["macd_hist"] = round(macd_hist[i], 2) if macd_hist[i] is not None else None
+
+    output_candles = valid_candles[-target_count:]
+
+    return json.dumps({
+        "ticker": ticker,
+        "meta": {
+            "currency": meta.get("currency", "USD"),
+            "regularMarketPrice": meta.get("regularMarketPrice"),
+            "fiftyTwoWeekHigh": meta.get("fiftyTwoWeekHigh"),
+            "fiftyTwoWeekLow": meta.get("fiftyTwoWeekLow"),
+            "regularMarketVolume": meta.get("regularMarketVolume"),
+            "longName": meta.get("longName"),
+            "shortName": meta.get("shortName"),
+        },
+        "candles": output_candles,
+    })
 
 
 def _shell_path() -> str | None:
