@@ -24,17 +24,21 @@ STAGE_DIR="$ROOT_DIR/app/src-tauri/binaries"
 mkdir -p "$DIST_DIR" "$WORK_DIR" "$SPEC_DIR" "$STAGE_DIR"
 
 ADD_BINARY_ARGS=()
-if [[ -d "$ROOT_DIR/../dctl" ]]; then
-  echo "Installing dctl dependencies..."
+# dctl can live at ../dctl (local dev) or ./dctl (CI checkout inside workspace)
+DCTL_DIR=""
+if [[ -d "$ROOT_DIR/../dctl" ]]; then DCTL_DIR="$ROOT_DIR/../dctl"
+elif [[ -d "$ROOT_DIR/dctl" ]]; then DCTL_DIR="$ROOT_DIR/dctl"; fi
+if [[ -n "$DCTL_DIR" ]]; then
+  echo "Installing dctl dependencies from $DCTL_DIR..."
   DCTL_EXTRAS=""
   if [[ "$(uname -s)" == "Darwin" ]]; then DCTL_EXTRAS="[macos]"; fi
-  python3 -m pip install -q -e "$ROOT_DIR/../dctl${DCTL_EXTRAS}"
+  python3 -m pip install -q -e "$DCTL_DIR${DCTL_EXTRAS}"
   echo "Building standalone dctl executable..."
   (
-    cd "$ROOT_DIR/../dctl"
+    cd "$DCTL_DIR"
     python3 -m PyInstaller --noconfirm --onefile dctl/__main__.py --name dctl --distpath dist
   )
-  ADD_BINARY_ARGS+=("--add-binary" "$ROOT_DIR/../dctl/dist/dctl:.")
+  ADD_BINARY_ARGS+=("--add-binary" "$DCTL_DIR/dist/dctl:.")
 fi
 
 python3 -m PyInstaller \

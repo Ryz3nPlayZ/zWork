@@ -50,11 +50,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Checkout dctl (sibling)
+      - name: Checkout dctl
         uses: actions/checkout@v4
         with:
           repository: Ryz3nPlayZ/dctl
-          path: ../dctl
+          path: dctl
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -117,11 +117,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Checkout dctl (sibling)
+      - name: Checkout dctl
         uses: actions/checkout@v4
         with:
           repository: Ryz3nPlayZ/dctl
-          path: ../dctl
+          path: dctl
 
       - name: Setup Python
         uses: actions/setup-python@v5
