@@ -729,6 +729,8 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
           <div className="border-t border-line pt-2.5 mt-2 text-[10px] text-ink-faint text-center">
             Changes auto-save as you type.
           </div>
+        </div>
+      )}
     </div>
   );
 }
