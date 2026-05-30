@@ -20,7 +20,7 @@ import mimetypes
 import traceback
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request
@@ -2531,7 +2531,7 @@ async def api_refactor(req: RefactorRequest):
             explanation=data.get("explanation", ""),
             steps=data.get("steps", [])
         )
-    except Exception as e:
+    except Exception:
         return RefactorResponse(
             refactored_code=req.code,
             explanation=f"Failed to parse AI response. Raw output was:\n{full_response}",

@@ -2303,7 +2303,6 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                 papers = await academic_mod.search_academic_literature(fallback_query, max_results=15)
                 
             # 3. Compute similarity and overlap
-            results = []
             max_sim = 0.0
             similar_papers = []
             
@@ -4040,16 +4039,16 @@ def _diagnose_command_failure(command: str, returncode: int, output: str, cwd: s
     # 4. Permission Denied
     elif any(x in output.lower() for x in ["permission denied", "eacces"]):
         diagnosis.append(
-            f"**Deficiency**: Permission denied during execution.\n"
-            f"**Suggested Fix**: Check ownership and permission bits of the target files/directories. "
-            f"You may need to run `chmod +x <file>` to make a script executable, or run with appropriate user permissions."
+            "**Deficiency**: Permission denied during execution.\n"
+            "**Suggested Fix**: Check ownership and permission bits of the target files/directories. "
+            "You may need to run `chmod +x <file>` to make a script executable, or run with appropriate user permissions."
         )
         
     # 5. Out of Memory (OOM)
     elif "out of memory" in output.lower() or "cuda error: out of memory" in output.lower() or "oom-killer" in output.lower():
         diagnosis.append(
-            f"**Deficiency**: Process ran out of memory (OOM).\n"
-            f"**Suggested Fix**: Reduce batch size, optimize memory utilization, or run on a system/GPU with more memory capability."
+            "**Deficiency**: Process ran out of memory (OOM).\n"
+            "**Suggested Fix**: Reduce batch size, optimize memory utilization, or run on a system/GPU with more memory capability."
         )
         
     # 6. Node/npm missing module
