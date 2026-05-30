@@ -1392,8 +1392,8 @@ async def _run_anthropic_loop(
                     auto_approve_destructive=auto_approve_destructive,
                 ):
                     tt = tev.get("type")
-                    if tt in ("activity", "permission"):
-                        # Override the "Preparing..." activity with the live one
+                    if tt in ("activity", "permission", "ask_question"):
+                        # Forward UI events (activity, permission gate, user-question prompt)
                         yield tev
                     elif tt == "tool_result":
                         ok = tev.get("ok", False)
@@ -1425,7 +1425,7 @@ async def _run_anthropic_loop(
                     auto_approve_destructive=auto_approve_destructive,
                 ):
                     tt = tev.get("type")
-                    if tt in ("activity", "tool_result", "permission"):
+                    if tt in ("activity", "tool_result", "permission", "ask_question"):
                         yield tev
                     if tt == "tool_result":
                         msg = tev.get("message", "")
@@ -1578,7 +1578,7 @@ async def _run_openai_loop(
                     auto_approve_destructive=auto_approve_destructive,
                 ):
                     tt = tev.get("type")
-                    if tt in ("activity", "tool_result", "permission"):
+                    if tt in ("activity", "tool_result", "permission", "ask_question"):
                         yield tev
                     if tt == "tool_result":
                         result_text = tev.get("message", "")
@@ -1606,7 +1606,7 @@ async def _run_openai_loop(
                     auto_approve_destructive=auto_approve_destructive,
                 ):
                     tt = tev.get("type")
-                    if tt in ("activity", "tool_result", "permission"):
+                    if tt in ("activity", "tool_result", "permission", "ask_question"):
                         yield tev
                     if tt == "tool_result":
                         msg = tev.get("message", "")

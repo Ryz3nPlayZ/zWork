@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 import ipaddress
 import json
 import logging
@@ -983,6 +983,62 @@ def get_uploaded_file(filename: str):
     return FileResponse(file_path)
 
 
+# ---------------- Export helpers ----------------
+
+
+@dataclass
+class _ExportBlock:
+    kind: str  # h1, h2, h3, p, ul, ol, todo, code, blank
+    text: str
+    checked: bool = False
+    language: str = ""
+
+
+def _parse_md_blocks(content: str) -> list[_ExportBlock]:
+    """Parse markdown into structured blocks for export."""
+    blocks: list[_ExportBlock] = []
+    in_code = False
+    code_text = ""
+    code_lang = ""
+
+    for line in content.split("\n"):
+        if line.startswith("```"):
+            if in_code:
+                blocks.append(_ExportBlock("code", code_text.strip(), language=code_lang))
+                in_code = False
+                code_text = ""
+                code_lang = ""
+            else:
+                in_code = True
+                code_lang = line[3:].strip()
+            continue
+        if in_code:
+            code_text += line + "\n"
+            continue
+        if line.startswith("### "):
+            blocks.append(_ExportBlock("h3", line[4:]))
+        elif line.startswith("## "):
+            blocks.append(_ExportBlock("h2", line[3:]))
+        elif line.startswith("# "):
+            blocks.append(_ExportBlock("h1", line[2:]))
+        elif line.startswith("- [x] "):
+            blocks.append(_ExportBlock("todo", line[6:], checked=True))
+        elif line.startswith("- [ ] "):
+            blocks.append(_ExportBlock("todo", line[6:], checked=False))
+        elif line.startswith("- ") or line.startswith("* "):
+            blocks.append(_ExportBlock("ul", line[2:]))
+        elif re.match(r"^\d+\.\s", line):
+            m = re.match(r"^\d+\.\s(.*)", line)
+            blocks.append(_ExportBlock("ol", m.group(1) if m else line))
+        elif line.strip() == "":
+            blocks.append(_ExportBlock("blank", ""))
+        else:
+            blocks.append(_ExportBlock("p", line))
+    if in_code:
+        blocks.append(_ExportBlock("code", code_text.strip(), language=code_lang))
+    return blocks
+
+
 @app.post("/api/export/docx")
 async def export_docx(body: dict):
     title = body.get("title", "Document")
@@ -991,30 +1047,109 @@ async def export_docx(body: dict):
         import docx
         from io import BytesIO
         from fastapi.responses import StreamingResponse
-        
+
         doc = docx.Document()
         doc.add_heading(title, 0)
-        
-        for line in content.split("\n"):
-            if line.startswith("# "):
-                doc.add_heading(line[2:], level=1)
-            elif line.startswith("## "):
-                doc.add_heading(line[3:], level=2)
-            elif line.startswith("### "):
-                doc.add_heading(line[4:], level=3)
-            elif line.startswith("- ") or line.startswith("* "):
-                doc.add_paragraph(line[2:], style='List Bullet')
-            elif line.strip():
-                doc.add_paragraph(line)
-                
+
+        for block in _parse_md_blocks(content):
+            if block.kind == "h1":
+                doc.add_heading(block.text, level=1)
+            elif block.kind == "h2":
+                doc.add_heading(block.text, level=2)
+            elif block.kind == "h3":
+                doc.add_heading(block.text, level=3)
+            elif block.kind == "ul":
+                doc.add_paragraph(block.text, style="List Bullet")
+            elif block.kind == "ol":
+                doc.add_paragraph(block.text, style="List Number")
+            elif block.kind == "todo":
+                prefix = "☑ " if block.checked else "☐ "
+                doc.add_paragraph(prefix + block.text)
+            elif block.kind == "code":
+                p = doc.add_paragraph()
+                run = p.add_run(block.text)
+                run.font.name = "Courier New"
+                run.font.size = docx.shared.Pt(9)
+            elif block.kind == "p":
+                doc.add_paragraph(block.text)
+
         file_stream = BytesIO()
         doc.save(file_stream)
         file_stream.seek(0)
-        
+
         return StreamingResponse(
             file_stream,
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            headers={"Content-Disposition": f"attachment; filename={title.replace(' ', '_')}.docx"}
+            headers={"Content-Disposition": f"attachment; filename={title.replace(' ', '_')}.docx"},
+        )
+    except Exception as e:
+        raise HTTPException(500, detail=str(e))
+
+
+@app.post("/api/export/pdf")
+async def export_pdf(body: dict):
+    title = body.get("title", "Document")
+    content = body.get("content", "")
+    try:
+        from fpdf import FPDF
+        from io import BytesIO
+        from fastapi.responses import StreamingResponse
+
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_auto_page_break(auto=True, margin=20)
+
+        # Title
+        pdf.set_font("Helvetica", "B", 18)
+        pdf.multi_cell(0, 10, title)
+        pdf.ln(6)
+
+        for block in _parse_md_blocks(content):
+            if block.kind == "h1":
+                pdf.ln(4)
+                pdf.set_font("Helvetica", "B", 16)
+                pdf.multi_cell(0, 8, block.text)
+                pdf.ln(2)
+            elif block.kind == "h2":
+                pdf.ln(3)
+                pdf.set_font("Helvetica", "B", 14)
+                pdf.multi_cell(0, 7, block.text)
+                pdf.ln(2)
+            elif block.kind == "h3":
+                pdf.ln(2)
+                pdf.set_font("Helvetica", "B", 12)
+                pdf.multi_cell(0, 6, block.text)
+                pdf.ln(1)
+            elif block.kind == "ul":
+                pdf.set_font("Helvetica", "", 11)
+                pdf.multi_cell(0, 6, f"  •  {block.text}")
+            elif block.kind == "ol":
+                pdf.set_font("Helvetica", "", 11)
+                pdf.multi_cell(0, 6, f"  {block.text}")
+            elif block.kind == "todo":
+                pdf.set_font("Helvetica", "", 11)
+                check = "☑" if block.checked else "☐"
+                pdf.multi_cell(0, 6, f"  {check}  {block.text}")
+            elif block.kind == "code":
+                pdf.ln(2)
+                pdf.set_font("Courier", "", 9)
+                for code_line in block.text.split("\n"):
+                    pdf.multi_cell(0, 5, f"  {code_line}")
+                pdf.ln(2)
+            elif block.kind == "p":
+                pdf.set_font("Helvetica", "", 11)
+                pdf.multi_cell(0, 6, block.text)
+                pdf.ln(2)
+            # blank lines are implicit spacing from ln() calls above
+
+        file_stream = BytesIO()
+        pdf.output(file_stream)
+        file_stream.seek(0)
+
+        return StreamingResponse(
+            file_stream,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={title.replace(' ', '_')}.pdf"},
         )
     except Exception as e:
         raise HTTPException(500, detail=str(e))

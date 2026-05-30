@@ -145,9 +145,8 @@ function serializeBlocksToMarkdown(blocks: Block[]): string {
 
 export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
   const updateArtifact = useApp((s) => s.updateArtifact);
-  const [editorMode, setEditorMode] = useState<"read" | "blocks" | "source">("read");
+  const [editorMode, setEditorMode] = useState<"read" | "blocks">("read");
   const [blocks, setBlocks] = useState<Block[]>(() => parseMarkdownToBlocks(artifact.content));
-  const [sourceDraft, setSourceDraft] = useState(artifact.content);
   const [copied, setCopied] = useState(false);
   const [activeBlockId, setActiveBlockId] = useState<string | null>(null);
   const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null);
@@ -182,7 +181,6 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
   useEffect(() => {
     if (editorMode === "read") {
       setBlocks(parseMarkdownToBlocks(artifact.content));
-      setSourceDraft(artifact.content);
     }
   }, [artifact.content, editorMode]);
 
@@ -258,32 +256,11 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
     }
   };
 
-  const handleSourceChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const text = e.target.value;
-    setSourceDraft(text);
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      void updateArtifact(artifact.id, { content: text });
-      setBlocks(parseMarkdownToBlocks(text));
-    }, AUTOSAVE_MS);
-  };
-
   const copyContent = () => {
     const text = serializeBlocksToMarkdown(blocks);
     navigator.clipboard.writeText(text).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
-  };
-
-  const downloadMd = () => {
-    const text = serializeBlocksToMarkdown(blocks);
-    const blob = new Blob([text], { type: "text/markdown" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${artifact.title.replace(/\s+/g, "_")}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
   const downloadDocx = () => {
@@ -299,6 +276,22 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
       })
       .catch((err: unknown) => {
         console.error("Docx export failed:", err);
+      });
+  };
+
+  const downloadPdf = () => {
+    const text = serializeBlocksToMarkdown(blocks);
+    api.exportPdf(artifact.title, text)
+      .then((blob: Blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${artifact.title.replace(/\s+/g, "_")}.pdf`;
+        a.click();
+        URL.revokeObjectURL(url);
+      })
+      .catch((err: unknown) => {
+        console.error("PDF export failed:", err);
       });
   };
 
@@ -323,21 +316,6 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
           </button>
           <button
             onClick={() => {
-              setEditorMode("source");
-              setSourceDraft(artifact.content);
-            }}
-            className={cn(
-              "px-2 py-1 text-[11px] font-medium rounded-md transition-all",
-              editorMode === "source"
-                ? "bg-paper-raised text-ink shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
-                : "text-ink-muted hover:text-ink"
-            )}
-          >
-            <Edit3 className="inline h-3 w-3 mr-1" />
-            Markdown
-          </button>
-          <button
-            onClick={() => {
               setEditorMode("blocks");
               setBlocks(parseMarkdownToBlocks(artifact.content));
             }}
@@ -348,8 +326,8 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
                 : "text-ink-muted hover:text-ink"
             )}
           >
-            <FileText className="inline h-3 w-3 mr-1" />
-            Blocks
+            <Edit3 className="inline h-3 w-3 mr-1" />
+            Edit
           </button>
         </div>
 
@@ -364,12 +342,12 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
         </button>
 
         <button
-          onClick={downloadMd}
+          onClick={downloadPdf}
           className="press flex items-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 py-1 text-[11px] text-ink-muted hover:text-ink transition-colors"
-          title="Export as Markdown file"
+          title="Export as PDF"
         >
           <Download className="h-3 w-3" />
-          <span>Export MD</span>
+          <span>Export PDF</span>
         </button>
 
         <button
@@ -389,7 +367,7 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
               ? "bg-accent/10 border-accent/30 text-accent"
               : "border-line bg-paper text-ink-muted hover:text-ink"
           )}
-          title="Show Markdown block formatting guide"
+          title="Show block editor guide"
         >
           <HelpCircle className="h-3 w-3" />
           <span>Guide</span>
@@ -643,24 +621,11 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
             })}
           </div>
         )}
-
-        {editorMode === "source" && (
-          <div className="w-full max-w-[720px] bg-paper shadow-pop border border-line rounded-xl min-h-[85vh] h-fit overflow-hidden">
-            <textarea
-              className="w-full min-h-[80vh] resize-none bg-paper p-10 font-mono text-[13px] leading-7 text-ink outline-none placeholder:text-ink-faint focus:outline-none"
-              value={sourceDraft}
-              onChange={handleSourceChange}
-              placeholder="Write markdown here…"
-              spellCheck
-              autoFocus
-            />
-          </div>
-        )}
       </div>
 
       {/* Footer Info */}
       <div className="shrink-0 border-t border-line px-3 py-1.5 text-[10.5px] text-ink-faint bg-paper-soft flex items-center justify-between">
-        <span>Document Blocks Mode: Press Enter for new line · Backspace to merge blocks</span>
+        <span>Press Enter for new block · Backspace to delete empty block</span>
         <span>Auto-saved</span>
       </div>
 
@@ -669,7 +634,7 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
           <div className="flex items-center justify-between border-b border-line pb-2 mb-3">
             <h3 className="font-semibold text-xs text-ink flex items-center gap-1.5">
               <HelpCircle className="h-3.5 w-3.5 text-accent" />
-              Markdown Formatting Guide
+              Block Editor Guide
             </h3>
             <button
               onClick={() => setShowCheatSheet(false)}
@@ -678,92 +643,92 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
               Close
             </button>
           </div>
-          
+
           <div className="flex-1 overflow-y-auto space-y-3.5 text-[11.5px] pr-1">
             <div>
-              <h4 className="font-medium text-ink-muted mb-1.5 text-[10.5px] uppercase tracking-wider">Headers & Structure</h4>
+              <h4 className="font-medium text-ink-muted mb-1.5 text-[10.5px] uppercase tracking-wider">Keyboard Shortcuts</h4>
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
-                  <span className="font-mono text-accent"># Heading 1</span>
-                  <span className="text-ink-faint text-[10px]">Title size</span>
+                  <span className="text-ink">Enter</span>
+                  <span className="text-ink-faint text-[10px]">New block below</span>
                 </div>
                 <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
-                  <span className="font-mono text-accent">## Heading 2</span>
-                  <span className="text-ink-faint text-[10px]">Section size</span>
+                  <span className="text-ink">Backspace</span>
+                  <span className="text-ink-faint text-[10px]">Delete empty block</span>
                 </div>
                 <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
-                  <span className="font-mono text-accent">### Heading 3</span>
-                  <span className="text-ink-faint text-[10px]">Subsection</span>
+                  <span className="text-ink">Shift + Enter</span>
+                  <span className="text-ink-faint text-[10px]">New line in block</span>
                 </div>
               </div>
             </div>
 
             <div>
-              <h4 className="font-medium text-ink-muted mb-1.5 text-[10.5px] uppercase tracking-wider">Lists & Tasks</h4>
+              <h4 className="font-medium text-ink-muted mb-1.5 text-[10.5px] uppercase tracking-wider">Block Types</h4>
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
-                  <span className="font-mono text-accent">- Item</span>
-                  <span className="text-ink-faint text-[10px]">Bullet point</span>
+                  <span className="text-ink">Heading 1 – 3</span>
+                  <span className="text-ink-faint text-[10px]">Titles & sections</span>
                 </div>
                 <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
-                  <span className="font-mono text-accent">1. Item</span>
-                  <span className="text-ink-faint text-[10px]">Numbered</span>
+                  <span className="text-ink">Paragraph</span>
+                  <span className="text-ink-faint text-[10px]">Body text</span>
                 </div>
                 <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
-                  <span className="font-mono text-accent">- [ ] Task</span>
-                  <span className="text-ink-faint text-[10px]">Unchecked Todo</span>
+                  <span className="text-ink">Bullet List</span>
+                  <span className="text-ink-faint text-[10px]">Unordered items</span>
                 </div>
                 <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
-                  <span className="font-mono text-accent">- [x] Done</span>
-                  <span className="text-ink-faint text-[10px]">Completed Todo</span>
+                  <span className="text-ink">Numbered List</span>
+                  <span className="text-ink-faint text-[10px]">Ordered steps</span>
+                </div>
+                <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
+                  <span className="text-ink">Todo</span>
+                  <span className="text-ink-faint text-[10px]">Checkbox items</span>
+                </div>
+                <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
+                  <span className="text-ink">Code Block</span>
+                  <span className="text-ink-faint text-[10px]">Monospace code</span>
                 </div>
               </div>
             </div>
 
             <div>
-              <h4 className="font-medium text-ink-muted mb-1.5 text-[10.5px] uppercase tracking-wider">Inline Styles</h4>
+              <h4 className="font-medium text-ink-muted mb-1.5 text-[10.5px] uppercase tracking-wider">Editing</h4>
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
-                  <span className="font-mono text-accent">**bold text**</span>
-                  <span className="text-ink-faint text-[10px]">Bold</span>
+                  <span className="text-ink">Hover a block</span>
+                  <span className="text-ink-faint text-[10px]">+ Add, ▾ Menu</span>
                 </div>
                 <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
-                  <span className="font-mono text-accent">*italic text*</span>
-                  <span className="text-ink-faint text-[10px]">Italic</span>
+                  <span className="text-ink">▾ Menu</span>
+                  <span className="text-ink-faint text-[10px]">Change type / delete</span>
                 </div>
                 <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
-                  <span className="font-mono text-accent">`code`</span>
-                  <span className="text-ink-faint text-[10px]">Inline code</span>
+                  <span className="text-ink">Import URL</span>
+                  <span className="text-ink-faint text-[10px]">Fetch web content</span>
                 </div>
               </div>
             </div>
 
             <div>
-              <h4 className="font-medium text-ink-muted mb-1.5 text-[10.5px] uppercase tracking-wider">Advanced Blocks</h4>
+              <h4 className="font-medium text-ink-muted mb-1.5 text-[10.5px] uppercase tracking-wider">Export</h4>
               <div className="space-y-1.5">
-                <div className="flex flex-col p-1.5 rounded bg-paper-sunken border border-line-soft">
-                  <span className="font-mono text-accent">```javascript</span>
-                  <span className="font-mono text-ink-muted pl-2">console.log("hello");</span>
-                  <span className="font-mono text-accent">```</span>
-                  <span className="text-ink-faint text-[9px] mt-1 text-right">Code Block</span>
+                <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
+                  <span className="text-ink">Export PDF</span>
+                  <span className="text-ink-faint text-[10px]">Portable document</span>
                 </div>
                 <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
-                  <span className="font-mono text-accent">&gt; quote</span>
-                  <span className="text-ink-faint text-[10px]">Quote block</span>
-                </div>
-                <div className="flex items-center justify-between p-1.5 rounded bg-paper-sunken border border-line-soft">
-                  <span className="font-mono text-accent">[Link](https://...)</span>
-                  <span className="text-ink-faint text-[10px]">Hyperlink</span>
+                  <span className="text-ink">Export Word</span>
+                  <span className="text-ink-faint text-[10px]">.docx format</span>
                 </div>
               </div>
             </div>
           </div>
-          
+
           <div className="border-t border-line pt-2.5 mt-2 text-[10px] text-ink-faint text-center">
-            Blocks auto-convert when typing in Notion mode.
+            Changes auto-save as you type.
           </div>
-        </div>
-      )}
     </div>
   );
 }

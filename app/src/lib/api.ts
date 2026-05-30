@@ -298,6 +298,13 @@ export const api = {
       body: JSON.stringify({ title, content })
     }).then((r) => r.blob()),
 
+  exportPdf: (title: string, content: string) =>
+    localFetch("/api/export/pdf", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title, content })
+    }).then((r) => r.blob()),
+
   getActivityLogs: () =>
     localFetch("/api/activity-logs").then((r) =>
       j<{ logs: Array<{ timestamp: number; filename: string; path: string }> }>(r)

@@ -164,10 +164,24 @@ fn auth_endpoint_url(auth_internal_base: &Url, endpoint: &str) -> Url {
         .unwrap_or_else(|_| panic!("failed to build auth endpoint URL: {endpoint}"))
 }
 
-/// Allowed model IDs that the router will serve.
-const ALLOWED_MODELS: &[&str] = &["deepseek-v4-flash", "deepseek-v4-pro"];
+/// Allowed model IDs that the router will serve (includes app aliases).
+const ALLOWED_MODELS: &[&str] = &[
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+    "zwork-flash",
+    "zwork-pro",
+];
 /// Models restricted to pro+ tiers.
-const PRO_ONLY_MODELS: &[&str] = &["deepseek-v4-pro"];
+const PRO_ONLY_MODELS: &[&str] = &["deepseek-v4-pro", "zwork-pro"];
+
+/// Resolve app-facing model aliases to the actual upstream model ID.
+fn resolve_upstream_model(model: &str) -> &str {
+    match model {
+        "zwork-flash" => "deepseek-v4-flash",
+        "zwork-pro" => "deepseek-v4-pro",
+        other => other,
+    }
+}
 
 fn load_gateway_providers() -> Vec<GatewayProvider> {
     let api_key = std::env::var("DEEPSEEK_API_KEY").unwrap_or_default();
@@ -1974,8 +1988,11 @@ async fn ai_proxy_anthropic(
         }
 
         if let Some(obj) = body_json.as_object_mut() {
-            // Use the requested model, not the provider default
-            obj.insert("model".to_string(), Value::String(requested_model.clone()));
+            // Resolve app aliases (zwork-flash → deepseek-v4-flash) before sending upstream
+            obj.insert(
+                "model".to_string(),
+                Value::String(resolve_upstream_model(&requested_model).to_string()),
+            );
             obj.insert("stream".to_string(), Value::Bool(true));
         }
 

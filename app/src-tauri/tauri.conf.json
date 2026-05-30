@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "zWork",
-  "version": "0.4.0-alpha.22",
+  "version": "0.4.0-beta.1",
   "identifier": "com.zwork.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -40,7 +40,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; connect-src 'self' http://127.0.0.1:8787 https://api.tryzwork.app https://us.i.posthog.com https://*.posthog.com https://api.github.com; style-src 'self' 'unsafe-inline'; img-src 'self' asset: https://asset.localhost data: blob:; font-src 'self' data:; frame-src 'self' blob:"
+      "csp": "default-src 'self'; script-src 'self'; connect-src 'self' http://127.0.0.1:8787 https://api.tryzwork.app https://us.i.posthog.com https://*.posthog.com https://api.github.com; style-src 'self' 'unsafe-inline'; img-src 'self' asset: https://asset.localhost https://cdn.jsdelivr.net data: blob:; font-src 'self' data:; frame-src 'self' blob:"
     }
   },
   "bundle": {

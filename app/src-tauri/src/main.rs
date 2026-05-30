@@ -735,7 +735,7 @@ fn main() {
         .plugin(UpdaterBuilder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &tauri::AppHandle, shortcut, event| {
             use tauri_plugin_global_shortcut::ShortcutState;
-            if event.state() == ShortcutState::Pressed && shortcut.to_string() == "ctrl+shift+space" {
+            if event.state() == ShortcutState::Pressed && shortcut.to_string() == "super+shift+space" {
                 if let Some(window) = app.get_webview_window("overlay") {
                     let is_visible = window.is_visible().unwrap_or(false);
                     if is_visible {
@@ -755,9 +755,9 @@ fn main() {
         ])
         .setup(|app| {
             use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
-            let shortcut: Shortcut = "Ctrl+Shift+Space".parse().unwrap();
+            let shortcut: Shortcut = "Super+Shift+Space".parse().unwrap();
             if let Err(e) = app.global_shortcut().register(shortcut) {
-                eprintln!("zWork: failed to register global shortcut Ctrl+Shift+Space: {e}");
+                eprintln!("zWork: failed to register global shortcut Super+Shift+Space: {e}");
             }
 
             // System tray

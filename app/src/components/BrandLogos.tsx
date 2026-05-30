@@ -1,5 +1,8 @@
 // Official brand marks fetched from Simple Icons CDN via jsDelivr.
 // See: https://github.com/simple-icons/simple-icons
+//
+// SVGs are rendered via CSS mask + currentColor so they inherit the
+// brand colour from the parent element's `color` CSS property.
 
 interface LogoProps {
   className?: string;
@@ -20,14 +23,26 @@ const APP_SLUGS: Record<string, string> = {
 export function AppBrandLogo({ appId, className, size = 24 }: { appId: string } & LogoProps) {
   const slug = APP_SLUGS[appId];
   if (!slug) return null;
+
+  const url = `${SI_CDN_BASE}/${slug}.svg`;
+
   return (
-    <img
-      src={`${SI_CDN_BASE}/${slug}.svg`}
-      alt=""
-      width={size}
-      height={size}
+    <span
       className={className}
-      style={{ display: "block" }}
+      style={{
+        display: "inline-block",
+        width: size,
+        height: size,
+        backgroundColor: "currentColor",
+        WebkitMaskImage: `url(${url})`,
+        WebkitMaskSize: "contain",
+        WebkitMaskRepeat: "no-repeat",
+        WebkitMaskPosition: "center",
+        maskImage: `url(${url})`,
+        maskSize: "contain",
+        maskRepeat: "no-repeat",
+        maskPosition: "center",
+      }}
       aria-hidden="true"
     />
   );
