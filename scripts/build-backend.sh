@@ -25,6 +25,10 @@ mkdir -p "$DIST_DIR" "$WORK_DIR" "$SPEC_DIR" "$STAGE_DIR"
 
 ADD_BINARY_ARGS=()
 if [[ -d "$ROOT_DIR/../dctl" ]]; then
+  echo "Installing dctl dependencies..."
+  DCTL_EXTRAS=""
+  if [[ "$(uname -s)" == "Darwin" ]]; then DCTL_EXTRAS="[macos]"; fi
+  python3 -m pip install -q -e "$ROOT_DIR/../dctl${DCTL_EXTRAS}"
   echo "Building standalone dctl executable..."
   (
     cd "$ROOT_DIR/../dctl"

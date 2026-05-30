@@ -50,6 +50,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Checkout dctl (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: Ryz3nPlayZ/dctl
+          path: ../dctl
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -110,6 +116,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Checkout dctl (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: Ryz3nPlayZ/dctl
+          path: ../dctl
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -216,6 +228,8 @@ jobs:
           VERSION_NUM="${VERSION#v}"
           if printf '%s' "$VERSION_NUM" | grep -qi 'alpha'; then
             export ZWORK_RELEASE_CHANNEL="alpha"
+          elif printf '%s' "$VERSION_NUM" | grep -qi 'beta'; then
+            export ZWORK_RELEASE_CHANNEL="beta"
           else
             export ZWORK_RELEASE_CHANNEL="stable"
           fi
@@ -228,7 +242,13 @@ jobs:
           pattern = r'## v' + re.escape('${VERSION_NUM}') + r'\n(.*?)(?=\n## |\Z)'
           m = re.search(pattern, text, re.DOTALL)
           changes = m.group(1).strip() if m else 'See CHANGELOG.md for details.'
-          prefix = 'This is an alpha test build. Expect rough edges, but updater/install/auth flows should be exercised end-to-end.\n\n' if os.environ.get('ZWORK_RELEASE_CHANNEL') == 'alpha' else ''
+          ch = os.environ.get('ZWORK_RELEASE_CHANNEL', '')
+          if ch == 'alpha':
+              prefix = 'This is an alpha test build. Expect rough edges, but updater/install/auth flows should be exercised end-to-end.\n\n'
+          elif ch == 'beta':
+              prefix = 'This is a beta build. Core features are functional but may still have issues. Feedback welcome.\n\n'
+          else:
+              prefix = ''
           body = '''Download zWork for your platform:
 
           | Platform | File |
