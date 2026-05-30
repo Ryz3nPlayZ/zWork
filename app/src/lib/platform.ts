@@ -1,3 +1,5 @@
+export const IS_TAURI = typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
+
 export function isMacOS(): boolean {
   if (typeof navigator === "undefined") return false;
   const platform = navigator.platform || "";
