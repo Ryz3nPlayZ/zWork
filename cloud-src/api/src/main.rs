@@ -170,40 +170,89 @@ const ALLOWED_MODELS: &[&str] = &[
     "deepseek-v4-pro",
     "zwork-flash",
     "zwork-pro",
+    "zwork-vision",
+    "gemma4:31b-cloud",
+    "llama-3.2-90b-vision",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
 ];
 /// Models restricted to pro+ tiers.
-const PRO_ONLY_MODELS: &[&str] = &["deepseek-v4-pro", "zwork-pro"];
+const PRO_ONLY_MODELS: &[&str] = &[
+    "deepseek-v4-pro",
+    "zwork-pro",
+    "zwork-vision",
+    "gemma4:31b-cloud",
+    "meta-llama/llama-4-scout-17b-16e-instruct",
+];
 
 /// Resolve app-facing model aliases to the actual upstream model ID.
 fn resolve_upstream_model(model: &str) -> &str {
     match model {
         "zwork-flash" => "deepseek-v4-flash",
         "zwork-pro" => "deepseek-v4-pro",
+        "zwork-vision" => "gemma4:31b-cloud",
         other => other,
     }
 }
 
 fn load_gateway_providers() -> Vec<GatewayProvider> {
+    let mut providers = Vec::new();
+
     let api_key = std::env::var("DEEPSEEK_API_KEY").unwrap_or_default();
-    if api_key.trim().is_empty() {
-        return Vec::new();
+    if !api_key.trim().is_empty() {
+        providers.push(GatewayProvider {
+            name: "DeepSeek".to_string(),
+            base_url: env_or("DEEPSEEK_BASE_URL", "https://api.deepseek.com/anthropic"),
+            api_key,
+            primary_model: env_or("DEEPSEEK_MODEL_PRIMARY", "deepseek-v4-flash"),
+            fallback_model: env_or("DEEPSEEK_MODEL_FALLBACK", "deepseek-v4-flash"),
+            protocol: match std::env::var("DEEPSEEK_PROTOCOL")
+                .unwrap_or_default()
+                .trim()
+                .to_ascii_lowercase()
+                .as_str()
+            {
+                "openai" => GatewayProtocol::OpenAi,
+                _ => GatewayProtocol::Anthropic,
+            },
+        });
     }
-    vec![GatewayProvider {
-        name: "DeepSeek".to_string(),
-        base_url: env_or("DEEPSEEK_BASE_URL", "https://api.deepseek.com/anthropic"),
-        api_key,
-        primary_model: env_or("DEEPSEEK_MODEL_PRIMARY", "deepseek-v4-flash"),
-        fallback_model: env_or("DEEPSEEK_MODEL_FALLBACK", "deepseek-v4-flash"),
-        protocol: match std::env::var("DEEPSEEK_PROTOCOL")
-            .unwrap_or_default()
-            .trim()
-            .to_ascii_lowercase()
-            .as_str()
-        {
-            "openai" => GatewayProtocol::OpenAi,
-            _ => GatewayProtocol::Anthropic,
-        },
-    }]
+
+    // Load Groq provider
+    let groq_key = std::env::var("GROQ_API_KEY").unwrap_or_default();
+    if !groq_key.trim().is_empty() {
+        providers.push(GatewayProvider {
+            name: "Groq".to_string(),
+            base_url: env_or("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
+            api_key: groq_key,
+            primary_model: env_or("GROQ_MODEL_PRIMARY", "meta-llama/llama-4-scout-17b-16e-instruct"),
+            fallback_model: env_or("GROQ_MODEL_FALLBACK", "meta-llama/llama-4-scout-17b-16e-instruct"),
+            protocol: GatewayProtocol::OpenAi,
+        });
+    }
+
+    // Load up to 5 Ollama/Vision providers
+    for i in 1..=5 {
+        let key_env = format!("OLLAMA_API_KEY_{}", i);
+        let base_env = format!("OLLAMA_BASE_URL_{}", i);
+        let model_env = format!("OLLAMA_MODEL_{}", i);
+
+        let key = std::env::var(&key_env).unwrap_or_default();
+        let base_url = std::env::var(&base_env).unwrap_or_default();
+        let model = std::env::var(&model_env).unwrap_or_else(|_| "gemma4:31b-cloud".to_string());
+
+        if !base_url.trim().is_empty() {
+            providers.push(GatewayProvider {
+                name: format!("OllamaCloud_{}", i),
+                base_url,
+                api_key: key,
+                primary_model: model.clone(),
+                fallback_model: model,
+                protocol: GatewayProtocol::OpenAi,
+            });
+        }
+    }
+
+    providers
 }
 
 /// Ensure assistant messages include a thinking block for DeepSeek compatibility.
@@ -1318,12 +1367,20 @@ async fn resolve_user_5h_limit(state: &AppState, tier: &str) -> i64 {
 }
 
 /// Enforce rate limits with dynamic free-tier pooling.
-async fn enforce_root_rate_limit(state: &AppState, user_id: &str, tier: &str) -> Result<(), StatusCode> {
+/// Pro model requests (deepseek-v4-pro / zwork-pro) count as 3x usage.
+async fn enforce_root_rate_limit(state: &AppState, user_id: &str, tier: &str, requested_model: &str) -> Result<(), StatusCode> {
     let limit_5h = resolve_user_5h_limit(state, tier).await;
 
+    // Weight pro model requests as 3x in the usage count
+    let pro_models = ["deepseek-v4-pro", "zwork-pro"];
+    let request_weight: i64 = if pro_models.contains(&requested_model) { 3 } else { 1 };
+
+    // Count historical usage with pro-model weighting
     let used_last_5h: i64 = sqlx::query_scalar(
         r#"
-        SELECT COUNT(*)
+        SELECT COALESCE(SUM(
+            CASE WHEN model_id IN ('deepseek-v4-pro', 'zwork-pro') THEN 3 ELSE 1 END
+        ), 0)
         FROM gateway_requests
         WHERE user_id = $1
           AND request_kind = 'root'
@@ -1335,14 +1392,16 @@ async fn enforce_root_rate_limit(state: &AppState, user_id: &str, tier: &str) ->
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if used_last_5h >= limit_5h {
+    if used_last_5h + request_weight > limit_5h {
         return Err(StatusCode::TOO_MANY_REQUESTS);
     }
 
     let weekly_limit = limit_5h * state.gateway.weekly_limit_multiplier.max(1);
     let used_last_7d: i64 = sqlx::query_scalar(
         r#"
-        SELECT COUNT(*)
+        SELECT COALESCE(SUM(
+            CASE WHEN model_id IN ('deepseek-v4-pro', 'zwork-pro') THEN 3 ELSE 1 END
+        ), 0)
         FROM gateway_requests
         WHERE user_id = $1
           AND request_kind = 'root'
@@ -1354,7 +1413,7 @@ async fn enforce_root_rate_limit(state: &AppState, user_id: &str, tier: &str) ->
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if used_last_7d >= weekly_limit {
+    if used_last_7d + request_weight > weekly_limit {
         return Err(StatusCode::TOO_MANY_REQUESTS);
     }
 
@@ -1693,8 +1752,32 @@ async fn ai_proxy(
         .await
         .map_err(|status| (status, "gateway_user_resolution_failed".to_string()))?;
 
+    if state.gateway.providers.is_empty() {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "hosted_gateway_not_configured".to_string(),
+        ));
+    }
+    let body_bytes = axum::body::to_bytes(req.into_body(), 1024 * 1024 * 10)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::BAD_REQUEST,
+                "request_body_too_large".to_string(),
+            )
+        })?;
+    let body_json: Value = serde_json::from_slice(&body_bytes)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "invalid_chat_payload".to_string()))?;
+
+    // Extract model for rate-limit weighting (pro models = 3x cost)
+    let openai_model = body_json
+        .get("model")
+        .and_then(|m| m.as_str())
+        .unwrap_or("")
+        .to_string();
+
     if let (Some(user), RequestKind::Root) = (&app_user, request_kind) {
-        enforce_root_rate_limit(&state, &user.user_id, &user.tier)
+        enforce_root_rate_limit(&state, &user.user_id, &user.tier, &openai_model)
             .await
             .map_err(|status| {
                 let message = match status {
@@ -1721,29 +1804,22 @@ async fn ai_proxy(
         None
     };
 
-    if state.gateway.providers.is_empty() {
-        return Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            "hosted_gateway_not_configured".to_string(),
-        ));
-    }
-    let body_bytes = axum::body::to_bytes(req.into_body(), 1024 * 1024 * 10)
-        .await
-        .map_err(|_| {
-            (
-                StatusCode::BAD_REQUEST,
-                "request_body_too_large".to_string(),
-            )
-        })?;
-    let body_json: Value = serde_json::from_slice(&body_bytes)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "invalid_chat_payload".to_string()))?;
-
     let mut failures: Vec<String> = Vec::new();
 
-    for provider in &state.gateway.providers {
-        if provider.protocol != GatewayProtocol::OpenAi {
-            continue;
+    let resolved_model = resolve_upstream_model(&openai_model);
+    let mut providers_to_try: Vec<&GatewayProvider> = Vec::new();
+    for p in &state.gateway.providers {
+        if p.protocol == GatewayProtocol::OpenAi && (p.primary_model == resolved_model || p.fallback_model == resolved_model) {
+            providers_to_try.push(p);
         }
+    }
+    for p in &state.gateway.providers {
+        if p.protocol == GatewayProtocol::OpenAi && !(p.primary_model == resolved_model || p.fallback_model == resolved_model) {
+            providers_to_try.push(p);
+        }
+    }
+
+    for provider in providers_to_try {
         let models = if provider.fallback_model.trim().is_empty()
             || provider.fallback_model.trim() == provider.primary_model.trim()
         {
@@ -1900,34 +1976,6 @@ async fn ai_proxy_anthropic(
         .await
         .map_err(|status| (status, "gateway_user_resolution_failed".to_string()))?;
 
-    if let (Some(user), RequestKind::Root) = (&app_user, request_kind) {
-        enforce_root_rate_limit(&state, &user.user_id, &user.tier)
-            .await
-            .map_err(|status| {
-                let message = match status {
-                    StatusCode::TOO_MANY_REQUESTS => "root_request_quota_exceeded".to_string(),
-                    StatusCode::CONFLICT => "too_many_active_runs".to_string(),
-                    _ => "gateway_rate_limit_failed".to_string(),
-                };
-                (status, message)
-            })?;
-    }
-
-    let request_id = if let Some(user) = &app_user {
-        Some(
-            insert_gateway_request(&state, &user.user_id, &run_id, request_kind)
-                .await
-                .map_err(|_| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "gateway_request_log_failed".to_string(),
-                    )
-                })?,
-        )
-    } else {
-        None
-    };
-
     if state.gateway.providers.is_empty() {
         return Err((
             StatusCode::SERVICE_UNAVAILABLE,
@@ -1976,6 +2024,34 @@ async fn ai_proxy_anthropic(
             "model_requires_pro_tier".to_string(),
         ));
     }
+
+    if let (Some(user), RequestKind::Root) = (&app_user, request_kind) {
+        enforce_root_rate_limit(&state, &user.user_id, &user.tier, &requested_model)
+            .await
+            .map_err(|status| {
+                let message = match status {
+                    StatusCode::TOO_MANY_REQUESTS => "root_request_quota_exceeded".to_string(),
+                    StatusCode::CONFLICT => "too_many_active_runs".to_string(),
+                    _ => "gateway_rate_limit_failed".to_string(),
+                };
+                (status, message)
+            })?;
+    }
+
+    let request_id = if let Some(user) = &app_user {
+        Some(
+            insert_gateway_request(&state, &user.user_id, &run_id, request_kind)
+                .await
+                .map_err(|_| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "gateway_request_log_failed".to_string(),
+                    )
+                })?,
+        )
+    } else {
+        None
+    };
 
     // Ensure thinking blocks are present in assistant messages for DeepSeek
     ensure_thinking_blocks(&mut body_json);
@@ -4160,7 +4236,9 @@ async fn analytics_summary(
 
     let five_hour_used: i64 = sqlx::query_scalar(
         r#"
-        SELECT COUNT(*)
+        SELECT COALESCE(SUM(
+            CASE WHEN model_id IN ('deepseek-v4-pro', 'zwork-pro') THEN 3 ELSE 1 END
+        ), 0)
         FROM gateway_requests
         WHERE user_id = $1
           AND request_kind = 'root'
@@ -4174,7 +4252,9 @@ async fn analytics_summary(
 
     let weekly_used: i64 = sqlx::query_scalar(
         r#"
-        SELECT COUNT(*)
+        SELECT COALESCE(SUM(
+            CASE WHEN model_id IN ('deepseek-v4-pro', 'zwork-pro') THEN 3 ELSE 1 END
+        ), 0)
         FROM gateway_requests
         WHERE user_id = $1
           AND request_kind = 'root'
@@ -4775,6 +4855,7 @@ async fn main() {
         .route("/api/session", get(session_me))
         .route("/api/telemetry/event", post(ingest_telemetry))
         .route("/api/chat/stream", post(ai_proxy))
+        .route("/api/chat/completions", post(ai_proxy))
         .route("/api/v1/chat/completions", post(ai_proxy))
         .route("/api/v1/messages", post(ai_proxy_anthropic))
         .route("/api/webhooks/stripe", post(stripe_webhook))

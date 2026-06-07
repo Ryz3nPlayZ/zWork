@@ -2,6 +2,26 @@
 
 All notable changes to zWork are documented here.
 
+## v0.4.0-beta.2
+
+**Migrated to pruned Hermes backend agent engine, added Ollama Cloud vision routing, and enhanced test resilience.**
+
+- Migrated sidecar backend execution loop to a clean, de-branded version of the Hermes Agent engine.
+- Integrated server-side routing for vision-capable models (e.g. `gemma4:31b-cloud`, `llama-3.2-90b-vision`) to run across multiple Ollama cloud providers.
+- Connected Groq provider for specialized text model routing (`meta-llama/llama-4-scout-17b-16e-instruct`).
+- Made local unit test suites resilient to external Yahoo Finance rate-limiting or network connection drops by skipping test runs gracefully on 429 errors.
+- Cleaned up frontend references, verified version alignment across all configs, and updated Tauri packages.
+
+## v0.4.0-beta.1
+
+**Rich document editor, spreadsheet suite, interactive sandbox, and code execution previews.**
+
+- Added full WYSIWYG document editor with formatting tools and export actions.
+- Integrated advanced spreadsheet component with formulas and CSV import/export.
+- Implemented interactive HTML/SVG code execution sandbox previews directly inside the Artifact view.
+- Added dark stock candlestick chart playground and Yahoo Finance `get_stock_data` agent tool.
+- Fixed memory leaks in chat viewport exports, centralized Tauri platform checks, and set up beta release channel pipelines.
+
 ## v0.4.0-alpha.19
 
 **Project chat embedding, UI cleanup, and connector logo fixes.**

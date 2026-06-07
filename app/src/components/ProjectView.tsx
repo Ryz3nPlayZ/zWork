@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef, useCallback } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import {
   ArrowLeft,
   MoreHorizontal,
@@ -10,9 +10,6 @@ import {
   FolderOpen,
   Clock,
   Loader2,
-  AlertCircle,
-  Settings as SettingsIcon,
-  RefreshCcw,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
@@ -20,8 +17,6 @@ import { isMacOS } from "../lib/platform";
 import { ChatInput } from "./ChatInput";
 import { IconButton } from "./IconButton";
 import { api } from "../lib/api";
-import { Message } from "./Message";
-import { ConcurrentWorkBanner } from "./ConcurrentWorkBanner";
 
 const EMOJI_OPTIONS = [
   "📁", "📊", "💡", "🚀", "🎯", "🔧", "💼", "📝", "🎨", "🏗️",
@@ -369,9 +364,6 @@ function ProjectDetail() {
   const updateProject = useApp((s) => s.updateProject);
   const openChat = useApp((s) => s.openChat);
 
-  // Chat state for inline project chat
-  const activeChat = useApp((s) => s.activeChatId ? s.chats[s.activeChatId] : undefined);
-
   const project = useMemo(
     () => projects.find((p) => p.id === activeId) || null,
     [projects, activeId],
@@ -601,34 +593,28 @@ function ProjectDetail() {
               autoFocus
             />
 
-            {/* Project chat thread or past chats list */}
-            {activeChat && activeChat.projectId === project.id ? (
-              <ProjectChatThread chat={activeChat} />
-            ) : (
-              <div className="rounded-2xl border border-line bg-paper-raised p-5">
-                <h3 className="mb-3 text-[13px] font-semibold text-ink">Past chats</h3>
-                {projectChats.length === 0 ? (
-                  <p className="text-center text-[13px] text-ink-muted">
-                    Start a chat to keep conversations organized and re-use project knowledge.
-                  </p>
-                ) : (
-                  <ul className="flex flex-col gap-1">
-                    {projectChats.map((c) => (
-                      <li key={c.id}>
-                        <button
-                          type="button"
-                          onClick={() => void openChat(c.id)}
-                          className="press flex w-full items-center justify-between rounded-md px-2 py-2 text-left text-[13px] text-ink hover:bg-paper-sunken"
-                        >
-                          <span className="truncate">{c.title}</span>
-                          <span className="ml-3 shrink-0 text-[11px] text-ink-faint">
-                            {c.message_count} msgs
-                          </span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+            {/* Past chats — flat list matching sidebar style */}
+            {projectChats.length > 0 && (
+              <div className="flex flex-col">
+                <h3 className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
+                  Chats
+                </h3>
+                <ul className="flex flex-col">
+                  {projectChats.map((c) => (
+                    <li key={c.id}>
+                      <button
+                        type="button"
+                        onClick={() => void openChat(c.id)}
+                        className={cn(
+                          "press flex w-full items-center rounded-md px-2 py-1.5 text-left text-[12.5px] text-ink-muted",
+                          "hover:bg-line/60 hover:text-ink",
+                        )}
+                      >
+                        <span className="truncate">{c.title}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
           </div>
@@ -933,112 +919,3 @@ function EditModal({
   );
 }
 
-function ProjectChatThread({ chat }: { chat: import("../lib/store").Chat }) {
-  const endRef = useRef<HTMLDivElement>(null);
-  const artifacts = useApp((s) => s.artifacts);
-  const send = useApp((s) => s.send);
-  const retry = useApp((s) => s.retry);
-  const regenerateMessage = useApp((s) => s.regenerateMessage);
-  const flagBadResponse = useApp((s) => s.flagBadResponse);
-  const openArtifact = useApp((s) => s.openArtifact);
-  const setView = useApp((s) => s.setView);
-
-  useEffect(() => {
-    const el = endRef.current;
-    if (!el) return;
-    const container = el.parentElement;
-    if (!container) return;
-    const scrollEl = container.parentElement as HTMLElement | null;
-    if (!scrollEl) return;
-    const distance = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
-    if (distance <= 0) return;
-    if (distance < 300) {
-      scrollEl.scrollBy({ top: distance, behavior: "smooth" });
-    } else {
-      scrollEl.scrollTo({ top: scrollEl.scrollHeight, behavior: "instant" });
-    }
-  }, [chat.messages.length, chat.working, chat.status]);
-
-  const handleAskSubmit = useCallback(
-    (_msgId: string, choice: string) => {
-      void send(choice);
-    },
-    [send],
-  );
-
-  const handleOpenArtifact = useCallback(
-    (artifact: Parameters<typeof openArtifact>[0]) => {
-      openArtifact(artifact);
-    },
-    [openArtifact],
-  );
-
-  const handleBack = () => {
-    useApp.setState({ activeChatId: null });
-  };
-
-  return (
-    <div className="flex flex-col gap-4 rounded-2xl border border-line bg-paper-raised p-5 min-h-[400px]">
-      <div className="flex items-center justify-between">
-        <h3 className="text-[13px] font-semibold text-ink truncate">{chat.title}</h3>
-        <button
-          type="button"
-          onClick={handleBack}
-          className="press rounded-md px-2 py-1 text-[11.5px] text-ink-muted hover:bg-paper-sunken hover:text-ink"
-        >
-          Back to project
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto max-h-[600px] flex flex-col gap-5 pr-2">
-        <ConcurrentWorkBanner />
-        {chat.messages.map((m, idx) => {
-          const isLast = idx === chat.messages.length - 1;
-          const isStreaming = !!chat.working && isLast;
-          const activities = isStreaming && m.role === "assistant"
-            ? chat.activities
-            : m.activities;
-          return (
-            <Message
-              key={m.id}
-              message={m}
-              onAskSubmit={handleAskSubmit}
-              onOpenArtifact={handleOpenArtifact}
-              artifacts={artifacts}
-              streaming={isStreaming}
-              activities={activities}
-              status={isStreaming ? chat.status : undefined}
-              onRetry={regenerateMessage}
-              onBadResponse={flagBadResponse}
-            />
-          );
-        })}
-        {chat.error && (
-          <div className="flex animate-fade-in items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12.5px] text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
-            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span className="break-words">{chat.error}</span>
-          </div>
-        )}
-        {chat.needsSetup && !chat.working && (
-          <div className="flex animate-fade-in items-center gap-2 rounded-lg border border-line bg-paper-sunken px-3 py-2">
-            <button
-              type="button"
-              onClick={() => setView("settings")}
-              className="press inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-[12.5px] font-medium text-ink hover:bg-paper-sunken"
-            >
-              <SettingsIcon className="h-3.5 w-3.5" /> Open Settings
-            </button>
-            <button
-              type="button"
-              onClick={() => void retry()}
-              className="press inline-flex items-center gap-1.5 rounded-md border border-line bg-paper-sunken px-2.5 py-1 text-[12.5px] font-medium text-ink hover:bg-paper hover:border-line-strong"
-            >
-              <RefreshCcw className="h-3.5 w-3.5" /> Retry
-            </button>
-          </div>
-        )}
-        <div ref={endRef} />
-      </div>
-    </div>
-  );
-}

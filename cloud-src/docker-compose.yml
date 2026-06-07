@@ -82,6 +82,10 @@ services:
       - FREE_TIER_POOL_5H=${FREE_TIER_POOL_5H}
       - PRO_ROOT_REQUESTS_PER_5H=${PRO_ROOT_REQUESTS_PER_5H}
       - MAX_ROOT_REQUESTS_PER_5H=${MAX_ROOT_REQUESTS_PER_5H}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - OLLAMA_API_KEY_1=${OLLAMA_API_KEY_1}
+      - OLLAMA_BASE_URL_1=${OLLAMA_BASE_URL_1}
+      - OLLAMA_MODEL_1=${OLLAMA_MODEL_1}
     depends_on:
       - postgres
       - better_auth

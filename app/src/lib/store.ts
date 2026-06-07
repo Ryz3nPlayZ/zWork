@@ -134,7 +134,6 @@ export type SettingsSection =
   | "plan"
   | "general"
   | "memory"
-  | "personalization"
   | "models"
   | "integrations";
 
@@ -440,10 +439,13 @@ interface AppState {
   setPlanMode: (v: boolean) => void;
   autoApproveDestructive: boolean;
   setAutoApproveDestructive: (v: boolean) => void;
+  accessibilityPermissionGranted: boolean | null;
+  screenRecordingPermissionGranted: boolean | null;
+  checkMacOSPermissions: () => Promise<void>;
+  requestAccessibility: () => Promise<void>;
+  requestScreenRecording: () => Promise<void>;
   webSearchEnabled: boolean;
   setWebSearchEnabled: (v: boolean) => void;
-  persona: string | null;
-  setPersona: (v: string | null) => void;
 
   // Subagent state
   subagents: SubagentTask[];
@@ -672,10 +674,10 @@ export const useApp = create<AppState>((set, get) => ({
   setPlanMode: (v) => set({ planMode: v }),
   autoApproveDestructive: false,
   setAutoApproveDestructive: (v) => set({ autoApproveDestructive: v }),
+  accessibilityPermissionGranted: null,
+  screenRecordingPermissionGranted: null,
   webSearchEnabled: false,
   setWebSearchEnabled: (v) => set({ webSearchEnabled: v }),
-  persona: null,
-  setPersona: (v) => set({ persona: v }),
 
   // Subagent state
   subagents: [],
@@ -688,6 +690,36 @@ export const useApp = create<AppState>((set, get) => ({
       return { subagents: updated };
     }),
   clearSubagents: () => set({ subagents: [] }),
+
+  checkMacOSPermissions: async () => {
+    if (IS_WEB) return;
+    try {
+      const access = await invoke<boolean>("check_accessibility_permission");
+      const screen = await invoke<boolean>("check_screen_recording_permission");
+      set({
+        accessibilityPermissionGranted: access,
+        screenRecordingPermissionGranted: screen,
+      });
+    } catch (e) {
+      console.error("Failed to check macOS permissions:", e);
+    }
+  },
+  requestAccessibility: async () => {
+    if (IS_WEB) return;
+    try {
+      await invoke("request_accessibility_permission");
+    } catch (e) {
+      console.error("Failed to request Accessibility permission:", e);
+    }
+  },
+  requestScreenRecording: async () => {
+    if (IS_WEB) return;
+    try {
+      await invoke("request_screen_recording_permission");
+    } catch (e) {
+      console.error("Failed to request Screen Recording permission:", e);
+    }
+  },
 
   refreshProjects: async () => {
     try {
@@ -837,7 +869,7 @@ export const useApp = create<AppState>((set, get) => ({
           {
             id: "zwork-flash",
             name: "zWork Flash",
-            subtitle: "Managed AI router",
+            subtitle: "Fast and efficient",
             shape: "openai",
             credential: "managed",
             model_id: "zwork-flash",
@@ -847,7 +879,7 @@ export const useApp = create<AppState>((set, get) => ({
           {
             id: "zwork-pro",
             name: "zWork Pro",
-            subtitle: "Managed AI router (Pro/Max)",
+            subtitle: "Most capable model",
             shape: "openai",
             credential: "managed",
             model_id: "zwork-pro",
@@ -911,6 +943,7 @@ export const useApp = create<AppState>((set, get) => ({
       get().refreshChats(),
       get().refreshMe(),
       get().refreshProjects(),
+      get().checkMacOSPermissions().catch(() => {}),
       get().fetchTasks().catch(() => {}),
       get().fetchEvents().catch(() => {}),
       api
@@ -1034,7 +1067,7 @@ export const useApp = create<AppState>((set, get) => ({
     const projectId = existing?.projectId || null;
     set({
       activeChatId: id,
-      view: projectId ? "projects" : "chat",
+      view: "chat",
       activeProjectId: projectId,
     });
     if (get().backendOffline) {
@@ -1086,7 +1119,7 @@ export const useApp = create<AppState>((set, get) => ({
         const fetchedProjectId = (full as any).project_id || null;
         set((s) => ({
           activeProjectId: fetchedProjectId,
-          view: fetchedProjectId ? "projects" : s.view,
+          view: "chat",
           artifacts: [...s.artifacts, ...loadedArtifacts],
           chats: {
             ...s.chats,
@@ -1424,11 +1457,10 @@ export const useApp = create<AppState>((set, get) => ({
           artifactPanelOpen: false,
           activeArtifactId: null,
         };
-      const wasInProject = !!get().activeProjectId;
       return {
         chats: { ...s.chats, [localId]: chat },
         activeChatId: localId,
-        view: wasInProject ? "projects" : "chat",
+        view: "chat",
       };
     });
 
@@ -1470,7 +1502,6 @@ export const useApp = create<AppState>((set, get) => ({
           auto_approve_destructive: autoApproveDestructive,
           attachments,
           web_search_enabled: get().webSearchEnabled,
-          persona: get().persona,
         },
         (evt) => {
           if (evt.type === "chat") {

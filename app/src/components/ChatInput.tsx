@@ -94,8 +94,6 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, v
   const setAutoApproveDestructive = useApp((s) => s.setAutoApproveDestructive);
   const webSearchEnabled = useApp((s) => s.webSearchEnabled);
   const setWebSearchEnabled = useApp((s) => s.setWebSearchEnabled);
-  const persona = useApp((s) => s.persona);
-  const setPersona = useApp((s) => s.setPersona);
   const working = useApp((s) => {
     const id = s.activeChatId;
     return id ? (s.chats[id]?.working ?? false) : false;
@@ -472,7 +470,7 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, v
           onSelect={insertTemplate}
           onManage={() => {
             setSlashState(null);
-            openSettings("personalization");
+            openSettings("memory");
           }}
         />
       )}
@@ -554,19 +552,6 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, v
             active={webSearchEnabled}
             onClick={() => setWebSearchEnabled(!webSearchEnabled)}
           />
-          <div className="flex items-center ml-1 border-l border-line pl-2.5">
-            <select
-              value={persona || ""}
-              onChange={(e) => setPersona(e.target.value || null)}
-              className="text-[11.5px] bg-paper-sunken border border-line rounded-lg px-2 py-1 text-ink-muted hover:text-ink outline-none cursor-pointer font-medium"
-            >
-              <option value="">Default Persona</option>
-              <option value="engineer">Software Engineer</option>
-              <option value="designer">UI/UX Designer</option>
-              <option value="writer">Technical Writer</option>
-              <option value="auditor">Code Auditor</option>
-            </select>
-          </div>
         </div>
       <div className="flex items-center gap-2">
         <ModelPicker />
@@ -604,7 +589,7 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, v
           void uploadFiles(files);
           e.currentTarget.value = "";
         }}
-        accept="image/*,.txt,.md,.markdown,.csv,.tsv,.json,.yaml,.yml,.py,.js,.jsx,.ts,.tsx,.html,.css,.xml,.svg,.pdf"
+        accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.txt,.md,.markdown,.csv,.tsv,.json,.yaml,.yml,.py,.js,.jsx,.ts,.tsx,.html,.css,.xml,.pdf"
       />
     </div>
     </>

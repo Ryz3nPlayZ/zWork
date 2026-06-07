@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Pencil, Check, X, AlertCircle, Settings as SettingsIcon, RefreshCcw, Download, ChevronDown } from "lucide-react";
+import { Pencil, Check, X, AlertCircle, Settings as SettingsIcon, RefreshCcw, Download, ChevronDown, ArrowLeft } from "lucide-react";
 import { useApp } from "../lib/store";
 import { isMacOS } from "../lib/platform";
 import { ChatInput } from "./ChatInput";
@@ -15,6 +15,7 @@ export function ChatView() {
   const send = useApp((s) => s.send);
   const retry = useApp((s) => s.retry);
   const setView = useApp((s) => s.setView);
+  const setActiveProject = useApp((s) => s.setActiveProject);
   const artifacts = useApp((s) => s.artifacts);
   const openArtifact = useApp((s) => s.openArtifact);
   const regenerateMessage = useApp((s) => s.regenerateMessage);
@@ -126,6 +127,19 @@ export function ChatView() {
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-line px-5 py-3 bg-paper-soft select-none">
           <div className="flex min-w-0 items-center gap-2">
+            {chat.projectId && (
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveProject(chat.projectId!);
+                  setView("projects");
+                }}
+                className="press inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[12px] text-ink-muted hover:bg-paper-sunken hover:text-ink"
+                title="Back to project"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" />
+              </button>
+            )}
             {editing ? (
               <div className="flex items-center gap-1" data-no-drag>
                 <input
@@ -268,49 +282,29 @@ export function ChatView() {
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-paper via-paper/95 to-transparent px-6 pb-5 pt-10 pointer-events-none z-10">
           <div className="mx-auto max-w-[960px] pointer-events-auto">
             {chat.pendingQuestion && (
-              <div className="mb-3 rounded-xl border border-line bg-paper-raised p-4 shadow-pop flex flex-col gap-2.5 animate-scale-up">
-                <div className="flex items-start gap-2">
-                  <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent/10 text-accent mt-0.5">
-                    <span className="text-[11px] font-bold">?</span>
-                  </div>
-                  <div>
-                    <h4 className="text-[13px] font-semibold text-ink leading-tight">
-                      Clarification Required
-                    </h4>
-                    <p className="text-[12px] text-ink-muted mt-1 leading-normal">
-                      {chat.pendingQuestion.question}
-                    </p>
-                  </div>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-2 mt-1">
-                  {chat.pendingQuestion.options.map((opt, oIdx) => (
-                    <button
-                      key={oIdx}
-                      onClick={() => {
-                        const optLower = opt.toLowerCase();
-                        if (optLower.includes("other") || optLower.includes("instead")) {
-                          document.querySelector("textarea")?.focus();
-                        } else {
+              <div className="mb-2 flex flex-col gap-1 animate-fade-in">
+                <p className="px-3 text-[12.5px] text-ink-muted leading-normal">
+                  {chat.pendingQuestion.question}
+                </p>
+                <div className="flex flex-col">
+                  {chat.pendingQuestion.options
+                    .filter((opt) => {
+                      const o = opt.toLowerCase();
+                      return !o.includes("other") && !o.includes("tell me what to do") && !o.includes("instead");
+                    })
+                    .map((opt, oIdx) => (
+                      <button
+                        key={oIdx}
+                        onClick={() => {
                           void useApp.getState().answerQuestion(chat.id, opt);
-                        }
-                      }}
-                      className="text-left px-3 py-2 rounded-lg border border-line bg-paper hover:bg-paper-sunken hover:border-line-strong text-[12px] text-ink-muted hover:text-ink transition-colors font-medium cursor-pointer"
-                    >
-                      <span className="text-ink-faint mr-1.5 font-mono">{oIdx + 1}.</span>
-                      {opt}
-                    </button>
-                  ))}
-                  <button
-                    onClick={() => {
-                      document.querySelector("textarea")?.focus();
-                    }}
-                    className="text-left px-3 py-2 rounded-lg border border-dashed border-line bg-paper hover:bg-paper-sunken hover:border-line-strong text-[12px] text-accent hover:text-accent-hover transition-colors font-medium cursor-pointer"
-                  >
-                    <span className="text-accent/60 mr-1.5 font-mono">*</span>
-                    Other (type below...)
-                  </button>
+                        }}
+                        className="press text-left px-3 py-2 text-[12.5px] text-ink-muted hover:text-ink hover:bg-line/40 transition-colors font-medium cursor-pointer rounded-md"
+                      >
+                        {opt}
+                      </button>
+                    ))}
                 </div>
+                <div className="h-px bg-line mx-3" />
               </div>
             )}
 

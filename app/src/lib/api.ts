@@ -713,7 +713,6 @@ async function streamChatWeb(
       kind: string;
     }>;
     web_search_enabled?: boolean;
-    persona?: string | null;
   },
   onEvent: (evt: StreamEvent) => void,
   signal?: AbortSignal,
@@ -802,10 +801,15 @@ async function streamChatWeb(
         if (!data) continue;
         try {
           const chunk = JSON.parse(data);
-          // Anthropic content_block_delta: { type: "content_block_delta", delta: { type: "text_delta", text: "..." } }
-          if (chunk.type === "content_block_delta" && chunk.delta?.text) {
+          // Only forward text_delta events — skip thinking_delta to avoid raw thought output
+          if (chunk.type === "content_block_delta" && chunk.delta?.type === "text_delta" && chunk.delta?.text) {
             assistantText += chunk.delta.text;
             onEvent({ type: "delta", text: chunk.delta.text });
+          }
+          // Emit status for thinking blocks so the UI shows activity
+          if (chunk.type === "content_block_delta" && chunk.delta?.type === "thinking_delta" && chunk.delta?.thinking) {
+            const preview = chunk.delta.thinking.trim().split("\n")[0].slice(0, 80);
+            if (preview) onEvent({ type: "status", text: `Thinking: ${preview}…` });
           }
           // message_stop signals end of streaming
           if (chunk.type === "message_stop") {
@@ -822,7 +826,7 @@ async function streamChatWeb(
       if (!data) continue;
       try {
         const chunk = JSON.parse(data);
-        if (chunk.type === "content_block_delta" && chunk.delta?.text) {
+        if (chunk.type === "content_block_delta" && chunk.delta?.type === "text_delta" && chunk.delta?.text) {
           assistantText += chunk.delta.text;
           onEvent({ type: "delta", text: chunk.delta.text });
         }
@@ -862,7 +866,6 @@ export async function streamChat(
       kind: string;
     }>;
     web_search_enabled?: boolean;
-    persona?: string | null;
   },
   onEvent: (evt: StreamEvent) => void,
   signal?: AbortSignal,

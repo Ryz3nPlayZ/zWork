@@ -53,10 +53,10 @@ def local_server():
     thread.join(timeout=2.0)
 
 
-@patch("sidecar.server.providers.stream_chat")
+@patch("sidecar.agent.hermes_agent.zWorkHermesAgent.run_turn")
 @patch("sidecar.server._resolve_model_id")
 @patch("sidecar.server.providers.lookup_model")
-def test_reconnection_flow(mock_lookup_model, mock_resolve_model_id, mock_stream_chat, local_server) -> None:
+def test_reconnection_flow(mock_lookup_model, mock_resolve_model_id, mock_run_turn, local_server) -> None:
     mock_resolve_model_id.return_value = "mock-model"
     mock_lookup_model.return_value = {
         "model_id": "mock-model",
@@ -73,7 +73,7 @@ def test_reconnection_flow(mock_lookup_model, mock_resolve_model_id, mock_stream
         await asyncio.sleep(0.5)
         yield {"type": "done"}
 
-    mock_stream_chat.side_effect = mock_stream
+    mock_run_turn.side_effect = mock_stream
 
     # 1. Start the first stream request
     with httpx.stream(
@@ -123,10 +123,10 @@ def test_reconnection_flow(mock_lookup_model, mock_resolve_model_id, mock_stream
     assert chat_id not in server.ACTIVE_RUNS
 
 
-@patch("sidecar.server.providers.stream_chat")
+@patch("sidecar.agent.hermes_agent.zWorkHermesAgent.run_turn")
 @patch("sidecar.server._resolve_model_id")
 @patch("sidecar.server.providers.lookup_model")
-def test_manual_stop(mock_lookup_model, mock_resolve_model_id, mock_stream_chat, local_server) -> None:
+def test_manual_stop(mock_lookup_model, mock_resolve_model_id, mock_run_turn, local_server) -> None:
     mock_resolve_model_id.return_value = "mock-model"
     mock_lookup_model.return_value = {
         "model_id": "mock-model",
@@ -144,7 +144,7 @@ def test_manual_stop(mock_lookup_model, mock_resolve_model_id, mock_stream_chat,
         except asyncio.CancelledError:
             raise
 
-    mock_stream_chat.side_effect = mock_stream
+    mock_run_turn.side_effect = mock_stream
 
     with httpx.stream(
         "POST",

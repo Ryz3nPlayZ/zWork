@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>zWork · Icon Preview</title>
+<style>
+:root {
+  --paper: 242 240 232;
+  --paper-raised: 252 250 242;
+  --paper-sunken: 234 232 224;
+  --ink: 48 46 40;
+  --ink-soft: 80 76 68;
+  --ink-muted: 130 126 115;
+  --ink-faint: 175 170 158;
+  --line: 218 214 202;
+  --line-strong: 200 196 184;
+}
+@media(prefers-color-scheme:dark){
+  :root {
+    --paper: 22 22 24;
+    --paper-raised: 31 31 34;
+    --paper-sunken: 18 18 20;
+    --ink: 236 236 234;
+    --ink-soft: 213 213 211;
+    --ink-muted: 160 160 157;
+    --ink-faint: 108 108 106;
+    --line: 45 45 49;
+    --line-strong: 62 62 66;
+  }
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: rgb(var(--paper));
+  color: rgb(var(--ink));
+  padding: 40px 24px;
+  line-height: 1.5;
+}
+h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; color: rgb(var(--ink)); }
+h2 { font-size: 13px; font-weight: 400; color: rgb(var(--ink-muted)); margin-bottom: 32px; }
+h3 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: rgb(var(--ink-faint)); margin: 32px 0 12px; }
+p.desc { font-size: 12px; color: rgb(var(--ink-muted)); margin-bottom: 12px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; }
+.card {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 16px 8px 12px; border-radius: 12px;
+  background: rgb(var(--paper-raised));
+  border: 1px solid rgb(var(--line));
+  transition: border-color .15s, box-shadow .15s;
+}
+.card:hover { border-color: rgb(var(--line-strong)); box-shadow: 0 1px 4px rgba(0,0,0,.04); }
+.icon-box { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; }
+.icon-box svg { width: 100%; height: 100%; }
+.card .name { font-size: 11px; font-weight: 500; color: rgb(var(--ink)); text-align: center; line-height: 1.3; }
+.card .slug { font-size: 9px; color: rgb(var(--ink-faint)); font-family: monospace; }
+.status { display: inline-block; font-size: 9px; padding: 1px 5px; border-radius: 4px; font-weight: 600; }
+.status-wired { background: rgb(var(--paper-sunken)); color: rgb(var(--ink-muted)); }
+hr { border: none; border-top: 1px solid rgb(var(--line)); margin: 24px 0 0; }
+</style>
+</head>
+<body>
+<h1>zWork · Icon Preview</h1>
+<h2>Available logos from each source, styled with the zWork color system</h2>
+
+<h3>Brand Logos · Simple Icons CDN <span class="status status-wired">WIRED</span></h3>
+<p class="desc">Official brand marks. Rendered as monochrome using zWork ink color. Respects prefers-color-scheme.</p>
+<div class="grid" id="s1"></div>
+
+<h3>Connector Apps · composio_app_display_map</h3>
+<p class="desc">Server-side display map. Lucide icon name used as fallback when no brand logo is wired.</p>
+<div class="grid" id="s2"></div>
+
+<h3>More Simple Icons <span class="status status-wired">AVAILABLE</span></h3>
+<p class="desc">Not yet wired. Add the slug to BrandLogos.tsx to activate.</p>
+<div class="grid" id="s3"></div>
+
+<h3>Fallback</h3>
+<div class="grid">
+  <div class="card">
+    <div class="icon-box" style="color:rgb(var(--ink-muted))">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a6 6 0 0 1-12 0V8"/></svg>
+    </div>
+    <div class="name">Plug</div>
+    <div class="slug">lucide:plug</div>
+  </div>
+</div>
+
+<script>
+const CDN = "https://cdn.jsdelivr.net/npm/simple-icons@latest/icons";
+// Use zWork ink color — adapts to light/dark via JS matching the CSS
+const ink = getComputedStyle(document.documentElement).getPropertyValue('--ink').trim();
+const iconColor = `rgb(${ink})`;
+
+const APPS = {
+  brand: [
+    { n:"Gmail", s:"gmail" },
+    { n:"Google Calendar", s:"googlecalendar" },
+    { n:"Slack", s:"slack" },
+    { n:"Notion", s:"notion" },
+    { n:"Google Drive", s:"googledrive" },
+    { n:"GitHub", s:"github" },
+    { n:"Linear", s:"linear" },
+  ],
+  connectors: [
+    { n:"Gmail", s:"gmail", l:"mail" },
+    { n:"Google Calendar", s:"googlecalendar", l:"calendar" },
+    { n:"Slack", s:"slack", l:"hash" },
+    { n:"Notion", s:"notion", l:"book-open" },
+    { n:"Google Drive", s:"googledrive", l:"folder" },
+    { n:"GitHub", s:"github", l:"git-branch" },
+    { n:"Jira", s:"jira", l:"layers" },
+    { n:"Trello", s:"trello", l:"layout-grid" },
+    { n:"Todoist", s:"todoist", l:"check-square" },
+    { n:"Linear", s:"linear", l:"zap" },
+    { n:"Asana", s:"asana", l:"target" },
+    { n:"HubSpot", s:"hubspot", l:"circle-dot" },
+  ],
+  extra: [
+    { n:"Discord", s:"discord" },
+    { n:"Figma", s:"figma" },
+    { n:"Spotify", s:"spotify" },
+    { n:"Zoom", s:"zoom" },
+    { n:"Dropbox", s:"dropbox" },
+    { n:"Airtable", s:"airtable" },
+    { n:"Stripe", s:"stripe" },
+    { n:"Twilio", s:"twilio" },
+    { n:"Salesforce", s:"salesforce" },
+    { n:"MS Teams", s:"microsoftteams" },
+    { n:"Google Sheets", s:"googlesheets" },
+    { n:"X / Twitter", s:"x" },
+  ],
+};
+
+async function render(id, apps, subFn) {
+  const el = document.getElementById(id);
+  el.innerHTML = apps.map(a => {
+    const sub = subFn ? subFn(a) : a.s;
+    return `<div class="card" data-s="${a.s}">
+      <div class="icon-box"><div class="ph" role="img" aria-label="${a.n} logo"></div></div>
+      <div class="name">${a.n}</div>
+      <div class="slug">${sub}</div>
+    </div>`;
+  }).join("");
+
+  for (const card of el.querySelectorAll(".card")) {
+    const s = card.dataset.s, ph = card.querySelector(".ph");
+    try {
+      const r = await fetch(CDN + "/" + s + ".svg");
+      if (!r.ok) { ph.textContent = "✕"; continue; }
+      let svg = await r.text();
+      // Replace currentColor with zWork ink — works in both light & dark
+      svg = svg.replace(/currentColor/g, iconColor);
+      ph.outerHTML = svg.replace(/<svg /, '<svg width="26" height="26" role="img" aria-label="' + (card.querySelector(".name")?.textContent || s) + '" ');
+    } catch { ph.textContent = "✕"; }
+  }
+}
+
+render("s1", APPS.brand);
+render("s2", APPS.connectors, a => "lucide:" + a.l);
+render("s3", APPS.extra);
+</script>
+</body>
+</html>

@@ -357,13 +357,19 @@ def available_models(s: settings_mod.Settings) -> list[dict]:
 
 
 def _subtitle_for(m: dict, cred: Optional[Credentials]) -> str:
-    base = m.get("base_url_override") or (cred.base_url if cred else "")
     credential = m.get("credential", "")
+    # zwork-router models: show a short, user-friendly subtitle
+    if credential == "zwork_router":
+        model_id = m.get("model_id", "")
+        if "pro" in model_id.lower():
+            return "Most capable model"
+        return "Fast and efficient"
+    base = m.get("base_url_override") or (cred.base_url if cred else "")
     cred_label = {
-        "anthropic": "Anthropic-compatible",
+        "anthropic": "Anthropic",
         "openai": "OpenAI-compatible",
-        "claude_code": "via local credentials",
-        "zwork_router": "Managed via zWork Router",
+        "claude_code": "Local credentials",
+        "zwork_router": "Managed",
     }.get(credential)
     if cred_label is None:
         spec = OPENAI_COMPAT_PROVIDERS.get(credential)
@@ -591,7 +597,16 @@ async def _anthropic_turn(
                                 started_text = True
                             yield {"type": "delta", "text": piece}
                         elif dtype == "thinking_delta" and block["type"] == "thinking":
-                            block["thinking"] += delta.get("thinking", "")
+                            piece = delta.get("thinking", "")
+                            block["thinking"] += piece
+                            # Yield periodic status so the UI doesn't look stuck
+                            # during long thinking phases
+                            chunk_len = len(piece)
+                            if chunk_len > 0:
+                                # Show a brief excerpt of what the model is thinking
+                                preview = piece.strip().split("\n")[0][:80]
+                                if preview:
+                                    yield {"type": "status", "text": f"Thinking: {preview}…"}
                         elif dtype == "signature_delta" and block["type"] == "thinking":
                             block["signature"] += delta.get("signature", "")
                         elif (
@@ -848,6 +863,10 @@ async def _openai_turn(
                         )
                         if thinking_piece:
                             reasoning_content += thinking_piece
+                            # Show a brief status so the UI doesn't look stuck
+                            preview = thinking_piece.strip().split("\n")[0][:80]
+                            if preview:
+                                yield {"type": "status", "text": f"Thinking: {preview}…"}
                         piece = delta.get("content")
                         if piece:
                             collected_text += piece
@@ -1036,6 +1055,14 @@ def _build_system_prompt(
             "Destructive operations (recursive delete, force push, disk formatting, database "
             "drops, system shutdown, etc.) require user approval. When you need to perform such "
             "an action, stop and ask the user explicitly — do NOT attempt to execute it."
+        )
+    else:
+        parts.append(
+            "## Zero-Prompt Auto-Approve Enabled\n\n"
+            "The user has enabled Auto-Approve mode. You have explicit, pre-approved permission to read/write files, "
+            "run commands, and control the desktop WITHOUT asking for confirmation. "
+            "Do NOT ask the user in chat prose 'Can I read X?' or 'Can I run Y?'. "
+            "Simply call the tools directly and immediately. Proceed silently and autonomously."
         )
 
     return "\n\n".join(parts)

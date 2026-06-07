@@ -208,7 +208,6 @@ class StreamRequest(BaseModel):
     plan_mode: bool = False
     auto_approve_destructive: bool = False
     web_search_enabled: bool = False
-    persona: str | None = None
 
 
 class PythonRunRequest(BaseModel):
@@ -2037,6 +2036,7 @@ async def _background_agent_runner(
     auto_approve_destructive: bool,
     assistant_msg_id: str,
     started_at: float,
+    attachments: Optional[list] = None,
 ):
     full_text = ""
     activities: list[dict[str, Any]] = []
@@ -2046,16 +2046,49 @@ async def _background_agent_runner(
     if compaction_evt is not None:
         await queue.put(compaction_evt)
 
+    # Resolve project markdown context if present
+    project_md = ""
+    if project_id and home_mod.is_safe_id(project_id):
+        project = projects_mod.get(project_id)
+        if project is not None:
+            project_md = projects_mod.get_context(project_id) or ""
+
+    # Resolve credentials and configuration for zWork Router
+    model_meta = providers.lookup_model(model_id, s) or {}
+    shape = model_meta.get("shape", "anthropic")
+    creds = providers.resolve(
+        model_meta.get("credential") or "zwork_router",
+        s,
+        model_meta.get("base_url_override", ""),
+    )
+    if creds is None:
+        from .agent.providers import ZWORK_ROUTER_BASE_URL
+        base_url = ZWORK_ROUTER_BASE_URL
+        token = os.environ.get("ZWORK_GATEWAY_TOKEN") or ""
+    else:
+        base_url = creds.base_url
+        token = creds.api_key
+
+    from .agent.hermes_agent import zWorkHermesAgent
+    agent = zWorkHermesAgent(
+        chat_id=chat_id,
+        model_id=model_id,
+        base_url=base_url,
+        token=token,
+        shape=shape,
+        run_ctx=run_ctx,
+    )
+
     try:
         async for evt in _heartbeat_stream(
-            providers.stream_chat(
-                [{"role": "system", "content": prompt}, *history],
-                model_id,
-                s,
-                run_ctx,
+            agent.run_turn(
+                history,
+                system_prompt=prompt,
                 project_id=project_id,
+                project_context=project_md,
                 plan_mode=plan_mode,
                 auto_approve_destructive=auto_approve_destructive,
+                attachments=attachments,
             )
         ):
             await queue.put(evt)
@@ -2163,14 +2196,6 @@ async def _background_agent_runner(
         )
         # Signal queue end
         await queue.put(None)
-
-
-PERSONAS = {
-    "engineer": "You are a Senior Software Engineer. You write clean, performant, documented code and focus on technical details, design patterns, and edge cases.",
-    "designer": "You are a Senior Product Designer & UI Developer. You focus on beautiful visual layouts, typography, Tailwind styles, visual hierarchy, animations, and user experience.",
-    "writer": "You are a Professional Technical Writer. You write clear, concise, engaging, and well-structured markdown documentation, manuals, and explanations.",
-    "auditor": "You are a Security Auditor and Code Reviewer. You analyze code for performance bottlenecks, security vulnerabilities, code smells, and compliance issues."
-}
 
 
 @app.post("/api/chat/stream")
@@ -2328,10 +2353,6 @@ async def chat_stream(req: StreamRequest):
         auto_approve_destructive=req.auto_approve_destructive,
     )
 
-    # Apply persona preset if specified
-    if req.persona and req.persona in PERSONAS:
-        prompt = f"{PERSONAS[req.persona]}\n\n{prompt}"
-
     # Apply web search news grounding context if enabled
     if req.web_search_enabled:
         try:
@@ -2417,6 +2438,7 @@ async def chat_stream(req: StreamRequest):
             auto_approve_destructive=req.auto_approve_destructive,
             assistant_msg_id=assistant_msg.id,
             started_at=started_at,
+            attachments=req.attachments,
         )
     )
     ACTIVE_RUNS[chat.id] = (task, queue, run_ctx, assistant_msg.id)

@@ -400,7 +400,7 @@ def build_system_prompt(
         memory_block=_memory_block(),
         project_block=_project_block(project_name, project_md),
         plan_mode_block=_plan_mode_block() if plan_mode else "",
-        permission_block=_permission_block() if not auto_approve_destructive else "",
+        permission_block=_permission_block(auto_approve_destructive),
         workspace_root=workspace_root(),
         workspace_apps_dir=workspace_apps_dir(),
         workspace_outputs_dir=workspace_outputs_dir(),
@@ -429,12 +429,21 @@ def _plan_mode_block() -> str:
     )
 
 
-def _permission_block() -> str:
-    return (
-        "## User confirmation required for destructive actions\n\n"
-        "Destructive shell commands are blocked until the user explicitly approves them. "
-        "If a destructive tool call is refused, stop and ask for approval in plain text before retrying."
-    )
+def _permission_block(auto_approve: bool) -> str:
+    if auto_approve:
+        return (
+            "## Zero-Prompt Auto-Approve Enabled\n\n"
+            "The user has enabled Auto-Approve mode. You have explicit, pre-approved permission to read/write files, "
+            "run commands, and control the desktop WITHOUT asking for confirmation. "
+            "Do NOT ask the user in chat prose 'Can I read X?' or 'Can I run Y?'. "
+            "Simply call the tools directly and immediately. Proceed silently and autonomously."
+        )
+    else:
+        return (
+            "## User confirmation required for destructive actions\n\n"
+            "Destructive shell commands are blocked until the user explicitly approves them. "
+            "If a destructive tool call is refused, stop and ask for approval in plain text before retrying."
+        )
 
 
 # Backward-compat constant for anyone importing the old name.

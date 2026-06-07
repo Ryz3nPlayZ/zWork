@@ -17,7 +17,6 @@ import {
   Plug,
   Sliders,
   Brain,
-  FileText,
   User,
   LogOut,
   ShieldAlert,
@@ -34,9 +33,9 @@ import {
   type PromptTemplate,
 } from "../lib/templates";
 import { IconButton } from "./IconButton";
-import { api, type Integration } from "../lib/api";
+import { api, IS_WEB, type Integration } from "../lib/api";
 
-type Section = "account" | "general" | "memory" | "personalization" | "models" | "integrations";
+type Section = "account" | "general" | "memory" | "models" | "integrations";
 
 const SECTION_META: Record<Section, { title: string; description: string; icon: React.ReactNode }> = {
   account: {
@@ -53,11 +52,6 @@ const SECTION_META: Record<Section, { title: string; description: string; icon: 
     title: "Memory",
     description: "Persistent notes zWork remembers.",
     icon: <Brain className="h-4 w-4" />,
-  },
-  personalization: {
-    title: "Personalization",
-    description: "Your zwork.md preferences file.",
-    icon: <FileText className="h-4 w-4" />,
   },
   models: {
     title: "Models",
@@ -223,7 +217,6 @@ export function SettingsPage() {
               <GeneralPanel settings={settings} onSave={saveSettings} />
             )}
             {section === "memory" && <MemoryPanel />}
-            {section === "personalization" && <PersonalizationPanel />}
           </div>
         </div>
       </div>
@@ -645,6 +638,24 @@ function GeneralPanel({
 }) {
   const [appVersion, setAppVersion] = useState(fallbackAppVersion());
   const providers = useApp((s) => s.providers);
+
+  const accessibilityPermissionGranted = useApp((s) => s.accessibilityPermissionGranted);
+  const screenRecordingPermissionGranted = useApp((s) => s.screenRecordingPermissionGranted);
+  const checkMacOSPermissions = useApp((s) => s.checkMacOSPermissions);
+  const requestAccessibility = useApp((s) => s.requestAccessibility);
+  const requestScreenRecording = useApp((s) => s.requestScreenRecording);
+  const autoApproveDestructive = useApp((s) => s.autoApproveDestructive);
+  const setAutoApproveDestructive = useApp((s) => s.setAutoApproveDestructive);
+
+  useEffect(() => {
+    if (IS_WEB) return;
+    checkMacOSPermissions();
+    const interval = setInterval(() => {
+      checkMacOSPermissions();
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [checkMacOSPermissions]);
+
   const models = providers?.models ?? [];
   const [defaultModel, setDefaultModel] = useState(settings?.default_model ?? "");
   const [useClaude, setUseClaude] = useState(!!settings?.use_claude_code_config);
@@ -712,6 +723,119 @@ function GeneralPanel({
         </Field>
       </section>
 
+      {/* System Permissions Section */}
+      {!IS_WEB && (
+        <section className="rounded-xl border border-line bg-paper-raised p-5 space-y-4 shadow-sm select-none">
+          <div>
+            <h3 className="text-[14px] font-semibold text-ink flex items-center gap-1.5">
+              <ShieldAlert className="h-4 w-4 text-accent" />
+              Desktop Control & System Permissions
+            </h3>
+            <p className="text-[12px] text-ink-muted mt-1 leading-relaxed">
+              Enable zWork to interact with your desktop and automate tasks. These are one-time OS permission requests.
+            </p>
+          </div>
+
+          <div className="border-t border-line my-3" />
+
+          {/* Perm 1: Accessibility */}
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <div className="text-[13px] font-medium text-ink flex items-center gap-2">
+                <span>Accessibility Access</span>
+                <span className={cn(
+                  "px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase",
+                  accessibilityPermissionGranted
+                    ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
+                    : "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                )}>
+                  {accessibilityPermissionGranted ? "Granted" : "Required"}
+                </span>
+              </div>
+              <p className="text-[11.5px] text-ink-muted">
+                Allows reading standard application UI trees, clicking buttons, and filling input fields.
+              </p>
+            </div>
+            {!accessibilityPermissionGranted && (
+              <button
+                onClick={requestAccessibility}
+                className="press px-3 py-1.5 text-[11px] font-medium bg-ink text-paper rounded-lg transition-all cursor-pointer"
+              >
+                Grant Permission
+              </button>
+            )}
+          </div>
+
+          <div className="border-t border-line-soft" />
+
+          {/* Perm 2: Screen Capture */}
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <div className="text-[13px] font-medium text-ink flex items-center gap-2">
+                <span>Screen Recording</span>
+                <span className={cn(
+                  "px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase",
+                  screenRecordingPermissionGranted
+                    ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
+                    : "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                )}>
+                  {screenRecordingPermissionGranted ? "Granted" : "Required"}
+                </span>
+              </div>
+              <p className="text-[11.5px] text-ink-muted">
+                Allows capturing screenshots to understand visual content on demand. Screenshots stay local.
+              </p>
+            </div>
+            {!screenRecordingPermissionGranted && (
+              <button
+                onClick={requestScreenRecording}
+                className="press px-3 py-1.5 text-[11px] font-medium bg-ink text-paper rounded-lg transition-all cursor-pointer"
+              >
+                Grant Permission
+              </button>
+            )}
+          </div>
+
+          <div className="border-t border-line" />
+
+          {/* Single Toggle: Auto-Approve / Zero-Prompt Mode */}
+          <div className="flex items-start justify-between gap-4 pt-1">
+            <div className="space-y-1 flex-1">
+              <div className="text-[13px] font-medium text-ink flex items-center gap-2">
+                <span>Zero-Prompt Auto-Approve Mode</span>
+                <span className={cn(
+                  "px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase",
+                  autoApproveDestructive
+                    ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
+                    : "bg-paper-sunken text-ink-faint border border-line"
+                )}>
+                  {autoApproveDestructive ? "Enabled" : "Disabled"}
+                </span>
+              </div>
+              <p className="text-[11.5px] leading-relaxed text-ink-muted">
+                When enabled, zWork executes commands, reads and writes files, and controls the desktop immediately without asking you for permission. Enable this to remove all tool authorization prompts.
+              </p>
+            </div>
+            
+            <button
+              onClick={() => setAutoApproveDestructive(!autoApproveDestructive)}
+              className={cn(
+                "press relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none mt-1",
+                autoApproveDestructive ? "bg-accent" : "bg-paper-sunken border-line"
+              )}
+            >
+              <span
+                className={cn(
+                  "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                  autoApproveDestructive ? "translate-x-4" : "translate-x-0"
+                )}
+              />
+            </button>
+          </div>
+        </section>
+      )}
+
+      {/* Version check */}
       <section className="rounded-xl border border-line bg-paper-raised p-4">
         <Field label="Version" description="The currently installed desktop build.">
           <div className="inline-flex items-center gap-2 rounded-lg border border-line bg-paper px-3 py-2 text-[12.5px] text-ink">
@@ -833,7 +957,7 @@ function GeneralPanel({
           >
             {models.map((m) => (
               <option key={m.id} value={m.id} className="bg-paper text-ink">
-                {m.name}{m.subtitle ? ` · ${m.subtitle}` : ""}
+                {m.name}
               </option>
             ))}
           </select>
@@ -863,6 +987,9 @@ function GeneralPanel({
           </div>
         </label>
       </section>
+
+      {/* Prompt Templates */}
+      <TemplatesSection />
     </div>
   );
 }
@@ -917,213 +1044,6 @@ function MemoryPanel() {
           </button>
         </div>
       </section>
-    </div>
-  );
-}
-
-// ---------------- Personalization ----------------
-
-interface PersonalizationData {
-  persona: string;
-  vibe: string;
-  verbosity: string;
-  customInstructions: string;
-}
-
-function parsePersonalization(md: string): PersonalizationData {
-  const data: PersonalizationData = {
-    persona: "Default Assistant",
-    vibe: "Professional & focused",
-    verbosity: "Balanced",
-    customInstructions: ""
-  };
-
-  if (!md) return data;
-
-  // Match both "**Vibe**: value" and "Vibe: **value**" formats
-  const matchField = (field: string): string | null => {
-    const m1 = md.match(new RegExp(`-\\s+\\*\\*${field}\\*\\*:\\s*([^\n]+)`, "i"));
-    if (m1) return m1[1].trim().replace(/\*\*/g, "");
-    const m2 = md.match(new RegExp(`-\\s+${field}:\\s*\\*\\*([^*]+)\\*\\*`, "i"));
-    if (m2) return m2[1].trim();
-    return null;
-  };
-
-  const persona = matchField("Persona");
-  if (persona) data.persona = persona;
-  const vibe = matchField("Vibe");
-  if (vibe) data.vibe = vibe;
-  const verbosity = matchField("Verbosity");
-  if (verbosity) data.verbosity = verbosity;
-
-  // Find custom instructions — prefer "How to talk to me" section (onboarding format)
-  const talkIdx = md.indexOf("## How to talk to me");
-  if (talkIdx !== -1) {
-    // Extract until the next ## section or end of file
-    const rest = md.substring(talkIdx + "## How to talk to me".length);
-    const nextSection = rest.indexOf("\n## ");
-    data.customInstructions = (nextSection !== -1 ? rest.substring(0, nextSection) : rest).trim();
-  } else {
-    const customIdx = md.indexOf("## Custom Instructions");
-    if (customIdx !== -1) {
-      data.customInstructions = md.substring(customIdx + "## Custom Instructions".length).trim();
-    }
-  }
-
-  return data;
-}
-
-function buildPersonalization(data: PersonalizationData): string {
-  return `# zWork personalization
-
-## Preferences
-
-- **Persona**: ${data.persona}
-- **Vibe**: ${data.vibe}
-- **Verbosity**: ${data.verbosity}
-
-## How to talk to me
-
-${data.customInstructions}`;
-}
-
-function PersonalizationPanel() {
-  const userMdContent = useApp((s) => s.userMdContent);
-  const refreshUserMd = useApp((s) => s.refreshUserMd);
-  const saveUserMd = useApp((s) => s.saveUserMd);
-
-  const [rawMode, setRawMode] = useState(false);
-  const [formData, setFormData] = useState<PersonalizationData>(() => parsePersonalization(userMdContent));
-  const [rawDraft, setRawDraft] = useState(userMdContent);
-  const [dirty, setDirty] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => { void refreshUserMd(); }, [refreshUserMd]);
-
-  useEffect(() => {
-    setFormData(parsePersonalization(userMdContent));
-    setRawDraft(userMdContent);
-    setDirty(false);
-  }, [userMdContent]);
-
-  const handleFormChange = (key: keyof PersonalizationData, value: string) => {
-    setFormData(prev => {
-      const next = { ...prev, [key]: value };
-      setRawDraft(buildPersonalization(next));
-      setDirty(true);
-      return next;
-    });
-  };
-
-  const handleRawChange = (value: string) => {
-    setRawDraft(value);
-    setDirty(true);
-    setFormData(parsePersonalization(value));
-  };
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      await saveUserMd(rawDraft);
-      setDirty(false);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="flex flex-col gap-4">
-      <div>
-        <h2 className="text-[17px] font-semibold tracking-tight text-ink">AI Persona & Personalization</h2>
-        <p className="mt-1 text-[13px] leading-5 text-ink-muted">
-          Customize how your zWork AI behaves, speaks, and aligns with your goals.
-        </p>
-      </div>
-
-      <section className="rounded-xl border border-line bg-paper-raised p-4 flex flex-col gap-4">
-        {/* Toggle Mode */}
-        <div className="flex items-center justify-between border-b border-line pb-3">
-          <span className="text-[12.5px] font-semibold text-ink">Personalization Settings</span>
-          <button
-            type="button"
-            onClick={() => setRawMode(!rawMode)}
-            className="text-[11.5px] text-accent hover:underline font-medium"
-          >
-            {rawMode ? "Back to Custom Vibe Settings" : "Edit Raw zwork.md Profile"}
-          </button>
-        </div>
-
-        {rawMode ? (
-          <textarea
-            value={rawDraft}
-            onChange={(e) => handleRawChange(e.target.value)}
-            rows={16}
-            className="block w-full resize-y rounded-lg border border-line bg-paper px-3 py-2.5 font-mono text-[12.5px] leading-5 text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
-            placeholder="# zWork personalization"
-          />
-        ) : (
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Vibe */}
-              <div>
-                <label className="block text-[12px] font-bold text-ink mb-1.5">Vibe / Tone</label>
-                <select
-                  value={formData.vibe}
-                  onChange={(e) => handleFormChange("vibe", e.target.value)}
-                  className="w-full bg-paper border border-line text-[13px] px-3.5 py-2 rounded-xl focus:outline-none focus:ring-1 focus:ring-ink focus:border-line-strong text-ink shadow-xs appearance-none pr-10 bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2020%2020%22%20fill%3D%22none%22%3E%3Cpath%20d%3D%22M7%209l3%203%203-3%22%20stroke%3D%22%23888888%22%20stroke-width%3D%221.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E')] bg-[length:18px_18px] bg-[right_10px_center] bg-no-repeat cursor-pointer transition-all duration-150"
-                >
-                  <option value="Professional & focused" className="bg-paper text-ink">Professional & focused</option>
-                  <option value="Casual & friendly" className="bg-paper text-ink">Casual & friendly</option>
-                  <option value="Technical & direct" className="bg-paper text-ink">Technical & direct</option>
-                  <option value="Creative & storytelling" className="bg-paper text-ink">Creative & storytelling</option>
-                </select>
-              </div>
-
-              {/* Verbosity */}
-              <div>
-                <label className="block text-[12px] font-bold text-ink mb-1.5">Verbosity</label>
-                <select
-                  value={formData.verbosity}
-                  onChange={(e) => handleFormChange("verbosity", e.target.value)}
-                  className="w-full bg-paper border border-line text-[13px] px-3.5 py-2 rounded-xl focus:outline-none focus:ring-1 focus:ring-ink focus:border-line-strong text-ink shadow-xs appearance-none pr-10 bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2020%2020%22%20fill%3D%22none%22%3E%3Cpath%20d%3D%22M7%209l3%203%203-3%22%20stroke%3D%22%23888888%22%20stroke-width%3D%221.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E')] bg-[length:18px_18px] bg-[right_10px_center] bg-no-repeat cursor-pointer transition-all duration-150"
-                >
-                  <option value="Concise" className="bg-paper text-ink">Concise (Short and direct)</option>
-                  <option value="Balanced" className="bg-paper text-ink">Balanced (Medium length)</option>
-                  <option value="Thorough" className="bg-paper text-ink">Thorough (Detailed & explanatory)</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Custom Instructions */}
-            <div>
-              <label className="block text-[12px] font-bold text-ink mb-1.5">Custom Persona Instructions</label>
-              <textarea
-                value={formData.customInstructions}
-                onChange={(e) => handleFormChange("customInstructions", e.target.value)}
-                rows={5}
-                className="block w-full resize-y rounded-lg border border-line bg-paper px-3 py-2 text-[12.5px] leading-5 text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none"
-                placeholder="e.g. Always keep in mind I am building a B2B SaaS startup. Use clean, visual metaphors..."
-              />
-            </div>
-          </div>
-        )}
-
-        <div className="mt-1 flex items-center justify-between border-t border-line pt-3">
-          <p className="text-[11.5px] text-ink-faint font-medium">
-            {dirty ? "Unsaved changes" : "Persona settings saved"}
-          </p>
-          <button
-            type="button"
-            disabled={!dirty || saving}
-            onClick={save}
-            className="press ring-focus inline-flex items-center gap-1.5 rounded-lg bg-ink px-4 py-2 text-[12px] font-bold text-paper hover:bg-ink-soft disabled:opacity-40 disabled:cursor-not-allowed transition"
-          >
-            {saving ? "Saving…" : "Save Changes"}
-          </button>
-        </div>
-      </section>
-
-      <TemplatesSection />
     </div>
   );
 }
