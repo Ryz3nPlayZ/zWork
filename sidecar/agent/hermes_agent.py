@@ -136,6 +136,8 @@ class zWorkHermesAgent:
                         "anthropic-version": "2023-06-01",
                         "content-type": "application/json",
                     }
+                    if self.token and not self.token.startswith("sk-ant-"):
+                        headers["authorization"] = f"Bearer {self.token}"
                     # Convert messages to anthropic-compatible schema
                     from .providers import _anthropic_convert_input_messages, _anthropic_tools
                     base_system, convo = _anthropic_convert_input_messages(messages)
