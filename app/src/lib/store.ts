@@ -904,6 +904,7 @@ export const useApp = create<AppState>((set, get) => ({
     }
 
     if (get().backendOffline) {
+      set({ onboardingDone: hasCompletedOnboardingLocally() ? true : false });
       try {
         const cachedSummaries = localStorage.getItem("zwork:cached-summaries");
         if (cachedSummaries) {

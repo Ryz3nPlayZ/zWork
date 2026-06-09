@@ -44,6 +44,9 @@ async fn main() {
         .route("/api/chat/stream", post(server::chat_stream_route))
         .route("/api/chats/:chat_id/gate/:gate_id/approve", post(server::approve_gate))
         .route("/api/chats/:chat_id/gate/:gate_id/reject", post(server::reject_gate))
+        .route("/api/onboard/status", get(server::onboard_status))
+        .route("/api/onboard/skip", post(server::onboard_skip))
+        .route("/api/onboard/complete", post(server::onboard_complete))
         .layer(CorsLayer::permissive());
 
     let addr = format!("{}:{}", host, port);

@@ -143,6 +143,43 @@ pub fn mask(key: &str) -> String {
     format!("{}...{}", &key[..4], &key[key.len() - 4..])
 }
 
+pub fn upsert_custom_model(
+    settings: &mut Settings,
+    id: Option<String>,
+    name: String,
+    shape: String,
+    credential: String,
+    model_id: String,
+    base_url_override: String,
+) -> CustomModel {
+    let custom_id = id.unwrap_or_else(|| {
+        let uuid = Uuid::new_v4().simple().to_string();
+        format!("custom-{}", &uuid[..8])
+    });
+
+    for m in &mut settings.custom_models {
+        if m.id == custom_id {
+            m.name = name.clone();
+            m.shape = shape.clone();
+            m.credential = credential.clone();
+            m.model_id = model_id.clone();
+            m.base_url_override = base_url_override.clone();
+            return m.clone();
+        }
+    }
+
+    let m = CustomModel {
+        id: custom_id,
+        name,
+        shape,
+        credential,
+        model_id,
+        base_url_override,
+    };
+    settings.custom_models.push(m.clone());
+    m
+}
+
 const SYSTEM_PROMPT_TEMPLATE: &str = "\
 You are zWork, an action-oriented AI work assistant created by Zemu Liu.
 Under the hood you are {model_name} from {provider_name}.
