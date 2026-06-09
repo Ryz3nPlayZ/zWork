@@ -1,13 +1,20 @@
 use axum::{
-    routing::{get, post},
-    response::sse::{Event, Sse},
-    response::IntoResponse,
-    Json, Router,
+    routing::{get, post, patch, put, delete},
+    Router,
 };
-use futures_util::stream;
-use std::{convert::Infallible, net::SocketAddr, time::Duration};
 use tower_http::cors::CorsLayer;
 use tracing::info;
+
+mod paths;
+mod secretstore;
+mod settings;
+mod chatstore;
+mod skills;
+mod academic;
+mod watchdog;
+mod tools;
+mod agent;
+mod server;
 
 #[tokio::main]
 async fn main() {
@@ -21,10 +28,22 @@ async fn main() {
         .unwrap_or(8787);
 
     let app = Router::new()
-        .route("/api/health", get(health))
-        .route("/api/me", get(me))
-        .route("/api/chats", get(chats))
-        .route("/api/events", get(events))
+        .route("/api/health", get(server::health))
+        .route("/api/me", get(server::me))
+        .route("/api/providers", get(server::get_providers))
+        .route("/api/settings", get(server::get_settings).put(server::put_settings))
+        .route("/api/chats", get(server::list_chats).post(server::create_chat))
+        .route(
+            "/api/chats/:chat_id",
+            get(server::get_chat)
+                .patch(server::patch_chat)
+                .delete(server::delete_chat),
+        )
+        .route("/api/chats/:chat_id/messages/:message_id", patch(server::patch_message))
+        .route("/api/chats/:chat_id/stop", post(server::stop_chat))
+        .route("/api/chat/stream", post(server::chat_stream_route))
+        .route("/api/chats/:chat_id/gate/:gate_id/approve", post(server::approve_gate))
+        .route("/api/chats/:chat_id/gate/:gate_id/reject", post(server::reject_gate))
         .layer(CorsLayer::permissive());
 
     let addr = format!("{}:{}", host, port);
@@ -32,28 +51,4 @@ async fn main() {
     
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
-}
-
-async fn health() -> &'static str {
-    "OK"
-}
-
-async fn me() -> impl IntoResponse {
-    Json(serde_json::json!({
-        "id": "rwork-user",
-        "email": "local@rwork.dev",
-        "name": "rWork User",
-        "tier": "pro"
-    }))
-}
-
-async fn chats() -> impl IntoResponse {
-    Json(serde_json::json!([]))
-}
-
-async fn events() -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
-    // Yield a keep-alive comment stream to keep connection active
-    let stream = stream::repeat_with(|| Ok(Event::default().comment("keep-alive")))
-        .throttle(Duration::from_secs(15));
-    Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default())
 }
