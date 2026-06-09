@@ -47,6 +47,8 @@ async fn main() {
         .route("/api/onboard/status", get(server::onboard_status))
         .route("/api/onboard/skip", post(server::onboard_skip))
         .route("/api/onboard/complete", post(server::onboard_complete))
+        .route("/api/skills", get(server::list_skills))
+        .route("/api/projects", get(server::list_projects))
         .layer(CorsLayer::permissive());
 
     let addr = format!("{}:{}", host, port);

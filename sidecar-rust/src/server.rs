@@ -51,12 +51,41 @@ pub async fn health() -> impl IntoResponse {
 }
 
 pub async fn me() -> impl IntoResponse {
+    let cwd = std::env::current_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| ".".to_string());
+    let os_name = std::env::consts::OS;
+    let name = display_name();
+    
     Json(json!({
-        "id": "rwork-user",
-        "email": "local@rwork.dev",
-        "name": "rWork User",
-        "tier": "pro"
+        "name": name,
+        "os": os_name,
+        "cwd": cwd,
     }))
+}
+
+fn display_name() -> String {
+    let p = crate::paths::onboarding_path();
+    if p.exists() {
+        if let Ok(content) = std::fs::read_to_string(&p) {
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(name) = val.get("display_name").and_then(|v| v.as_str()) {
+                    if !name.trim().is_empty() {
+                        return name.to_string();
+                    }
+                }
+            }
+        }
+    }
+    
+    if let Ok(user) = std::env::var("USER") {
+        if !user.trim().is_empty() {
+            return user.trim().to_string();
+        }
+    }
+    
+    "friend".to_string();
+    "friend".to_string()
 }
 
 pub async fn get_providers() -> impl IntoResponse {
@@ -94,7 +123,7 @@ pub async fn put_settings(Json(mut body): Json<settings::Settings>) -> impl Into
 
 pub async fn list_chats() -> impl IntoResponse {
     let list = chatstore::list_all();
-    Json(list)
+    Json(serde_json::json!({ "chats": list }))
 }
 
 pub async fn create_chat(Json(req): Json<CreateChatRequest>) -> impl IntoResponse {
@@ -374,4 +403,21 @@ pub async fn onboard_complete(Json(body): Json<OnboardBody>) -> impl IntoRespons
     let _ = std::fs::write(&p, onboarding_json.to_string());
 
     Json(json!({ "ok": true }))
+}
+
+pub async fn list_skills() -> impl IntoResponse {
+    let list = crate::skills::list_skills();
+    let serialized: Vec<serde_json::Value> = list.into_iter().map(|s| {
+        serde_json::json!({
+            "slug": s.slug,
+            "name": s.name,
+            "description": s.description,
+            "path": s.path.to_string_lossy().to_string()
+        })
+    }).collect();
+    Json(serde_json::json!({ "skills": serialized }))
+}
+
+pub async fn list_projects() -> impl IntoResponse {
+    Json(serde_json::json!({ "projects": [] }))
 }
