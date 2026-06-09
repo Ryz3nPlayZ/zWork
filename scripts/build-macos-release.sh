@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 
 export CARGO_HOME="$ROOT_DIR/.cargo_cache"
 
-"$ROOT_DIR/scripts/build-backend.sh"
+"$ROOT_DIR/scripts/build-rust-backend.sh"
 
 cd "$ROOT_DIR/app"
 npm run tauri -- build --bundles dmg
