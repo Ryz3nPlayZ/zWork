@@ -180,6 +180,13 @@ pub fn upsert_custom_model(
     m
 }
 
+pub fn remove_custom_model(settings: &mut Settings, model_id: &str) -> bool {
+    let before = settings.custom_models.len();
+    settings.custom_models.retain(|m| m.id != model_id);
+    settings.custom_models.len() != before
+}
+
+
 const SYSTEM_PROMPT_TEMPLATE: &str = "\
 You are zWork, an action-oriented AI work assistant created by Zemu Liu.
 Under the hood you are {model_name} from {provider_name}.

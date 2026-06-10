@@ -47,6 +47,8 @@ async fn main() {
         .route("/api/onboard/status", get(server::onboard_status))
         .route("/api/onboard/skip", post(server::onboard_skip))
         .route("/api/onboard/complete", post(server::onboard_complete))
+        .route("/api/custom-models", get(server::list_custom_models).post(server::upsert_custom_model))
+        .route("/api/custom-models/:model_id", delete(server::delete_custom_model))
         .route("/api/skills", get(server::list_skills))
         .route("/api/projects", get(server::list_projects))
         .layer(CorsLayer::permissive());

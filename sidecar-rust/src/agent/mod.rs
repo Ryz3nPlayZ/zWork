@@ -103,14 +103,42 @@ pub fn run_agent_turn(
         }
         
         // Resolve credentials
-        let model_meta = s.custom_models.iter().find(|m| m.id == model_id);
-        let shape = model_meta.map_or("anthropic".to_string(), |m| m.shape.clone());
-        let credential = model_meta.map_or("zwork_router".to_string(), |m| m.credential.clone());
-        let api_key = s.api_keys.get(&credential).cloned().unwrap_or_default();
-        let base_url = s.provider_config.get(&credential)
-            .and_then(|c| c.get("base_url"))
-            .cloned()
-            .unwrap_or_else(|| "https://api.tryzwork.app/api".to_string());
+        let (api_key, base_url, shape, real_model_id) = if model_id == "__claude_code__" {
+            let cc_model = crate::server::read_claude_code_model().unwrap_or_default();
+            let real_model = if cc_model.is_empty() || cc_model == "(default)" {
+                "claude-3-5-sonnet-latest".to_string()
+            } else {
+                cc_model
+            };
+            if let Some(cred) = crate::server::resolve("claude_code", &s, "") {
+                (cred.api_key, cred.base_url, cred.shape, real_model)
+            } else {
+                ("".to_string(), "https://api.anthropic.com".to_string(), "anthropic".to_string(), real_model)
+            }
+        } else if let Some(m) = s.custom_models.iter().find(|m| m.id == model_id) {
+            let real_model = if m.model_id == "(default)" || m.model_id.is_empty() {
+                "claude-3-5-sonnet-latest".to_string()
+            } else {
+                m.model_id.clone()
+            };
+            if let Some(cred) = crate::server::resolve(&m.credential, &s, &m.base_url_override) {
+                (cred.api_key, cred.base_url, cred.shape, real_model)
+            } else {
+                ("".to_string(), m.base_url_override.clone(), m.shape.clone(), real_model)
+            }
+        } else {
+            // Fallback: zwork_router default models
+            let real_model = if model_id.contains("pro") {
+                "deepseek-v4-pro".to_string()
+            } else {
+                "deepseek-v4-flash".to_string()
+            };
+            if let Some(cred) = crate::server::resolve("zwork_router", &s, "") {
+                (cred.api_key, cred.base_url, cred.shape, real_model)
+            } else {
+                ("".to_string(), "https://api.tryzwork.app/api".to_string(), "anthropic".to_string(), real_model)
+            }
+        };
             
         // Main multi-turn executor loop (max 15 turns)
         let mut turn = 0;
@@ -178,7 +206,7 @@ pub fn run_agent_turn(
             
             let body = if shape == "anthropic" {
                 json!({
-                    "model": model_id,
+                    "model": real_model_id,
                     "system": system,
                     "messages": convo,
                     "stream": true,
@@ -188,7 +216,7 @@ pub fn run_agent_turn(
                 let mut messages_payload = vec![json!({"role": "system", "content": system})];
                 messages_payload.extend(convo);
                 json!({
-                    "model": model_id,
+                    "model": real_model_id,
                     "messages": messages_payload,
                     "stream": true,
                     "tools": tools_payload

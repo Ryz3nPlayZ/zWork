@@ -88,26 +88,347 @@ fn display_name() -> String {
     "friend".to_string()
 }
 
-pub async fn get_providers() -> impl IntoResponse {
-    // Return standard providers matching what the UI expects
-    Json(json!({
-        "providers": [
-            {
-                "id": "zwork_router",
-                "name": "zWork Cloud Router (Default)",
-                "models": [
-                    { "id": "deepseek-v4-flash", "name": "DeepSeek v4 Flash (Vision)" },
-                    { "id": "groq-llama-3-3", "name": "Llama 3.3 70B (Fast)" }
-                ]
-            },
-            {
-                "id": "anthropic",
-                "name": "Anthropic Claude BYOK",
-                "models": [
-                    { "id": "claude-3-5-sonnet", "name": "Claude 3.5 Sonnet" }
-                ]
+fn read_claude_code_env() -> std::collections::HashMap<String, String> {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return std::collections::HashMap::new(),
+    };
+    let path = home.join(".claude").join("settings.json");
+    if !path.exists() {
+        return std::collections::HashMap::new();
+    }
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return std::collections::HashMap::new(),
+    };
+    let val: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return std::collections::HashMap::new(),
+    };
+    let mut out = std::collections::HashMap::new();
+    if let Some(env) = val.get("env").and_then(|e| e.as_object()) {
+        for (k, v) in env {
+            let val_str = match v {
+                serde_json::Value::String(s) => s.clone(),
+                serde_json::Value::Number(n) => n.to_string(),
+                serde_json::Value::Bool(b) => b.to_string(),
+                _ => continue,
+            };
+            out.insert(k.clone(), val_str);
+        }
+    }
+    out
+}
+
+pub fn read_claude_code_model() -> Option<String> {
+    let home = dirs::home_dir()?;
+    let path = home.join(".claude").join("settings.json");
+    if !path.exists() {
+        return None;
+    }
+    let content = std::fs::read_to_string(&path).ok()?;
+    let val: serde_json::Value = serde_json::from_str(&content).ok()?;
+    val.get("model").and_then(|m| m.as_str()).map(|s| s.to_string())
+}
+
+pub fn resolve(credential: &str, settings: &settings::Settings, override_base_url: &str) -> Option<Credentials> {
+    let shape = if credential == "anthropic" || credential == "claude_code" {
+        "anthropic".to_string()
+    } else {
+        "openai".to_string()
+    };
+
+    if credential == "claude_code" {
+        if !settings.use_claude_code_config {
+            return None;
+        }
+        let env = read_claude_code_env();
+        let tok = env.get("ANTHROPIC_AUTH_TOKEN")
+            .or_else(|| env.get("ANTHROPIC_API_KEY"))
+            .cloned();
+        if let Some(tok_str) = tok {
+            if !tok_str.trim().is_empty() {
+                let base = if !override_base_url.is_empty() {
+                    override_base_url.to_string()
+                } else {
+                    env.get("ANTHROPIC_BASE_URL")
+                        .cloned()
+                        .unwrap_or_else(|| "https://api.anthropic.com".to_string())
+                };
+                return Some(Credentials {
+                    shape,
+                    api_key: tok_str,
+                    base_url: base.trim_end_matches('/').to_string(),
+                    source: "claude_code".to_string(),
+                });
             }
-        ]
+        }
+        return None;
+    }
+
+    if credential == "anthropic" {
+        let key = settings.api_keys.get("anthropic").cloned().unwrap_or_default();
+        if !key.trim().is_empty() {
+            let base = if !override_base_url.is_empty() {
+                override_base_url.to_string()
+            } else {
+                settings.provider_config.get("anthropic")
+                    .and_then(|m| m.get("base_url"))
+                    .cloned()
+                    .unwrap_or_else(|| "https://api.anthropic.com".to_string())
+            };
+            return Some(Credentials {
+                shape,
+                api_key: key,
+                base_url: base,
+                source: "byok".to_string(),
+            });
+        }
+        if let Ok(tok) = std::env::var("ANTHROPIC_API_KEY").or_else(|_| std::env::var("ANTHROPIC_AUTH_TOKEN")) {
+            if !tok.trim().is_empty() {
+                let base = if !override_base_url.is_empty() {
+                    override_base_url.to_string()
+                } else {
+                    std::env::var("ANTHROPIC_BASE_URL").unwrap_or_else(|_| "https://api.anthropic.com".to_string())
+                };
+                return Some(Credentials {
+                    shape,
+                    api_key: tok,
+                    base_url: base,
+                    source: "env".to_string(),
+                });
+            }
+        }
+        return None;
+    }
+
+    if credential == "openai" {
+        let key = settings.api_keys.get("openai").cloned().unwrap_or_default();
+        if !key.trim().is_empty() {
+            let base = if !override_base_url.is_empty() {
+                override_base_url.to_string()
+            } else {
+                settings.provider_config.get("openai")
+                    .and_then(|m| m.get("base_url"))
+                    .cloned()
+                    .unwrap_or_else(|| "https://api.openai.com/v1".to_string())
+            };
+            return Some(Credentials {
+                shape,
+                api_key: key,
+                base_url: base,
+                source: "byok".to_string(),
+            });
+        }
+        if let Ok(tok) = std::env::var("OPENAI_API_KEY") {
+            if !tok.trim().is_empty() {
+                let base = if !override_base_url.is_empty() {
+                    override_base_url.to_string()
+                } else {
+                    std::env::var("OPENAI_BASE_URL").unwrap_or_else(|_| "https://api.openai.com/v1".to_string())
+                };
+                return Some(Credentials {
+                    shape,
+                    api_key: tok,
+                    base_url: base,
+                    source: "env".to_string(),
+                });
+            }
+        }
+        return None;
+    }
+
+    if credential == "zwork_router" {
+        let key = settings.api_keys.get("zwork_router")
+            .or_else(|| settings.api_keys.get("openai"))
+            .cloned()
+            .unwrap_or_default();
+        if !key.trim().is_empty() {
+            let base = if !override_base_url.is_empty() {
+                override_base_url.to_string()
+            } else {
+                settings.provider_config.get("zwork_router")
+                    .and_then(|m| m.get("base_url"))
+                    .or_else(|| settings.provider_config.get("openai").and_then(|m| m.get("base_url")))
+                    .cloned()
+                    .unwrap_or_else(|| "https://api.tryzwork.app/api".to_string())
+            };
+            return Some(Credentials {
+                shape,
+                api_key: key,
+                base_url: base,
+                source: "byok".to_string(),
+            });
+        }
+        if let Ok(tok) = std::env::var("ZWORK_GATEWAY_TOKEN") {
+            if !tok.trim().is_empty() {
+                let base = if !override_base_url.is_empty() {
+                    override_base_url.to_string()
+                } else {
+                    "https://api.tryzwork.app/api".to_string()
+                };
+                return Some(Credentials {
+                    shape,
+                    api_key: tok,
+                    base_url: base,
+                    source: "env".to_string(),
+                });
+            }
+        }
+        return None;
+    }
+
+    // Default for other compatibility providers
+    let key = settings.api_keys.get(credential).cloned().unwrap_or_default();
+    if !key.trim().is_empty() {
+        let base = if !override_base_url.is_empty() {
+            override_base_url.to_string()
+        } else {
+            settings.provider_config.get(credential)
+                .and_then(|m| m.get("base_url"))
+                .cloned()
+                .unwrap_or_default()
+        };
+        return Some(Credentials {
+            shape,
+            api_key: key,
+            base_url: base,
+            source: "byok".to_string(),
+        });
+    }
+    
+    // Check uppercase env var
+    let env_var_name = format!("{}_API_KEY", credential.to_uppercase());
+    if let Ok(tok) = std::env::var(&env_var_name) {
+        if !tok.trim().is_empty() {
+            let base = if !override_base_url.is_empty() {
+                override_base_url.to_string()
+            } else {
+                std::env::var(format!("{}_BASE_URL", credential.to_uppercase())).unwrap_or_default()
+            };
+            return Some(Credentials {
+                shape,
+                api_key: tok,
+                base_url: base,
+                source: "env".to_string(),
+            });
+        }
+    }
+
+    None
+}
+
+#[derive(Debug, Clone)]
+pub struct Credentials {
+    pub shape: String,
+    pub api_key: String,
+    pub base_url: String,
+    pub source: String,
+}
+
+pub async fn get_providers() -> impl IntoResponse {
+    let s = settings::load();
+    
+    // 1. Build credentials status
+    let mut credentials_status = serde_json::Map::new();
+    let sources = vec![
+        "anthropic",
+        "openai",
+        "claude_code",
+        "zwork_router",
+        "groq",
+        "cerebras",
+        "deepseek",
+        "zai",
+    ];
+    for src in sources {
+        let cred = resolve(src, &s, "");
+        credentials_status.insert(
+            src.to_string(),
+            serde_json::json!({
+                "configured": cred.is_some(),
+                "source": cred.as_ref().map(|c| c.source.clone()),
+                "base_url": cred.as_ref().map(|c| c.base_url.clone()),
+                "shape": if src == "anthropic" || src == "claude_code" { "anthropic" } else { "openai" },
+            }),
+        );
+    }
+
+    // 2. Build available models list
+    let mut models = Vec::new();
+
+    let cc = resolve("claude_code", &s, "");
+    if cc.is_some() {
+        let existing = s.custom_models.iter().any(|m| m.credential == "claude_code");
+        if !existing {
+            let cc_model = read_claude_code_model().unwrap_or_default();
+            models.push(serde_json::json!({
+                "id": "__claude_code__",
+                "name": "Local credentials",
+                "subtitle": format!("via {}", cc.as_ref().unwrap().base_url),
+                "shape": "anthropic",
+                "credential": "claude_code",
+                "model_id": if cc_model.is_empty() { "(default)".to_string() } else { cc_model },
+                "configured": true,
+                "synthesized": true,
+            }));
+        }
+    }
+
+    for m in &s.custom_models {
+        let cred = resolve(&m.credential, &s, &m.base_url_override);
+        
+        let subtitle = if m.credential == "zwork_router" {
+            if m.model_id.to_lowercase().contains("pro") {
+                "Most capable model".to_string()
+            } else {
+                "Fast and efficient".to_string()
+            }
+        } else {
+            let base = if !m.base_url_override.is_empty() {
+                m.base_url_override.clone()
+            } else {
+                cred.as_ref().map(|c| c.base_url.clone()).unwrap_or_default()
+            };
+            
+            let label = match m.credential.as_str() {
+                "anthropic" => "Anthropic",
+                "openai" => "OpenAI-compatible",
+                "claude_code" => "Local credentials",
+                "zwork_router" => "Managed",
+                other => other,
+            };
+            
+            if !base.is_empty() {
+                format!("{} · {}", label, base)
+            } else {
+                label.to_string()
+            }
+        };
+
+        models.push(serde_json::json!({
+            "id": m.id,
+            "name": m.name,
+            "subtitle": subtitle,
+            "shape": m.shape,
+            "credential": m.credential,
+            "model_id": m.model_id,
+            "base_url_override": m.base_url_override,
+            "configured": cred.is_some(),
+            "synthesized": false,
+        }));
+    }
+
+    let default_model = if models.iter().any(|m| m.get("id").and_then(|v| v.as_str()) == Some(&s.default_model)) {
+        s.default_model.clone()
+    } else {
+        models.first().and_then(|m| m.get("id").and_then(|v| v.as_str())).unwrap_or("").to_string()
+    };
+
+    Json(serde_json::json!({
+        "credentials": credentials_status,
+        "models": models,
+        "default_model": default_model,
     }))
 }
 
@@ -421,3 +742,71 @@ pub async fn list_skills() -> impl IntoResponse {
 pub async fn list_projects() -> impl IntoResponse {
     Json(serde_json::json!({ "projects": [] }))
 }
+
+#[derive(Deserialize)]
+pub struct UpsertCustomModelRequest {
+    pub id: Option<String>,
+    pub name: String,
+    pub shape: String,
+    pub credential: String,
+    pub model_id: String,
+    #[serde(default)]
+    pub base_url_override: String,
+}
+
+pub async fn list_custom_models() -> impl IntoResponse {
+    let s = settings::load();
+    Json(json!({ "custom_models": s.custom_models }))
+}
+
+pub async fn upsert_custom_model(
+    Json(req): Json<UpsertCustomModelRequest>,
+) -> impl IntoResponse {
+    let id_opt = req.id.clone();
+    if let Some(ref id) = id_opt {
+        if !crate::paths::is_safe_id(id) {
+            return (axum::http::StatusCode::BAD_REQUEST, Json(json!({ "error": "invalid model_id" }))).into_response();
+        }
+    }
+    
+    let mut s = settings::load();
+    let m = settings::upsert_custom_model(
+        &mut s,
+        id_opt,
+        req.name,
+        req.shape,
+        req.credential,
+        req.model_id,
+        req.base_url_override,
+    );
+    settings::save(&mut s);
+    
+    Json(json!({
+        "custom_models": s.custom_models,
+        "id": m.id,
+    })).into_response()
+}
+
+pub async fn delete_custom_model(
+    Path(model_id): Path<String>,
+) -> impl IntoResponse {
+    if !crate::paths::is_safe_id(&model_id) {
+        return (axum::http::StatusCode::BAD_REQUEST, Json(json!({ "error": "invalid model_id" }))).into_response();
+    }
+    
+    let mut s = settings::load();
+    let ok = settings::remove_custom_model(&mut s, &model_id);
+    if !ok {
+        return (axum::http::StatusCode::NOT_FOUND, Json(json!({ "error": "model not found" }))).into_response();
+    }
+    
+    if s.default_model == model_id {
+        s.default_model = String::new();
+    }
+    settings::save(&mut s);
+    
+    Json(json!({
+        "custom_models": s.custom_models,
+    })).into_response()
+}
+
