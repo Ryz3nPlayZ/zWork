@@ -759,9 +759,9 @@ function GeneralPanel({
             {!accessibilityPermissionGranted && (
               <button
                 onClick={requestAccessibility}
-                className="press px-3 py-1.5 text-[11px] font-medium bg-ink text-paper rounded-lg transition-all cursor-pointer"
+                className="press px-3 py-1.5 text-[11px] font-medium border border-line bg-paper-raised hover:bg-paper-sunken text-ink rounded-lg transition-all cursor-pointer shrink-0"
               >
-                Grant Permission
+                Grant
               </button>
             )}
           </div>
@@ -789,9 +789,9 @@ function GeneralPanel({
             {!screenRecordingPermissionGranted && (
               <button
                 onClick={requestScreenRecording}
-                className="press px-3 py-1.5 text-[11px] font-medium bg-ink text-paper rounded-lg transition-all cursor-pointer"
+                className="press px-3 py-1.5 text-[11px] font-medium border border-line bg-paper-raised hover:bg-paper-sunken text-ink rounded-lg transition-all cursor-pointer shrink-0"
               >
-                Grant Permission
+                Grant
               </button>
             )}
           </div>

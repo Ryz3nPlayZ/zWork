@@ -1009,16 +1009,32 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   refreshComposio: async () => {
+    // Always ensure the static app list is present so the Connectors grid renders
+    const STATIC_APPS = [
+      { id: "gmail",          name: "Gmail",           color: "#EA4335", icon: null },
+      { id: "googlecalendar", name: "Google Calendar", color: "#4285F4", icon: null },
+      { id: "notion",         name: "Notion",          color: "#000000", icon: null },
+      { id: "googledrive",    name: "Google Drive",    color: "#34A853", icon: null },
+      { id: "github",         name: "GitHub",          color: "#24292E", icon: null },
+      { id: "linear",         name: "Linear",          color: "#5E6AD2", icon: null },
+    ];
+    // Seed immediately so grid doesn't flash empty
+    if (get().composioApps.length === 0) {
+      set({ composioApps: STATIC_APPS });
+    }
     try {
       const [status, accounts, apps] = await Promise.all([
         api.composioStatus().catch(() => null),
         api.composioAccounts().catch(() => ({ accounts: [] })),
-        api.composioApps().catch(() => ({ apps: [] })),
+        api.composioApps().catch(() => null), // null = don't overwrite on failure
       ]);
       set({
         composioStatus: status,
         composioAccounts: accounts.accounts,
-        composioApps: apps.apps,
+        // Only update apps if the call succeeded and returned a non-empty list
+        ...(apps && apps.apps && apps.apps.length > 0
+          ? { composioApps: apps.apps }
+          : {}),
       });
     } catch (e) { console.warn("refreshComposio failed:", e) }
   },

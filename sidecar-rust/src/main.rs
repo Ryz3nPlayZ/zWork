@@ -50,7 +50,16 @@ async fn main() {
         .route("/api/custom-models", get(server::list_custom_models).post(server::upsert_custom_model))
         .route("/api/custom-models/:model_id", delete(server::delete_custom_model))
         .route("/api/skills", get(server::list_skills))
-        .route("/api/projects", get(server::list_projects))
+        .route("/api/projects", get(server::list_projects).post(server::create_project))
+        .route("/api/projects/:project_id", patch(server::update_project).delete(server::delete_project))
+        .route("/api/projects/:project_id/context", get(server::get_project_context).put(server::put_project_context))
+        .route("/api/integrations", get(server::list_integrations))
+        .route("/api/composio/status", get(server::composio_status))
+        .route("/api/composio/config", post(server::composio_set_config))
+        .route("/api/composio/accounts", get(server::composio_accounts))
+        .route("/api/composio/connect", post(server::composio_connect))
+        .route("/api/composio/disconnect", post(server::composio_disconnect))
+        .route("/api/composio/apps", get(server::composio_apps))
         .layer(CorsLayer::permissive());
 
     let addr = format!("{}:{}", host, port);

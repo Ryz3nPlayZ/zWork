@@ -70,17 +70,62 @@ pub fn run_agent_turn(
             chat = chatstore::get(&chat.id).unwrap();
         }
         
-        // Build system prompt template
+        // 1. Resolve credentials
+        let (api_key, base_url, shape, real_model_id, provider_display_name) = if model_id == "__claude_code__" {
+            let cc_model = crate::server::read_claude_code_model().unwrap_or_default();
+            let real_model = if cc_model.is_empty() || cc_model == "(default)" {
+                "claude-3-5-sonnet-latest".to_string()
+            } else {
+                cc_model
+            };
+            if let Some(cred) = crate::server::resolve("claude_code", &s, "") {
+                (cred.api_key, cred.base_url, cred.shape, real_model, "local credentials".to_string())
+            } else {
+                ("".to_string(), "https://api.anthropic.com".to_string(), "anthropic".to_string(), real_model, "local credentials".to_string())
+            }
+        } else if let Some(m) = s.custom_models.iter().find(|m| m.id == model_id) {
+            let real_model = if m.model_id == "(default)" || m.model_id.is_empty() {
+                "claude-3-5-sonnet-latest".to_string()
+            } else {
+                m.model_id.clone()
+            };
+            let provider_name = m.credential.clone();
+            if let Some(cred) = crate::server::resolve(&m.credential, &s, &m.base_url_override) {
+                (cred.api_key, cred.base_url, cred.shape, real_model, provider_name)
+            } else {
+                ("".to_string(), m.base_url_override.clone(), m.shape.clone(), real_model, provider_name)
+            }
+        } else {
+            // Fallback: zwork_router default models
+            let real_model = if model_id.contains("pro") {
+                "deepseek-v4-pro".to_string()
+            } else {
+                "deepseek-v4-flash".to_string()
+            };
+            if let Some(cred) = crate::server::resolve("zwork_router", &s, "") {
+                (cred.api_key, cred.base_url, cred.shape, real_model, "zWork Cloud Router".to_string())
+            } else {
+                ("".to_string(), "https://api.tryzwork.app/api".to_string(), "anthropic".to_string(), real_model, "zWork Cloud Router".to_string())
+            }
+        };
+
+        // 2. Build system prompt
+        let user_name = crate::server::display_name();
+        let os_name = std::env::consts::OS.to_string();
+        let cwd = std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| ".".to_string());
+
         let skills_list = crate::skills::format_for_system_prompt();
         let skills = crate::skills::list_skills();
         let example_slug = skills.first().map(|s| s.slug.as_str()).unwrap_or("frontend-design");
-        
+
         let system_prompt = settings::build_system_prompt(
-            &model_id,
-            "zWork Cloud Router",
-            "zWork User",
-            "macOS Desktop",
-            &crate::paths::repo_root().to_string_lossy(),
+            &real_model_id,
+            &provider_display_name,
+            &user_name,
+            &os_name,
+            &cwd,
             "", // Project name optional
             "", // Project context optional
             plan_mode,
@@ -88,7 +133,7 @@ pub fn run_agent_turn(
             &skills_list,
             example_slug
         );
-        
+
         let mut history_messages = Vec::new();
         // Insert system prompt first
         history_messages.push(json!({
@@ -101,44 +146,6 @@ pub fn run_agent_turn(
                 "content": msg.content
             }));
         }
-        
-        // Resolve credentials
-        let (api_key, base_url, shape, real_model_id) = if model_id == "__claude_code__" {
-            let cc_model = crate::server::read_claude_code_model().unwrap_or_default();
-            let real_model = if cc_model.is_empty() || cc_model == "(default)" {
-                "claude-3-5-sonnet-latest".to_string()
-            } else {
-                cc_model
-            };
-            if let Some(cred) = crate::server::resolve("claude_code", &s, "") {
-                (cred.api_key, cred.base_url, cred.shape, real_model)
-            } else {
-                ("".to_string(), "https://api.anthropic.com".to_string(), "anthropic".to_string(), real_model)
-            }
-        } else if let Some(m) = s.custom_models.iter().find(|m| m.id == model_id) {
-            let real_model = if m.model_id == "(default)" || m.model_id.is_empty() {
-                "claude-3-5-sonnet-latest".to_string()
-            } else {
-                m.model_id.clone()
-            };
-            if let Some(cred) = crate::server::resolve(&m.credential, &s, &m.base_url_override) {
-                (cred.api_key, cred.base_url, cred.shape, real_model)
-            } else {
-                ("".to_string(), m.base_url_override.clone(), m.shape.clone(), real_model)
-            }
-        } else {
-            // Fallback: zwork_router default models
-            let real_model = if model_id.contains("pro") {
-                "deepseek-v4-pro".to_string()
-            } else {
-                "deepseek-v4-flash".to_string()
-            };
-            if let Some(cred) = crate::server::resolve("zwork_router", &s, "") {
-                (cred.api_key, cred.base_url, cred.shape, real_model)
-            } else {
-                ("".to_string(), "https://api.tryzwork.app/api".to_string(), "anthropic".to_string(), real_model)
-            }
-        };
             
         // Main multi-turn executor loop (max 15 turns)
         let mut turn = 0;
@@ -214,7 +221,8 @@ pub fn run_agent_turn(
                 })
             } else {
                 let mut messages_payload = vec![json!({"role": "system", "content": system})];
-                messages_payload.extend(convo);
+                let converted_convo = prompts::convert_convo_for_openai(&convo);
+                messages_payload.extend(converted_convo);
                 json!({
                     "model": real_model_id,
                     "messages": messages_payload,
@@ -225,7 +233,7 @@ pub fn run_agent_turn(
             
             // Call upstream token stream
             let mut stream = stream_upstream(endpoint, headers, body, shape.clone());
-            let mut assistant_content_blocks = Vec::new();
+            let mut assistant_content_blocks: Vec<serde_json::Value> = Vec::new();
             let mut tool_calls = Vec::new();
             
             while let Some(evt_res) = stream.next().await {
@@ -238,10 +246,26 @@ pub fn run_agent_turn(
                 if et == "delta" {
                     let text = evt.get("text").and_then(|v| v.as_str()).unwrap_or("");
                     accumulated_text.push_str(text);
-                    assistant_content_blocks.push(json!({
-                        "type": "text",
-                        "text": text
-                    }));
+                    
+                    if !text.is_empty() {
+                        let mut merged = false;
+                        if let Some(last_block) = assistant_content_blocks.last_mut() {
+                            if last_block.get("type").and_then(|v| v.as_str()) == Some("text") {
+                                if let Some(last_text) = last_block.get_mut("text") {
+                                    if let Some(t_str) = last_text.as_str() {
+                                        *last_text = json!(format!("{}{}", t_str, text));
+                                        merged = true;
+                                    }
+                                }
+                            }
+                        }
+                        if !merged {
+                            assistant_content_blocks.push(json!({
+                                "type": "text",
+                                "text": text
+                            }));
+                        }
+                    }
                     
                     // Update chat storage and stream to frontend
                     let _ = chatstore::update_message(

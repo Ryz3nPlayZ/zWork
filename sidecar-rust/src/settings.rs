@@ -109,16 +109,22 @@ pub fn save(settings: &mut Settings) {
     if settings.telemetry_enabled && settings.telemetry_install_id.is_empty() {
         settings.telemetry_install_id = Uuid::new_v4().simple().to_string();
     }
-    
-    // Persist api_keys to secret store and keep empty strings in JSON
+
+    // Persist api_keys to secret store and write empty strings to JSON as presence markers
     let mut placeholders = HashMap::new();
     for (k, v) in &settings.api_keys {
         if !v.is_empty() {
             secretstore::set_api_key(k, v);
-            placeholders.insert(k.clone(), String::new());
         }
+        // Always insert a placeholder (empty string) to mark that this credential
+        // slot exists. This prevents load() from losing entries.
+        placeholders.insert(k.clone(), String::new());
     }
-    
+    // Also ensure all known credential slots have a placeholder even if never set
+    for cred in KNOWN_CREDENTIALS {
+        placeholders.entry(cred.to_string()).or_insert_with(String::new);
+    }
+
     let p = settings_path();
     let mut serialized_data = settings.clone();
     serialized_data.api_keys = placeholders;
@@ -138,9 +144,23 @@ pub fn mask(key: &str) -> String {
         return String::new();
     }
     if key.len() <= 8 {
-        return "********".to_string();
+        return "••••••••".to_string();
     }
-    format!("{}...{}", &key[..4], &key[key.len() - 4..])
+    format!("{}…{}", &key[..4], &key[key.len() - 4..])
+}
+
+pub fn public_view(s: &Settings) -> crate::server::SettingsPublic {
+    crate::server::SettingsPublic {
+        default_model: s.default_model.clone(),
+        use_claude_code_config: s.use_claude_code_config,
+        telemetry_enabled: s.telemetry_enabled,
+        api_keys: s.api_keys.iter()
+            .filter(|(_, v)| !v.is_empty())
+            .map(|(k, v)| (k.clone(), mask(v)))
+            .collect(),
+        provider_config: s.provider_config.clone(),
+        custom_models: s.custom_models.clone(),
+    }
 }
 
 pub fn upsert_custom_model(
@@ -198,7 +218,7 @@ zWork is the product. Your job is to get real work done on the user's computer �
 
 ## User personalization (zwork.md)
 
-BEFORE answering the user's first non-trivial request in a session, read `zwork.md` at the workspace root with the `read_file` tool if it exists. It contains the user's preferences (vibe, verbosity, decision style, goals). Honor it in every reply — do not re-summarize it back to the user, just apply it.
+The user's preferences (vibe, verbosity, decision style, goals) are provided below. Honor them in every reply — do not mention, summarize, or acknowledge these preferences to the user. Just apply them silently.
 
 {zwork_md_block}
 
@@ -423,9 +443,16 @@ pub fn build_system_prompt(
     skills_list: &str,
     example_slug: &str,
 ) -> String {
-    let zwork_md_block = match fs::metadata(zwork_md_path()) {
-        Ok(_) => format!("The user already has a personalization file at `{}` — prioritize loading it.", zwork_md_path().display()),
-        Err(_) => "The user has not yet completed onboarding; there is no `zwork.md` yet. Operate with sensible defaults.".to_string(),
+    let zwork_md_block = match fs::read_to_string(zwork_md_path()) {
+        Ok(content) => {
+            let content = content.trim();
+            if content.is_empty() {
+                "No personalization preferences set yet. Operate with sensible defaults.".to_string()
+            } else {
+                format!("The user's personalization preferences:\n\n{}", content)
+            }
+        }
+        Err(_) => "No personalization preferences set yet. Operate with sensible defaults.".to_string(),
     };
 
     let memory_block = match fs::read_to_string(memory_path()) {

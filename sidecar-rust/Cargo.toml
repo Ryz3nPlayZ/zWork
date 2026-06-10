@@ -1,6 +1,6 @@
 [package]
 name = "rwork-backend"
-version = "0.5.0-alpha.4"
+version = "0.5.0-alpha.6"
 edition = "2021"
 
 [dependencies]
@@ -15,6 +15,7 @@ tower-http = { version = "0.5.2", features = ["cors", "trace"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 uuid = { version = "1.9.1", features = ["v4"] }
+chrono = "0.4"
 dirs = "5.0.1"
 rusqlite = { version = "0.31.0", features = ["bundled"] }
 # Add nix for process signal control on Unix

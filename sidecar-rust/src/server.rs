@@ -7,6 +7,7 @@ use axum::{
 use futures_util::stream::Stream;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::convert::Infallible;
 use tokio_stream::StreamExt;
 
@@ -64,7 +65,7 @@ pub async fn me() -> impl IntoResponse {
     }))
 }
 
-fn display_name() -> String {
+pub fn display_name() -> String {
     let p = crate::paths::onboarding_path();
     if p.exists() {
         if let Ok(content) = std::fs::read_to_string(&p) {
@@ -84,7 +85,6 @@ fn display_name() -> String {
         }
     }
     
-    "friend".to_string();
     "friend".to_string()
 }
 
@@ -355,14 +355,17 @@ pub async fn get_providers() -> impl IntoResponse {
     }
 
     // 2. Build available models list
+    // Custom models go first; synthesized claude_code entry goes last so it doesn't
+    // hijack the default when the user has real provider models configured.
     let mut models = Vec::new();
+    let mut synthesized_cc: Option<serde_json::Value> = None;
 
     let cc = resolve("claude_code", &s, "");
     if cc.is_some() {
         let existing = s.custom_models.iter().any(|m| m.credential == "claude_code");
         if !existing {
             let cc_model = read_claude_code_model().unwrap_or_default();
-            models.push(serde_json::json!({
+            synthesized_cc = Some(serde_json::json!({
                 "id": "__claude_code__",
                 "name": "Local credentials",
                 "subtitle": format!("via {}", cc.as_ref().unwrap().base_url),
@@ -419,10 +422,25 @@ pub async fn get_providers() -> impl IntoResponse {
         }));
     }
 
-    let default_model = if models.iter().any(|m| m.get("id").and_then(|v| v.as_str()) == Some(&s.default_model)) {
+    // Push synthesized claude_code entry last so it doesn't win the default slot
+    if let Some(cc_entry) = synthesized_cc {
+        models.push(cc_entry);
+    }
+
+    // Prefer: 1) saved default_model if valid, 2) first configured model, 3) first model overall
+    let default_model = if !s.default_model.is_empty() && models.iter().any(|m| m.get("id").and_then(|v| v.as_str()) == Some(&s.default_model)) {
         s.default_model.clone()
     } else {
-        models.first().and_then(|m| m.get("id").and_then(|v| v.as_str())).unwrap_or("").to_string()
+        // Pick the first *configured* non-synthesized model, else first overall
+        models.iter()
+            .find(|m| {
+                m.get("configured").and_then(|v| v.as_bool()).unwrap_or(false)
+                    && !m.get("synthesized").and_then(|v| v.as_bool()).unwrap_or(false)
+            })
+            .or_else(|| models.first())
+            .and_then(|m| m.get("id").and_then(|v| v.as_str()))
+            .unwrap_or("")
+            .to_string()
     };
 
     Json(serde_json::json!({
@@ -432,14 +450,66 @@ pub async fn get_providers() -> impl IntoResponse {
     }))
 }
 
+
 pub async fn get_settings() -> impl IntoResponse {
     let s = settings::load();
-    Json(s)
+    Json(settings::public_view(&s))
 }
 
-pub async fn put_settings(Json(mut body): Json<settings::Settings>) -> impl IntoResponse {
-    settings::save(&mut body);
-    Json(body)
+/// Accepts a **partial** settings patch and merges it into the existing persisted settings.
+/// Sending only `{ "api_keys": { "zwork_router": "tok" } }` will NOT wipe other fields.
+#[derive(serde::Deserialize, Default)]
+pub struct SettingsPatch {
+    pub api_keys: Option<std::collections::HashMap<String, String>>,
+    pub provider_config: Option<std::collections::HashMap<String, std::collections::HashMap<String, String>>>,
+    pub default_model: Option<String>,
+    pub use_claude_code_config: Option<bool>,
+    pub telemetry_enabled: Option<bool>,
+}
+
+pub async fn put_settings(Json(patch): Json<SettingsPatch>) -> impl IntoResponse {
+    let mut s = settings::load();
+
+    // Merge api_keys: only update keys that are explicitly provided
+    if let Some(keys) = patch.api_keys {
+        for (k, v) in keys {
+            s.api_keys.insert(k, v);
+        }
+    }
+
+    // Merge provider_config: deep merge — update only the sub-maps provided
+    if let Some(pc) = patch.provider_config {
+        for (provider, cfg) in pc {
+            let entry = s.provider_config.entry(provider).or_default();
+            for (k, v) in cfg {
+                entry.insert(k, v);
+            }
+        }
+    }
+
+    if let Some(dm) = patch.default_model {
+        s.default_model = dm;
+    }
+    if let Some(ucc) = patch.use_claude_code_config {
+        s.use_claude_code_config = ucc;
+    }
+    if let Some(te) = patch.telemetry_enabled {
+        s.telemetry_enabled = te;
+    }
+
+    settings::save(&mut s);
+    Json(settings::public_view(&s))
+}
+
+// SettingsPublic mirrors the public view of settings (API keys masked)
+#[derive(Serialize)]
+pub struct SettingsPublic {
+    pub default_model: String,
+    pub use_claude_code_config: bool,
+    pub telemetry_enabled: bool,
+    pub api_keys: HashMap<String, String>,
+    pub provider_config: HashMap<String, HashMap<String, String>>,
+    pub custom_models: Vec<settings::CustomModel>,
 }
 
 pub async fn list_chats() -> impl IntoResponse {
@@ -740,7 +810,190 @@ pub async fn list_skills() -> impl IntoResponse {
 }
 
 pub async fn list_projects() -> impl IntoResponse {
-    Json(serde_json::json!({ "projects": [] }))
+    let projects_dir = crate::paths::projects_dir();
+    let mut projects = Vec::new();
+
+    if let Ok(entries) = std::fs::read_dir(&projects_dir) {
+        for entry in entries.flatten() {
+            let meta_path = entry.path().join("project.json");
+            if let Ok(content) = std::fs::read_to_string(&meta_path) {
+                if let Ok(proj) = serde_json::from_str::<serde_json::Value>(&content) {
+                    projects.push(proj);
+                }
+            }
+        }
+    }
+
+    // Sort by created_at descending
+    projects.sort_by(|a, b| {
+        let ta = a.get("created_at").and_then(|v| v.as_i64()).unwrap_or(0);
+        let tb = b.get("created_at").and_then(|v| v.as_i64()).unwrap_or(0);
+        tb.cmp(&ta)
+    });
+
+    Json(serde_json::json!({ "projects": projects }))
+}
+
+#[derive(Deserialize)]
+pub struct CreateProjectRequest {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub icon: String,
+}
+
+pub async fn create_project(Json(req): Json<CreateProjectRequest>) -> impl IntoResponse {
+    let id = uuid::Uuid::new_v4().simple().to_string();
+    let now = chrono::Utc::now().timestamp_millis();
+
+    let project = serde_json::json!({
+        "id": id,
+        "name": req.name,
+        "description": req.description,
+        "icon": req.icon,
+        "created_at": now,
+        "updated_at": now,
+        "chat_ids": [],
+    });
+
+    let dir = crate::paths::project_dir(&id);
+    let _ = std::fs::create_dir_all(&dir);
+    let meta_path = dir.join("project.json");
+    let _ = std::fs::write(&meta_path, serde_json::to_string_pretty(&project).unwrap_or_default());
+
+    Json(serde_json::json!({ "project": project }))
+}
+
+#[derive(Deserialize)]
+pub struct UpdateProjectRequest {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub starred: Option<bool>,
+    pub icon: Option<String>,
+}
+
+pub async fn update_project(
+    Path(project_id): Path<String>,
+    Json(req): Json<UpdateProjectRequest>,
+) -> impl IntoResponse {
+    let dir = crate::paths::project_dir(&project_id);
+    let meta_path = dir.join("project.json");
+
+    let mut project = match std::fs::read_to_string(&meta_path) {
+        Ok(content) => serde_json::from_str::<serde_json::Value>(&content).unwrap_or_default(),
+        Err(_) => return Json(json!({ "error": "Project not found" })),
+    };
+
+    if let Some(name) = req.name {
+        project["name"] = json!(name);
+    }
+    if let Some(desc) = req.description {
+        project["description"] = json!(desc);
+    }
+    if let Some(starred) = req.starred {
+        project["starred"] = json!(starred);
+    }
+    if let Some(icon) = req.icon {
+        project["icon"] = json!(icon);
+    }
+    project["updated_at"] = json!(chrono::Utc::now().timestamp_millis());
+
+    let _ = std::fs::write(&meta_path, serde_json::to_string_pretty(&project).unwrap_or_default());
+
+    Json(json!({ "project": project }))
+}
+
+pub async fn delete_project(Path(project_id): Path<String>) -> impl IntoResponse {
+    let dir = crate::paths::project_dir(&project_id);
+    if !dir.exists() {
+        return Json(json!({ "ok": false, "error": "Project not found" }));
+    }
+    match std::fs::remove_dir_all(&dir) {
+        Ok(_) => Json(json!({ "ok": true })),
+        Err(e) => Json(json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+pub async fn get_project_context(Path(project_id): Path<String>) -> impl IntoResponse {
+    let dir = crate::paths::project_dir(&project_id);
+    let ctx_path = dir.join("context.md");
+    let content = std::fs::read_to_string(&ctx_path).unwrap_or_default();
+    Json(json!({ "content": content }))
+}
+
+pub async fn put_project_context(
+    Path(project_id): Path<String>,
+    Json(body): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let dir = crate::paths::project_dir(&project_id);
+    let _ = std::fs::create_dir_all(&dir);
+    let ctx_path = dir.join("context.md");
+    let content = body.get("content").and_then(|v| v.as_str()).unwrap_or("");
+    let _ = std::fs::write(&ctx_path, content);
+    Json(json!({ "ok": true }))
+}
+
+pub async fn list_integrations() -> impl IntoResponse {
+    let mut integrations: Vec<serde_json::Value> = Vec::new();
+
+    // Detect Claude Code (claude CLI + ~/.claude/settings.json)
+    let claude_path = which_tool("claude");
+    let cc_settings = dirs::home_dir()
+        .map(|h| h.join(".claude").join("settings.json"))
+        .filter(|p| p.exists());
+    let cc_detected = claude_path.is_some() || cc_settings.is_some();
+    let cc_can_reuse = cc_settings.is_some();
+    let cc_detail = if cc_can_reuse {
+        format!(
+            "claude CLI detected{}. Credentials available in ~/.claude/settings.json.",
+            claude_path.as_deref().map(|p| format!(" at {p}")).unwrap_or_default()
+        )
+    } else if cc_detected {
+        "claude CLI detected but no ~/.claude/settings.json found.".to_string()
+    } else {
+        "Claude Code is not installed on this machine.".to_string()
+    };
+    integrations.push(serde_json::json!({
+        "id": "claude_code",
+        "name": "Claude Code",
+        "detected": cc_detected,
+        "can_reuse_credentials": cc_can_reuse,
+        "detail": cc_detail,
+        "path": claude_path.unwrap_or_default(),
+    }));
+
+    // Detect Ollama
+    let ollama_path = which_tool("ollama");
+    let ollama_detected = ollama_path.is_some();
+    integrations.push(serde_json::json!({
+        "id": "ollama",
+        "name": "Ollama",
+        "detected": ollama_detected,
+        "can_reuse_credentials": false,
+        "detail": if ollama_detected {
+            format!("Ollama detected{}. Add models via Settings → Models.", ollama_path.as_deref().map(|p| format!(" at {p}")).unwrap_or_default())
+        } else {
+            "Ollama is not installed on this machine.".to_string()
+        },
+        "path": ollama_path.unwrap_or_default(),
+    }));
+
+    Json(serde_json::json!({ "integrations": integrations }))
+}
+
+fn which_tool(name: &str) -> Option<String> {
+    let output = std::process::Command::new("which")
+        .arg(name)
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !path.is_empty() {
+            return Some(path);
+        }
+    }
+    None
 }
 
 #[derive(Deserialize)]
@@ -808,5 +1061,52 @@ pub async fn delete_custom_model(
     Json(json!({
         "custom_models": s.custom_models,
     })).into_response()
+}
+
+// ─── Composio stubs ──────────────────────────────────────────────────────────
+// These endpoints keep the frontend Connectors page from rendering blank.
+// Full Composio integration is not yet wired into the Rust backend; the
+// status stub advertises "not configured" so the UI can show the grid and
+// invite the user to set up an API key later.
+
+pub async fn composio_status() -> impl IntoResponse {
+    Json(json!({
+        "configured": false,
+        "enabled": false,
+        "available": false,
+        "api_key_set": false,
+        "connected_apps": [],
+        "tool_count": 0,
+        "user_id": "",
+    }))
+}
+
+pub async fn composio_set_config() -> impl IntoResponse {
+    (axum::http::StatusCode::NOT_IMPLEMENTED, Json(json!({ "error": "composio not yet supported in this build" })))
+}
+
+pub async fn composio_accounts() -> impl IntoResponse {
+    Json(json!({ "accounts": [] }))
+}
+
+pub async fn composio_connect() -> impl IntoResponse {
+    (axum::http::StatusCode::NOT_IMPLEMENTED, Json(json!({ "error": "composio not yet supported in this build" })))
+}
+
+pub async fn composio_disconnect() -> impl IntoResponse {
+    (axum::http::StatusCode::NOT_IMPLEMENTED, Json(json!({ "error": "composio not yet supported in this build" })))
+}
+
+/// Returns a curated list of supported apps so the Connectors page grid renders.
+pub async fn composio_apps() -> impl IntoResponse {
+    let apps = vec![
+        json!({ "id": "gmail",          "name": "Gmail",           "color": "#EA4335", "icon": null }),
+        json!({ "id": "googlecalendar", "name": "Google Calendar", "color": "#4285F4", "icon": null }),
+        json!({ "id": "notion",         "name": "Notion",          "color": "#000000", "icon": null }),
+        json!({ "id": "googledrive",    "name": "Google Drive",    "color": "#34A853", "icon": null }),
+        json!({ "id": "github",         "name": "GitHub",          "color": "#24292E", "icon": null }),
+        json!({ "id": "linear",         "name": "Linear",          "color": "#5E6AD2", "icon": null }),
+    ];
+    Json(json!({ "apps": apps }))
 }
 
