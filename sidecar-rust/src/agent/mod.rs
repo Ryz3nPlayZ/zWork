@@ -416,7 +416,7 @@ pub fn run_agent_turn(
         let _ = tx.send(json!({
             "type": "done"
         })).await;
-        
+
         let _ = tx.send(json!({
             "type": "end"
         })).await;

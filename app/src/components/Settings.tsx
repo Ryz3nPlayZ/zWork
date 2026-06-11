@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
-import { isMacOS } from "../lib/platform";
+import { isMacOS, IS_TAURI } from "../lib/platform";
 import { fallbackAppVersion, resolveAppVersion } from "../lib/appVersion";
 import {
   loadTemplates,
@@ -34,6 +34,7 @@ import {
 } from "../lib/templates";
 import { IconButton } from "./IconButton";
 import { api, IS_WEB, type Integration } from "../lib/api";
+import { KeybindRecorder } from "./KeybindRecorder";
 
 type Section = "account" | "general" | "memory" | "models" | "integrations";
 
@@ -169,11 +170,11 @@ export function SettingsPage() {
         </div>
       </div>
 
-      {/* Body */}
-      <div className="min-h-0 flex-1 overflow-y-auto" style={{ scrollbarGutter: "stable" }}>
-        <div className="mx-auto flex w-full max-w-[1080px] gap-0 lg:gap-8 px-0 lg:px-8 py-0 lg:py-6">
-          {/* Section tabs — horizontal on mobile, vertical on desktop */}
-          <nav className="flex shrink-0 flex-row gap-0 lg:flex-col lg:w-[200px] border-b border-line lg:border-b-0 lg:pt-2 overflow-x-auto">
+      {/* Body — nav is sticky, only content scrolls */}
+      <div className="min-h-0 flex-1 flex flex-col lg:flex-row overflow-hidden">
+        <div className="mx-auto flex w-full max-w-[1080px] gap-0 lg:gap-8 px-0 lg:px-8 py-0 lg:py-6 flex-1 min-h-0">
+          {/* Section tabs — horizontal sticky on mobile, vertical sticky on desktop */}
+          <nav className="flex shrink-0 flex-row gap-0 lg:flex-col lg:w-[200px] border-b border-line lg:border-b-0 lg:pt-2 overflow-x-auto lg:overflow-visible lg:sticky lg:top-0 bg-paper">
             {(Object.keys(SECTION_META) as Section[]).map((key) => {
               const meta = SECTION_META[key];
               const isActive = section === key;
@@ -198,8 +199,8 @@ export function SettingsPage() {
             })}
           </nav>
 
-          {/* Content area */}
-          <div className="min-w-0 flex-1 w-full px-5 lg:px-0 py-5 space-y-5">
+          {/* Content area — only this scrolls */}
+          <div className="min-w-0 flex-1 w-full px-5 lg:px-0 py-5 space-y-5 overflow-y-auto" style={{ scrollbarGutter: "stable" }}>
             {section === "account" && <AccountPanel />}
             {section === "models" && (
               <ModelsPanel
@@ -988,9 +989,73 @@ function GeneralPanel({
         </label>
       </section>
 
+      {/* Global Keyboard Shortcut */}
+      {IS_TAURI && !IS_WEB && (
+        <GlobalShortcutSection />
+      )}
+
       {/* Prompt Templates */}
       <TemplatesSection />
     </div>
+  );
+}
+
+// ---------------- Global Shortcut ----------------
+
+const OVERLAY_SHORTCUT_KEY = "zwork:overlay-shortcut";
+
+function GlobalShortcutSection() {
+  const [shortcut, setShortcut] = useState<string>(() => {
+    return localStorage.getItem(OVERLAY_SHORTCUT_KEY) || "Super+Shift+Space";
+  });
+
+  // On mount, sync the stored shortcut with the Tauri backend
+  useEffect(() => {
+    if (!IS_TAURI || IS_WEB) return;
+    (async () => {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        // Re-register whatever we have stored so the backend is in sync
+        await invoke("register_overlay_shortcut", { shortcutStr: shortcut });
+      } catch (e) {
+        console.warn("Failed to sync overlay shortcut:", e);
+      }
+    })();
+  }, []);
+
+  const handleChange = async (newShortcut: string) => {
+    if (!IS_TAURI || IS_WEB) return;
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("register_overlay_shortcut", { shortcutStr: newShortcut });
+      setShortcut(newShortcut);
+      if (newShortcut) {
+        localStorage.setItem(OVERLAY_SHORTCUT_KEY, newShortcut);
+      } else {
+        localStorage.removeItem(OVERLAY_SHORTCUT_KEY);
+      }
+    } catch (e) {
+      console.error("Failed to register overlay shortcut:", e);
+      alert(`Failed to register shortcut: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  return (
+    <section className="rounded-xl border border-line bg-paper-raised p-5 space-y-3 shadow-sm">
+      <div>
+        <h3 className="text-[14px] font-semibold text-ink">Keyboard Shortcuts</h3>
+        <p className="text-[12px] text-ink-muted mt-1 leading-relaxed">
+          Configure global keyboard shortcuts that work even when zWork is not focused.
+        </p>
+      </div>
+      <div className="border-t border-line" />
+      <KeybindRecorder
+        label="Toggle Chatbox Overlay"
+        description="Brings up the zWork overlay on top of any app. Requires a modifier key (⌘, ⌃, ⌥, ⇧) plus another key."
+        value={shortcut}
+        onChange={handleChange}
+      />
+    </section>
   );
 }
 
