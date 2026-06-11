@@ -253,10 +253,20 @@ function stripArtifactJunk(text: string): string {
 function needsManagedRouterMigration(settings: SettingsPublic): boolean {
   const defaultModel = settings.default_model || "";
   const customModels = settings.custom_models || [];
-  const hasFlash = customModels.some((model) => model.id === "zwork-flash");
-  const hasPro = customModels.some((model) => model.id === "zwork-pro");
+  const flash = customModels.find((m) => m.id === "zwork-flash");
+  const pro = customModels.find((m) => m.id === "zwork-pro");
   const hasOldRouter = customModels.some((model) => model.id === "zwork-router");
   const hasLegacyCustomModel = customModels.some((model) => LEGACY_MANAGED_MODEL_IDS.has(model.id) || LEGACY_MANAGED_MODEL_IDS.has(model.model_id));
+
+  // Check that flash/pro exist AND have correct names/model_ids
+  const flashCorrupted = !flash
+    || flash.name !== "zWork Flash"
+    || flash.model_id !== "deepseek-v4-flash"
+    || flash.credential !== "zwork_router";
+  const proCorrupted = !pro
+    || pro.name !== "zWork Pro"
+    || pro.model_id !== "deepseek-v4-pro"
+    || pro.credential !== "zwork_router";
 
   return (
     LEGACY_MANAGED_BASE_URLS.has(settings.provider_config?.openai?.base_url || "") ||
@@ -264,8 +274,8 @@ function needsManagedRouterMigration(settings: SettingsPublic): boolean {
     LEGACY_MANAGED_MODEL_IDS.has(defaultModel) ||
     hasLegacyCustomModel ||
     hasOldRouter ||
-    !hasFlash ||
-    !hasPro
+    flashCorrupted ||
+    proCorrupted
   );
 }
 
@@ -904,6 +914,7 @@ export const useApp = create<AppState>((set, get) => ({
     }
 
     if (get().backendOffline) {
+      set({ onboardingDone: hasCompletedOnboardingLocally() ? true : false });
       try {
         const cachedSummaries = localStorage.getItem("zwork:cached-summaries");
         if (cachedSummaries) {
@@ -1008,16 +1019,32 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   refreshComposio: async () => {
+    // Always ensure the static app list is present so the Connectors grid renders
+    const STATIC_APPS = [
+      { id: "gmail",          name: "Gmail",           color: "#EA4335", icon: null },
+      { id: "googlecalendar", name: "Google Calendar", color: "#4285F4", icon: null },
+      { id: "notion",         name: "Notion",          color: "#000000", icon: null },
+      { id: "googledrive",    name: "Google Drive",    color: "#34A853", icon: null },
+      { id: "github",         name: "GitHub",          color: "#24292E", icon: null },
+      { id: "linear",         name: "Linear",          color: "#5E6AD2", icon: null },
+    ];
+    // Seed immediately so grid doesn't flash empty
+    if (get().composioApps.length === 0) {
+      set({ composioApps: STATIC_APPS });
+    }
     try {
       const [status, accounts, apps] = await Promise.all([
         api.composioStatus().catch(() => null),
         api.composioAccounts().catch(() => ({ accounts: [] })),
-        api.composioApps().catch(() => ({ apps: [] })),
+        api.composioApps().catch(() => null), // null = don't overwrite on failure
       ]);
       set({
         composioStatus: status,
         composioAccounts: accounts.accounts,
-        composioApps: apps.apps,
+        // Only update apps if the call succeeded and returned a non-empty list
+        ...(apps && apps.apps && apps.apps.length > 0
+          ? { composioApps: apps.apps }
+          : {}),
       });
     } catch (e) { console.warn("refreshComposio failed:", e) }
   },
@@ -1490,6 +1517,24 @@ export const useApp = create<AppState>((set, get) => ({
     const controller = new AbortController();
     set({ _abort: controller });
 
+    // Safety timeout: if the stream hasn't resolved in 5 minutes, abort it
+    // so the working spinner can't get stuck forever.
+    const safetyTimer = setTimeout(() => {
+      if (get().chats[localId]?.working) {
+        controller.abort();
+        set((s) => {
+          const c = s.chats[localId];
+          if (!c) return s;
+          return {
+            chats: {
+              ...s.chats,
+              [localId]: { ...c, working: false, status: undefined, error: "Stream timed out. Please try again." },
+            },
+          };
+        });
+      }
+    }, 5 * 60 * 1000);
+
     try {
       await streamChat(
         {
@@ -1875,6 +1920,7 @@ export const useApp = create<AppState>((set, get) => ({
         };
       });
     } finally {
+      clearTimeout(safetyTimer);
       set({ _abort: null });
       // Refresh history so the new chat shows up in the sidebar.
       get().refreshChats();

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Check, ChevronDown, AlertCircle, Plus } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
@@ -10,7 +10,15 @@ export function ModelPicker() {
   const setView = useApp((s) => s.setView);
 
   const [open, setOpen] = useState(false);
+  const [dropUp, setDropUp] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  const updateDirection = useCallback(() => {
+    if (!ref.current) return;
+    const rect = ref.current.getBoundingClientRect();
+    // If trigger is in the top 60% of viewport, drop down; otherwise drop up.
+    setDropUp(rect.top < window.innerHeight * 0.6);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -34,7 +42,7 @@ export function ModelPicker() {
     <div ref={ref} className="relative">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => { updateDirection(); setOpen((v) => !v); }}
         className={cn(
           "press ring-focus inline-flex items-center gap-1.5 rounded-full border border-line bg-paper",
           "pl-2.5 pr-2 py-1 text-[12px] font-medium text-ink",
@@ -48,7 +56,10 @@ export function ModelPicker() {
       {open && (
         <div
           role="listbox"
-          className="absolute bottom-[calc(100%+8px)] right-0 z-40 w-[320px] animate-fade-in rounded-xl border border-line bg-paper p-1 shadow-pop"
+          className={cn(
+            "absolute right-0 z-40 w-[320px] animate-fade-in rounded-xl border border-line bg-paper p-1 shadow-pop",
+            dropUp ? "top-[calc(100%+8px)]" : "bottom-[calc(100%+8px)]",
+          )}
         >
           <div className="px-2.5 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
             Model

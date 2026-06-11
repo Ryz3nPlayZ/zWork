@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import { CornerDownLeft, Settings as SettingsIcon } from "lucide-react";
+import { CornerDownLeft } from "lucide-react";
 import { cn } from "../lib/cn";
 import { filterTemplates, type PromptTemplate } from "../lib/templates";
 
@@ -18,7 +18,7 @@ export function SlashMenu({
   activeIndex,
   onActiveIndexChange,
   onSelect,
-  onManage,
+  onManage: _onManage,
 }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
   const matches = useMemo(() => filterTemplates(templates, query), [templates, query]);
@@ -82,19 +82,6 @@ export function SlashMenu({
             );
           })
         )}
-      </div>
-      <div className="flex items-center justify-between gap-2 border-t border-line bg-paper px-3 py-1.5">
-        <span className="text-[10.5px] text-ink-faint">
-          Enter to insert, Esc to dismiss
-        </span>
-        <button
-          type="button"
-          onClick={onManage}
-          className="press inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-ink-muted hover:bg-paper-sunken hover:text-ink"
-        >
-          <SettingsIcon className="h-3 w-3" />
-          Manage templates
-        </button>
       </div>
     </div>
   );

@@ -93,7 +93,7 @@ export interface ComposioAccount {
 export interface ComposioApp {
   id: string;
   name: string;
-  icon: string;
+  icon: string | null;
   color: string;
 }
 
