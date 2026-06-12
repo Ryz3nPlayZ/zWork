@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 
 rm -rf "$ROOT_DIR/dist"
 
-"$ROOT_DIR/scripts/build-backend.sh"
+"$ROOT_DIR/scripts/build-rust-backend.sh"
 
 cd "$ROOT_DIR/app"
 if ! APPIMAGE_EXTRACT_AND_RUN=1 npx tauri build --bundles appimage --ci; then

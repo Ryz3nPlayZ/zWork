@@ -18,10 +18,12 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import dataclass, field, asdict
-from typing import Any
 import uuid
+from dataclasses import asdict, dataclass, field
+from typing import Any
 
+from . import secretstore
+from . import skills as skills_mod
 from .home import (
     memory_path,
     settings_path,
@@ -32,9 +34,6 @@ from .home import (
     workspace_uploads_dir,
     zwork_md_path,
 )
-from . import skills as skills_mod
-from . import secretstore
-
 
 SYSTEM_PROMPT_TEMPLATE = """\
 You are zWork, an action-oriented AI work assistant created by Zemu Liu.

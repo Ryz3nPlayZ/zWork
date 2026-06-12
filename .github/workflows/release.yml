@@ -69,7 +69,9 @@ jobs:
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: app/src-tauri -> target
+          workspaces: |
+            app/src-tauri -> target
+            sidecar-rust -> target
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -103,7 +105,7 @@ jobs:
 
   macos-backend:
     needs: verify
-    name: macOS backend (${{ matrix.arch }})
+    name: macOS Rust backend (${{ matrix.arch }})
     strategy:
       matrix:
         include:
@@ -117,27 +119,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Checkout dctl
-        uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          repository: Ryz3nPlayZ/dctl
-          path: dctl
+          targets: ${{ matrix.target }}
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
         with:
-          python-version: "3.12"
-          cache: pip
+          workspaces: sidecar-rust -> target
 
-      - name: Cache PyInstaller work dir
-        uses: actions/cache@v4
-        with:
-          path: .release/pyinstaller-work
-          key: pyinstaller-${{ matrix.target }}-${{ hashFiles('pyproject.toml', 'sidecar/**/*.py', 'zWork-Skills/**/*') }}
-          restore-keys: pyinstaller-${{ matrix.target }}-
-
-      - name: Build backend
-        run: bash scripts/build-backend.sh ${{ matrix.target }}
+      - name: Build Rust backend
+        run: bash scripts/build-rust-backend.sh ${{ matrix.target }}
 
       - name: Upload backend
         uses: actions/upload-artifact@v4
