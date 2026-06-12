@@ -110,6 +110,10 @@ const CREDENTIAL_PLACEHOLDERS: Record<string, { keyPlaceholder: string; baseUrlP
     keyPlaceholder: "(z.ai API key)",
     baseUrlPlaceholder: "https://api.z.ai/api/paas/v4",
   },
+  ollama: {
+    keyPlaceholder: "(optional — leave blank for local)",
+    baseUrlPlaceholder: "http://localhost:11434/v1",
+  },
 };
 
 export function SettingsPage() {
@@ -437,6 +441,7 @@ function ModelsPanel({
                   <option value="openai" className="bg-paper text-ink">OpenAI-compatible (BYOK)</option>
                   <option value="deepseek" className="bg-paper text-ink">DeepSeek (BYOK)</option>
                   <option value="zai" className="bg-paper text-ink">z.ai (BYOK)</option>
+                  <option value="ollama" className="bg-paper text-ink">Ollama (local / cloud)</option>
                   <option value="claude_code" className="bg-paper text-ink">Local config (reuse credentials)</option>
                 </select>
             </Field>

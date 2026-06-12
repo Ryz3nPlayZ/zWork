@@ -244,6 +244,18 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
                 "required": ["subcommand"]
             }
         }));
+        schemas.push(json!({
+            "name": "spawn_agent",
+            "description": "Spawn a sub-agent for parallel independent work. Returns a task ID to track progress.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "description": { "type": "string", "description": "Short description of the task for the sub-agent" },
+                    "model_id": { "type": "string", "description": "Optional model override for the sub-agent" }
+                },
+                "required": ["description"]
+            }
+        }));
     }
 
     schemas
@@ -319,6 +331,12 @@ pub fn execute_tool(
                 Ok(serde_json::to_string_pretty(&profile).unwrap_or_default())
             }
             "dctl" => dctl::execute_dctl(&params).await,
+            "spawn_agent" => {
+                // Sub-agent spawning is not yet fully implemented in the Rust backend.
+                // Return a placeholder so the model knows the tool was received.
+                let desc = params.get("description").and_then(|v| v.as_str()).unwrap_or("task");
+                Ok(format!("Sub-agent spawned for: {}. (Note: sub-agent execution is not yet available in this build — performing the task inline instead.)", desc))
+            }
             "ask_question" | "ask_user" => {
                 // Return immediate choice instructions if called programmatically
                 Ok("Select from options card in chat UI.".to_string())

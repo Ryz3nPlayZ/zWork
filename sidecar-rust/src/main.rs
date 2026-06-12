@@ -60,6 +60,7 @@ async fn main() {
         .route("/api/composio/connect", post(server::composio_connect))
         .route("/api/composio/disconnect", post(server::composio_disconnect))
         .route("/api/composio/apps", get(server::composio_apps))
+        .route("/api/ollama/models", post(server::ollama_models))
         .layer(CorsLayer::permissive());
 
     let addr = format!("{}:{}", host, port);

@@ -278,6 +278,25 @@ pub fn resolve(credential: &str, settings: &settings::Settings, override_base_ur
         return None;
     }
 
+    if credential == "ollama" {
+        let base = if !override_base_url.is_empty() {
+            override_base_url.to_string()
+        } else {
+            settings.provider_config.get("ollama")
+                .and_then(|m| m.get("base_url"))
+                .cloned()
+                .unwrap_or_else(|| "http://localhost:11434/v1".to_string())
+        };
+        // Local Ollama doesn't require an API key
+        let key = settings.api_keys.get("ollama").cloned().unwrap_or_default();
+        return Some(Credentials {
+            shape: "openai".to_string(),
+            api_key: key,
+            base_url: base.trim_end_matches('/').to_string(),
+            source: "ollama".to_string(),
+        });
+    }
+
     // Default for other compatibility providers
     let key = settings.api_keys.get(credential).cloned().unwrap_or_default();
     if !key.trim().is_empty() {
@@ -1110,3 +1129,90 @@ pub async fn composio_apps() -> impl IntoResponse {
     Json(json!({ "apps": apps }))
 }
 
+// ---- Ollama ----
+
+#[derive(serde::Deserialize)]
+pub struct OllamaModelsRequest {
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key: String,
+}
+
+/// Check if an Ollama URL is safe to proxy (SSRF protection).
+fn is_safe_ollama_url(url: &str) -> bool {
+    let url = url.trim().trim_end_matches('/');
+    // Allow localhost variants
+    if url.starts_with("http://localhost:") || url.starts_with("http://127.0.0.1:") {
+        return true;
+    }
+    // Allow official Ollama cloud
+    if url.contains("ollama.com") {
+        return true;
+    }
+    // Allow private network ranges (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
+    if url.starts_with("http://192.168.") || url.starts_with("http://10.") {
+        return true;
+    }
+    if url.starts_with("http://172.") {
+        if let Some(rest) = url.strip_prefix("http://172.") {
+            if let Some(octet_str) = rest.split('.').next() {
+                if let Ok(octet) = octet_str.parse::<u8>() {
+                    if octet >= 16 && octet <= 31 {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+pub async fn ollama_models(
+    Json(req): Json<OllamaModelsRequest>,
+) -> impl IntoResponse {
+    if !is_safe_ollama_url(&req.base_url) {
+        return (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "URL not allowed. Only localhost, private IPs, and ollama.com are permitted." })),
+        ).into_response();
+    }
+
+    let base = req.base_url.trim().trim_end_matches('/');
+    let models_url = format!("{}/v1/models", base);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .unwrap_or_default();
+
+    let mut request = client.get(&models_url);
+    if !req.api_key.is_empty() {
+        request = request.header("authorization", format!("Bearer {}", req.api_key));
+    }
+
+    match request.send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            match resp.text().await {
+                Ok(body) => {
+                    if status.is_success() {
+                        // Try to parse and return the models
+                        if let Ok(val) = serde_json::from_str::<Value>(&body) {
+                            return Json(val).into_response();
+                        }
+                        return Json(json!({ "raw": body })).into_response();
+                    }
+                    (status, Json(json!({ "error": body }))).into_response()
+                }
+                Err(e) => (
+                    axum::http::StatusCode::BAD_GATEWAY,
+                    Json(json!({ "error": format!("Failed to read response: {e}") })),
+                ).into_response(),
+            }
+        }
+        Err(e) => (
+            axum::http::StatusCode::BAD_GATEWAY,
+            Json(json!({ "error": format!("Failed to connect to Ollama: {e}. Is Ollama running at {}?", req.base_url) })),
+        ).into_response(),
+    }
+}

@@ -60,7 +60,15 @@ pub fn run_agent_turn(
                 chatstore::create("New chat", &model_id, &project_id)
             }
         };
-        
+
+        // Emit chat reconciliation event so the frontend can map its
+        // provisional tmp_ ID to the real server-assigned chat ID.
+        let _ = tx.send(json!({
+            "type": "chat",
+            "id": chat.id,
+            "title": chat.title
+        })).await;
+
         // Append user message if not already appended
         let is_dup = chat.messages.last().map_or(false, |m| {
             m.role == "user" && m.content.as_str().unwrap_or("").trim() == user_message.trim()
@@ -293,7 +301,16 @@ pub fn run_agent_turn(
                 "role": "assistant",
                 "content": assistant_content_blocks
             }));
-            
+
+            // If no structured tool_calls came through, check if the model
+            // output tool call syntax as plain text (common for providers
+            // that don't support the `tools` API parameter).
+            if tool_calls.is_empty() && !accumulated_text.is_empty() {
+                if let Some(parsed) = parse_text_tool_calls(&accumulated_text) {
+                    tool_calls = parsed;
+                }
+            }
+
             if tool_calls.is_empty() {
                 break; // No more tool calls: loop completed
             }
@@ -423,4 +440,64 @@ pub fn run_agent_turn(
     });
     
     ReceiverStream::new(rx).map(Ok)
+}
+
+/// Parse tool calls that a model outputted as plain text instead of
+/// structured tool_use blocks. Handles patterns like:
+///   `read_memory(content="first_message")`
+///   ```json\n{"name": "read_file", "arguments": {"path": "foo.rs"}}\n```
+fn parse_text_tool_calls(text: &str) -> Option<Vec<Value>> {
+    let mut calls = Vec::new();
+
+    // Pattern 1: function_call blocks ```json ... "name": "..." ... ```
+    if let Some(start) = text.find("```json") {
+        if let Some(end) = text[start + 7..].find("```") {
+            let json_str = &text[start + 7..start + 7 + end];
+            if let Ok(parsed) = serde_json::from_str::<Value>(json_str.trim()) {
+                let name = parsed.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let args = parsed.get("arguments")
+                    .or_else(|| parsed.get("parameters"))
+                    .cloned()
+                    .unwrap_or(json!({}));
+                if !name.is_empty() {
+                    calls.push(json!({
+                        "id": format!("text_tc_{}", calls.len()),
+                        "name": name,
+                        "input": args
+                    }));
+                }
+            }
+        }
+    }
+
+    // Pattern 2: bare function_call(name=args) syntax
+    let re = regex::Regex::new(r"(\w+)\(([^)]*)\)").ok()?;
+    for cap in re.captures_iter(text) {
+        let name = cap.get(1)?.as_str();
+        // Skip common non-tool words
+        if matches!(name, "the" | "a" | "an" | "is" | "to" | "and" | "or" | "if" | "for" | "not" | "this" | "that") {
+            continue;
+        }
+        let args_str = cap.get(2)?.as_str();
+        let mut args = serde_json::Map::new();
+        // Parse key=value pairs
+        for pair in args_str.split(',') {
+            let pair = pair.trim();
+            if let Some(eq) = pair.find('=') {
+                let key = pair[..eq].trim().trim_matches('"');
+                let val = pair[eq + 1..].trim()
+                    .trim_matches('"')
+                    .trim_start_matches('"')
+                    .to_string();
+                args.insert(key.to_string(), json!(val));
+            }
+        }
+        calls.push(json!({
+            "id": format!("text_tc_{}", calls.len()),
+            "name": name,
+            "input": Value::Object(args)
+        }));
+    }
+
+    if calls.is_empty() { None } else { Some(calls) }
 }
