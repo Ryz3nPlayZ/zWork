@@ -155,9 +155,9 @@ pub fn run_agent_turn(
             }));
         }
             
-        // Main multi-turn executor loop (max 15 turns)
+        // Main multi-turn executor loop (max 5 turns)
         let mut turn = 0;
-        let max_turns = 15;
+        let max_turns = 5;
         
         // Initialize the assistant response message
         let assistant_msg = chatstore::append_message(&chat.id, "assistant", json!(""));
@@ -442,24 +442,37 @@ pub fn run_agent_turn(
     ReceiverStream::new(rx).map(Ok)
 }
 
+/// Known tool names that the text parser is allowed to match.
+/// Anything else is ignored to prevent false positives from normal English text.
+const KNOWN_TOOLS: &[&str] = &[
+    "read_file", "list_dir", "write_file", "run_command",
+    "extract_document", "web_search", "search_papers", "format_citation",
+    "save_memory", "deploy_web_app", "dctl", "read_skill", "spawn_agent",
+    "ask_question", "ask_user", "ask_user_for_permission", "detect_hardware",
+];
+
 /// Parse tool calls that a model outputted as plain text instead of
 /// structured tool_use blocks. Handles patterns like:
-///   `read_memory(content="first_message")`
 ///   ```json\n{"name": "read_file", "arguments": {"path": "foo.rs"}}\n```
+///   read_file(path="foo.rs")
+///
+/// STRICT mode: only matches known tool names, caps at 3 calls max,
+/// and requires arguments to contain key=value or JSON syntax.
 fn parse_text_tool_calls(text: &str) -> Option<Vec<Value>> {
     let mut calls = Vec::new();
 
-    // Pattern 1: function_call blocks ```json ... "name": "..." ... ```
+    // Pattern 1: JSON code blocks with "name" field referencing a known tool
+    // e.g. ```json\n{"name": "read_file", "arguments": {"path": "foo.rs"}}\n```
     if let Some(start) = text.find("```json") {
         if let Some(end) = text[start + 7..].find("```") {
             let json_str = &text[start + 7..start + 7 + end];
             if let Ok(parsed) = serde_json::from_str::<Value>(json_str.trim()) {
                 let name = parsed.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                let args = parsed.get("arguments")
-                    .or_else(|| parsed.get("parameters"))
-                    .cloned()
-                    .unwrap_or(json!({}));
-                if !name.is_empty() {
+                if KNOWN_TOOLS.contains(&name) {
+                    let args = parsed.get("arguments")
+                        .or_else(|| parsed.get("parameters"))
+                        .cloned()
+                        .unwrap_or(json!({}));
                     calls.push(json!({
                         "id": format!("text_tc_{}", calls.len()),
                         "name": name,
@@ -470,34 +483,83 @@ fn parse_text_tool_calls(text: &str) -> Option<Vec<Value>> {
         }
     }
 
-    // Pattern 2: bare function_call(name=args) syntax
-    let re = regex::Regex::new(r"(\w+)\(([^)]*)\)").ok()?;
-    for cap in re.captures_iter(text) {
-        let name = cap.get(1)?.as_str();
-        // Skip common non-tool words
-        if matches!(name, "the" | "a" | "an" | "is" | "to" | "and" | "or" | "if" | "for" | "not" | "this" | "that") {
-            continue;
-        }
-        let args_str = cap.get(2)?.as_str();
-        let mut args = serde_json::Map::new();
-        // Parse key=value pairs
-        for pair in args_str.split(',') {
-            let pair = pair.trim();
-            if let Some(eq) = pair.find('=') {
-                let key = pair[..eq].trim().trim_matches('"');
-                let val = pair[eq + 1..].trim()
-                    .trim_matches('"')
-                    .trim_start_matches('"')
-                    .to_string();
-                args.insert(key.to_string(), json!(val));
+    // Pattern 2: bare function_call syntax BUT only for known tool names.
+    // Matches: tool_name(key="value", ...) or tool_name({"json": "args"})
+    for tool_name in KNOWN_TOOLS {
+        if calls.len() >= 3 { break; } // Cap at 3 text-parsed calls
+        // Look for `tool_name(` in the text — the opening paren after the exact tool name
+        let needle = format!("{}(", tool_name);
+        let mut search_from = 0;
+        while let Some(pos) = text[search_from..].find(&needle) {
+            if calls.len() >= 3 { break; }
+            let abs_pos = search_from + pos;
+            // Make sure it's not part of a longer word (e.g. "deploy_web_app" shouldn't match inside "my_deploy_web_app")
+            if abs_pos > 0 {
+                let prev_char = text.as_bytes()[abs_pos - 1];
+                if prev_char.is_ascii_alphanumeric() || prev_char == b'_' {
+                    search_from = abs_pos + needle.len();
+                    continue;
+                }
             }
+            // Extract the content between the parentheses (balanced)
+            let open_paren = abs_pos + tool_name.len();
+            if let Some((args_str, _end)) = extract_balanced_parens(text, open_paren) {
+                let args = parse_tool_args(&args_str);
+                calls.push(json!({
+                    "id": format!("text_tc_{}", calls.len()),
+                    "name": tool_name,
+                    "input": args
+                }));
+            }
+            search_from = abs_pos + needle.len();
         }
-        calls.push(json!({
-            "id": format!("text_tc_{}", calls.len()),
-            "name": name,
-            "input": Value::Object(args)
-        }));
     }
 
     if calls.is_empty() { None } else { Some(calls) }
+}
+
+/// Extract balanced parenthesized content starting at `start` (which should point to '(').
+/// Returns the inner content and the position after the closing ')'.
+fn extract_balanced_parens(text: &str, start: usize) -> Option<(String, usize)> {
+    let bytes = text.as_bytes();
+    if start >= bytes.len() || bytes[start] != b'(' { return None; }
+    let mut depth = 1;
+    let mut i = start + 1;
+    let mut inner = String::new();
+    while i < bytes.len() && depth > 0 {
+        let ch = bytes[i];
+        if ch == b'(' { depth += 1; }
+        else if ch == b')' { depth -= 1; }
+        if depth > 0 { inner.push(ch as char); }
+        i += 1;
+    }
+    if depth == 0 { Some((inner, i)) } else { None }
+}
+
+/// Parse tool arguments from a string like `key="value", key2="value2"` or JSON.
+fn parse_tool_args(args_str: &str) -> Value {
+    let trimmed = args_str.trim();
+
+    // Try JSON first
+    if trimmed.starts_with('{') {
+        if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
+            return parsed;
+        }
+    }
+
+    // Fall back to key=value pair parsing
+    let mut args = serde_json::Map::new();
+    for pair in trimmed.split(',') {
+        let pair = pair.trim();
+        if let Some(eq) = pair.find('=') {
+            let key = pair[..eq].trim().trim_matches('"').trim();
+            let val = pair[eq + 1..].trim()
+                .trim_matches('"')
+                .to_string();
+            if !key.is_empty() {
+                args.insert(key.to_string(), json!(val));
+            }
+        }
+    }
+    Value::Object(args)
 }
