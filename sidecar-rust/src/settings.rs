@@ -18,6 +18,7 @@ pub const KNOWN_CREDENTIALS: &[&str] = &[
     "cerebras",
     "deepseek",
     "zai",
+    "ollama",
     "composio",
 ];
 
