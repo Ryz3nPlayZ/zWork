@@ -1082,6 +1082,922 @@ pub async fn delete_custom_model(
     })).into_response()
 }
 
+// ─── Memory / User MD ─────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct ContentBody {
+    pub content: String,
+}
+
+pub async fn get_memory() -> impl IntoResponse {
+    let content = std::fs::read_to_string(crate::paths::memory_path()).unwrap_or_default();
+    Json(json!({ "content": content }))
+}
+
+pub async fn put_memory(Json(body): Json<ContentBody>) -> impl IntoResponse {
+    let p = crate::paths::memory_path();
+    if let Some(parent) = p.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&p, &body.content);
+    Json(json!({ "ok": true }))
+}
+
+pub async fn get_user_md() -> impl IntoResponse {
+    let content = std::fs::read_to_string(crate::paths::zwork_md_path()).unwrap_or_default();
+    Json(json!({ "content": content }))
+}
+
+pub async fn put_user_md(Json(body): Json<ContentBody>) -> impl IntoResponse {
+    let p = crate::paths::zwork_md_path();
+    if let Some(parent) = p.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&p, &body.content);
+    Json(json!({ "ok": true }))
+}
+
+// ─── Telemetry ────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct TelemetryEventBody {
+    pub event: String,
+    pub session_id: Option<String>,
+    pub properties: Option<Value>,
+    pub ts: Option<u64>,
+}
+
+pub async fn telemetry_event(Json(body): Json<TelemetryEventBody>) -> impl IntoResponse {
+    let s = settings::load();
+    if !s.telemetry_enabled {
+        return Json(json!({ "ok": true }));
+    }
+
+    let entry = json!({
+        "event": body.event,
+        "session_id": body.session_id,
+        "properties": body.properties,
+        "ts": body.ts.unwrap_or_else(|| {
+            chrono::Utc::now().timestamp_millis() as u64
+        }),
+    });
+
+    // Append JSONL line
+    let log_path = crate::paths::telemetry_log_path();
+    if let Some(parent) = log_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .and_then(|mut f| {
+            use std::io::Write;
+            writeln!(f, "{}", entry)
+        });
+
+    // Fire-and-forget to external endpoint if configured
+    if let Ok(endpoint) = std::env::var("ZW_TELEMETRY_ENDPOINT") {
+        if !endpoint.is_empty() {
+            let _ = tokio::spawn(async move {
+                let _ = reqwest::Client::new()
+                    .post(&endpoint)
+                    .json(&entry)
+                    .timeout(std::time::Duration::from_secs(5))
+                    .send()
+                    .await;
+            });
+        }
+    }
+
+    Json(json!({ "ok": true }))
+}
+
+// ─── Chat answer-question ────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct AnswerQuestionBody {
+    pub answer: String,
+}
+
+pub async fn answer_question(
+    Path(chat_id): Path<String>,
+    Json(body): Json<AnswerQuestionBody>,
+) -> impl IntoResponse {
+    let ok = crate::agent::answer_pending_question(&chat_id, &body.answer);
+    Json(json!({ "success": ok }))
+}
+
+// ─── Chat truncate ───────────────────────────────────────────────────────────
+
+pub async fn truncate_message(
+    Path((chat_id, message_id)): Path<(String, String)>,
+    Json(body): Json<PatchMessageRequest>,
+) -> impl IntoResponse {
+    let result = chatstore::truncate_at_message(&chat_id, &message_id, body.content);
+    Json(json!({ "success": result.is_some(), "chat": result }))
+}
+
+// ─── Activity logs ───────────────────────────────────────────────────────────
+
+pub async fn activity_logs() -> impl IntoResponse {
+    let p = crate::paths::activity_log_path();
+    let logs: Vec<Value> = if p.exists() {
+        std::fs::read_to_string(&p)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    } else {
+        vec![]
+    };
+    Json(json!({ "logs": logs }))
+}
+
+// ─── Project extras ───────────────────────────────────────────────────────────
+
+pub async fn get_project_memory(Path(project_id): Path<String>) -> impl IntoResponse {
+    let dir = crate::paths::project_dir(&project_id);
+    let p = dir.join("project_memory.md");
+    let content = std::fs::read_to_string(&p).unwrap_or_default();
+    Json(json!({ "content": content }))
+}
+
+pub async fn put_project_memory(
+    Path(project_id): Path<String>,
+    Json(body): Json<ContentBody>,
+) -> impl IntoResponse {
+    let dir = crate::paths::project_dir(&project_id);
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(dir.join("project_memory.md"), &body.content);
+    Json(json!({ "ok": true }))
+}
+
+pub async fn get_project_timeline(Path(project_id): Path<String>) -> impl IntoResponse {
+    let dir = crate::paths::project_dir(&project_id);
+    let p = dir.join("timeline.md");
+    let content = std::fs::read_to_string(&p).unwrap_or_default();
+    Json(json!({ "content": content }))
+}
+
+#[derive(Deserialize)]
+pub struct UploadItem {
+    pub client_id: Option<String>,
+    pub name: String,
+    #[serde(default = "default_octet_stream")]
+    pub mime: String,
+    #[serde(default = "default_file_kind")]
+    pub kind: String,
+    pub text_content: Option<String>,
+    pub data_url: Option<String>,
+}
+
+fn default_octet_stream() -> String { "application/octet-stream".to_string() }
+fn default_file_kind() -> String { "file".to_string() }
+
+#[derive(Deserialize)]
+pub struct UploadBody {
+    pub files: Vec<UploadItem>,
+}
+
+pub async fn list_project_files(Path(project_id): Path<String>) -> impl IntoResponse {
+    let dir = crate::paths::project_dir(&project_id).join("files");
+    let mut files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            let size = path.metadata().map(|m| m.len()).unwrap_or(0);
+            files.push(json!({ "name": name, "size": size }));
+        }
+    }
+    Json(json!({ "files": files }))
+}
+
+pub async fn upload_project_files(
+    Path(project_id): Path<String>,
+    Json(body): Json<UploadBody>,
+) -> impl IntoResponse {
+    let dir = crate::paths::project_dir(&project_id).join("files");
+    let _ = std::fs::create_dir_all(&dir);
+    let mut created = Vec::new();
+    for item in &body.files {
+        let filename = format!("{}_{}", uuid::Uuid::new_v4().simple(), item.name);
+        let path = dir.join(&filename);
+        if let Some(ref text) = item.text_content {
+            let _ = std::fs::write(&path, text);
+        } else if let Some(ref data_url) = item.data_url {
+            // Decode base64 data URL
+            if let Some(b64) = data_url.split(',').nth(1) {
+                match standard_b64_decode(b64) {
+                    Ok(bytes) => { let _ = std::fs::write(&path, bytes); }
+                    Err(_) => continue,
+                }
+            }
+        }
+        created.push(json!({ "name": filename, "original_name": item.name }));
+    }
+    Json(json!({ "files": created }))
+}
+
+pub async fn delete_project_file(
+    Path((project_id, filename)): Path<(String, String)>,
+) -> impl IntoResponse {
+    // Prevent path traversal
+    if filename.contains('/') || filename.contains('\\') || filename.contains("..") {
+        return Json(json!({ "error": "Invalid filename" }));
+    }
+    let path = crate::paths::project_dir(&project_id).join("files").join(&filename);
+    if path.exists() {
+        let _ = std::fs::remove_file(&path);
+        Json(json!({ "ok": true }))
+    } else {
+        Json(json!({ "error": "File not found" }))
+    }
+}
+
+// ─── Uploads ──────────────────────────────────────────────────────────────────
+
+pub async fn list_uploads() -> impl IntoResponse {
+    let dir = crate::paths::workspace_uploads_dir();
+    let mut files = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            let size = path.metadata().map(|m| m.len()).unwrap_or(0);
+            let mime = guess_mime(&name);
+            let mut item = json!({ "name": name, "size": size, "mime": mime });
+            // Include text preview for small text files
+            if size < 100_000 && mime.starts_with("text/") || name.ends_with(".md") || name.ends_with(".json") {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    item.as_object_mut().unwrap().insert("content".to_string(), json!(content));
+                }
+            }
+            files.push(item);
+        }
+    }
+    Json(json!({ "files": files }))
+}
+
+pub async fn upload_files(Json(body): Json<UploadBody>) -> impl IntoResponse {
+    let dir = crate::paths::workspace_uploads_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let mut created = Vec::new();
+    for item in &body.files {
+        let id = uuid::Uuid::new_v4().simple();
+        let filename = format!("{}_{}", id, sanitize_filename(&item.name));
+        let path = dir.join(&filename);
+        if let Some(ref text) = item.text_content {
+            let _ = std::fs::write(&path, text);
+        } else if let Some(ref data_url) = item.data_url {
+            if let Some(b64) = data_url.split(',').nth(1) {
+                match standard_b64_decode(b64) {
+                    Ok(bytes) => { let _ = std::fs::write(&path, bytes); }
+                    Err(_) => continue,
+                }
+            }
+        }
+        created.push(json!({
+            "id": id.to_string(),
+            "client_id": item.client_id,
+            "name": item.name,
+            "filename": filename,
+            "mime": item.mime,
+            "size": path.metadata().map(|m| m.len()).unwrap_or(0),
+        }));
+    }
+    Json(json!({ "files": created }))
+}
+
+pub async fn get_upload(Path(filename): Path<String>) -> impl IntoResponse {
+    if filename.contains('/') || filename.contains('\\') || filename.contains("..") {
+        return (axum::http::StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid filename" }))).into_response();
+    }
+    let path = crate::paths::workspace_uploads_dir().join(&filename);
+    if !path.exists() {
+        return (axum::http::StatusCode::NOT_FOUND, Json(json!({ "error": "File not found" }))).into_response();
+    }
+    match tokio::fs::read(&path).await {
+        Ok(bytes) => {
+            let mime = guess_mime(&filename);
+            (axum::http::StatusCode::OK, [(axum::http::header::CONTENT_TYPE, mime)], bytes).into_response()
+        }
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": e.to_string() }))).into_response(),
+    }
+}
+
+// ─── Utility endpoints ────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct PythonRunRequest {
+    pub code: String,
+}
+
+pub async fn run_python(Json(body): Json<PythonRunRequest>) -> impl IntoResponse {
+    let tmp_dir = std::env::temp_dir();
+    let tmp_path = tmp_dir.join(format!("zwork_run_{}.py", uuid::Uuid::new_v4().simple()));
+    if let Err(e) = std::fs::write(&tmp_path, &body.code) {
+        return Json(json!({ "stdout": "", "stderr": format!("Failed to write temp file: {}", e) }));
+    }
+
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        tokio::process::Command::new("python3")
+            .arg(&tmp_path)
+            .output(),
+    ).await;
+
+    let _ = std::fs::remove_file(&tmp_path);
+
+    match result {
+        Ok(Ok(output)) => Json(json!({
+            "stdout": String::from_utf8_lossy(&output.stdout).to_string(),
+            "stderr": String::from_utf8_lossy(&output.stderr).to_string(),
+        })),
+        Ok(Err(e)) => Json(json!({ "stdout": "", "stderr": e.to_string() })),
+        Err(_) => Json(json!({ "stdout": "", "stderr": "Execution timed out (10s limit)" })),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct ScrapeRequest {
+    pub url: String,
+}
+
+pub async fn scrape_url(Json(body): Json<ScrapeRequest>) -> impl IntoResponse {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .user_agent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) zWork/1.0")
+        .build()
+        .unwrap_or_default();
+
+    match client.get(&body.url).send().await {
+        Ok(resp) => {
+            let html = resp.text().await.unwrap_or_default();
+            let title = extract_html_title(&html);
+            let markdown = html_to_markdown(&html);
+            Json(json!({ "markdown": markdown, "title": title }))
+        }
+        Err(e) => Json(json!({ "error": format!("Failed to fetch: {}", e), "markdown": "", "title": "" })),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct RefactorRequest {
+    pub code: String,
+    pub instruction: String,
+    #[serde(default = "default_clean")]
+    pub mode: String,
+}
+
+fn default_clean() -> String { "clean".to_string() }
+
+pub async fn refactor_code(Json(body): Json<RefactorRequest>) -> impl IntoResponse {
+    // Simple refactor: use LLM with non-streaming call
+    let s = settings::load();
+    let model_id = if !s.default_model.is_empty() { &s.default_model } else { "deepseek-v4-flash" };
+
+    let (api_key, base_url, shape, real_model) = if let Some(m) = s.custom_models.iter().find(|m| m.id == model_id) {
+        let real = if m.model_id.is_empty() { "deepseek-v4-flash".to_string() } else { m.model_id.clone() };
+        if let Some(cred) = resolve(&m.credential, &s, &m.base_url_override) {
+            (cred.api_key, cred.base_url, cred.shape, real)
+        } else {
+            return Json(json!({ "error": "No credentials configured for refactoring model" }));
+        }
+    } else {
+        match resolve("zwork_router", &s, "") {
+            Some(cred) => (cred.api_key, cred.base_url, cred.shape, "deepseek-v4-flash".to_string()),
+            None => return Json(json!({ "error": "No model credentials available" })),
+        }
+    };
+
+    let endpoint = if shape == "anthropic" {
+        format!("{}/v1/messages", base_url)
+    } else {
+        format!("{}/chat/completions", base_url)
+    };
+
+    let system = "You are a code refactoring assistant. Given code and an instruction, return ONLY a JSON object with keys: refactored_code, explanation, steps (array of strings). No markdown fences.";
+
+    let messages = json!([
+        {"role": "system", "content": system},
+        {"role": "user", "content": format!("Instruction: {}\n\nCode:\n{}", body.instruction, body.code)}
+    ]);
+
+    let req_body = if shape == "anthropic" {
+        json!({ "model": real_model, "system": system, "messages": messages["messages"].as_array().unwrap().clone(), "max_tokens": 4096 })
+    } else {
+        json!({ "model": real_model, "messages": messages["messages"], "max_tokens": 4096 })
+    };
+
+    let client = reqwest::Client::new();
+    let mut req = client.post(&endpoint).json(&req_body);
+    if shape == "anthropic" {
+        req = req.header("x-api-key", &api_key).header("anthropic-version", "2023-06-01");
+    } else {
+        req = req.header("authorization", format!("Bearer {}", api_key));
+    }
+
+    match req.send().await {
+        Ok(resp) => {
+            let text = resp.text().await.unwrap_or_default();
+            // Try to extract the content from the response
+            if let Ok(val) = serde_json::from_str::<Value>(&text) {
+                let content = if shape == "anthropic" {
+                    val.get("content").and_then(|c| c.get(0)).and_then(|c| c.get("text")).and_then(|t| t.as_str()).unwrap_or(&text).to_string()
+                } else {
+                    val.get("choices").and_then(|c| c.get(0)).and_then(|c| c.get("message")).and_then(|m| m.get("content")).and_then(|t| t.as_str()).unwrap_or(&text).to_string()
+                };
+                // Try parsing as JSON, strip markdown fences if present
+                let cleaned = content.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
+                if let Ok(parsed) = serde_json::from_str::<Value>(cleaned) {
+                    Json(parsed)
+                } else {
+                    Json(json!({ "refactored_code": content, "explanation": "", "steps": [] }))
+                }
+            } else {
+                Json(json!({ "error": "Failed to parse LLM response", "raw": text }))
+            }
+        }
+        Err(e) => Json(json!({ "error": format!("LLM request failed: {}", e) })),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct ExportRequest {
+    pub content: String,
+    #[serde(default = "default_export_title")]
+    pub title: String,
+}
+
+fn default_export_title() -> String { "Document".to_string() }
+
+pub async fn export_docx(Json(body): Json<ExportRequest>) -> impl IntoResponse {
+    // Use Python to convert markdown → docx via python-docx
+    let script = r#"
+import sys, json
+try:
+    from docx import Document
+    from docx.shared import Pt, Inches
+    doc = Document()
+    for line in sys.stdin.read().split('\n'):
+        if line.startswith('# '):
+            doc.add_heading(line[2:], level=1)
+        elif line.startswith('## '):
+            doc.add_heading(line[3:], level=2)
+        elif line.startswith('### '):
+            doc.add_heading(line[4:], level=3)
+        elif line.startswith('- ') or line.startswith('* '):
+            doc.add_paragraph(line[2:], style='List Bullet')
+        elif line.startswith('```'):
+            pass
+        else:
+            doc.add_paragraph(line)
+    import tempfile, os, base64
+    fd, path = tempfile.mkstemp(suffix='.docx')
+    doc.save(path)
+    with open(path, 'rb') as f:
+        print(base64.b64encode(f.read()).decode())
+    os.unlink(path)
+except Exception as e:
+    print(json.dumps({"error": str(e)}))
+"#;
+    let output = tokio::process::Command::new("python3")
+        .arg("-c").arg(script)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .ok()
+        .and_then(|mut child| {
+            use tokio::io::AsyncWriteExt;
+            child.stdin.take().and_then(|mut stdin| {
+                // Can't easily do async write here in sync context, fall back to blocking
+                Some(child)
+            })
+        });
+
+    // Simpler approach: write to temp file, run python, read result
+    let tmp_md = std::env::temp_dir().join(format!("zwork_export_{}.md", uuid::Uuid::new_v4().simple()));
+    let tmp_docx = tmp_md.with_extension("docx");
+    let _ = std::fs::write(&tmp_md, &body.content);
+
+    let script = format!(r#"
+from docx import Document
+doc = Document()
+with open('{}') as f:
+    for line in f:
+        line = line.rstrip('\n')
+        if line.startswith('# '): doc.add_heading(line[2:], level=1)
+        elif line.startswith('## '): doc.add_heading(line[3:], level=2)
+        elif line.startswith('### '): doc.add_heading(line[4:], level=3)
+        elif line.startswith('- ') or line.startswith('* '): doc.add_paragraph(line[2:], style='List Bullet')
+        else: doc.add_paragraph(line)
+doc.save('{}')
+"#, tmp_md.display(), tmp_docx.display());
+
+    let result = tokio::process::Command::new("python3")
+        .arg("-c")
+        .arg(&script)
+        .output()
+        .await;
+
+    let _ = std::fs::remove_file(&tmp_md);
+
+    match result {
+        Ok(output) if output.status.success() && tmp_docx.exists() => {
+            match std::fs::read(&tmp_docx) {
+                Ok(bytes) => {
+                    let _ = std::fs::remove_file(&tmp_docx);
+                    let b64 = standard_b64_encode(&bytes);
+                    Json(json!({ "data": format!("data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,{}", b64), "filename": format!("{}.docx", body.title) }))
+                }
+                Err(e) => Json(json!({ "error": format!("Failed to read docx: {}", e) })),
+            }
+        }
+        Ok(output) => {
+            let _ = std::fs::remove_file(&tmp_docx);
+            Json(json!({ "error": String::from_utf8_lossy(&output.stderr).to_string() }))
+        }
+        Err(e) => Json(json!({ "error": format!("Failed to run python: {}", e) })),
+    }
+}
+
+pub async fn export_pdf(Json(body): Json<ExportRequest>) -> impl IntoResponse {
+    let tmp_md = std::env::temp_dir().join(format!("zwork_export_{}.md", uuid::Uuid::new_v4().simple()));
+    let tmp_pdf = tmp_md.with_extension("pdf");
+    let _ = std::fs::write(&tmp_md, &body.content);
+
+    let script = format!(r#"
+from fpdf import FPDF
+pdf = FPDF()
+pdf.add_page()
+pdf.set_auto_page_break(auto=True, margin=15)
+with open('{}') as f:
+    for line in f:
+        line = line.rstrip('\n')
+        if line.startswith('# '): pdf.set_font('Helvetica', 'B', 16); pdf.cell(0, 10, line[2:], ln=True)
+        elif line.startswith('## '): pdf.set_font('Helvetica', 'B', 14); pdf.cell(0, 8, line[3:], ln=True)
+        elif line.startswith('### '): pdf.set_font('Helvetica', 'B', 12); pdf.cell(0, 7, line[4:], ln=True)
+        else: pdf.set_font('Helvetica', '', 10); pdf.multi_cell(0, 5, line)
+pdf.output('{}')
+"#, tmp_md.display(), tmp_pdf.display());
+
+    let result = tokio::process::Command::new("python3")
+        .arg("-c")
+        .arg(&script)
+        .output()
+        .await;
+
+    let _ = std::fs::remove_file(&tmp_md);
+
+    match result {
+        Ok(output) if output.status.success() && tmp_pdf.exists() => {
+            match std::fs::read(&tmp_pdf) {
+                Ok(bytes) => {
+                    let _ = std::fs::remove_file(&tmp_pdf);
+                    let b64 = standard_b64_encode(&bytes);
+                    Json(json!({ "data": format!("data:application/pdf;base64,{}", b64), "filename": format!("{}.pdf", body.title) }))
+                }
+                Err(e) => Json(json!({ "error": format!("Failed to read pdf: {}", e) })),
+            }
+        }
+        Ok(output) => {
+            let _ = std::fs::remove_file(&tmp_pdf);
+            Json(json!({ "error": String::from_utf8_lossy(&output.stderr).to_string() }))
+        }
+        Err(e) => Json(json!({ "error": format!("Failed to run python: {}", e) })),
+    }
+}
+
+pub async fn screenshot() -> impl IntoResponse {
+    // Find dctl binary
+    let dctl_path = crate::tools::dctl::find_dctl_path();
+    let dctl_bin = match dctl_path {
+        Some(p) => p,
+        None => return Json(json!({ "error": "dctl not found" })),
+    };
+
+    let result = tokio::process::Command::new(&dctl_bin)
+        .arg("screenshot")
+        .arg("--base64")
+        .output()
+        .await;
+
+    match result {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            // Try parsing as JSON (dctl returns JSON with base64 field)
+            let (b64_data, temp_path) = if let Ok(val) = serde_json::from_str::<Value>(&stdout) {
+                let b64 = val.get("base64").and_then(|v| v.as_str()).unwrap_or(&stdout).to_string();
+                let tmp = val.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                (b64, tmp)
+            } else {
+                (stdout.trim().to_string(), String::new())
+            };
+
+            let filename = format!("screenshot_{}.png", chrono::Utc::now().timestamp_millis());
+            let upload_dir = crate::paths::workspace_uploads_dir();
+            let _ = std::fs::create_dir_all(&upload_dir);
+
+            // Save to uploads
+            match standard_b64_decode(&b64_data) {
+                Ok(bytes) => {
+                    let save_path = upload_dir.join(&filename);
+                    let _ = std::fs::write(&save_path, &bytes);
+
+                    // Clean up temp file if exists
+                    if !temp_path.is_empty() {
+                        let _ = std::fs::remove_file(&temp_path);
+                    }
+
+                    Json(json!({
+                        "screenshot": format!("data:image/png;base64,{}", b64_data),
+                        "path": save_path.to_string_lossy(),
+                        "filename": filename,
+                    }))
+                }
+                Err(e) => Json(json!({ "error": format!("Failed to decode screenshot: {}", e) })),
+            }
+        }
+        Ok(output) => Json(json!({ "error": String::from_utf8_lossy(&output.stderr).to_string() })),
+        Err(e) => Json(json!({ "error": format!("Failed to run dctl: {}", e) })),
+    }
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+fn standard_b64_decode(input: &str) -> Result<Vec<u8>, String> {
+    // Manual base64 decode without adding a dependency
+    use std::io::Read;
+    let trimmed = input.trim().replace('\n', "").replace('\r', "").replace(' ', "");
+    let decoded = base64_decode_bytes(trimmed.as_bytes());
+    decoded.ok_or_else(|| "Invalid base64".to_string())
+}
+
+fn standard_b64_encode(input: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::new();
+    let chunks = input.chunks(3);
+    for chunk in chunks {
+        let b0 = chunk[0] as u32;
+        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
+        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        result.push(CHARS[((triple >> 18) & 0x3F) as usize] as char);
+        result.push(CHARS[((triple >> 12) & 0x3F) as usize] as char);
+        if chunk.len() > 1 { result.push(CHARS[((triple >> 6) & 0x3F) as usize] as char); } else { result.push('='); }
+        if chunk.len() > 2 { result.push(CHARS[(triple & 0x3F) as usize] as char); } else { result.push('='); }
+    }
+    result
+}
+
+fn base64_decode_bytes(input: &[u8]) -> Option<Vec<u8>> {
+    const TABLE: [i8; 256] = [
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,62,-1,-1,-1,63,
+        52,53,54,55,56,57,58,59,60,61,-1,-1,-1,-1,-1,-1,
+        -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,
+        15,16,17,18,19,20,21,22,23,24,25,-1,-1,-1,-1,-1,
+        -1,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,
+        41,42,43,44,45,46,47,48,49,50,51,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+    ];
+    let mut result = Vec::new();
+    let input: Vec<u8> = input.iter().filter(|&&b| b != b'=' && b != b'\n' && b != b'\r' && b != b' ').copied().collect();
+    let chunks = input.chunks(4);
+    for chunk in chunks {
+        let mut acc: u32 = 0;
+        let mut bits = 0;
+        for &b in chunk {
+            let v = TABLE[b as usize];
+            if v < 0 { return None; }
+            acc = (acc << 6) | (v as u32);
+            bits += 6;
+        }
+        while bits >= 8 {
+            bits -= 8;
+            result.push((acc >> bits) as u8);
+        }
+    }
+    Some(result)
+}
+
+fn guess_mime(filename: &str) -> String {
+    let lower = filename.to_lowercase();
+    if lower.ends_with(".png") { "image/png".to_string() }
+    else if lower.ends_with(".jpg") || lower.ends_with(".jpeg") { "image/jpeg".to_string() }
+    else if lower.ends_with(".gif") { "image/gif".to_string() }
+    else if lower.ends_with(".pdf") { "application/pdf".to_string() }
+    else if lower.ends_with(".json") { "application/json".to_string() }
+    else if lower.ends_with(".md") { "text/markdown".to_string() }
+    else if lower.ends_with(".txt") { "text/plain".to_string() }
+    else if lower.ends_with(".html") { "text/html".to_string() }
+    else if lower.ends_with(".csv") { "text/csv".to_string() }
+    else { "application/octet-stream".to_string() }
+}
+
+fn sanitize_filename(name: &str) -> String {
+    name.chars()
+        .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+        .collect()
+}
+
+fn extract_html_title(html: &str) -> String {
+    if let Some(start) = html.find("<title>") {
+        if let Some(end) = html[start + 7..].find("</title>") {
+            return html[start + 7..start + 7 + end].trim().to_string();
+        }
+    }
+    String::new()
+}
+
+fn html_to_markdown(html: &str) -> String {
+    let mut text = html.to_string();
+    // Strip script and style blocks
+    let re_script = regex::Regex::new(r"(?is)<script[^>]*>.*?</script>").ok();
+    let re_style = regex::Regex::new(r"(?is)<style[^>]*>.*?</style>").ok();
+    if let Some(re) = re_script { text = re.replace_all(&text, "").to_string(); }
+    if let Some(re) = re_style { text = re.replace_all(&text, "").to_string(); }
+    // Headers
+    for level in 1..=6 {
+        let tag = format!("h{}", level);
+        let prefix = "#".repeat(level);
+        let re_open = regex::Regex::new(&format!(r"(?i)<{}\s*[^>]*>", tag)).ok();
+        let re_close = regex::Regex::new(&format!(r"(?i)</{}>", tag)).ok();
+        if let Some(re) = re_open { text = re.replace_all(&text, &format!("\n{} ", prefix)).to_string(); }
+        if let Some(re) = re_close { text = re.replace_all(&text, "\n").to_string(); }
+    }
+    // Paragraphs and line breaks
+    let re_p = regex::Regex::new(r"(?i)<p\s*[^>]*>").ok();
+    let re_p_close = regex::Regex::new(r"(?i)</p>").ok();
+    let re_br = regex::Regex::new(r"(?i)<br\s*/?\s*>").ok();
+    if let Some(re) = re_p { text = re.replace_all(&text, "\n").to_string(); }
+    if let Some(re) = re_p_close { text = re.replace_all(&text, "\n").to_string(); }
+    if let Some(re) = re_br { text = re.replace_all(&text, "\n").to_string(); }
+    // Links
+    let re_link = regex::Regex::new(r#"(?i)<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>"#).ok();
+    if let Some(re) = re_link { text = re.replace_all(&text, "[$2]($1)").to_string(); }
+    // Bold and italic
+    let re_b = regex::Regex::new(r"(?i)</?(b|strong)>").ok();
+    let re_i = regex::Regex::new(r"(?i)</?(i|em)>").ok();
+    if let Some(re) = re_b { text = re.replace_all(&text, "**").to_string(); }
+    if let Some(re) = re_i { text = re.replace_all(&text, "*").to_string(); }
+    // List items
+    let re_li = regex::Regex::new(r"(?i)<li[^>]*>").ok();
+    if let Some(re) = re_li { text = re.replace_all(&text, "- ").to_string(); }
+    // Strip remaining tags
+    let re_tag = regex::Regex::new(r"<[^>]+>").ok();
+    if let Some(re) = re_tag { text = re.replace_all(&text, "").to_string(); }
+    // Decode HTML entities
+    text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'");
+    // Collapse whitespace
+    let re_ws = regex::Regex::new(r"\n{3,}").ok();
+    if let Some(re) = re_ws { text = re.replace_all(&text, "\n\n").to_string(); }
+    text.trim().to_string()
+}
+
+// ─── Tasks ────────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct TaskCreateUpdate {
+    pub title: Option<String>,
+    #[serde(default)]
+    pub column: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub priority: Option<String>,
+    #[serde(default)]
+    pub due_date: Option<String>,
+    #[serde(default)]
+    pub assignee: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct TaskColumnUpdate {
+    pub column: String,
+}
+
+pub async fn list_tasks() -> impl IntoResponse {
+    let tasks = crate::taskstore::get_tasks();
+    Json(json!({ "tasks": tasks }))
+}
+
+pub async fn create_task_handler(Json(req): Json<TaskCreateUpdate>) -> impl IntoResponse {
+    let task = crate::taskstore::create_task(
+        req.title.unwrap_or_default(),
+        req.column,
+        req.description,
+        req.priority,
+        req.due_date,
+        req.assignee,
+    );
+    Json(json!({ "task": task }))
+}
+
+pub async fn update_task_handler(
+    Path(task_id): Path<String>,
+    Json(req): Json<TaskCreateUpdate>,
+) -> impl IntoResponse {
+    match crate::taskstore::update_task(
+        &task_id,
+        req.title,
+        req.column,
+        req.description,
+        req.priority,
+        req.due_date,
+        req.assignee,
+    ) {
+        Some(task) => Json(json!({ "task": task })),
+        None => Json(json!({ "error": "Task not found" })),
+    }
+}
+
+pub async fn update_task_column_handler(
+    Path(task_id): Path<String>,
+    Json(req): Json<TaskColumnUpdate>,
+) -> impl IntoResponse {
+    match crate::taskstore::update_task_column(&task_id, &req.column) {
+        Some(task) => Json(json!({ "task": task })),
+        None => Json(json!({ "error": "Task not found" })),
+    }
+}
+
+pub async fn delete_task_handler(Path(task_id): Path<String>) -> impl IntoResponse {
+    let ok = crate::taskstore::delete_task(&task_id);
+    Json(json!({ "success": ok }))
+}
+
+// ─── Events ───────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct EventCreateUpdate {
+    pub title: String,
+    pub date: String,
+    pub start_time: Option<String>,
+    pub end_time: Option<String>,
+}
+
+pub async fn list_events() -> impl IntoResponse {
+    let events = crate::taskstore::get_events();
+    Json(json!({ "events": events }))
+}
+
+pub async fn create_event_handler(Json(req): Json<EventCreateUpdate>) -> impl IntoResponse {
+    let event = crate::taskstore::create_event(
+        req.title,
+        req.date,
+        req.start_time,
+        req.end_time,
+    );
+    Json(json!({ "event": event }))
+}
+
+pub async fn delete_event_handler(Path(event_id): Path<String>) -> impl IntoResponse {
+    let ok = crate::taskstore::delete_event(&event_id);
+    Json(json!({ "success": ok }))
+}
+
+// ─── MCP stubs ────────────────────────────────────────────────────────────────
+
+pub async fn mcp_servers() -> impl IntoResponse {
+    let config_path = dirs::home_dir()
+        .map(|h| h.join(".zwork").join("mcp.json"))
+        .unwrap_or_default();
+    let servers: Vec<Value> = if config_path.exists() {
+        std::fs::read_to_string(&config_path)
+            .ok()
+            .and_then(|s| {
+                let v: Value = serde_json::from_str(&s).ok()?;
+                let obj = v.get("mcpServers")?.as_object()?;
+                Some(obj.iter().map(|(name, spec)| {
+                    json!({
+                        "name": name,
+                        "connected": false,
+                        "spec": spec,
+                    })
+                }).collect())
+            })
+            .unwrap_or_default()
+    } else {
+        vec![]
+    };
+    Json(json!({ "servers": servers, "config_path": config_path.to_string_lossy() }))
+}
+
+pub async fn mcp_tools() -> impl IntoResponse {
+    Json(json!({ "tools": [] }))
+}
+
 // ─── Composio stubs ──────────────────────────────────────────────────────────
 // These endpoints keep the frontend Connectors page from rendering blank.
 // Full Composio integration is not yet wired into the Rust backend; the

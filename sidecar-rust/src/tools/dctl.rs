@@ -3,7 +3,12 @@ use std::process::Stdio;
 use tokio::process::Command;
 use crate::paths::repo_root;
 
-fn find_dctl_path() -> String {
+pub fn find_dctl_path() -> Option<String> {
+    let path = find_dctl_path_inner();
+    if path.is_empty() { None } else { Some(path) }
+}
+
+fn find_dctl_path_inner() -> String {
     let rr = repo_root();
     
     // 1. Dev layout: sibling dctl folder
@@ -43,7 +48,7 @@ pub async fn execute_dctl(params: &Value) -> Result<String, String> {
         }
     }
     
-    let dctl_bin = find_dctl_path();
+    let dctl_bin = find_dctl_path_inner();
     let mut cmd = Command::new(&dctl_bin);
     cmd.args(&args);
     cmd.stdout(Stdio::piped());

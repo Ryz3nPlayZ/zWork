@@ -11,6 +11,7 @@ pub mod shell;
 pub mod search;
 pub mod doc_extract;
 pub mod dctl;
+pub mod stock;
 
 // Risk evaluation for permission checking
 pub enum Risk {
@@ -145,6 +146,18 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
             }
         }),
         json!({
+            "name": "get_stock_data",
+            "description": "Get stock price data and technical indicators (SMA, EMA, RSI, MACD) for a given ticker.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": { "type": "string", "description": "Stock ticker symbol (e.g. AAPL, GOOGL)" },
+                    "range": { "type": "string", "description": "Time range: 5d, 1mo, 3mo, 6mo, 1y, 2y, ytd, max", "default": "3mo" }
+                },
+                "required": ["ticker"]
+            }
+        }),
+        json!({
             "name": "ask_question",
             "description": "Ask the user a clarifying question with multiple choice options. Blocks until response.",
             "parameters": {
@@ -244,6 +257,55 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
                 "required": ["subcommand"]
             }
         }));
+        // dctl specializations — route to the same dctl binary
+        schemas.push(json!({
+            "name": "dctl_system",
+            "description": "System-level desktop control: launch apps, list windows, system discovery.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "description": "System action (launch, list-windows, etc.)" },
+                    "args": { "type": "array", "items": { "type": "string" }, "description": "Action arguments" }
+                },
+                "required": ["action"]
+            }
+        }));
+        schemas.push(json!({
+            "name": "dctl_ui",
+            "description": "UI automation: click, type, read accessibility tree, interact with controls.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "description": "UI action (click, type, read-tree, etc.)" },
+                    "args": { "type": "array", "items": { "type": "string" }, "description": "Action arguments" }
+                },
+                "required": ["action"]
+            }
+        }));
+        schemas.push(json!({
+            "name": "dctl_browser",
+            "description": "Browser automation via CDP: open URLs, take snapshots, interact with page elements.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "description": "Browser action (open, snapshot, tabs, etc.)" },
+                    "args": { "type": "array", "items": { "type": "string" }, "description": "Action arguments" }
+                },
+                "required": ["action"]
+            }
+        }));
+        schemas.push(json!({
+            "name": "dctl_office",
+            "description": "Office document control: semantic editing of Word, Excel, LibreOffice documents.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "description": "Office action" },
+                    "args": { "type": "array", "items": { "type": "string" }, "description": "Action arguments" }
+                },
+                "required": ["action"]
+            }
+        }));
         schemas.push(json!({
             "name": "spawn_agent",
             "description": "Spawn a sub-agent for parallel independent work. Returns a task ID to track progress.",
@@ -254,6 +316,39 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
                     "model_id": { "type": "string", "description": "Optional model override for the sub-agent" }
                 },
                 "required": ["description"]
+            }
+        }));
+        schemas.push(json!({
+            "name": "manage_tasks",
+            "description": "List, create, update, or delete user tasks. Tasks have columns: inbox, todo, doing, done.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "enum": ["list", "create", "update", "delete"], "description": "Action to perform" },
+                    "task_id": { "type": "string", "description": "Task ID (for update/delete)" },
+                    "title": { "type": "string", "description": "Task title (for create/update)" },
+                    "column": { "type": "string", "enum": ["inbox", "todo", "doing", "done"], "description": "Column to move task to" },
+                    "description": { "type": "string", "description": "Task description" },
+                    "priority": { "type": "string", "enum": ["low", "medium", "high"], "description": "Task priority" },
+                    "due_date": { "type": "string", "description": "Due date YYYY-MM-DD" }
+                },
+                "required": ["action"]
+            }
+        }));
+        schemas.push(json!({
+            "name": "manage_events",
+            "description": "List, create, or delete calendar events.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "enum": ["list", "create", "delete"], "description": "Action to perform" },
+                    "event_id": { "type": "string", "description": "Event ID (for delete)" },
+                    "title": { "type": "string", "description": "Event title" },
+                    "date": { "type": "string", "description": "Event date YYYY-MM-DD" },
+                    "start_time": { "type": "string", "description": "Start time HH:MM" },
+                    "end_time": { "type": "string", "description": "End time HH:MM" }
+                },
+                "required": ["action"]
             }
         }));
     }
@@ -330,7 +425,36 @@ pub fn execute_tool(
                 });
                 Ok(serde_json::to_string_pretty(&profile).unwrap_or_default())
             }
-            "dctl" => dctl::execute_dctl(&params).await,
+            "get_stock_data" => stock::execute_get_stock_data(&params).await,
+            "dctl" | "dctl_system" | "dctl_ui" | "dctl_browser" | "dctl_office" => {
+                // All dctl variants route to the same binary.
+                // For specialized variants, map the action param to subcommand.
+                let mapped_params = if name != "dctl" {
+                    let action = params.get("action").and_then(|v| v.as_str()).unwrap_or("");
+                    let mut new_params = params.clone();
+                    // Set subcommand from action field
+                    new_params.as_object_mut().map(|obj| {
+                        obj.insert("subcommand".to_string(), json!(action));
+                    });
+                    // Prefix with the variant category for disambiguation
+                    let category = match name.as_str() {
+                        "dctl_system" => "system",
+                        "dctl_ui" => "ui",
+                        "dctl_browser" => "browser",
+                        "dctl_office" => "office",
+                        _ => "",
+                    };
+                    if !category.is_empty() {
+                        new_params.as_object_mut().map(|obj| {
+                            obj.insert("category".to_string(), json!(category));
+                        });
+                    }
+                    new_params
+                } else {
+                    params.clone()
+                };
+                dctl::execute_dctl(&mapped_params).await
+            }
             "spawn_agent" => {
                 // Sub-agent spawning is not yet fully implemented in the Rust backend.
                 // Return a placeholder so the model knows the tool was received.
@@ -340,6 +464,96 @@ pub fn execute_tool(
             "ask_question" | "ask_user" => {
                 // Return immediate choice instructions if called programmatically
                 Ok("Select from options card in chat UI.".to_string())
+            }
+            "manage_tasks" => {
+                let action = params.get("action").and_then(|v| v.as_str()).unwrap_or("list");
+                match action {
+                    "list" => {
+                        let tasks = crate::taskstore::get_tasks();
+                        Ok(serde_json::to_string_pretty(&tasks).unwrap_or_else(|_| "[]".to_string()))
+                    }
+                    "create" => {
+                        let title = params.get("title").and_then(|v| v.as_str()).unwrap_or("Untitled task");
+                        let task = crate::taskstore::create_task(
+                            title.to_string(),
+                            params.get("column").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                            params.get("description").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                            params.get("priority").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                            params.get("due_date").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                            None,
+                        );
+                        Ok(format!("Created task: {} (id={})", task.title, task.id))
+                    }
+                    "update" => {
+                        let task_id = params.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
+                        if task_id.is_empty() {
+                            Err("task_id is required for update action".to_string())
+                        } else {
+                            match crate::taskstore::update_task(
+                                task_id,
+                                params.get("title").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                params.get("column").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                params.get("description").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                params.get("priority").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                params.get("due_date").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                None,
+                            ) {
+                                Some(task) => Ok(format!("Updated task: {} (id={})", task.title, task.id)),
+                                None => Err(format!("Task '{}' not found", task_id)),
+                            }
+                        }
+                    }
+                    "delete" => {
+                        let task_id = params.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
+                        if crate::taskstore::delete_task(task_id) {
+                            Ok(format!("Deleted task {}", task_id))
+                        } else {
+                            Err(format!("Task '{}' not found", task_id))
+                        }
+                    }
+                    _ => Err(format!("Unknown manage_tasks action: {}", action)),
+                }
+            }
+            "manage_events" => {
+                let action = params.get("action").and_then(|v| v.as_str()).unwrap_or("list");
+                match action {
+                    "list" => {
+                        let events = crate::taskstore::get_events();
+                        Ok(serde_json::to_string_pretty(&events).unwrap_or_else(|_| "[]".to_string()))
+                    }
+                    "create" => {
+                        let title = params.get("title").and_then(|v| v.as_str()).unwrap_or("Untitled event");
+                        let date = params.get("date").and_then(|v| v.as_str()).unwrap_or("");
+                        if date.is_empty() {
+                            Err("date is required for create action".to_string())
+                        } else {
+                            let event = crate::taskstore::create_event(
+                                title.to_string(),
+                                date.to_string(),
+                                params.get("start_time").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                                params.get("end_time").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                            );
+                            Ok(format!("Created event: {} on {} (id={})", event.title, event.date, event.id))
+                        }
+                    }
+                    "delete" => {
+                        let event_id = params.get("event_id").and_then(|v| v.as_str()).unwrap_or("");
+                        if crate::taskstore::delete_event(event_id) {
+                            Ok(format!("Deleted event {}", event_id))
+                        } else {
+                            Err(format!("Event '{}' not found", event_id))
+                        }
+                    }
+                    _ => Err(format!("Unknown manage_events action: {}", action)),
+                }
+            }
+            t if t.starts_with("mcp__") => {
+                // MCP tool execution — not yet implemented
+                Err(format!("MCP tool '{}' is not yet available in this build.", name))
+            }
+            t if t.starts_with("composio__") => {
+                // Composio tool execution — not yet implemented
+                Err(format!("Composio tool '{}' is not yet available in this build.", name))
             }
             _ => Err(format!("Tool '{}' is not implemented.", name)),
         };

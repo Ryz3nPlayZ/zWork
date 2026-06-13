@@ -215,3 +215,19 @@ pub fn set_compaction(chat_id: &str, summary: &str, cursor: u64) -> Option<Chat>
     save(&c);
     Some(c)
 }
+
+/// Remove all messages after the given message_id, optionally updating that
+/// message's content. Returns the updated chat.
+pub fn truncate_at_message(chat_id: &str, message_id: &str, content: Option<Value>) -> Option<Chat> {
+    let mut c = get(chat_id)?;
+    let pos = c.messages.iter().position(|m| m.id == message_id)?;
+    // Optionally update the truncation target message
+    if let Some(ref val) = content {
+        c.messages[pos].content = val.clone();
+    }
+    // Keep only messages up to and including the target
+    c.messages.truncate(pos + 1);
+    c.updated_at = now_ms();
+    save(&c);
+    Some(c)
+}

@@ -106,6 +106,18 @@ pub fn skills_dir() -> PathBuf {
     repo_root().join("zWork-Skills")
 }
 
+pub fn tasks_path() -> PathBuf {
+    home_dir().join("tasks.json")
+}
+
+pub fn activity_log_path() -> PathBuf {
+    home_dir().join("state").join("activity_log.json")
+}
+
+pub fn telemetry_log_path() -> PathBuf {
+    home_dir().join("telemetry.jsonl")
+}
+
 pub fn is_safe_id(id_str: &str) -> bool {
     if id_str.is_empty() {
         return false;

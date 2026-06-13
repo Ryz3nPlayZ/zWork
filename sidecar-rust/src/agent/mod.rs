@@ -9,6 +9,7 @@ use crate::settings;
 use crate::chatstore;
 mod prompts;
 mod stream;
+mod compaction;
 
 use prompts::convert_input_messages;
 use stream::stream_upstream;
@@ -33,6 +34,35 @@ pub fn reject_gate(gate_id: &str) -> bool {
     let mut map = pending_permission_gates().lock().unwrap();
     if let Some(tx) = map.remove(gate_id) {
         let _ = tx.send(false);
+        true
+    } else {
+        false
+    }
+}
+
+// ─── Pending question registry ───────────────────────────────────────────────
+// Tracks ask_user/ask_question tool calls that are waiting for the user to
+// answer via the POST /api/chats/:chat_id/answer-question endpoint.
+
+fn pending_questions() -> &'static Mutex<HashMap<String, oneshot::Sender<String>>> {
+    static INSTANCE: OnceLock<Mutex<HashMap<String, oneshot::Sender<String>>>> = OnceLock::new();
+    INSTANCE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Register a pending question and return a receiver that resolves when the
+/// user answers via the REST endpoint.
+pub fn register_pending_question(chat_id: &str) -> oneshot::Receiver<String> {
+    let (tx, rx) = oneshot::channel();
+    let mut map = pending_questions().lock().unwrap();
+    map.insert(chat_id.to_string(), tx);
+    rx
+}
+
+/// Resolve a pending question. Called from the answer-question REST handler.
+pub fn answer_pending_question(chat_id: &str, answer: &str) -> bool {
+    let mut map = pending_questions().lock().unwrap();
+    if let Some(tx) = map.remove(chat_id) {
+        let _ = tx.send(answer.to_string());
         true
     } else {
         false
@@ -449,6 +479,8 @@ const KNOWN_TOOLS: &[&str] = &[
     "extract_document", "web_search", "search_papers", "format_citation",
     "save_memory", "deploy_web_app", "dctl", "read_skill", "spawn_agent",
     "ask_question", "ask_user", "ask_user_for_permission", "detect_hardware",
+    "manage_tasks", "manage_events", "get_stock_data",
+    "dctl_system", "dctl_ui", "dctl_browser", "dctl_office",
 ];
 
 /// Parse tool calls that a model outputted as plain text instead of
