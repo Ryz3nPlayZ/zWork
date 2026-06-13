@@ -29,6 +29,7 @@ const InboxPage = lazy(() => import("./components/InboxPage").then((m) => ({ def
 const OverlayChatView = lazy(() => import("./components/OverlayChatView").then((m) => ({ default: m.OverlayChatView })));
 import { Logo } from "./components/Logo";
 import { KeybindingsModal } from "./components/KeybindingsModal";
+import { PermissionPrompt } from "./components/PermissionPrompt";
 
 
 function OfflineBanner() {
@@ -590,6 +591,7 @@ export default function App() {
           <SearchModal />
         </Suspense>
         <KeybindingsModal />
+        <PermissionPrompt />
       </div>
     </div>
   );
