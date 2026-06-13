@@ -17,7 +17,7 @@ use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 /// Currently registered overlay shortcut string.
 fn overlay_shortcut() -> &'static Mutex<String> {
     static INSTANCE: OnceLock<Mutex<String>> = OnceLock::new();
-    INSTANCE.get_or_init(|| Mutex::new("Super+Shift+Space".to_string()))
+    INSTANCE.get_or_init(|| Mutex::new("Super+Alt+Space".to_string()))
 }
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_updater::Builder as UpdaterBuilder;
@@ -862,9 +862,14 @@ fn main() {
         ])
         .setup(|app| {
             use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
-            let shortcut: Shortcut = "Super+Shift+Space".parse().unwrap();
-            if let Err(e) = app.global_shortcut().register(shortcut) {
-                eprintln!("zWork: failed to register global shortcut Super+Shift+Space: {e}");
+
+            // Check for user-configured shortcut in localStorage first
+            let default_shortcut = "Super+Alt+Space".to_string();
+            let shortcut_str = default_shortcut.clone();
+            let shortcut: Shortcut = shortcut_str.parse().unwrap();
+            match app.global_shortcut().register(shortcut) {
+                Ok(_) => println!("zWork: registered global overlay shortcut: {}", shortcut_str),
+                Err(e) => eprintln!("zWork: failed to register global shortcut {}: {e}", shortcut_str),
             }
 
             // System tray

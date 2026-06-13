@@ -8,7 +8,14 @@ pub async fn execute_read_file(params: &Value) -> Result<String, String> {
         .ok_or_else(|| "Missing parameter 'path'".to_string())?;
     
     let path = Path::new(path_str);
-    fs::read_to_string(path).map_err(|e| format!("Failed to read file '{}': {}", path_str, e))
+    let mut content = fs::read_to_string(path)
+        .map_err(|e| format!("Failed to read file '{}': {}", path_str, e))?;
+    
+    if content.len() > 200_000 {
+        content.truncate(200_000);
+        content.push_str("\n…[truncated]");
+    }
+    Ok(content)
 }
 
 pub async fn execute_write_file(params: &Value) -> Result<String, String> {

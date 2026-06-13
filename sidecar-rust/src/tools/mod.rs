@@ -23,19 +23,25 @@ pub fn evaluate_tool_risk(name: &str, params: &Value) -> Risk {
     match name {
         "run_command" => {
             let cmd = params.get("command").and_then(|v| v.as_str()).unwrap_or("");
-            let cmd_lower = cmd.to_lowercase();
-            // Check for obviously destructive patterns
-            if cmd_lower.contains("rm -rf")
-                || cmd_lower.contains("format ")
-                || cmd_lower.contains("dropdb")
-                || cmd_lower.contains("shutdown")
-                || cmd_lower.contains("kill -9")
-            {
+            if targets_zwork_backend(cmd) {
                 Risk::Destructive {
-                    reason: format!("Executing potentially destructive command: '{}'", cmd),
+                    reason: "Refusing to run a command that kills the zWork local backend on port 8787. Restart or inspect the backend instead of killing the app's own service.".to_string(),
                 }
             } else {
-                Risk::Safe
+                let cmd_lower = cmd.to_lowercase();
+                // Check for obviously destructive patterns
+                if cmd_lower.contains("rm -rf")
+                    || cmd_lower.contains("format ")
+                    || cmd_lower.contains("dropdb")
+                    || cmd_lower.contains("shutdown")
+                    || cmd_lower.contains("kill -9")
+                {
+                    Risk::Destructive {
+                        reason: format!("Executing potentially destructive command: '{}'", cmd),
+                    }
+                } else {
+                    Risk::Safe
+                }
             }
         }
         "write_file" => {
@@ -51,6 +57,20 @@ pub fn evaluate_tool_risk(name: &str, params: &Value) -> Risk {
         }
         _ => Risk::Safe,
     }
+}
+
+fn targets_zwork_backend(command: &str) -> bool {
+    let c = command.to_lowercase();
+    if !c.contains("8787") {
+        return false;
+    }
+    
+    // Check for patterns like lsof/kill or pkill/killall containing 8787
+    let lsof_kill = regex::Regex::new(r"\blsof\b[^;&|]*(?::8787|-i\s*:8787)").unwrap();
+    let kill_cmd = regex::Regex::new(r"\b(?:xargs\s+)?kill(?:all)?\b").unwrap();
+    let direct_kill = regex::Regex::new(r"\b(?:kill|pkill|killall)\b[^;&|]*8787").unwrap();
+    
+    (lsof_kill.is_match(&c) && kill_cmd.is_match(&c)) || direct_kill.is_match(&c)
 }
 
 pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {

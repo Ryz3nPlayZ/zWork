@@ -1011,7 +1011,7 @@ const OVERLAY_SHORTCUT_KEY = "zwork:overlay-shortcut";
 
 function GlobalShortcutSection() {
   const [shortcut, setShortcut] = useState<string>(() => {
-    return localStorage.getItem(OVERLAY_SHORTCUT_KEY) || "Super+Shift+Space";
+    return localStorage.getItem(OVERLAY_SHORTCUT_KEY) || "Super+Alt+Space";
   });
 
   // On mount, sync the stored shortcut with the Tauri backend
@@ -1051,6 +1051,11 @@ function GlobalShortcutSection() {
         <h3 className="text-[14px] font-semibold text-ink">Keyboard Shortcuts</h3>
         <p className="text-[12px] text-ink-muted mt-1 leading-relaxed">
           Configure global keyboard shortcuts that work even when zWork is not focused.
+          {!accessibilityPermissionGranted && (
+            <span className="text-amber-500 font-medium block mt-1">
+              ⚠ Accessibility permission is required for global shortcuts to work. Grant it in the Permissions section above.
+            </span>
+          )}
         </p>
       </div>
       <div className="border-t border-line" />
