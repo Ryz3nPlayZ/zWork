@@ -499,10 +499,95 @@ fn is_http_url(url: &str) -> bool {
     }
 }
 
+/// macOS Accessibility trust check via CoreFoundation + ApplicationServices.
+///
+/// `AXIsProcessTrusted()` only reports cached state and never adds the app to
+/// the Accessibility list. `AXIsProcessTrustedWithOptions` with the
+/// `kAXTrustedCheckOptionPrompt` key set to true makes macOS show the native
+/// "would like to control this computer" dialog AND registers the app in the
+/// list so the user can toggle it. This is the only reliable way to request
+/// the permission — without it the app never appears in System Settings.
 #[cfg(target_os = "macos")]
-#[link(name = "ApplicationServices", kind = "framework")]
-extern "C" {
-    fn AXIsProcessTrusted() -> bool;
+mod macos_a11y {
+    use std::ffi::c_void;
+    use std::os::raw::c_char;
+
+    /// CFDictionary callbacks are structs (5 function pointers on 64-bit)
+    /// passed by reference. We only need their address, so an opaque sized
+    /// type is sufficient.
+    #[repr(C)]
+    struct CfDictCallBacks {
+        _opaque: [usize; 5],
+    }
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        static kCFAllocatorDefault: *const c_void;
+        static kCFTypeDictionaryKeyCallBacks: CfDictCallBacks;
+        static kCFTypeDictionaryValueCallBacks: CfDictCallBacks;
+        static kCFBooleanTrue: *const c_void;
+        fn CFStringCreateWithCString(
+            alloc: *const c_void,
+            c_str: *const c_char,
+            encoding: u32,
+        ) -> *const c_void;
+        fn CFDictionaryCreate(
+            alloc: *const c_void,
+            keys: *const *const c_void,
+            values: *const *const c_void,
+            num_values: isize,
+            key_callbacks: *const CfDictCallBacks,
+            value_callbacks: *const CfDictCallBacks,
+        ) -> *const c_void;
+        fn CFRelease(cf: *const c_void);
+    }
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    extern "C" {
+        fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
+    }
+
+    // kCFStringEncodingUTF8
+    const UTF8: u32 = 0x0800_0100;
+
+    /// Returns whether the process is Accessibility-trusted.
+    /// When `prompt` is true, macOS shows its native grant dialog and adds the
+    /// app to the Accessibility list (if missing). When false, this is a pure
+    /// non-interactive status check.
+    pub fn is_trusted(prompt: bool) -> bool {
+        unsafe {
+            if !prompt {
+                return AXIsProcessTrustedWithOptions(std::ptr::null());
+            }
+
+            let key = CFStringCreateWithCString(
+                kCFAllocatorDefault,
+                b"AXTrustedCheckOptionPrompt\0".as_ptr() as *const c_char,
+                UTF8,
+            );
+            let value = kCFBooleanTrue;
+            let keys: [*const c_void; 1] = [key];
+            let values: [*const c_void; 1] = [value];
+            let options = CFDictionaryCreate(
+                kCFAllocatorDefault,
+                keys.as_ptr(),
+                values.as_ptr(),
+                1,
+                &kCFTypeDictionaryKeyCallBacks,
+                &kCFTypeDictionaryValueCallBacks,
+            );
+
+            let trusted = AXIsProcessTrustedWithOptions(options);
+
+            if !options.is_null() {
+                CFRelease(options);
+            }
+            if !key.is_null() {
+                CFRelease(key);
+            }
+            trusted
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -516,7 +601,7 @@ extern "C" {
 fn check_accessibility_permission() -> bool {
     #[cfg(target_os = "macos")]
     {
-        unsafe { AXIsProcessTrusted() }
+        macos_a11y::is_trusted(false)
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -536,26 +621,33 @@ fn check_screen_recording_permission() -> bool {
     }
 }
 
+/// Triggers the native macOS Accessibility prompt (which also registers zWork
+/// in the Accessibility list) and returns the current trust state.
 #[tauri::command]
-fn request_accessibility_permission() {
+fn request_accessibility_permission() -> bool {
     #[cfg(target_os = "macos")]
     {
-        let _ = std::process::Command::new("open")
-            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-            .spawn();
+        macos_a11y::is_trusted(true)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
     }
 }
 
 #[tauri::command]
-fn request_screen_recording_permission() {
+fn request_screen_recording_permission() -> bool {
     #[cfg(target_os = "macos")]
     {
         unsafe {
             CGRequestScreenCaptureAccess();
+            // Re-preflight after requesting so the caller gets the live state.
+            CGPreflightScreenCaptureAccess()
         }
-        let _ = std::process::Command::new("open")
-            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
-            .spawn();
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
     }
 }
 

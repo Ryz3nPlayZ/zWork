@@ -69,7 +69,31 @@ function OfflineBanner() {
   );
 }
 
+/**
+ * Detect whether this webview is the overlay window, synchronously.
+ * Tauri injects the window label into `__TAURI_INTERNALS__.metadata` before
+ * any app JS runs, so this is safe to call at the top of the component.
+ */
+function isOverlayWindow(): boolean {
+  if (typeof window === "undefined") return false;
+  const internals = (window as any).__TAURI_INTERNALS__;
+  return internals?.metadata?.currentWindow?.label === "overlay";
+}
+
 export default function App() {
+  // Detect the overlay window SYNCHRONOUSLY — this must happen before any
+  // hooks are called. The window label is constant for the process lifetime,
+  // so returning early here keeps the hook count stable across renders
+  // (violating this causes React error #300). Previously this was an async
+  // state that flipped false→true mid-lifecycle, skipping later hooks.
+  if (isOverlayWindow()) {
+    return (
+      <Suspense fallback={<div className="h-screen w-screen bg-paper/10 backdrop-blur-xl" />}>
+        <OverlayChatView />
+      </Suspense>
+    );
+  }
+
   const previewMode = getPreviewMode();
   // Handle OAuth token callback from web sign-in (must run before any auth logic)
   handleOAuthTokenCallback();
@@ -96,30 +120,6 @@ export default function App() {
   const backendReady = useApp((s) => s.backendReady);
   const keybindingsOpen = useApp((s) => s.keybindingsOpen);
   const setKeybindingsOpen = useApp((s) => s.setKeybindingsOpen);
-
-  const [isOverlay, setIsOverlay] = useState(false);
-  useEffect(() => {
-    if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__) {
-      import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-        try {
-          const win = getCurrentWindow();
-          if (win.label === "overlay") {
-            setIsOverlay(true);
-          }
-        } catch (err) {
-          console.error(err);
-        }
-      });
-    }
-  }, []);
-
-  if (isOverlay) {
-    return (
-      <Suspense fallback={<div className="h-screen w-screen bg-paper/10 backdrop-blur-xl" />}>
-        <OverlayChatView />
-      </Suspense>
-    );
-  }
 
   // Skip onboarding in browser preview mode (non-Tauri environment)
   const skipOnboarding = typeof window !== "undefined" && !((window as any).__TAURI_INTERNALS__);
