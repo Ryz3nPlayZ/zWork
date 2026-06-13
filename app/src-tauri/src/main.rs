@@ -14,10 +14,10 @@ use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri_plugin_process::init as process_init;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 
-/// Currently registered overlay shortcut string.
-fn overlay_shortcut() -> &'static Mutex<String> {
-    static INSTANCE: OnceLock<Mutex<String>> = OnceLock::new();
-    INSTANCE.get_or_init(|| Mutex::new("Super+Alt+Space".to_string()))
+/// Currently registered overlay shortcut.
+fn overlay_shortcut() -> &'static Mutex<Option<Shortcut>> {
+    static INSTANCE: OnceLock<Mutex<Option<Shortcut>>> = OnceLock::new();
+    INSTANCE.get_or_init(|| Mutex::new(None))
 }
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_updater::Builder as UpdaterBuilder;
@@ -669,36 +669,39 @@ async fn begin_desktop_auth(app: tauri::AppHandle, start_url: String) -> Result<
 }
 
 /// Re-register the global overlay shortcut.
-/// `shortcut_str` should be a Tauri-compatible shortcut like "Super+Shift+Space".
+/// `shortcut_str` should be a Tauri-compatible shortcut like "Super+Alt+Space".
 /// Pass empty string to unregister.
 #[tauri::command]
 async fn register_overlay_shortcut(app: tauri::AppHandle, shortcut_str: String) -> Result<String, String> {
     // Unregister the old shortcut
     {
         let old = overlay_shortcut().lock().unwrap().clone();
-        if !old.is_empty() {
-            if let Ok(old_shortcut) = old.parse::<Shortcut>() {
-                let _ = app.global_shortcut().unregister(old_shortcut);
-            }
+        if let Some(old_shortcut) = old {
+            let _ = app.global_shortcut().unregister(old_shortcut);
         }
     }
 
     if shortcut_str.is_empty() {
-        *overlay_shortcut().lock().unwrap() = String::new();
+        *overlay_shortcut().lock().unwrap() = None;
         return Ok("unregistered".to_string());
     }
 
     let shortcut: Shortcut = shortcut_str.parse().map_err(|e| format!("Invalid shortcut: {e}"))?;
     app.global_shortcut().register(shortcut)
         .map_err(|e| format!("Failed to register shortcut: {e}"))?;
-    *overlay_shortcut().lock().unwrap() = shortcut_str.clone();
+    *overlay_shortcut().lock().unwrap() = Some(shortcut);
     Ok(shortcut_str)
 }
 
 /// Get the currently registered overlay shortcut string.
 #[tauri::command]
 async fn get_overlay_shortcut() -> String {
-    overlay_shortcut().lock().unwrap().clone()
+    overlay_shortcut()
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|s| s.to_string())
+        .unwrap_or_default()
 }
 
 fn hex_digit(b: u8) -> Option<u8> {
@@ -835,8 +838,8 @@ fn main() {
         .plugin(UpdaterBuilder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &tauri::AppHandle, shortcut, event| {
             use tauri_plugin_global_shortcut::ShortcutState;
-            let current = overlay_shortcut().lock().unwrap().to_lowercase();
-            if event.state() == ShortcutState::Pressed && shortcut.to_string().to_lowercase() == current {
+            let current = overlay_shortcut().lock().unwrap().clone();
+            if event.state() == ShortcutState::Pressed && current.as_ref() == Some(&shortcut) {
                 if let Some(window) = app.get_webview_window("overlay") {
                     let is_visible = window.is_visible().unwrap_or(false);
                     if is_visible {
@@ -864,12 +867,14 @@ fn main() {
             use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
             // Check for user-configured shortcut in localStorage first
-            let default_shortcut = "Super+Alt+Space".to_string();
-            let shortcut_str = default_shortcut.clone();
-            let shortcut: Shortcut = shortcut_str.parse().unwrap();
+            let default_shortcut_str = "Control+Alt+Space".to_string();
+            let shortcut: Shortcut = default_shortcut_str.parse().unwrap();
             match app.global_shortcut().register(shortcut) {
-                Ok(_) => println!("zWork: registered global overlay shortcut: {}", shortcut_str),
-                Err(e) => eprintln!("zWork: failed to register global shortcut {}: {e}", shortcut_str),
+                Ok(_) => {
+                    *overlay_shortcut().lock().unwrap() = Some(shortcut);
+                    println!("zWork: registered global overlay shortcut: {}", default_shortcut_str);
+                }
+                Err(e) => eprintln!("zWork: failed to register global shortcut {}: {e}", default_shortcut_str),
             }
 
             // System tray

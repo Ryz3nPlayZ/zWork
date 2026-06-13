@@ -1011,7 +1011,7 @@ const OVERLAY_SHORTCUT_KEY = "zwork:overlay-shortcut";
 
 function GlobalShortcutSection() {
   const [shortcut, setShortcut] = useState<string>(() => {
-    return localStorage.getItem(OVERLAY_SHORTCUT_KEY) || "Super+Alt+Space";
+    return localStorage.getItem(OVERLAY_SHORTCUT_KEY) || "Control+Alt+Space";
   });
 
   // On mount, sync the stored shortcut with the Tauri backend
