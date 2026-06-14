@@ -1108,7 +1108,7 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
         options = params.get("options", [])
         run = current_run()
         chat_id = run.chat_id if run else "global"
-        
+
         yield {
             "type": "activity",
             "id": tool_id,
@@ -1116,22 +1116,22 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
             "icon": "help-circle",
             "done": False,
         }
-        
+
         event = asyncio.Event()
         result_box = []
         PENDING_QUESTIONS[chat_id] = (event, result_box)
-        
+
         yield {
             "type": "ask_question",
             "chat_id": chat_id,
             "question": question,
             "options": options,
         }
-        
+
         await event.wait()
         PENDING_QUESTIONS.pop(chat_id, None)
         user_answer = result_box[0] if result_box else "No response"
-        
+
         yield {
             "type": "activity",
             "id": tool_id,
@@ -1139,7 +1139,7 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
             "icon": "help-circle",
             "done": True,
         }
-        
+
         yield {
             "type": "tool_result",
             "tool": tool_name,
@@ -1152,10 +1152,10 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
         explanation = params.get("explanation", "")
         question = f"Permission Required:\n\n{explanation}\n\nDo you want to proceed?"
         options = ["Approve", "Deny", "Tell me what to do instead"]
-        
+
         run = current_run()
         chat_id = run.chat_id if run else "global"
-        
+
         yield {
             "type": "activity",
             "id": tool_id,
@@ -1163,22 +1163,22 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
             "icon": "shield-alert",
             "done": False,
         }
-        
+
         event = asyncio.Event()
         result_box = []
         PENDING_QUESTIONS[chat_id] = (event, result_box)
-        
+
         yield {
             "type": "ask_question",
             "chat_id": chat_id,
             "question": question,
             "options": options,
         }
-        
+
         await event.wait()
         PENDING_QUESTIONS.pop(chat_id, None)
         user_answer = result_box[0] if result_box else "Deny"
-        
+
         user_answer_lower = user_answer.strip().lower()
         if user_answer_lower == "approve":
             ok = True
@@ -1201,7 +1201,7 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
             msg = f"Permission denied. User provided the following instructions instead: '{user_answer}'"
             label = "Instructions received"
             icon = "help-circle"
-            
+
         yield {
             "type": "activity",
             "id": tool_id,
@@ -1209,7 +1209,7 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
             "icon": icon,
             "done": True,
         }
-        
+
         yield {
             "type": "tool_result",
             "tool": tool_name,
@@ -1590,7 +1590,9 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                     )
                 msg = result["output"] or f"exit {result['returncode']}"
                 if not result["ok"]:
-                    diag = _diagnose_command_failure(command, result["returncode"], msg, cwd)
+                    diag = _diagnose_command_failure(
+                        command, result["returncode"], msg, cwd
+                    )
                     if diag:
                         msg += diag
                 yield {
@@ -2282,58 +2284,92 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
         }
         try:
             # 1. Keyword extraction from topic and hypotheses
-            stop_words = {"a", "an", "the", "and", "or", "but", "in", "on", "of", "for", "to", "with", "by", "at", "from", "as", "is", "are", "was", "were", "be", "been", "using", "method", "approach", "novel"}
+            stop_words = {
+                "a",
+                "an",
+                "the",
+                "and",
+                "or",
+                "but",
+                "in",
+                "on",
+                "of",
+                "for",
+                "to",
+                "with",
+                "by",
+                "at",
+                "from",
+                "as",
+                "is",
+                "are",
+                "was",
+                "were",
+                "be",
+                "been",
+                "using",
+                "method",
+                "approach",
+                "novel",
+            }
+
             def get_keywords(text: str) -> set[str]:
                 tokens = re.findall(r"\b[a-zA-Z]{3,}\b", text.lower())
                 return {t for t in tokens if t not in stop_words}
-            
+
             topic_keywords = get_keywords(topic)
             hyp_keywords = get_keywords(hypotheses)
             all_keywords = topic_keywords.union(hyp_keywords)
-            
+
             # Formulate query from top 5 keywords or topic
             query = topic if topic else " ".join(list(all_keywords)[:5])
-            
+
             # 2. Search academic literature
-            papers = await academic_mod.search_academic_literature(query, max_results=15)
-            
+            papers = await academic_mod.search_academic_literature(
+                query, max_results=15
+            )
+
             # If no papers found, try search with a subset of keywords
             if not papers and len(all_keywords) > 0:
                 fallback_query = " ".join(list(all_keywords)[:3])
-                papers = await academic_mod.search_academic_literature(fallback_query, max_results=15)
-                
+                papers = await academic_mod.search_academic_literature(
+                    fallback_query, max_results=15
+                )
+
             # 3. Compute similarity and overlap
             max_sim = 0.0
             similar_papers = []
-            
+
             for p in papers:
                 title = p.get("title", "")
                 abstract = p.get("abstract", "")
-                
+
                 # Combine title and abstract for paper keywords
                 paper_text = f"{title} {abstract}"
                 paper_keywords = get_keywords(paper_text)
-                
+
                 # Jaccard overlap
                 intersection = all_keywords.intersection(paper_keywords)
                 union = all_keywords.union(paper_keywords)
                 similarity = len(intersection) / len(union) if union else 0.0
-                
+
                 if similarity > 0.05:
-                    similar_papers.append({
-                        "title": title,
-                        "authors": p.get("authors", []),
-                        "year": p.get("year"),
-                        "similarity": round(similarity, 3),
-                        "url": p.get("url", ""),
-                        "pdf_url": p.get("pdf_url", ""),
-                    })
+                    similar_papers.append(
+                        {
+                            "title": title,
+                            "authors": p.get("authors", []),
+                            "year": p.get("year"),
+                            "similarity": round(similarity, 3),
+                            "url": p.get("url", ""),
+                            "pdf_url": p.get("pdf_url", ""),
+                        }
+                    )
                     if similarity > max_sim:
                         max_sim = similarity
-            
+
             # Sort by similarity desc
             similar_papers.sort(key=lambda x: x["similarity"], reverse=True)
-            
+
             # Determine recommendation
             if max_sim > 0.25:
                 recommendation = "High overlap detected. Suggest differentiating your hypotheses or focusing on a different niche."
@@ -2344,7 +2380,7 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
             else:
                 recommendation = "No significant overlap found in the top retrieved literature. The idea appears novel."
                 rating = "High Novelty"
-                
+
             report = {
                 "novelty_rating": rating,
                 "max_similarity_score": round(max_sim, 3),
@@ -2353,7 +2389,7 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                 "topic_keywords_analyzed": list(topic_keywords),
                 "hypotheses_keywords_analyzed": list(hyp_keywords),
             }
-            
+
             yield {
                 "type": "activity",
                 "id": tool_id,
@@ -2412,37 +2448,56 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
             full_path = Path(path).expanduser()
             if not full_path.exists():
                 raise FileNotFoundError(f"File {path} not found.")
-            
+
             content = full_path.read_text(encoding="utf-8", errors="replace")
-            
+
             # 2. Section detection
             sections = {
                 "Abstract": bool(re.search(r"(?i)\babstract\b", content)),
                 "Introduction": bool(re.search(r"(?i)\bintroduction\b", content)),
-                "Methodology/Model": bool(re.search(r"(?i)\b(method|methodology|model|proposed method)\b", content)),
-                "Experiments/Results": bool(re.search(r"(?i)\b(experiments|results|evaluation)\b", content)),
-                "Related Work": bool(re.search(r"(?i)\b(related work|literature review)\b", content)),
+                "Methodology/Model": bool(
+                    re.search(
+                        r"(?i)\b(method|methodology|model|proposed method)\b", content
+                    )
+                ),
+                "Experiments/Results": bool(
+                    re.search(r"(?i)\b(experiments|results|evaluation)\b", content)
+                ),
+                "Related Work": bool(
+                    re.search(r"(?i)\b(related work|literature review)\b", content)
+                ),
                 "Conclusion": bool(re.search(r"(?i)\bconclusion\b", content)),
-                "References": bool(re.search(r"(?i)\b(references|bibliography)\b", content)),
+                "References": bool(
+                    re.search(r"(?i)\b(references|bibliography)\b", content)
+                ),
             }
-            
+
             # 3. Scan for placeholder/template content
             template_patterns = [
-                (r"(?i)template\s+(abstract|introduction|method|methodology|conclusion|discussion|results|related\s+work)", "Template section header"),
+                (
+                    r"(?i)template\s+(abstract|introduction|method|methodology|conclusion|discussion|results|related\s+work)",
+                    "Template section header",
+                ),
                 (r"(?i)\[INSERT\s+.*?\]", "Insert placeholder"),
                 (r"(?i)\[TODO\s*:?\s*.*?\]", "TODO placeholder"),
                 (r"(?i)\[PLACEHOLDER\s*:?\s*.*?\]", "Explicit placeholder"),
                 (r"(?i)lorem\s+ipsum", "Lorem ipsum filler"),
-                (r"(?i)this\s+section\s+will\s+(describe|discuss|present|outline|explain)", "Future-tense placeholder"),
-                (r"(?i)add\s+(your|the)\s+(content|text|description)\s+here", "Add content placeholder"),
+                (
+                    r"(?i)this\s+section\s+will\s+(describe|discuss|present|outline|explain)",
+                    "Future-tense placeholder",
+                ),
+                (
+                    r"(?i)add\s+(your|the)\s+(content|text|description)\s+here",
+                    "Add content placeholder",
+                ),
                 (r"(?i)replace\s+this\s+(text|content|section)", "Replace placeholder"),
             ]
-            
+
             matches = []
             lines = content.split("\n")
             total_chars = sum(len(line.strip()) for line in lines if line.strip())
             template_chars = 0
-            
+
             for line_num, line in enumerate(lines, start=1):
                 stripped = line.strip()
                 if not stripped:
@@ -2450,17 +2505,15 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                 for pattern, desc in template_patterns:
                     if re.search(pattern, stripped):
                         excerpt = stripped[:100]
-                        matches.append({
-                            "type": desc,
-                            "line": line_num,
-                            "excerpt": excerpt
-                        })
+                        matches.append(
+                            {"type": desc, "line": line_num, "excerpt": excerpt}
+                        )
                         template_chars += len(stripped)
                         break
-            
+
             template_ratio = template_chars / total_chars if total_chars > 0 else 0.0
             word_count = len(content.split())
-            
+
             # Formulate score
             rigor_score = 5.0
             if sections["Experiments/Results"]:
@@ -2469,19 +2522,23 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                 rigor_score += 1.0
             if word_count > 3000:
                 rigor_score += 1.0
-            
+
             report = {
                 "word_count": word_count,
                 "character_count": len(content),
                 "sections_found": sections,
-                "sections_completeness_ratio": round(sum(1 for v in sections.values() if v) / len(sections), 2),
+                "sections_completeness_ratio": round(
+                    sum(1 for v in sections.values() if v) / len(sections), 2
+                ),
                 "template_ratio": round(template_ratio, 4),
                 "template_matches_count": len(matches),
-                "template_matches": matches[:10], # Show top 10 matches
-                "estimated_quality_score": round(max(1.0, rigor_score - (template_ratio * 10)), 1),
+                "template_matches": matches[:10],  # Show top 10 matches
+                "estimated_quality_score": round(
+                    max(1.0, rigor_score - (template_ratio * 10)), 1
+                ),
                 "passed_quality_gate": template_ratio <= 0.05,
             }
-            
+
             yield {
                 "type": "activity",
                 "id": tool_id,
@@ -2531,8 +2588,10 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
         experiment_results = str(params.get("experiment_results") or "").strip()
         output_path = str(params.get("output_path") or "").strip()
         latex_format = bool(params.get("latex_format", False))
-        
-        label = f"Write research paper: {topic[:50]}" if topic else "Write research paper"
+
+        label = (
+            f"Write research paper: {topic[:50]}" if topic else "Write research paper"
+        )
         yield {
             "type": "activity",
             "id": tool_id,
@@ -2542,30 +2601,43 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
         }
         try:
             # 1. Search literature to find 8 real papers for references and context
-            yield {"type": "status", "text": "Searching literature for real references..."}
+            yield {
+                "type": "status",
+                "text": "Searching literature for real references...",
+            }
             papers = await academic_mod.search_academic_literature(topic, max_results=8)
-            
+
             # Format bibliography
             bib_lines = []
             citations = []
             for i, p in enumerate(papers, 1):
                 authors = p.get("authors", [])
-                author_str = ", ".join(authors[:3]) + (" et al." if len(authors) > 3 else "")
+                author_str = ", ".join(authors[:3]) + (
+                    " et al." if len(authors) > 3 else ""
+                )
                 year = p.get("year") or "2025"
                 title = p.get("title", "")
                 journal = p.get("journal", "") or "arXiv preprint"
                 doi = p.get("doi") or "N/A"
-                bib_lines.append(f"[{i}] {author_str} ({year}). \"{title}\". *{journal}*. DOI: {doi}")
-                
+                bib_lines.append(
+                    f'[{i}] {author_str} ({year}). "{title}". *{journal}*. DOI: {doi}'
+                )
+
                 # Cite keys
                 last_name = authors[0].split()[-1] if authors else "Author"
                 citations.append(f"[{i}] ({last_name}, {year})")
-                
-            bibliography_section = "\n".join(bib_lines) if bib_lines else "[1] Scholar, A. (2025). \"Foundational concepts of the field\". *Journal of AI*."
+
+            bibliography_section = (
+                "\n".join(bib_lines)
+                if bib_lines
+                else '[1] Scholar, A. (2025). "Foundational concepts of the field". *Journal of AI*.'
+            )
 
             # 2. Write outline using LLM
             yield {"type": "status", "text": "Generating paper outline..."}
-            outline_system = "You are a senior academic researcher formulating a paper outline."
+            outline_system = (
+                "You are a senior academic researcher formulating a paper outline."
+            )
             outline_prompt = (
                 f"Create a detailed, section-by-section outline for a research paper on '{topic}'.\n"
                 f"Hypotheses: {hypotheses}\n"
@@ -2576,12 +2648,18 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
 
             # 3. Write each section sequentially using LLM
             sections = {}
-            section_names = ["Abstract & Introduction", "Related Work", "Methodology", "Experiments & Results", "Conclusion"]
-            
+            section_names = [
+                "Abstract & Introduction",
+                "Related Work",
+                "Methodology",
+                "Experiments & Results",
+                "Conclusion",
+            ]
+
             for sname in section_names:
                 yield {"type": "status", "text": f"Drafting section: {sname}..."}
                 sys_prompt = "You are a top-tier machine learning researcher writing a paper for a major venue (NeurIPS/ICML)."
-                
+
                 context = (
                     f"Research Topic: {topic}\n"
                     f"Hypotheses: {hypotheses}\n"
@@ -2590,24 +2668,24 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                 )
                 if experiment_results:
                     context += f"Experimental results to include/discuss: {experiment_results}\n"
-                
+
                 draft_prompt = (
                     f"{context}\n\n"
                     f"Please write a comprehensive, rigorous academic section for: '{sname}'.\n"
                     f"Use LaTeX syntax for mathematical equations. "
                 )
-                
+
                 if sname == "Related Work":
                     draft_prompt += "You MUST integrate and cite the real papers in the bibliography above using [1], [2], etc. format."
                 elif sname == "Experiments & Results":
                     draft_prompt += "Weave in the experimental results. Make sure to present tables and discussion of metrics."
-                    
+
                 section_text = await _generate_text(draft_prompt, sys_prompt)
                 sections[sname] = section_text
 
             # 4. Assemble final paper
             yield {"type": "status", "text": "Assembling final paper..."}
-            
+
             if latex_format:
                 # Basic LaTeX assembly
                 latex_content = (
@@ -2623,13 +2701,16 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                 )
                 for sname, stext in sections.items():
                     latex_content += f"\\section{{{sname}}}\n{stext}\n\n"
-                latex_content += "\\section{References}\n" + bibliography_section + "\n\\end{document}\n"
+                latex_content += (
+                    "\\section{References}\n"
+                    + bibliography_section
+                    + "\n\\end{document}\n"
+                )
                 final_content = latex_content
                 ext = ".tex"
             else:
                 markdown_content = (
-                    f"# {topic}\n\n"
-                    "**zWork Autonomous Research Agent**\n\n"
+                    f"# {topic}\n\n**zWork Autonomous Research Agent**\n\n"
                 )
                 for sname, stext in sections.items():
                     markdown_content += f"## {sname}\n\n{stext}\n\n"
@@ -2642,7 +2723,7 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                 safe_name = "".join([c if c.isalnum() else "_" for c in topic.lower()])
                 safe_name = re.sub(r"_+", "_", safe_name).strip("_")
                 output_path = f"workspace/outputs/{safe_name}_paper{ext}"
-                
+
             full_out = Path(output_path).expanduser()
             full_out.parent.mkdir(parents=True, exist_ok=True)
             full_out.write_text(final_content, encoding="utf-8")
@@ -2650,7 +2731,7 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
             # Assess Quality of generated draft
             word_count = len(final_content.split())
             quality_rating = "Excellent" if word_count > 2000 else "Short Draft"
-            
+
             report = {
                 "success": True,
                 "topic": topic,
@@ -2660,7 +2741,7 @@ async def execute_tool(tool_name: str, params: dict[str, Any]) -> AsyncIterator[
                 "bibliography_used": bib_lines,
                 "outline_generated": outline,
             }
-            
+
             yield {
                 "type": "activity",
                 "id": tool_id,
@@ -2945,7 +3026,9 @@ def _calc_rsi(prices: list[float], period: int = 14) -> list[float | None]:
     return rsi
 
 
-def _calc_macd(prices: list[float]) -> tuple[list[float | None], list[float | None], list[float | None]]:
+def _calc_macd(
+    prices: list[float],
+) -> tuple[list[float | None], list[float | None], list[float | None]]:
     ema12 = _calc_ema(prices, 12)
     ema26 = _calc_ema(prices, 26)
     macd = []
@@ -3004,7 +3087,7 @@ def _get_stock_data(ticker: str, period: str = "60d") -> str:
     meta = result.get("meta", {})
     timestamps = result.get("timestamp", [])
     quotes = result.get("indicators", {}).get("quote", [{}])[0]
-    
+
     opens = quotes.get("open", [])
     highs = quotes.get("high", [])
     lows = quotes.get("low", [])
@@ -3021,22 +3104,27 @@ def _get_stock_data(ticker: str, period: str = "60d") -> str:
             and volumes[i] is not None
         ):
             import datetime
-            date_str = datetime.datetime.fromtimestamp(timestamps[i], datetime.timezone.utc).strftime("%Y-%m-%d")
-            valid_candles.append({
-                "date": date_str,
-                "open": round(float(opens[i]), 2),
-                "high": round(float(highs[i]), 2),
-                "low": round(float(lows[i]), 2),
-                "close": round(float(closes[i]), 2),
-                "volume": int(volumes[i]),
-            })
+
+            date_str = datetime.datetime.fromtimestamp(
+                timestamps[i], datetime.timezone.utc
+            ).strftime("%Y-%m-%d")
+            valid_candles.append(
+                {
+                    "date": date_str,
+                    "open": round(float(opens[i]), 2),
+                    "high": round(float(highs[i]), 2),
+                    "low": round(float(lows[i]), 2),
+                    "close": round(float(closes[i]), 2),
+                    "volume": int(volumes[i]),
+                }
+            )
 
     target_count = 60
     if "30" in period:
         target_count = 30
     elif "90" in period:
         target_count = 90
-    
+
     close_prices = [c["close"] for c in valid_candles]
     sma20 = _calc_sma(close_prices, 20)
     ema20 = _calc_ema(close_prices, 20)
@@ -3044,28 +3132,40 @@ def _get_stock_data(ticker: str, period: str = "60d") -> str:
     macd, macd_signal, macd_hist = _calc_macd(close_prices)
 
     for i in range(len(valid_candles)):
-        valid_candles[i]["sma_20"] = round(sma20[i], 2) if sma20[i] is not None else None
-        valid_candles[i]["ema_20"] = round(ema20[i], 2) if ema20[i] is not None else None
-        valid_candles[i]["rsi_14"] = round(rsi14[i], 2) if rsi14[i] is not None else None
+        valid_candles[i]["sma_20"] = (
+            round(sma20[i], 2) if sma20[i] is not None else None
+        )
+        valid_candles[i]["ema_20"] = (
+            round(ema20[i], 2) if ema20[i] is not None else None
+        )
+        valid_candles[i]["rsi_14"] = (
+            round(rsi14[i], 2) if rsi14[i] is not None else None
+        )
         valid_candles[i]["macd"] = round(macd[i], 2) if macd[i] is not None else None
-        valid_candles[i]["macd_signal"] = round(macd_signal[i], 2) if macd_signal[i] is not None else None
-        valid_candles[i]["macd_hist"] = round(macd_hist[i], 2) if macd_hist[i] is not None else None
+        valid_candles[i]["macd_signal"] = (
+            round(macd_signal[i], 2) if macd_signal[i] is not None else None
+        )
+        valid_candles[i]["macd_hist"] = (
+            round(macd_hist[i], 2) if macd_hist[i] is not None else None
+        )
 
     output_candles = valid_candles[-target_count:]
 
-    return json.dumps({
-        "ticker": ticker,
-        "meta": {
-            "currency": meta.get("currency", "USD"),
-            "regularMarketPrice": meta.get("regularMarketPrice"),
-            "fiftyTwoWeekHigh": meta.get("fiftyTwoWeekHigh"),
-            "fiftyTwoWeekLow": meta.get("fiftyTwoWeekLow"),
-            "regularMarketVolume": meta.get("regularMarketVolume"),
-            "longName": meta.get("longName"),
-            "shortName": meta.get("shortName"),
-        },
-        "candles": output_candles,
-    })
+    return json.dumps(
+        {
+            "ticker": ticker,
+            "meta": {
+                "currency": meta.get("currency", "USD"),
+                "regularMarketPrice": meta.get("regularMarketPrice"),
+                "fiftyTwoWeekHigh": meta.get("fiftyTwoWeekHigh"),
+                "fiftyTwoWeekLow": meta.get("fiftyTwoWeekLow"),
+                "regularMarketVolume": meta.get("regularMarketVolume"),
+                "longName": meta.get("longName"),
+                "shortName": meta.get("shortName"),
+            },
+            "candles": output_candles,
+        }
+    )
 
 
 def _shell_path() -> str | None:
@@ -3659,6 +3759,7 @@ def _dctl_env() -> dict[str, str]:
 def _dctl_path() -> str:
     """Find the dctl standalone binary in dev or bundle layouts."""
     import sys
+
     this_file = Path(__file__).resolve()
     candidates = []
 
@@ -3666,11 +3767,13 @@ def _dctl_path() -> str:
     bundle_root = getattr(sys, "_MEIPASS", None)
     if bundle_root:
         p = Path(bundle_root)
-        candidates.extend([
-            p / "usr" / "bin" / "dctl",
-            p / "bin" / "dctl",
-            p / "dctl",
-        ])
+        candidates.extend(
+            [
+                p / "usr" / "bin" / "dctl",
+                p / "bin" / "dctl",
+                p / "dctl",
+            ]
+        )
 
     # Bundled: same directory as the backend binary
     if "extracted" in str(this_file):
@@ -4005,29 +4108,41 @@ def parse_tool_calls(text: str) -> list[dict[str, Any]]:
     return calls
 
 
-def _diagnose_command_failure(command: str, returncode: int, output: str, cwd: str) -> str:
+def _diagnose_command_failure(
+    command: str, returncode: int, output: str, cwd: str
+) -> str:
     """Analyze the output/error of a failed command to suggest a fix."""
     diagnosis = []
-    
+
     # 1. Missing python packages
     if "ModuleNotFoundError:" in output or "ImportError:" in output:
-        match = re.search(r"(?:ModuleNotFoundError|ImportError): No module named ['\"]([^'\"]+)['\"]", output)
+        match = re.search(
+            r"(?:ModuleNotFoundError|ImportError): No module named ['\"]([^'\"]+)['\"]",
+            output,
+        )
         module_name = match.group(1) if match else "the required module"
         diagnosis.append(
             f"**Deficiency**: Python module '{module_name}' is not installed.\n"
             f"**Suggested Fix**: Install the module using `pip install {module_name}` or `poetry add {module_name}`."
         )
-        
+
     # 2. Command not found
-    elif "command not found" in output or "not recognized as an internal or external command" in output or ("sh: 1: " in output and "not found" in output):
+    elif (
+        "command not found" in output
+        or "not recognized as an internal or external command" in output
+        or ("sh: 1: " in output and "not found" in output)
+    ):
         cmd_name = command.split()[0] if command.split() else "command"
         diagnosis.append(
             f"**Deficiency**: Command '{cmd_name}' is not available in the system path or not installed.\n"
             f"**Suggested Fix**: Install the tool or verify its path. (e.g. for npm/npx tools, run `npm install -g {cmd_name}` or `npm install` in your project folder)."
         )
-        
+
     # 3. Port conflict
-    elif any(x in output.lower() for x in ["eaddrinuse", "address already in use", "port already in use"]):
+    elif any(
+        x in output.lower()
+        for x in ["eaddrinuse", "address already in use", "port already in use"]
+    ):
         port_match = re.search(r"\b\d{2,5}\b", output)
         port = port_match.group(0) if port_match else "the configured port"
         diagnosis.append(
@@ -4035,7 +4150,7 @@ def _diagnose_command_failure(command: str, returncode: int, output: str, cwd: s
             f"**Suggested Fix**: Free up port {port} or change the port configuration. "
             f"On Linux/macOS, you can find the process using `lsof -i :{port}` and terminate it."
         )
-        
+
     # 4. Permission Denied
     elif any(x in output.lower() for x in ["permission denied", "eacces"]):
         diagnosis.append(
@@ -4043,14 +4158,18 @@ def _diagnose_command_failure(command: str, returncode: int, output: str, cwd: s
             "**Suggested Fix**: Check ownership and permission bits of the target files/directories. "
             "You may need to run `chmod +x <file>` to make a script executable, or run with appropriate user permissions."
         )
-        
+
     # 5. Out of Memory (OOM)
-    elif "out of memory" in output.lower() or "cuda error: out of memory" in output.lower() or "oom-killer" in output.lower():
+    elif (
+        "out of memory" in output.lower()
+        or "cuda error: out of memory" in output.lower()
+        or "oom-killer" in output.lower()
+    ):
         diagnosis.append(
             "**Deficiency**: Process ran out of memory (OOM).\n"
             "**Suggested Fix**: Reduce batch size, optimize memory utilization, or run on a system/GPU with more memory capability."
         )
-        
+
     # 6. Node/npm missing module
     elif "Error: Cannot find module" in output:
         match = re.search(r"Cannot find module ['\"]([^'\"]+)['\"]", output)
@@ -4061,12 +4180,15 @@ def _diagnose_command_failure(command: str, returncode: int, output: str, cwd: s
         )
 
     # 7. File/Directory not found
-    elif "no such file or directory" in output.lower() or "directory not found" in output.lower():
+    elif (
+        "no such file or directory" in output.lower()
+        or "directory not found" in output.lower()
+    ):
         diagnosis.append(
             f"**Deficiency**: A referenced file or directory does not exist.\n"
             f"**Suggested Fix**: Verify the paths in your command and check the current directory (cwd: {cwd})."
         )
-        
+
     if diagnosis:
         return "\n\n--- [COMMAND FAILURE DIAGNOSIS] ---\n" + "\n".join(diagnosis)
     return ""
@@ -4076,19 +4198,26 @@ def _detect_hardware_profile() -> dict:
     import platform
     import shutil
     import subprocess
-    
+
     has_gpu = False
     gpu_type = "cpu"
     gpu_name = "CPU only"
     vram_mb = None
-    
+
     # 1. Try local NVIDIA GPU
     nvidia_smi = shutil.which("nvidia-smi")
     if nvidia_smi:
         try:
             res = subprocess.run(
-                [nvidia_smi, "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
-                capture_output=True, text=True, timeout=5, check=False
+                [
+                    nvidia_smi,
+                    "--query-gpu=name,memory.total",
+                    "--format=csv,noheader,nounits",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
             )
             if res.returncode == 0 and res.stdout.strip():
                 line = res.stdout.strip().splitlines()[0]
@@ -4103,7 +4232,7 @@ def _detect_hardware_profile() -> dict:
                         vram_mb = 0
         except Exception:
             pass
-            
+
     # 2. Try macOS Apple Silicon MPS
     if not has_gpu and platform.system() == "Darwin" and platform.machine() == "arm64":
         has_gpu = True
@@ -4112,7 +4241,7 @@ def _detect_hardware_profile() -> dict:
 
     # Get CPU info
     cpu_count = os.cpu_count() or 1
-    
+
     return {
         "has_gpu": has_gpu,
         "gpu_type": gpu_type,
@@ -4128,7 +4257,7 @@ async def _generate_text(prompt: str, system: str = "") -> str:
     from . import settings as settings_mod
     from . import providers as providers_mod
     import httpx
-    
+
     s = settings_mod.load()
     model_id = s.default_model or "zwork-flash"
     model = providers_mod.lookup_model(model_id, s)
@@ -4138,7 +4267,7 @@ async def _generate_text(prompt: str, system: str = "") -> str:
             "model_id": "deepseek-v4-flash",
             "base_url_override": "",
         }
-        
+
     creds = providers_mod.resolve(model["credential"], s)
     if not creds:
         token = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OPENAI_API_KEY")
@@ -4146,10 +4275,15 @@ async def _generate_text(prompt: str, system: str = "") -> str:
             # Fallback mock text generator if no key is in environment
             return f"[Draft of research section under prompt: {prompt[:100]}...]"
         shape = "anthropic" if "sk-ant-" in token else "openai"
-        base_url = "https://api.anthropic.com" if shape == "anthropic" else "https://api.openai.com/v1"
+        base_url = (
+            "https://api.anthropic.com"
+            if shape == "anthropic"
+            else "https://api.openai.com/v1"
+        )
         from .settings import Credentials
+
         creds = Credentials(api_key=token, base_url=base_url, shape=shape)
-        
+
     if creds.shape == "anthropic":
         url = f"{creds.base_url}/v1/messages"
         headers = {
@@ -4161,7 +4295,7 @@ async def _generate_text(prompt: str, system: str = "") -> str:
         else:
             headers["authorization"] = f"Bearer {creds.api_key}"
             headers["x-api-key"] = creds.api_key
-            
+
         body = {
             "model": model["model_id"],
             "max_tokens": 4096,
@@ -4169,7 +4303,7 @@ async def _generate_text(prompt: str, system: str = "") -> str:
         }
         if system:
             body["system"] = system
-            
+
         async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(url, json=body, headers=headers)
             resp.raise_for_status()
@@ -4180,7 +4314,7 @@ async def _generate_text(prompt: str, system: str = "") -> str:
                 if block.get("type") == "text":
                     text += block.get("text", "")
             return text
-            
+
     else:
         url = f"{creds.base_url}/chat/completions"
         headers = {
@@ -4191,13 +4325,13 @@ async def _generate_text(prompt: str, system: str = "") -> str:
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        
+
         body = {
             "model": model["model_id"],
             "max_tokens": 4096,
             "messages": messages,
         }
-        
+
         async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(url, json=body, headers=headers)
             resp.raise_for_status()
@@ -4206,5 +4340,3 @@ async def _generate_text(prompt: str, system: str = "") -> str:
             if choices:
                 return choices[0].get("message", {}).get("content", "")
             return ""
-
-

@@ -712,7 +712,8 @@ async def onboard_complete(body: OnboardBody) -> dict:
             custom_id = (
                 model_id
                 if credkey == "zwork_router"
-                or model_id in (providers.ZWORK_ROUTER_MODEL_ID, providers.ZWORK_PRO_MODEL_ID)
+                or model_id
+                in (providers.ZWORK_ROUTER_MODEL_ID, providers.ZWORK_PRO_MODEL_ID)
                 else None
             )
             if custom_id and not home_mod.is_safe_id(custom_id):
@@ -916,18 +917,18 @@ async def capture_screenshot():
             [sys.executable, "-m", "dctl", "screenshot", "--base64"],
             capture_output=True,
             text=True,
-            check=True
+            check=True,
         )
         import json
         import shutil
         import time
-        
+
         data = json.loads(res.stdout)
         screenshot_base64 = data.get("result", "")
-        
+
         uploads_dir = home_mod.workspace_uploads_dir()
         uploads_dir.mkdir(parents=True, exist_ok=True)
-        
+
         temp_path = data.get("path")
         persistent_path = ""
         filename = ""
@@ -936,7 +937,7 @@ async def capture_screenshot():
             dest = uploads_dir / filename
             shutil.copy(temp_path, dest)
             persistent_path = str(dest)
-            
+
             # Record in log JSON
             log_path = home_mod.zwork_data_dir() / "state" / "activity_log.json"
             log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -946,15 +947,22 @@ async def capture_screenshot():
                     logs = json.loads(log_path.read_text(encoding="utf-8"))
                 except Exception:
                     logs = []
-            
-            logs.insert(0, {
-                "timestamp": int(time.time()),
-                "filename": filename,
-                "path": persistent_path,
-            })
+
+            logs.insert(
+                0,
+                {
+                    "timestamp": int(time.time()),
+                    "filename": filename,
+                    "path": persistent_path,
+                },
+            )
             log_path.write_text(json.dumps(logs[:50]), encoding="utf-8")
-            
-        return {"screenshot": screenshot_base64, "path": persistent_path, "filename": filename}
+
+        return {
+            "screenshot": screenshot_base64,
+            "path": persistent_path,
+            "filename": filename,
+        }
     except Exception as e:
         return {"screenshot": "", "error": str(e)}
 
@@ -962,6 +970,7 @@ async def capture_screenshot():
 @app.get("/api/activity-logs")
 def get_activity_logs() -> dict:
     import json
+
     log_path = home_mod.zwork_data_dir() / "state" / "activity_log.json"
     if not log_path.exists():
         return {"logs": []}
@@ -979,6 +988,7 @@ def get_uploaded_file(filename: str):
     if not file_path.exists():
         raise HTTPException(404, "File not found")
     from fastapi.responses import FileResponse
+
     return FileResponse(file_path)
 
 
@@ -1003,7 +1013,9 @@ def _parse_md_blocks(content: str) -> list[_ExportBlock]:
     for line in content.split("\n"):
         if line.startswith("```"):
             if in_code:
-                blocks.append(_ExportBlock("code", code_text.strip(), language=code_lang))
+                blocks.append(
+                    _ExportBlock("code", code_text.strip(), language=code_lang)
+                )
                 in_code = False
                 code_text = ""
                 code_lang = ""
@@ -1079,7 +1091,9 @@ async def export_docx(body: dict):
         return StreamingResponse(
             file_stream,
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            headers={"Content-Disposition": f"attachment; filename={title.replace(' ', '_')}.docx"},
+            headers={
+                "Content-Disposition": f"attachment; filename={title.replace(' ', '_')}.docx"
+            },
         )
     except Exception as e:
         raise HTTPException(500, detail=str(e))
@@ -1148,7 +1162,9 @@ async def export_pdf(body: dict):
         return StreamingResponse(
             file_stream,
             media_type="application/pdf",
-            headers={"Content-Disposition": f"attachment; filename={title.replace(' ', '_')}.pdf"},
+            headers={
+                "Content-Disposition": f"attachment; filename={title.replace(' ', '_')}.pdf"
+            },
         )
     except Exception as e:
         raise HTTPException(500, detail=str(e))
@@ -1244,7 +1260,7 @@ def list_uploaded_files() -> dict:
     uploads_dir = home_mod.workspace_uploads_dir()
     if not uploads_dir.exists():
         return {"files": []}
-    
+
     files = []
     for p in uploads_dir.iterdir():
         if p.is_file() and not p.name.startswith("."):
@@ -1252,22 +1268,27 @@ def list_uploaded_files() -> dict:
             mime = mime or "application/octet-stream"
             content = ""
             is_text = mime.startswith("text/") or mime in (
-                "application/json", "application/javascript",
-                "application/x-yaml", "text/csv", "text/markdown",
-                "application/xml"
+                "application/json",
+                "application/javascript",
+                "application/x-yaml",
+                "text/csv",
+                "text/markdown",
+                "application/xml",
             )
             if is_text:
                 try:
                     content = p.read_text(encoding="utf-8", errors="ignore")
                 except Exception:
                     pass
-            files.append({
-                "name": p.name,
-                "size": p.stat().st_size,
-                "mime": mime,
-                "content": content,
-                "path": str(p)
-            })
+            files.append(
+                {
+                    "name": p.name,
+                    "size": p.stat().st_size,
+                    "mime": mime,
+                    "content": content,
+                    "path": str(p),
+                }
+            )
     return {"files": files}
 
 
@@ -1436,18 +1457,20 @@ def list_project_files(project_id: str) -> dict:
     files_dir = p_dir / "files"
     if not files_dir.exists():
         return {"files": []}
-    
+
     results = []
     for child in files_dir.iterdir():
         if child.is_file():
             stat = child.stat()
             mime, _ = mimetypes.guess_type(str(child))
-            results.append({
-                "name": child.name,
-                "size": stat.st_size,
-                "mime": mime or "application/octet-stream",
-                "path": str(child),
-            })
+            results.append(
+                {
+                    "name": child.name,
+                    "size": stat.st_size,
+                    "mime": mime or "application/octet-stream",
+                    "path": str(child),
+                }
+            )
     return {"files": results}
 
 
@@ -1461,12 +1484,12 @@ def upload_project_files(project_id: str, body: UploadBody) -> dict:
     p_dir = home_mod.project_dir(project_id)
     files_dir = p_dir / "files"
     files_dir.mkdir(parents=True, exist_ok=True)
-    
+
     results = []
     for item in body.files:
         safe_name = Path(item.name or "upload").name
         out = files_dir / safe_name
-        
+
         if item.text_content is not None:
             out.write_text(item.text_content, encoding="utf-8")
             size = len(item.text_content.encode("utf-8"))
@@ -1483,13 +1506,15 @@ def upload_project_files(project_id: str, body: UploadBody) -> dict:
         else:
             out.write_text("", encoding="utf-8")
             size = 0
-            
-        results.append({
-            "name": safe_name,
-            "size": size,
-            "mime": item.mime,
-            "path": str(out),
-        })
+
+        results.append(
+            {
+                "name": safe_name,
+                "size": size,
+                "mime": item.mime,
+                "path": str(out),
+            }
+        )
     return {"files": results}
 
 
@@ -1691,7 +1716,7 @@ def truncate_message(chat_id: str, message_id: str, body: MessagePatch) -> dict:
     c = chatstore.get(chat_id)
     if not c:
         raise HTTPException(404, "chat not found")
-    
+
     new_messages = []
     found = False
     for msg in c.messages:
@@ -1701,10 +1726,10 @@ def truncate_message(chat_id: str, message_id: str, body: MessagePatch) -> dict:
                 msg.content = body.content
             found = True
             break
-            
+
     if not found:
         raise HTTPException(404, "message not found")
-        
+
     c.messages = new_messages
     c.updated_at = chatstore.now_ms()
     chatstore.save(c)
@@ -1717,7 +1742,7 @@ async def run_python_code(body: PythonRunRequest) -> dict:
     import tempfile
     import subprocess
     import contextlib
-    
+
     code = body.code
     with tempfile.NamedTemporaryFile(suffix=".py", delete=False) as f:
         f.write(code.encode("utf-8"))
@@ -1866,7 +1891,7 @@ async def auto_plan_tasks(body: TaskAutoPlanRequest) -> dict:
             if evt.get("type") == "delta":
                 text_parts.append(evt.get("text", ""))
         generated = "".join(text_parts).strip()
-        
+
         # Clean potential markdown block
         if "```" in generated:
             parts = generated.split("```")
@@ -1890,9 +1915,18 @@ async def auto_plan_tasks(body: TaskAutoPlanRequest) -> dict:
         print("Failed to auto-plan via LLM, falling back:", e)
         # Fallback to standard tasks
         tasks_to_create = [
-            {"title": f"Plan & define requirements for {body.project_title}", "days": 1},
-            {"title": f"Design mockup & choose tech stack for {body.project_title}", "days": 2},
-            {"title": f"Implement core functionality for {body.project_title}", "days": 3},
+            {
+                "title": f"Plan & define requirements for {body.project_title}",
+                "days": 1,
+            },
+            {
+                "title": f"Design mockup & choose tech stack for {body.project_title}",
+                "days": 2,
+            },
+            {
+                "title": f"Implement core functionality for {body.project_title}",
+                "days": 3,
+            },
             {"title": f"Run tests & fix bugs for {body.project_title}", "days": 2},
             {"title": f"Final review & launch {body.project_title}", "days": 1},
         ]
@@ -1907,12 +1941,8 @@ async def auto_plan_tasks(body: TaskAutoPlanRequest) -> dict:
         days = int(item.get("days", body.interval_days))
         current_date += timedelta(days=days)
         due_date_str = current_date.strftime("%Y-%m-%d")
-        
-        t = taskstore.save_task(
-            title=title,
-            column="todo",
-            due_date=due_date_str
-        )
+
+        t = taskstore.save_task(title=title, column="todo", due_date=due_date_str)
         created_tasks.append(taskstore.asdict(t))
 
     return {"tasks": created_tasks}
@@ -2022,6 +2052,7 @@ async def _maybe_compact_history(
         "summary_chars": len(summary),
     }
 
+
 async def _background_agent_runner(
     chat_id: str,
     queue: asyncio.Queue,
@@ -2063,6 +2094,7 @@ async def _background_agent_runner(
     )
     if creds is None:
         from .agent.providers import ZWORK_ROUTER_BASE_URL
+
         base_url = ZWORK_ROUTER_BASE_URL
         token = os.environ.get("ZWORK_GATEWAY_TOKEN") or ""
     else:
@@ -2070,6 +2102,7 @@ async def _background_agent_runner(
         token = creds.api_key
 
     from .agent.hermes_agent import zWorkHermesAgent
+
     agent = zWorkHermesAgent(
         chat_id=chat_id,
         model_id=model_id,
@@ -2170,6 +2203,7 @@ async def _background_agent_runner(
         async def delayed_cleanup():
             await asyncio.sleep(120)
             ACTIVE_RUNS.pop(chat_id, None)
+
         asyncio.create_task(delayed_cleanup())
 
         if full_text and terminal_status == "empty":
@@ -2251,6 +2285,7 @@ async def chat_stream(req: StreamRequest):
         and chat.messages[-2].role == "user"
         and chat.messages[-2].content.strip() == req.message.strip()
     ):
+
         async def sse_finished() -> Any:
             yield _sse({"type": "chat", "id": chat.id, "title": chat.title})
             yield _sse({"type": "done"})
@@ -2332,7 +2367,19 @@ async def chat_stream(req: StreamRequest):
     # Determine plan mode from user message keywords or explicit flag
     plan_mode = req.plan_mode
     msg_lower = req.message.lower()
-    if any(k in msg_lower for k in ["plan a ", "plan an ", "plan feature", "create a plan", "make a plan", "plan mode", "planda", "planla"]):
+    if any(
+        k in msg_lower
+        for k in [
+            "plan a ",
+            "plan an ",
+            "plan feature",
+            "create a plan",
+            "make a plan",
+            "plan mode",
+            "planda",
+            "planla",
+        ]
+    ):
         plan_mode = True
 
     # Build a system prompt with live model identity
@@ -2357,12 +2404,15 @@ async def chat_stream(req: StreamRequest):
     if req.web_search_enabled:
         try:
             from .agent.tools import _web_search
+
             search_query = req.message.strip().splitlines()[0][:80]
             search_results = _web_search(search_query, max_results=5)
             if search_results:
                 prompt = f"{prompt}\n\n## Web Search Results (Grounding Context)\nThe user has enabled web search. Here are the latest search results for '{search_query}'. Apply this context when answering the user query:\n\n{search_results}"
         except Exception as e:
-            prompt = f"{prompt}\n\n## Web Search Results\nFailed to perform web search: {e}"
+            prompt = (
+                f"{prompt}\n\n## Web Search Results\nFailed to perform web search: {e}"
+            )
 
     attachment_block = ""
     if req.attachments:
@@ -2382,7 +2432,7 @@ async def chat_stream(req: StreamRequest):
         )
     hint = _artifact_hint(req.message)
     if req.artifact_mode:
-        hint = "The user has explicitly requested to work inside a document (Document mode is ON). You MUST create or update a document. Start your response with [[ARTIFACT kind=doc title=\"Document Title\"]] and place the full document content inside it. Keep your chat response minimal."
+        hint = 'The user has explicitly requested to work inside a document (Document mode is ON). You MUST create or update a document. Start your response with [[ARTIFACT kind=doc title="Document Title"]] and place the full document content inside it. Keep your chat response minimal.'
     prompt = f"{prompt}\n\n{attachment_block}\n\n## Artifact intent hint\n{hint}"
 
     raw_history = [
@@ -2505,14 +2555,14 @@ async def api_refactor(req: RefactorRequest):
         "You are an expert AI refactoring helper. "
         "Take the user's code and modify it according to their instructions.\n"
         "Your response MUST be a valid JSON object containing exactly three fields:\n"
-        "1. \"refactored_code\": The complete, valid modified code (no markdown formatting, just the raw code text).\n"
-        "2. \"explanation\": A brief description in plain English of the changes you made.\n"
-        "3. \"steps\": A list of strings representing the structured step-by-step changes.\n\n"
+        '1. "refactored_code": The complete, valid modified code (no markdown formatting, just the raw code text).\n'
+        '2. "explanation": A brief description in plain English of the changes you made.\n'
+        '3. "steps": A list of strings representing the structured step-by-step changes.\n\n'
         "Example JSON output:\n"
         "{\n"
-        "  \"refactored_code\": \"def greet():\\n    print('hello')\",\n"
-        "  \"explanation\": \"Added print statement\",\n"
-        "  \"steps\": [\"Defined greet function\", \"Added hello message\"]\n"
+        '  "refactored_code": "def greet():\\n    print(\'hello\')",\n'
+        '  "explanation": "Added print statement",\n'
+        '  "steps": ["Defined greet function", "Added hello message"]\n'
         "}\n"
         "IMPORTANT: Output ONLY the raw JSON object. Do not wrap in markdown block, just output the JSON."
     )
@@ -2525,7 +2575,7 @@ async def api_refactor(req: RefactorRequest):
 
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_content}
+        {"role": "user", "content": user_content},
     ]
 
     full_response = ""
@@ -2551,13 +2601,13 @@ async def api_refactor(req: RefactorRequest):
         return RefactorResponse(
             refactored_code=data.get("refactored_code", req.code),
             explanation=data.get("explanation", ""),
-            steps=data.get("steps", [])
+            steps=data.get("steps", []),
         )
     except Exception:
         return RefactorResponse(
             refactored_code=req.code,
             explanation=f"Failed to parse AI response. Raw output was:\n{full_response}",
-            steps=["Error: could not generate structured steps."]
+            steps=["Error: could not generate structured steps."],
         )
 
 
@@ -2572,45 +2622,66 @@ class ScrapeResponse(BaseModel):
 
 def html_to_markdown(html_content: str) -> str:
     import html
+
     # 1. Strip script and style elements
-    html_content = re.sub(r'<(script|style)\b[^>]*>([\s\S]*?)</\1>', '', html_content, flags=re.IGNORECASE)
-    
+    html_content = re.sub(
+        r"<(script|style)\b[^>]*>([\s\S]*?)</\1>", "", html_content, flags=re.IGNORECASE
+    )
+
     # 2. Convert headers
-    html_content = re.sub(r'<h1\b[^>]*>([\s\S]*?)</h1>', r'\n# \1\n', html_content, flags=re.IGNORECASE)
-    html_content = re.sub(r'<h2\b[^>]*>([\s\S]*?)</h2>', r'\n## \1\n', html_content, flags=re.IGNORECASE)
-    html_content = re.sub(r'<h3\b[^>]*>([\s\S]*?)</h3>', r'\n### \1\n', html_content, flags=re.IGNORECASE)
-    html_content = re.sub(r'<h4\b[^>]*>([\s\S]*?)</h4>', r'\n#### \1\n', html_content, flags=re.IGNORECASE)
-    
+    html_content = re.sub(
+        r"<h1\b[^>]*>([\s\S]*?)</h1>", r"\n# \1\n", html_content, flags=re.IGNORECASE
+    )
+    html_content = re.sub(
+        r"<h2\b[^>]*>([\s\S]*?)</h2>", r"\n## \1\n", html_content, flags=re.IGNORECASE
+    )
+    html_content = re.sub(
+        r"<h3\b[^>]*>([\s\S]*?)</h3>", r"\n### \1\n", html_content, flags=re.IGNORECASE
+    )
+    html_content = re.sub(
+        r"<h4\b[^>]*>([\s\S]*?)</h4>", r"\n#### \1\n", html_content, flags=re.IGNORECASE
+    )
+
     # 3. Convert paragraphs
-    html_content = re.sub(r'<p\b[^>]*>([\s\S]*?)</p>', r'\n\1\n', html_content, flags=re.IGNORECASE)
-    
+    html_content = re.sub(
+        r"<p\b[^>]*>([\s\S]*?)</p>", r"\n\1\n", html_content, flags=re.IGNORECASE
+    )
+
     # 4. Convert lists & list items
-    html_content = re.sub(r'<li\b[^>]*>([\s\S]*?)</li>', r'\n- \1', html_content, flags=re.IGNORECASE)
-    
+    html_content = re.sub(
+        r"<li\b[^>]*>([\s\S]*?)</li>", r"\n- \1", html_content, flags=re.IGNORECASE
+    )
+
     # 5. Convert links
-    html_content = re.sub(r'<a\b[^>]*href=["\']([^"\']*)["\'][^>]*>([\s\S]*?)</a>', r'[\2](\1)', html_content, flags=re.IGNORECASE)
-    
+    html_content = re.sub(
+        r'<a\b[^>]*href=["\']([^"\']*)["\'][^>]*>([\s\S]*?)</a>',
+        r"[\2](\1)",
+        html_content,
+        flags=re.IGNORECASE,
+    )
+
     # 6. Strip all other remaining tags
-    html_content = re.sub(r'<[^>]+>', '', html_content)
-    
+    html_content = re.sub(r"<[^>]+>", "", html_content)
+
     # 7. Unescape HTML entities
     html_content = html.unescape(html_content)
-    
+
     # 8. Clean up whitespaces and newlines
-    lines = [line.strip() for line in html_content.split('\n')]
+    lines = [line.strip() for line in html_content.split("\n")]
     cleaned_lines = []
     for line in lines:
         if line:
             cleaned_lines.append(line)
-        elif not cleaned_lines or cleaned_lines[-1] != '':
-            cleaned_lines.append('')
-            
-    return '\n'.join(cleaned_lines).strip()
+        elif not cleaned_lines or cleaned_lines[-1] != "":
+            cleaned_lines.append("")
+
+    return "\n".join(cleaned_lines).strip()
 
 
 @app.post("/api/scrape", response_model=ScrapeResponse)
 async def api_scrape(req: ScrapeRequest):
     import httpx
+
     url = req.url.strip()
     if not url.startswith("http://") and not url.startswith("https://"):
         url = "https://" + url
@@ -2627,10 +2698,11 @@ async def api_scrape(req: ScrapeRequest):
         raise HTTPException(500, f"Failed to fetch webpage: {str(e)}")
 
     import html
-    title_match = re.search(r'<title>([\s\S]*?)</title>', html_content, re.IGNORECASE)
+
+    title_match = re.search(r"<title>([\s\S]*?)</title>", html_content, re.IGNORECASE)
     title = title_match.group(1).strip() if title_match else "Scraped Page"
     title = html.unescape(title)
-    title = re.sub(r'\s+', ' ', title)
+    title = re.sub(r"\s+", " ", title)
 
     markdown = html_to_markdown(html_content)
 

@@ -181,7 +181,7 @@ jobs:
           CUA_VERSION="0.5.3"
           curl -fsSL "https://github.com/trycua/cua/releases/download/cua-driver-rs-v${CUA_VERSION}/cua-driver-rs-${CUA_VERSION}-darwin-universal.tar.gz" -o /tmp/cua-driver.tar.gz
           tar -xzf /tmp/cua-driver.tar.gz -C /tmp/
-          cp /tmp/cua-driver app/src-tauri/binaries/cua-driver
+          cp /tmp/cua-driver-rs-${CUA_VERSION}-darwin-universal/cua-driver app/src-tauri/binaries/cua-driver
           chmod +x app/src-tauri/binaries/cua-driver
 
       - name: Build universal macOS app

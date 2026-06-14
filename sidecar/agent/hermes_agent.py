@@ -21,6 +21,7 @@ from .providers import _gated_execute_tool, _build_system_prompt
 
 logger = logging.getLogger(__name__)
 
+
 class zWorkHermesAgent:
     """The central agent runtime loop replacing our old backend harness."""
 
@@ -45,7 +46,9 @@ class zWorkHermesAgent:
         )
         self.client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=20.0))
 
-    def _format_vision_blocks(self, text: str, attachments: List[Any]) -> List[Dict[str, Any]]:
+    def _format_vision_blocks(
+        self, text: str, attachments: List[Any]
+    ) -> List[Dict[str, Any]]:
         """Encode local image files to base64 and package as vision blocks."""
         blocks = []
         if text:
@@ -76,21 +79,23 @@ class zWorkHermesAgent:
                         b64_data = base64.b64encode(f.read()).decode("utf-8")
 
                     if self.shape == "anthropic":
-                        blocks.append({
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": mime,
-                                "data": b64_data,
-                            },
-                        })
+                        blocks.append(
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": mime,
+                                    "data": b64_data,
+                                },
+                            }
+                        )
                     else:
-                        blocks.append({
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:{mime};base64,{b64_data}"
-                            },
-                        })
+                        blocks.append(
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:{mime};base64,{b64_data}"},
+                            }
+                        )
             except Exception as e:
                 logger.error(f"Failed to process attachment for vision: {e}")
 
@@ -108,7 +113,7 @@ class zWorkHermesAgent:
         attachments: Optional[List[Any]] = None,
     ) -> AsyncIterator[Dict[str, Any]]:
         """Run the multi-turn agent execution loop."""
-        
+
         # 1. Inject vision blocks into the latest user message if attachments are present
         if attachments and messages and messages[-1]["role"] == "user":
             last_msg = messages[-1]
@@ -120,10 +125,10 @@ class zWorkHermesAgent:
         if compaction.should_compact(messages):
             # Compact list to prevent context window overflow
             # We skip actual summary generation inside loop for simplicity
-            messages = messages[-compaction.DEFAULT_KEEP_RECENT:]
+            messages = messages[-compaction.DEFAULT_KEEP_RECENT :]
 
         async with run_scope(self.run_ctx):
-            for turn in range(15): # Max 15 turns per run
+            for turn in range(15):  # Max 15 turns per run
                 self.run_ctx.turn_index = turn
                 self.run_ctx.log("provider_turn_started", turn=turn, shape=self.shape)
 
@@ -138,9 +143,13 @@ class zWorkHermesAgent:
                     if self.token and not self.token.startswith("sk-ant-"):
                         headers["authorization"] = f"Bearer {self.token}"
                     # Convert messages to anthropic-compatible schema
-                    from .providers import _anthropic_convert_input_messages, _anthropic_tools
+                    from .providers import (
+                        _anthropic_convert_input_messages,
+                        _anthropic_tools,
+                    )
+
                     base_system, convo = _anthropic_convert_input_messages(messages)
-                    
+
                     full_system = _build_system_prompt(
                         system_prompt,
                         project_id=project_id,
@@ -148,7 +157,7 @@ class zWorkHermesAgent:
                         plan_mode=plan_mode,
                         auto_approve_destructive=auto_approve_destructive,
                     )
-                    
+
                     body = {
                         "model": self.model_id,
                         "system": full_system,
@@ -163,7 +172,7 @@ class zWorkHermesAgent:
                         "content-type": "application/json",
                     }
                     from .providers import _openai_tools
-                    
+
                     full_system = _build_system_prompt(
                         system_prompt,
                         project_id=project_id,
@@ -171,12 +180,12 @@ class zWorkHermesAgent:
                         plan_mode=plan_mode,
                         auto_approve_destructive=auto_approve_destructive,
                     )
-                    
+
                     openai_messages = [{"role": "system", "content": full_system}]
                     for m in messages:
                         if m.get("role") != "system":
                             openai_messages.append(m)
-                            
+
                     body = {
                         "model": self.model_id,
                         "messages": openai_messages,
@@ -186,16 +195,20 @@ class zWorkHermesAgent:
 
                 # Add extra run tracing headers
                 headers["x-zwork-run-id"] = self.run_ctx.run_id
-                headers["x-zwork-request-kind"] = "root" if turn == 0 else "continuation"
+                headers["x-zwork-request-kind"] = (
+                    "root" if turn == 0 else "continuation"
+                )
 
                 yield {"type": "status", "text": "Thinking"}
 
                 # Execute upstream stream call
                 assistant_content_blocks = []
                 tool_calls_to_execute = []
-                
+
                 try:
-                    async with self.client.stream("POST", endpoint, json=body, headers=headers) as response:
+                    async with self.client.stream(
+                        "POST", endpoint, json=body, headers=headers
+                    ) as response:
                         if response.status_code != 200:
                             err_msg = f"Upstream router error: {response.status_code}"
                             yield {"type": "error", "text": err_msg}
@@ -208,7 +221,7 @@ class zWorkHermesAgent:
                             data_str = line[6:].strip()
                             if data_str == "[DONE]":
                                 break
-                            
+
                             try:
                                 chunk = json.loads(data_str)
                             except json.JSONDecodeError:
@@ -221,7 +234,9 @@ class zWorkHermesAgent:
                                     delta = chunk.get("delta") or {}
                                     if delta.get("type") == "text_delta":
                                         txt = delta.get("text") or ""
-                                        assistant_content_blocks.append({"type": "text", "text": txt})
+                                        assistant_content_blocks.append(
+                                            {"type": "text", "text": txt}
+                                        )
                                         yield {"type": "delta", "text": txt}
                                     elif delta.get("type") == "thinking_delta":
                                         # support thinking outputs
@@ -229,11 +244,13 @@ class zWorkHermesAgent:
                                 elif ev_type == "content_block_start":
                                     block = chunk.get("content_block") or {}
                                     if block.get("type") == "tool_use":
-                                        tool_calls_to_execute.append({
-                                            "id": block.get("id"),
-                                            "name": block.get("name"),
-                                            "input": block.get("input") or {},
-                                        })
+                                        tool_calls_to_execute.append(
+                                            {
+                                                "id": block.get("id"),
+                                                "name": block.get("name"),
+                                                "input": block.get("input") or {},
+                                            }
+                                        )
                             # Parse OpenAI format chunks
                             else:
                                 choices = chunk.get("choices") or []
@@ -242,13 +259,17 @@ class zWorkHermesAgent:
                                 delta = choices[0].get("delta") or {}
                                 if "content" in delta and delta["content"]:
                                     txt = delta["content"]
-                                    assistant_content_blocks.append({"type": "text", "text": txt})
+                                    assistant_content_blocks.append(
+                                        {"type": "text", "text": txt}
+                                    )
                                     yield {"type": "delta", "text": txt}
                                 if "tool_calls" in delta:
                                     for tc in delta["tool_calls"]:
                                         idx = tc.get("index", 0)
                                         if len(tool_calls_to_execute) <= idx:
-                                            tool_calls_to_execute.append({"id": "", "name": "", "input": ""})
+                                            tool_calls_to_execute.append(
+                                                {"id": "", "name": "", "input": ""}
+                                            )
                                         item = tool_calls_to_execute[idx]
                                         if tc.get("id"):
                                             item["id"] = tc["id"]
@@ -267,26 +288,36 @@ class zWorkHermesAgent:
                     for tc in tool_calls_to_execute:
                         if isinstance(tc["input"], str):
                             try:
-                                tc["input"] = json.loads(tc["input"]) if tc["input"].strip() else {}
+                                tc["input"] = (
+                                    json.loads(tc["input"])
+                                    if tc["input"].strip()
+                                    else {}
+                                )
                             except json.JSONDecodeError:
                                 tc["input"] = {}
 
                 # 3. Append assistant response to messages
                 assistant_msg_content = []
                 for tc in tool_calls_to_execute:
-                    assistant_msg_content.append({
-                        "type": "tool_use",
-                        "id": tc["id"],
-                        "name": tc["name"],
-                        "input": tc["input"],
-                    })
-                
-                text_content = "".join(b["text"] for b in assistant_content_blocks if b["type"] == "text")
+                    assistant_msg_content.append(
+                        {
+                            "type": "tool_use",
+                            "id": tc["id"],
+                            "name": tc["name"],
+                            "input": tc["input"],
+                        }
+                    )
+
+                text_content = "".join(
+                    b["text"] for b in assistant_content_blocks if b["type"] == "text"
+                )
                 if text_content:
                     assistant_msg_content.append({"type": "text", "text": text_content})
-                
+
                 if assistant_msg_content:
-                    messages.append({"role": "assistant", "content": assistant_msg_content})
+                    messages.append(
+                        {"role": "assistant", "content": assistant_msg_content}
+                    )
 
                 # 4. If no tools were called, the loop finishes
                 if not tool_calls_to_execute:
@@ -319,12 +350,14 @@ class zWorkHermesAgent:
                         result_text = f"Tool '{name}' failed: {e}"
                         yield {"type": "error", "text": result_text}
 
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": tc["id"],
-                        "content": result_text or ("ok" if ok else "failed"),
-                        "is_error": not ok,
-                    })
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tc["id"],
+                            "content": result_text or ("ok" if ok else "failed"),
+                            "is_error": not ok,
+                        }
+                    )
 
                 # Append tool result turn to history for the next iteration
                 messages.append({"role": "user", "content": tool_results})

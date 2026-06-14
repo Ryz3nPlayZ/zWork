@@ -606,7 +606,10 @@ async def _anthropic_turn(
                                 # Show a brief excerpt of what the model is thinking
                                 preview = piece.strip().split("\n")[0][:80]
                                 if preview:
-                                    yield {"type": "status", "text": f"Thinking: {preview}…"}
+                                    yield {
+                                        "type": "status",
+                                        "text": f"Thinking: {preview}…",
+                                    }
                         elif dtype == "signature_delta" and block["type"] == "thinking":
                             block["signature"] += delta.get("signature", "")
                         elif (
@@ -866,7 +869,10 @@ async def _openai_turn(
                             # Show a brief status so the UI doesn't look stuck
                             preview = thinking_piece.strip().split("\n")[0][:80]
                             if preview:
-                                yield {"type": "status", "text": f"Thinking: {preview}…"}
+                                yield {
+                                    "type": "status",
+                                    "text": f"Thinking: {preview}…",
+                                }
                         piece = delta.get("content")
                         if piece:
                             collected_text += piece
@@ -991,8 +997,11 @@ You have access to `dctl`, a tool suite for controlling the user's desktop envir
         from sidecar.agent.tools import _dctl_path
         import subprocess
         import json
+
         dctl_bin = _dctl_path()
-        res = subprocess.run([dctl_bin, "capabilities"], capture_output=True, text=True, timeout=2)
+        res = subprocess.run(
+            [dctl_bin, "capabilities"], capture_output=True, text=True, timeout=2
+        )
         if res.returncode == 0:
             caps = json.loads(res.stdout)
             caps_data = caps.get("data", {})
@@ -1250,13 +1259,13 @@ async def _gated_execute_tool(
     auto_approve_destructive: bool,
 ) -> AsyncIterator[dict]:
     risk, reason = tool_risk(name, params)
-    
+
     is_approved = False
     try:
         from .runtime import current_run
     except ImportError:
         from sidecar.agent.runtime import current_run
-        
+
     run = current_run()
     if run is not None and name == "run_command":
         cmd = str(params.get("command") or "")
@@ -1265,7 +1274,10 @@ async def _gated_execute_tool(
         except ImportError:
             from sidecar.agent.tools import _normalized_command
         normalized_cmd = _normalized_command(cmd)
-        if hasattr(run, "approved_commands") and normalized_cmd in run.approved_commands:
+        if (
+            hasattr(run, "approved_commands")
+            and normalized_cmd in run.approved_commands
+        ):
             is_approved = True
 
     yield {
@@ -1273,7 +1285,9 @@ async def _gated_execute_tool(
         "tool": name,
         "risk": risk,
         "reason": reason,
-        "blocked": risk == "destructive" and not auto_approve_destructive and not is_approved,
+        "blocked": risk == "destructive"
+        and not auto_approve_destructive
+        and not is_approved,
     }
     if risk == "destructive" and not auto_approve_destructive and not is_approved:
         msg = (

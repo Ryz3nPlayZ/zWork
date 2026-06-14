@@ -51,6 +51,7 @@ def get(project_id: str) -> Project | None:
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
         import dataclasses
+
         valid_keys = {f.name for f in dataclasses.fields(Project)}
         filtered = {k: v for k, v in data.items() if k in valid_keys}
         return Project(**filtered)
@@ -131,7 +132,9 @@ def set_memory(project_id: str, content: str) -> bool:
     p = get(project_id)
     if not p:
         return False
-    (project_dir(project_id) / "project_memory.md").write_text(content, encoding="utf-8")
+    (project_dir(project_id) / "project_memory.md").write_text(
+        content, encoding="utf-8"
+    )
     return True
 
 
