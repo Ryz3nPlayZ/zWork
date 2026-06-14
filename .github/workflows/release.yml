@@ -82,6 +82,24 @@ jobs:
         run: npm ci
         working-directory: app
 
+      - name: Download cua-driver (${{ matrix.platform }})
+        shell: bash
+        run: |
+          CUA_VERSION="0.5.3"
+          case "${{ matrix.platform }}" in
+            linux)
+              curl -fsSL "https://github.com/trycua/cua/releases/download/cua-driver-rs-v${CUA_VERSION}/cua-driver-rs-${CUA_VERSION}-linux-x86_64-binary.tar.gz" -o /tmp/cua.tar.gz
+              tar -xzf /tmp/cua.tar.gz -C /tmp/
+              cp /tmp/cua-driver app/src-tauri/binaries/cua-driver
+              chmod +x app/src-tauri/binaries/cua-driver
+              ;;
+            windows)
+              curl -fsSL "https://github.com/trycua/cua/releases/download/cua-driver-rs-v${CUA_VERSION}/cua-driver-rs-${CUA_VERSION}-windows-x86_64-binary.zip" -o /tmp/cua.zip
+              unzip -o /tmp/cua.zip -d /tmp/
+              cp /tmp/cua-driver.exe app/src-tauri/binaries/cua-driver.exe 2>/dev/null || cp /tmp/cua-driver app/src-tauri/binaries/cua-driver.exe
+              ;;
+          esac
+
       - name: Build (Linux/macOS)
         if: runner.os != 'Windows'
         run: bash ${{ matrix.build_script }}
@@ -179,9 +197,9 @@ jobs:
       - name: Download cua-driver (macOS universal)
         run: |
           CUA_VERSION="0.5.3"
-          curl -fsSL "https://github.com/trycua/cua/releases/download/cua-driver-rs-v${CUA_VERSION}/cua-driver-rs-${CUA_VERSION}-darwin-universal.tar.gz" -o /tmp/cua-driver.tar.gz
+          curl -fsSL "https://github.com/trycua/cua/releases/download/cua-driver-rs-v${CUA_VERSION}/cua-driver-rs-${CUA_VERSION}-darwin-universal-binary.tar.gz" -o /tmp/cua-driver.tar.gz
           tar -xzf /tmp/cua-driver.tar.gz -C /tmp/
-          cp /tmp/cua-driver-rs-${CUA_VERSION}-darwin-universal/cua-driver app/src-tauri/binaries/cua-driver
+          cp /tmp/cua-driver app/src-tauri/binaries/cua-driver
           chmod +x app/src-tauri/binaries/cua-driver
 
       - name: Build universal macOS app
