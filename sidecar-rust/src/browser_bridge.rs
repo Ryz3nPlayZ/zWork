@@ -18,10 +18,16 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 struct BridgeState {
     /// Sender to the active extension WebSocket (if connected).
     ws_tx: Option<mpsc::UnboundedSender<String>>,
+    /// Monotonic id of the connection that owns `ws_tx`. Used so a stale
+    /// disconnect (an old socket closing after a newer one took over) doesn't
+    /// clobber the live connection.
+    ws_conn_id: u64,
     /// Pending commands waiting for extension responses.
     pending: HashMap<String, oneshot::Sender<Value>>,
     /// Command counter for generating cmd_N IDs.
     counter: u64,
+    /// Connection counter for generating ws conn ids.
+    conn_counter: u64,
 }
 
 fn bridge() -> &'static Mutex<BridgeState> {
@@ -29,16 +35,12 @@ fn bridge() -> &'static Mutex<BridgeState> {
     BRIDGE.get_or_init(|| {
         Mutex::new(BridgeState {
             ws_tx: None,
+            ws_conn_id: 0,
             pending: HashMap::new(),
             counter: 0,
+            conn_counter: 0,
         })
     })
-}
-
-/// Check if the Chrome extension is connected.
-pub async fn extension_connected() -> bool {
-    let state = bridge().lock().await;
-    state.ws_tx.is_some()
 }
 
 /// Send a command to the browser extension and wait for the response.
@@ -69,8 +71,14 @@ pub async fn send_command(action: &str, params: Value) -> Result<String, String>
     let cmd_str = serde_json::to_string(&cmd)
         .map_err(|e| format!("Serialization error: {}", e))?;
 
-    ws_tx.send(cmd_str)
-        .map_err(|e| format!("Failed to send command to extension: {}", e))?;
+    if ws_tx.send(cmd_str).is_err() {
+        // The extension channel is gone (it disconnected between us grabbing
+        // the sender and sending). Drop the pending entry so it isn't leaked
+        // until the timeout fires.
+        let mut state = bridge().lock().await;
+        state.pending.remove(&id);
+        return Err("Browser extension disconnected before the command was sent.".to_string());
+    }
 
     // Wait for response (10s timeout)
     match tokio::time::timeout(std::time::Duration::from_secs(10), rx).await {
@@ -102,16 +110,20 @@ pub async fn ws_handler(ws: axum::extract::ws::WebSocketUpgrade) -> impl axum::r
     ws.on_upgrade(handle_ws_connection)
 }
 
-async fn handle_ws_connection(mut socket: WebSocket) {
+async fn handle_ws_connection(socket: WebSocket) {
     let (ws_tx, mut ws_rx) = mpsc::unbounded_channel::<String>();
 
-    // Register this connection as the active one
-    {
+    // Register this connection as the active one and stamp it with a unique
+    // id so a later disconnect can tell whether it still owns the bridge.
+    let conn_id = {
         let mut state = bridge().lock().await;
+        state.conn_counter += 1;
+        state.ws_conn_id = state.conn_counter;
         state.ws_tx = Some(ws_tx);
-    }
+        state.ws_conn_id
+    };
 
-    tracing::info!("[browser-bridge] extension connected");
+    tracing::info!("[browser-bridge] extension connected (conn={})", conn_id);
 
     // Spawn a task to forward outgoing messages to the WebSocket
     let (mut ws_sender, mut ws_receiver) = socket.split();
@@ -132,7 +144,7 @@ async fn handle_ws_connection(mut socket: WebSocket) {
 
                 // If this is a response to a pending command, resolve it
                 let is_settled = payload.get("type").and_then(|v| v.as_str()) == Some("settled");
-                
+
                 if let Some(ref id) = msg_id {
                     let mut state = bridge().lock().await;
                     if let Some(tx) = state.pending.remove(id) {
@@ -153,19 +165,30 @@ async fn handle_ws_connection(mut socket: WebSocket) {
         }
     }
 
-    // Cleanup: unregister connection
+    // Cleanup: only tear down the bridge if this connection still owns it.
+    // A newer connection may have already taken over (e.g. the extension
+    // reconnected before the old socket fully closed); in that case we leave
+    // the live connection and its pending commands untouched.
     send_task.abort();
-    {
+    let still_owner = {
         let mut state = bridge().lock().await;
-        state.ws_tx = None;
-        // Cancel any pending commands
-        for (_, tx) in state.pending.drain() {
-            let _ = tx.send(serde_json::json!({
-                "ok": false,
-                "error": "Browser extension disconnected"
-            }));
+        if state.ws_conn_id == conn_id {
+            state.ws_tx = None;
+            // Fail any commands still waiting on this (now-dead) connection.
+            for (_, tx) in state.pending.drain() {
+                let _ = tx.send(serde_json::json!({
+                    "ok": false,
+                    "error": "Browser extension disconnected"
+                }));
+            }
+            true
+        } else {
+            false
         }
-    }
+    };
 
-    tracing::info!("[browser-bridge] extension disconnected");
+    tracing::info!(
+        "[browser-bridge] extension disconnected (conn={}, released={})",
+        conn_id, still_owner
+    );
 }

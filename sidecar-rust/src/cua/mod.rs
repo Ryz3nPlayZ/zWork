@@ -1,7 +1,7 @@
 mod mcp_client;
 mod types;
 
-pub use types::{ActionResult, CaptureResult, UIElement};
+pub use types::{ActionResult, CaptureResult};
 
 use mcp_client::McpClient;
 use serde_json::{json, Value};
@@ -42,17 +42,6 @@ pub async fn click(element: u32, app: Option<&str>) -> Result<ActionResult, Stri
     }
     let result = c.call("click", params).await?;
     serde_json::from_value(result).map_err(|e| format!("click parse error: {}", e))
-}
-
-/// Double-click an element.
-pub async fn double_click(element: u32, app: Option<&str>) -> Result<ActionResult, String> {
-    let c = client().await?;
-    let mut params = json!({"element": element});
-    if let Some(a) = app {
-        params["app"] = json!(a);
-    }
-    let result = c.call("double_click", params).await?;
-    serde_json::from_value(result).map_err(|e| format!("double_click parse error: {}", e))
 }
 
 /// Type text into the currently focused field.

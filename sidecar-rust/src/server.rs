@@ -1181,11 +1181,17 @@ pub struct AnswerQuestionBody {
 }
 
 pub async fn answer_question(
-    Path(chat_id): Path<String>,
-    Json(body): Json<AnswerQuestionBody>,
+    Path(_chat_id): Path<String>,
+    Json(_body): Json<AnswerQuestionBody>,
 ) -> impl IntoResponse {
-    let ok = crate::agent::answer_pending_question(&chat_id, &body.answer);
-    Json(json!({ "success": ok }))
+    // The interactive ask_question / ask_user flow is not wired through a
+    // pending-question registry in this build — the tools return a static hint
+    // instead of blocking. Keep the endpoint live so the frontend doesn't 404,
+    // and report that no interactive handler is registered.
+    Json(json!({
+        "success": false,
+        "error": "No interactive question is pending in this build."
+    }))
 }
 
 // ─── Chat truncate ───────────────────────────────────────────────────────────
@@ -1684,10 +1690,14 @@ pub async fn screenshot() -> impl IntoResponse {
                 let upload_dir = crate::paths::workspace_uploads_dir();
                 let _ = std::fs::create_dir_all(&upload_dir);
 
-                // Extract base64 from data URL (strip "data:image/png;base64," prefix)
-                let b64_data = data_url
-                    .strip_prefix("data:image/png;base64,")
-                    .unwrap_or(&data_url);
+                // Extract the base64 payload from a data URL. Handles any media
+                // type (data:image/png;base64, …, data:image/jpeg;base64, …) by
+                // splitting on the ";base64," marker. Falls back to the raw
+                // string if this isn't a data URL at all.
+                let b64_data = match data_url.split_once(";base64,") {
+                    Some((_, payload)) => payload,
+                    None => &data_url,
+                };
                 
                 match standard_b64_decode(b64_data) {
                     Ok(bytes) => {

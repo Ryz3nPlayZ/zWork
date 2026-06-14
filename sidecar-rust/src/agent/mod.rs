@@ -40,35 +40,6 @@ pub fn reject_gate(gate_id: &str) -> bool {
     }
 }
 
-// ─── Pending question registry ───────────────────────────────────────────────
-// Tracks ask_user/ask_question tool calls that are waiting for the user to
-// answer via the POST /api/chats/:chat_id/answer-question endpoint.
-
-fn pending_questions() -> &'static Mutex<HashMap<String, oneshot::Sender<String>>> {
-    static INSTANCE: OnceLock<Mutex<HashMap<String, oneshot::Sender<String>>>> = OnceLock::new();
-    INSTANCE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// Register a pending question and return a receiver that resolves when the
-/// user answers via the REST endpoint.
-pub fn register_pending_question(chat_id: &str) -> oneshot::Receiver<String> {
-    let (tx, rx) = oneshot::channel();
-    let mut map = pending_questions().lock().unwrap();
-    map.insert(chat_id.to_string(), tx);
-    rx
-}
-
-/// Resolve a pending question. Called from the answer-question REST handler.
-pub fn answer_pending_question(chat_id: &str, answer: &str) -> bool {
-    let mut map = pending_questions().lock().unwrap();
-    if let Some(tx) = map.remove(chat_id) {
-        let _ = tx.send(answer.to_string());
-        true
-    } else {
-        false
-    }
-}
-
 pub fn run_agent_turn(
     chat_id: String,
     model_id: String,
@@ -358,9 +329,8 @@ pub fn run_agent_turn(
                 
                 if let Risk::Destructive { reason } = risk {
                     if !auto_approve {
-                        execute_allowed = false;
                         let gate_id = format!("gate_{}", uuid::Uuid::new_v4().simple());
-                        
+
                         // Yield permission request
                         let _ = tx.send(json!({
                             "type": "permission",
@@ -376,9 +346,26 @@ pub fn run_agent_turn(
                             map.insert(gate_id.clone(), gate_tx);
                         }
                         
-                        // Wait for user approval
-                        if let Ok(approved) = gate_rx.await {
-                            execute_allowed = approved;
+                        // Wait for user approval, with a long safety timeout so
+                        // an unanswered prompt (UI closed, SSE stream dropped)
+                        // can't hang the agent loop forever. On expiry we
+                        // auto-deny and surface it to the user.
+                        const GATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+                        match tokio::time::timeout(GATE_TIMEOUT, gate_rx).await {
+                            Ok(Ok(approved)) => {
+                                execute_allowed = approved;
+                            }
+                            Ok(Err(_)) => {
+                                // Gate dropped without a decision — deny.
+                                execute_allowed = false;
+                            }
+                            Err(_) => {
+                                let _ = tx.send(json!({
+                                    "type": "status",
+                                    "text": "Permission request timed out after 10 minutes and was auto-denied."
+                                })).await;
+                                execute_allowed = false;
+                            }
                         }
                     }
                 }

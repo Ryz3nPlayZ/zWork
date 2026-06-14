@@ -51,11 +51,37 @@ impl McpClient {
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
+            // Kill the driver when this handle drops (i.e. when the backend
+            // exits), so we don't leak orphaned cua-driver processes.
+            .kill_on_drop(true)
             .spawn()
             .map_err(|e| format!("Failed to start {}: {}", bin, e))?;
 
         let stdin = child.stdin.take().ok_or("No stdin handle")?;
         let stdout = child.stdout.take().ok_or("No stdout handle")?;
+        let stderr = child.stderr.take().ok_or("No stderr handle")?;
+
+        // Drain stderr in the background. If we don't read it, the driver's
+        // stderr pipe buffer (≈64KB) can fill, blocking the driver on its next
+        // stderr write — which stalls stdin processing and deadlocks the whole
+        // MCP client. Forward lines to the tracing log for diagnostics.
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(stderr);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line).await {
+                    Ok(0) => break, // EOF — driver exited
+                    Ok(_) => {
+                        let trimmed = line.trim_end();
+                        if !trimmed.is_empty() {
+                            tracing::debug!("[cua-driver] {}", trimmed);
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
 
         let client = Self {
             stdin: Arc::new(Mutex::new(stdin)),
@@ -100,11 +126,16 @@ impl McpClient {
         self.send_and_receive(&request).await
     }
 
-    /// Write a JSON-RPC request to stdin and read the response from stdout.
+    /// Write a JSON-RPC request to stdin and read the matching response from stdout.
+    ///
+    /// Lines are read in a loop because the server may emit JSON-RPC
+    /// notifications (e.g. logging) on stdout that are not replies. We skip any
+    /// line whose `id` does not match our request, and return on the first match.
     async fn send_and_receive(&self, request: &Value) -> Result<Value, String> {
         // Serialize request
         let req_str = serde_json::to_string(request)
             .map_err(|e| format!("Serialization error: {}", e))?;
+        let expected_id = request.get("id").cloned();
 
         // Write to stdin (newline-delimited JSON)
         {
@@ -117,35 +148,61 @@ impl McpClient {
                 .map_err(|e| format!("Flush error: {}", e))?;
         }
 
-        // Read response line from stdout
-        let mut line = String::new();
-        {
-            let mut stdout = self.stdout.lock().await;
-            line.clear();
-            stdout.read_line(&mut line).await
-                .map_err(|e| format!("Read error: {}", e))?;
-        }
+        // Read stdout line by line until we find our response.
+        loop {
+            let mut line = String::new();
+            let read = {
+                let mut stdout = self.stdout.lock().await;
+                stdout.read_line(&mut line).await
+                    .map_err(|e| format!("Read error: {}", e))?
+            };
 
-        let line = line.trim();
-        if line.is_empty() {
-            return Err("Empty response from cua-driver".to_string());
-        }
+            // read_line returning 0 bytes means EOF: the driver closed stdout,
+            // almost always because it crashed or was never granted the macOS
+            // permissions (Accessibility / Screen Recording) it needs.
+            if read == 0 {
+                return Err(
+                    "cua-driver process exited without responding. \
+                     Verify cua-driver is installed and that Accessibility \
+                     and Screen Recording permissions are granted."
+                        .to_string(),
+                );
+            }
 
-        let response: Value = serde_json::from_str(line)
-            .map_err(|e| format!("JSON parse error ({}): {}", e, line.chars().take(100).collect::<String>()))?;
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
 
-        // Check for JSON-RPC error
-        if let Some(err) = response.get("error") {
-            let msg = err.get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Unknown error");
-            return Err(format!("cua-driver error: {}", msg));
-        }
+            // Skip non-JSON noise lines (banners, stray output) without failing.
+            let response: Value = match serde_json::from_str(trimmed) {
+                Ok(v) => v,
+                Err(_) => {
+                    tracing::debug!("[cua-driver] non-JSON stdout: {}", trimmed);
+                    continue;
+                }
+            };
 
-        // Return the result
-        match response.get("result") {
-            Some(r) => Ok(r.clone()),
-            None => Err(format!("No result in response: {}", line.chars().take(200).collect::<String>())),
+            // Only a message carrying our request id is our reply. Skip
+            // notifications (no id) and replies to other in-flight requests.
+            match response.get("id") {
+                Some(id) if expected_id.as_ref() == Some(id) => {}
+                _ => continue,
+            }
+
+            // Check for JSON-RPC error
+            if let Some(err) = response.get("error") {
+                let msg = err.get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown error");
+                return Err(format!("cua-driver error: {}", msg));
+            }
+
+            // Return the result
+            return match response.get("result") {
+                Some(r) => Ok(r.clone()),
+                None => Err(format!("No result in response: {}", trimmed.chars().take(200).collect::<String>())),
+            };
         }
     }
 }

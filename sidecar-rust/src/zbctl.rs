@@ -2,12 +2,7 @@
 // Uses browser_bridge.rs internally — no external Python daemon needed.
 // The Chrome extension connects to ws://127.0.0.1:8787/ws directly.
 
-use serde_json::{json, Value};
-
-/// Check if the Chrome extension is connected.
-pub async fn extension_connected() -> bool {
-    crate::browser_bridge::extension_connected().await
-}
+use serde_json::json;
 
 /// Navigate the user's Chrome to a URL.
 pub async fn navigate(url: &str, _tab_id: Option<u32>) -> Result<String, String> {
@@ -50,11 +45,6 @@ pub async fn scroll(direction: &str, amount: Option<i32>) -> Result<String, Stri
 /// List all browser tabs.
 pub async fn tabs() -> Result<String, String> {
     crate::browser_bridge::send_command("tabs", json!({})).await
-}
-
-/// Get the active browser tab.
-pub async fn active_tab() -> Result<String, String> {
-    crate::browser_bridge::send_command("active-tab", json!({})).await
 }
 
 /// Take a screenshot of the current browser tab.

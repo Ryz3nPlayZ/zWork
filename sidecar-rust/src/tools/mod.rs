@@ -1,6 +1,5 @@
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
-use std::collections::HashMap;
 use std::convert::Infallible;
 use futures_util::stream::Stream;
 use futures_util::StreamExt;
@@ -605,6 +604,13 @@ pub fn execute_tool(
             }
             "desktop_wait" => {
                 let seconds = params.get("seconds").and_then(|v| v.as_f64()).unwrap_or(1.0);
+                // Clamp to a sane range so a model can't stall the agent loop
+                // for minutes on end, and guard against NaN / negatives.
+                let seconds = if seconds.is_finite() && seconds > 0.0 {
+                    seconds.min(60.0)
+                } else {
+                    1.0
+                };
                 match crate::cua::wait(seconds).await {
                     Ok(result) => Ok(serde_json::to_string_pretty(&result).unwrap_or_default()),
                     Err(e) => Err(e),

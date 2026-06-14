@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
 use uuid::Uuid;
 use crate::paths::{
     settings_path, zwork_md_path, memory_path, workspace_root,
@@ -92,7 +91,7 @@ pub fn load() -> Settings {
     
     // Save masked settings back to disk if raw keys were present in the loaded JSON
     let mut needs_rewrite = false;
-    for (k, v) in credential_names {
+    for (_, v) in credential_names {
         if !v.is_empty() {
             needs_rewrite = true;
             break;
