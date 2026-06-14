@@ -40,7 +40,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; connect-src 'self' http://127.0.0.1:8787 https://api.tryzwork.app https://us.i.posthog.com https://*.posthog.com https://api.github.com; style-src 'self' 'unsafe-inline'; img-src 'self' asset: https://asset.localhost https://cdn.jsdelivr.net data: blob:; font-src 'self' data:; frame-src 'self' blob:"
+      "csp": "default-src 'self'; script-src 'self'; connect-src 'self' http://127.0.0.1:8787 http://127.0.0.1:8788 https://api.tryzwork.app https://us.i.posthog.com https://*.posthog.com https://api.github.com; style-src 'self' 'unsafe-inline'; img-src 'self' asset: https://asset.localhost https://cdn.jsdelivr.net data: blob:; font-src 'self' data:; frame-src 'self' blob:"
     }
   },
   "bundle": {
@@ -50,10 +50,10 @@
       "minimumSystemVersion": "10.13"
     },
     "externalBin": [
-      "binaries/zwork-backend",
-      "binaries/cua-driver"
+      "binaries/zwork-backend"
     ],
     "resources": [
+      "binaries/cua-driver*",
       "extension/*"
     ],
     "targets": "all",

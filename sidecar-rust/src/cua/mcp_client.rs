@@ -17,16 +17,29 @@ pub struct McpClient {
 impl McpClient {
     /// Resolve cua-driver binary.
     /// Priority:
-    /// 1. Next to our own executable (bundled as Tauri sidecar)
-    /// 2. ~/.local/bin/cua-driver (user install)
-    /// 3. $PATH (fallback)
+    /// 1. Bundled as Tauri resource (Contents/Resources/binaries/cua-driver)
+    /// 2. Next to our own executable (dev layout)
+    /// 3. ~/.local/bin/cua-driver (user install)
+    /// 4. $PATH (fallback)
     fn find_cua_binary() -> String {
-        // Check for cua-driver next to our executable (bundled in Tauri binaries/)
+        // Check for cua-driver in Tauri app bundle resources
         if let Ok(exe) = std::env::current_exe() {
-            if let Some(dir) = exe.parent() {
-                let bundled = dir.join("cua-driver");
-                if bundled.exists() {
-                    return bundled.to_string_lossy().to_string();
+            // exe is at .../Contents/MacOS/zwork-backend (bundled)
+            // resources are at .../Contents/Resources/binaries/
+            if let Some(macos_dir) = exe.parent() {
+                // Bundled: ../Resources/binaries/cua-driver
+                let resources_bin = macos_dir
+                    .parent()  // MacOS -> Contents
+                    .map(|p| p.join("Resources").join("binaries").join("cua-driver"));
+                if let Some(ref path) = resources_bin {
+                    if path.exists() {
+                        return path.to_string_lossy().to_string();
+                    }
+                }
+                // Dev: next to our executable (both in sidecar-rust/target/ or binaries/)
+                let next_to_exe = macos_dir.join("cua-driver");
+                if next_to_exe.exists() {
+                    return next_to_exe.to_string_lossy().to_string();
                 }
             }
         }
