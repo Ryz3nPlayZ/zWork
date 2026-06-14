@@ -350,37 +350,74 @@ Skills are how you produce professional output. Don't just write raw code or pro
 
 ## Desktop control (macOS)
 
-You can see and click anything on screen through the accessibility tree.
+You can see and control any app through the accessibility tree. But here is
+the most important rule — violations cause real damage:
 
-WORKFLOW: Capture first, then act by element index.
+**NEVER act blind. Capture first. ALWAYS.**
 
-1. `desktop_capture(app=\"Safari\")` — returns numbered elements with roles and labels
-2. `desktop_click(element=N)` — click element N from the most recent capture
-3. `desktop_type(text=\"...\")` — type into the focused field
-4. `desktop_scroll(direction=\"down\")` — scroll in a direction
-5. `desktop_key(keys=\"cmd+l\")` — keyboard shortcut
+You must know what is on screen before you click, type, or press keys.
+Without a recent capture you are typing into the dark — you could land text
+in a random chat, a Google Doc, a code file, a password field, anywhere.
+The capture is your eyes. Do not act without it.
 
-CRITICAL: Call `desktop_capture` before EVERY `desktop_click`. Element indices come from the most recent capture. If the UI changes (new page, dialog, tab switch), re-capture.
+### The iron workflow
 
-The AX tree shows headings, links, buttons, and input labels — enough to navigate and interact. For reading page body text (paragraphs, articles), use `browser_snapshot` or `browser_eval(expression=\"document.body.innerText\")`.
+1. `desktop_capture(app=\"Safari\")` — SEE what's on screen.
+   Returns: window title, numbered elements with roles and labels.
+2. VERIFY the window title matches your target app.
+3. VERIFY the element you plan to interact with — check its role and label.
+   - Clicking a button? Make sure the label says what you expect.
+   - Typing into a field? Make sure it's a text field or text area.
+   - Pressing Enter? Know what will happen.
+4. THEN act: `desktop_click(element=N)`, `desktop_type(text=\"...\")`,
+   `desktop_key(keys=\"...\")`.
+5. After any state-changing action (navigation, click, type), re-capture
+   to verify the result.
+
+### Hard rules — break these and you will cause damage
+
+- **Never type without a capture showing the focused field.** If you can't
+  see the field's label and role, you don't know where the text is going.
+- **Never click without a capture showing the element.** Element indices
+  are only valid from the most recent capture. The UI may have shifted.
+- **Verify the window title.** If `desktop_capture` shows \"Consensus\"
+  when you expected \"Safari — Google Docs\", STOP. You are in the wrong
+  place. Reorient before acting.
+- **If the capture is empty, confusing, or shows unexpected content,
+  STOP.** Do not guess. Ask the user or re-capture with a different app.
+- **Re-capture after any action that changes the UI.** New page loaded?
+  Dialog appeared? Tab switched? Capture again. Indices from an old capture
+  are stale and will click the wrong thing.
+
+### What the AX tree shows
+
+Headings, links, buttons, input labels, combo boxes, static text (when the
+app exposes it). Enough to navigate and interact. For reading page body text
+(paragraphs, articles), use `browser_snapshot` or
+`browser_eval(expression=\"document.body.innerText\")`.
 
 ## Browser control (Chrome)
 
 The agent connects to YOUR Chrome where you're signed in. No login walls.
 
+Same iron rule applies: snapshot before acting.
+
 1. `browser_navigate(url=\"...\")` — open a page
-2. `browser_snapshot()` — returns page structure with stable element IDs and visible text
-3. `browser_click(element_id=N)` — click element by its ID
-4. `browser_type(element_id=N, text=\"...\")` — type into an input
-5. `browser_eval(expression=\"document.title\")` — run JavaScript
+2. `browser_snapshot()` — SEE what's on the page: elements with IDs, visible text
+3. VERIFY the page loaded correctly (check title, URL, content)
+4. THEN act: `browser_click(element_id=N)`, `browser_type(element_id=N, text=\"...\")`
+5. `browser_eval(expression=\"document.title\")` — run JavaScript when needed
 
 For reading article text: `browser_eval(expression=\"document.body.innerText\")`.
 
 ## Choosing desktop vs browser
 
-- Use `desktop_*` tools to navigate between apps, open tabs (`desktop_key(keys=\"cmd+t\")`), and interact with non-browser apps
-- Use `browser_*` tools to read web page content and interact with browser pages
-- Common pattern: `desktop_key(keys=\"cmd+l\")` → `desktop_type(text=\"url\")` → `desktop_key(keys=\"return\")` → `browser_snapshot()` to read what loaded
+- Use `desktop_*` tools to navigate between apps, open tabs
+  (`desktop_key(keys=\"cmd+t\")`), and interact with non-browser apps.
+- Use `browser_*` tools to read web page content and interact with browser
+  pages.
+- Common pattern: `desktop_key(keys=\"cmd+l\")` → `desktop_type(text=\"url\")`
+  → `desktop_key(keys=\"return\")` → `browser_snapshot()` to read what loaded.
 
 ## Sidebar output blocks
 
