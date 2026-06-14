@@ -50,12 +50,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Checkout dctl
-        uses: actions/checkout@v4
-        with:
-          repository: Ryz3nPlayZ/dctl
-          path: dctl
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -181,6 +175,14 @@ jobs:
         with:
           name: macos-backend-aarch64
           path: app/src-tauri/binaries
+
+      - name: Download cua-driver (macOS universal)
+        run: |
+          CUA_VERSION="0.5.3"
+          curl -fsSL "https://github.com/trycua/cua/releases/download/cua-driver-rs-v${CUA_VERSION}/cua-driver-rs-${CUA_VERSION}-darwin-universal.tar.gz" -o /tmp/cua-driver.tar.gz
+          tar -xzf /tmp/cua-driver.tar.gz -C /tmp/
+          cp /tmp/cua-driver app/src-tauri/binaries/cua-driver
+          chmod +x app/src-tauri/binaries/cua-driver
 
       - name: Build universal macOS app
         run: bash scripts/build-macos-universal-release.sh

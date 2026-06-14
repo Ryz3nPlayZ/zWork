@@ -2,6 +2,19 @@
 
 All notable changes to zWork are documented here.
 
+## v0.5.0-alpha.13
+
+**Desktop control via cua-driver, embedded browser bridge, redesigned overlay.**
+
+- Integrated cua-driver for background macOS desktop control: capture AX tree, click by element index, type, scroll, keyboard shortcuts
+- Replaced dctl CLI wrapper with 17 structured tool schemas: `desktop_capture`, `desktop_click`, `desktop_type`, `desktop_scroll`, `desktop_key`, `desktop_focus`, `desktop_list_apps`, `desktop_wait`, `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_eval`, `browser_scroll`, `browser_screenshot`, `browser_tabs`
+- Embedded zbctl WebSocket bridge directly into zWork Rust backend — no Python daemon required. Chrome extension connects to ws://127.0.0.1:8787/ws
+- Bundled cua-driver as Tauri sidecar binary, extension as app resource
+- Redesigned global overlay (Cmd+Ctrl+Space) with clean command bar, scale+fade animation, theme-aware design tokens
+- Updated system prompt with capture→act workflow guidance, desktop vs browser tool selection
+- Removed dctl dependency from CI pipeline
+- Updated version to 0.5.0-alpha.13
+
 ## v0.4.0-beta.2
 
 **Migrated to pruned Hermes backend agent engine, added Ollama Cloud vision routing, and enhanced test resilience.**

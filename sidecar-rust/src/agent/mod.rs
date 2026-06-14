@@ -477,10 +477,13 @@ pub fn run_agent_turn(
 const KNOWN_TOOLS: &[&str] = &[
     "read_file", "list_dir", "write_file", "run_command",
     "extract_document", "web_search", "search_papers", "format_citation",
-    "save_memory", "deploy_web_app", "dctl", "read_skill", "spawn_agent",
+    "save_memory", "deploy_web_app", "read_skill", "spawn_agent",
     "ask_question", "ask_user", "ask_user_for_permission", "detect_hardware",
     "manage_tasks", "manage_events", "get_stock_data",
-    "dctl_system", "dctl_ui", "dctl_browser", "dctl_office",
+    "desktop_capture", "desktop_click", "desktop_type", "desktop_scroll",
+    "desktop_key", "desktop_focus", "desktop_list_apps", "desktop_wait",
+    "browser_navigate", "browser_snapshot", "browser_click", "browser_type",
+    "browser_eval", "browser_scroll", "browser_screenshot", "browser_tabs",
 ];
 
 /// Parse tool calls that a model outputted as plain text instead of

@@ -1671,57 +1671,41 @@ pdf.output('{}')
 }
 
 pub async fn screenshot() -> impl IntoResponse {
-    // Find dctl binary
-    let dctl_path = crate::tools::dctl::find_dctl_path();
-    let dctl_bin = match dctl_path {
-        Some(p) => p,
-        None => return Json(json!({ "error": "dctl not found" })),
-    };
+    // Use zbctl to capture the browser screenshot
+    match crate::zbctl::screenshot().await {
+        Ok(result) => {
+            // zbctl returns a JSON object with dataUrl field
+            if let Ok(val) = serde_json::from_str::<Value>(&result) {
+                let data_url = val.get("dataUrl")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&result)
+                    .to_string();
+                let filename = format!("screenshot_{}.png", chrono::Utc::now().timestamp_millis());
+                let upload_dir = crate::paths::workspace_uploads_dir();
+                let _ = std::fs::create_dir_all(&upload_dir);
 
-    let result = tokio::process::Command::new(&dctl_bin)
-        .arg("screenshot")
-        .arg("--base64")
-        .output()
-        .await;
-
-    match result {
-        Ok(output) if output.status.success() => {
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            // Try parsing as JSON (dctl returns JSON with base64 field)
-            let (b64_data, temp_path) = if let Ok(val) = serde_json::from_str::<Value>(&stdout) {
-                let b64 = val.get("base64").and_then(|v| v.as_str()).unwrap_or(&stdout).to_string();
-                let tmp = val.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                (b64, tmp)
-            } else {
-                (stdout.trim().to_string(), String::new())
-            };
-
-            let filename = format!("screenshot_{}.png", chrono::Utc::now().timestamp_millis());
-            let upload_dir = crate::paths::workspace_uploads_dir();
-            let _ = std::fs::create_dir_all(&upload_dir);
-
-            // Save to uploads
-            match standard_b64_decode(&b64_data) {
-                Ok(bytes) => {
-                    let save_path = upload_dir.join(&filename);
-                    let _ = std::fs::write(&save_path, &bytes);
-
-                    // Clean up temp file if exists
-                    if !temp_path.is_empty() {
-                        let _ = std::fs::remove_file(&temp_path);
+                // Extract base64 from data URL (strip "data:image/png;base64," prefix)
+                let b64_data = data_url
+                    .strip_prefix("data:image/png;base64,")
+                    .unwrap_or(&data_url);
+                
+                match standard_b64_decode(b64_data) {
+                    Ok(bytes) => {
+                        let save_path = upload_dir.join(&filename);
+                        let _ = std::fs::write(&save_path, &bytes);
+                        Json(json!({
+                            "screenshot": data_url,
+                            "path": save_path.to_string_lossy(),
+                            "filename": filename,
+                        }))
                     }
-
-                    Json(json!({
-                        "screenshot": format!("data:image/png;base64,{}", b64_data),
-                        "path": save_path.to_string_lossy(),
-                        "filename": filename,
-                    }))
+                    Err(e) => Json(json!({ "error": format!("Failed to decode screenshot: {}", e) })),
                 }
-                Err(e) => Json(json!({ "error": format!("Failed to decode screenshot: {}", e) })),
+            } else {
+                Json(json!({ "error": "Invalid screenshot response from zbctl" }))
             }
         }
-        Ok(output) => Json(json!({ "error": String::from_utf8_lossy(&output.stderr).to_string() })),
-        Err(e) => Json(json!({ "error": format!("Failed to run dctl: {}", e) })),
+        Err(e) => Json(json!({ "error": format!("Screenshot failed (is zbctl running with Chrome connected?): {}", e) })),
     }
 }
 

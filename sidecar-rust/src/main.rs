@@ -16,6 +16,9 @@ mod tools;
 mod agent;
 mod taskstore;
 mod server;
+mod cua;
+mod zbctl;
+mod browser_bridge;
 
 #[tokio::main]
 async fn main() {
@@ -29,6 +32,7 @@ async fn main() {
         .unwrap_or(8787);
 
     let app = Router::new()
+        .route("/ws", get(browser_bridge::ws_handler))
         .route("/api/health", get(server::health))
         .route("/api/me", get(server::me))
         .route("/api/providers", get(server::get_providers))

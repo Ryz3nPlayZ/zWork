@@ -10,7 +10,6 @@ pub mod fs;
 pub mod shell;
 pub mod search;
 pub mod doc_extract;
-pub mod dctl;
 pub mod stock;
 
 // Risk evaluation for permission checking
@@ -265,66 +264,170 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
                 "required": ["project_path"]
             }
         }));
+        // ─── Desktop control (cua-driver) ───
         schemas.push(json!({
-            "name": "dctl",
-            "description": "Desktop control GUI automation client tool. Subcommands: click, type, screenshot, etc.",
+            "name": "desktop_capture",
+            "description": "Capture the accessibility tree of an app window. Returns numbered elements you can click/type into. MUST be called before desktop_click, desktop_type, or desktop_scroll. Use app=\"Safari\" or app=\"Chrome\" to scope to a single app.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "subcommand": { "type": "string", "description": "dctl action" },
-                    "args": { "type": "array", "items": { "type": "string" }, "description": "Subcommand arguments" }
-                },
-                "required": ["subcommand"]
-            }
-        }));
-        // dctl specializations — route to the same dctl binary
-        schemas.push(json!({
-            "name": "dctl_system",
-            "description": "System-level desktop control: launch apps, list windows, system discovery.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "action": { "type": "string", "description": "System action (launch, list-windows, etc.)" },
-                    "args": { "type": "array", "items": { "type": "string" }, "description": "Action arguments" }
-                },
-                "required": ["action"]
+                    "app": { "type": "string", "description": "App name to capture (e.g. \"Safari\", \"Chrome\", \"Finder\"). Omit for frontmost app." }
+                }
             }
         }));
         schemas.push(json!({
-            "name": "dctl_ui",
-            "description": "UI automation: click, type, read accessibility tree, interact with controls.",
+            "name": "desktop_click",
+            "description": "Click an element by its index from the last desktop_capture. Element indices come from the capture output.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": { "type": "string", "description": "UI action (click, type, read-tree, etc.)" },
-                    "args": { "type": "array", "items": { "type": "string" }, "description": "Action arguments" }
+                    "element": { "type": "integer", "description": "Element index from desktop_capture output" },
+                    "app": { "type": "string", "description": "App to click in (optional, uses last capture target)" }
                 },
-                "required": ["action"]
+                "required": ["element"]
             }
         }));
         schemas.push(json!({
-            "name": "dctl_browser",
-            "description": "Browser automation via CDP: open URLs, take snapshots, interact with page elements.",
+            "name": "desktop_type",
+            "description": "Type text into the currently focused field. Use desktop_click first to focus the right input.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": { "type": "string", "description": "Browser action (open, snapshot, tabs, etc.)" },
-                    "args": { "type": "array", "items": { "type": "string" }, "description": "Action arguments" }
+                    "text": { "type": "string", "description": "Text to type" },
+                    "app": { "type": "string", "description": "App to type in (optional)" }
                 },
-                "required": ["action"]
+                "required": ["text"]
             }
         }));
         schemas.push(json!({
-            "name": "dctl_office",
-            "description": "Office document control: semantic editing of Word, Excel, LibreOffice documents.",
+            "name": "desktop_scroll",
+            "description": "Scroll in a direction on the current window.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": { "type": "string", "description": "Office action" },
-                    "args": { "type": "array", "items": { "type": "string" }, "description": "Action arguments" }
+                    "direction": { "type": "string", "enum": ["up", "down", "left", "right"], "description": "Scroll direction" },
+                    "amount": { "type": "integer", "description": "Number of scroll ticks (default 3)" },
+                    "app": { "type": "string", "description": "App to scroll in (optional)" }
                 },
-                "required": ["action"]
+                "required": ["direction"]
             }
+        }));
+        schemas.push(json!({
+            "name": "desktop_key",
+            "description": "Press a keyboard shortcut or key. Use for navigation: cmd+l (address bar), cmd+t (new tab), cmd+w (close tab), return, escape, tab, space, arrow keys.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "keys": { "type": "string", "description": "Key combination: \"cmd+l\", \"cmd+t\", \"return\", \"escape\", \"tab\", \"cmd+shift+g\", \"up\", \"down\"" },
+                    "app": { "type": "string", "description": "App to send keys to (optional)" }
+                },
+                "required": ["keys"]
+            }
+        }));
+        schemas.push(json!({
+            "name": "desktop_focus",
+            "description": "Focus a running application without raising its window. Use before desktop_capture to target a specific app.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "app": { "type": "string", "description": "App name: \"Safari\", \"Chrome\", \"Finder\", \"Gemini\", \"Terminal\", etc." }
+                },
+                "required": ["app"]
+            }
+        }));
+        schemas.push(json!({
+            "name": "desktop_list_apps",
+            "description": "List all running applications with their process IDs.",
+            "parameters": { "type": "object", "properties": {} }
+        }));
+        schemas.push(json!({
+            "name": "desktop_wait",
+            "description": "Wait for a specified duration in seconds. Use after navigation or actions that need loading time.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "seconds": { "type": "number", "description": "Duration in seconds (e.g. 1.5)" }
+                },
+                "required": ["seconds"]
+            }
+        }));
+        // ─── Browser control (zbctl → user's Chrome) ───
+        schemas.push(json!({
+            "name": "browser_navigate",
+            "description": "Open a URL in your Chrome browser using your active session and cookies. No login walls.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": { "type": "string", "description": "Full URL to navigate to" }
+                },
+                "required": ["url"]
+            }
+        }));
+        schemas.push(json!({
+            "name": "browser_snapshot",
+            "description": "Get a structured snapshot of the current browser page. Returns interactive elements with stable IDs, roles, labels, and visible page text. Use this to read page content and find elements to interact with.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "max_items": { "type": "integer", "description": "Max elements to return (default 80)" }
+                }
+            }
+        }));
+        schemas.push(json!({
+            "name": "browser_click",
+            "description": "Click an element on the current browser page by its element ID from browser_snapshot.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "element_id": { "type": "integer", "description": "Element ID from browser_snapshot" }
+                },
+                "required": ["element_id"]
+            }
+        }));
+        schemas.push(json!({
+            "name": "browser_type",
+            "description": "Type text into an input field on the current browser page.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "element_id": { "type": "integer", "description": "Element ID of input from browser_snapshot" },
+                    "text": { "type": "string", "description": "Text to type" }
+                },
+                "required": ["element_id", "text"]
+            }
+        }));
+        schemas.push(json!({
+            "name": "browser_eval",
+            "description": "Execute JavaScript in the current browser page and return the result. Use to read DOM content like document.body.innerText or document.title.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "expression": { "type": "string", "description": "JavaScript expression. Example: \"document.body.innerText\"" }
+                },
+                "required": ["expression"]
+            }
+        }));
+        schemas.push(json!({
+            "name": "browser_scroll",
+            "description": "Scroll the current browser page.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "direction": { "type": "string", "enum": ["up", "down", "left", "right"], "description": "Scroll direction" },
+                    "amount": { "type": "integer", "description": "Pixels to scroll (default 500)" }
+                },
+                "required": ["direction"]
+            }
+        }));
+        schemas.push(json!({
+            "name": "browser_screenshot",
+            "description": "Take a screenshot of the current browser tab. Returns base64-encoded PNG.",
+            "parameters": { "type": "object", "properties": {} }
+        }));
+        schemas.push(json!({
+            "name": "browser_tabs",
+            "description": "List all open tabs in the connected Chrome browser.",
+            "parameters": { "type": "object", "properties": {} }
         }));
         schemas.push(json!({
             "name": "spawn_agent",
@@ -446,34 +549,100 @@ pub fn execute_tool(
                 Ok(serde_json::to_string_pretty(&profile).unwrap_or_default())
             }
             "get_stock_data" => stock::execute_get_stock_data(&params).await,
-            "dctl" | "dctl_system" | "dctl_ui" | "dctl_browser" | "dctl_office" => {
-                // All dctl variants route to the same binary.
-                // For specialized variants, map the action param to subcommand.
-                let mapped_params = if name != "dctl" {
-                    let action = params.get("action").and_then(|v| v.as_str()).unwrap_or("");
-                    let mut new_params = params.clone();
-                    // Set subcommand from action field
-                    new_params.as_object_mut().map(|obj| {
-                        obj.insert("subcommand".to_string(), json!(action));
-                    });
-                    // Prefix with the variant category for disambiguation
-                    let category = match name.as_str() {
-                        "dctl_system" => "system",
-                        "dctl_ui" => "ui",
-                        "dctl_browser" => "browser",
-                        "dctl_office" => "office",
-                        _ => "",
-                    };
-                    if !category.is_empty() {
-                        new_params.as_object_mut().map(|obj| {
-                            obj.insert("category".to_string(), json!(category));
-                        });
-                    }
-                    new_params
-                } else {
-                    params.clone()
-                };
-                dctl::execute_dctl(&mapped_params).await
+            // ─── Desktop control (cua-driver) ───
+            "desktop_capture" => {
+                let app = params.get("app").and_then(|v| v.as_str());
+                match crate::cua::capture(app).await {
+                    Ok(result) => Ok(serde_json::to_string_pretty(&result).unwrap_or_default()),
+                    Err(e) => Err(e),
+                }
+            }
+            "desktop_click" => {
+                let element = params.get("element").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let app = params.get("app").and_then(|v| v.as_str());
+                match crate::cua::click(element, app).await {
+                    Ok(result) => Ok(serde_json::to_string_pretty(&result).unwrap_or_default()),
+                    Err(e) => Err(e),
+                }
+            }
+            "desktop_type" => {
+                let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                let app = params.get("app").and_then(|v| v.as_str());
+                match crate::cua::type_text(text, app).await {
+                    Ok(result) => Ok(serde_json::to_string_pretty(&result).unwrap_or_default()),
+                    Err(e) => Err(e),
+                }
+            }
+            "desktop_scroll" => {
+                let direction = params.get("direction").and_then(|v| v.as_str()).unwrap_or("down");
+                let amount = params.get("amount").and_then(|v| v.as_i64()).unwrap_or(3) as i32;
+                let app = params.get("app").and_then(|v| v.as_str());
+                match crate::cua::scroll(direction, amount, app).await {
+                    Ok(result) => Ok(serde_json::to_string_pretty(&result).unwrap_or_default()),
+                    Err(e) => Err(e),
+                }
+            }
+            "desktop_key" => {
+                let keys = params.get("keys").and_then(|v| v.as_str()).unwrap_or("");
+                let app = params.get("app").and_then(|v| v.as_str());
+                match crate::cua::key(keys, app).await {
+                    Ok(result) => Ok(serde_json::to_string_pretty(&result).unwrap_or_default()),
+                    Err(e) => Err(e),
+                }
+            }
+            "desktop_focus" => {
+                let app = params.get("app").and_then(|v| v.as_str()).unwrap_or("");
+                match crate::cua::focus_app(app).await {
+                    Ok(result) => Ok(serde_json::to_string_pretty(&result).unwrap_or_default()),
+                    Err(e) => Err(e),
+                }
+            }
+            "desktop_list_apps" => {
+                match crate::cua::list_apps().await {
+                    Ok(apps) => Ok(serde_json::to_string_pretty(&apps).unwrap_or_default()),
+                    Err(e) => Err(e),
+                }
+            }
+            "desktop_wait" => {
+                let seconds = params.get("seconds").and_then(|v| v.as_f64()).unwrap_or(1.0);
+                match crate::cua::wait(seconds).await {
+                    Ok(result) => Ok(serde_json::to_string_pretty(&result).unwrap_or_default()),
+                    Err(e) => Err(e),
+                }
+            }
+            // ─── Browser control (zbctl) ───
+            "browser_navigate" => {
+                let url = params.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                let tab_id = params.get("tab_id").and_then(|v| v.as_u64()).map(|v| v as u32);
+                crate::zbctl::navigate(url, tab_id).await
+            }
+            "browser_snapshot" => {
+                let max_items = params.get("max_items").and_then(|v| v.as_u64()).unwrap_or(80) as u32;
+                crate::zbctl::snapshot(max_items, true).await
+            }
+            "browser_click" => {
+                let element_id = params.get("element_id").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                crate::zbctl::click(element_id).await
+            }
+            "browser_type" => {
+                let element_id = params.get("element_id").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                crate::zbctl::type_text(element_id, text).await
+            }
+            "browser_eval" => {
+                let expression = params.get("expression").and_then(|v| v.as_str()).unwrap_or("");
+                crate::zbctl::eval(expression).await
+            }
+            "browser_scroll" => {
+                let direction = params.get("direction").and_then(|v| v.as_str()).unwrap_or("down");
+                let amount = params.get("amount").and_then(|v| v.as_i64()).map(|v| v as i32);
+                crate::zbctl::scroll(direction, amount).await
+            }
+            "browser_screenshot" => {
+                crate::zbctl::screenshot().await
+            }
+            "browser_tabs" => {
+                crate::zbctl::tabs().await
             }
             "spawn_agent" => {
                 // Sub-agent spawning is not yet fully implemented in the Rust backend.

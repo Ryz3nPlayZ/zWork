@@ -50,7 +50,11 @@
       "minimumSystemVersion": "10.13"
     },
     "externalBin": [
-      "binaries/zwork-backend"
+      "binaries/zwork-backend",
+      "binaries/cua-driver"
+    ],
+    "resources": [
+      "extension/*"
     ],
     "targets": "all",
     "icon": [
