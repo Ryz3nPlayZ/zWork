@@ -6,7 +6,6 @@ gateways, config wizards, and CLI setups removed.
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import json
 import uuid
@@ -16,8 +15,8 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 
 import httpx
 
-from . import compaction, settings as settings_mod
-from .runtime import RunContext, current_run, run_scope
+from . import compaction
+from .runtime import RunContext, run_scope
 from .providers import _gated_execute_tool, _build_system_prompt
 
 logger = logging.getLogger(__name__)
@@ -56,7 +55,7 @@ class zWorkHermesAgent:
             try:
                 # Handle both dict-like and object-like attachments
                 path_str = getattr(a, "path", None) or a.get("path")
-                name_str = getattr(a, "name", None) or a.get("name")
+                getattr(a, "name", None) or a.get("name")
                 if not path_str:
                     continue
                 path = Path(path_str)

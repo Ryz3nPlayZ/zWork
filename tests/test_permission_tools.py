@@ -1,7 +1,6 @@
 """Tests for ask_user and ask_user_for_permission tools."""
 import asyncio
 import pytest
-from typing import Any
 
 from sidecar.agent import tools
 
@@ -51,7 +50,7 @@ async def test_ask_user_flow(monkeypatch) -> None:
     events = await task
 
     # Assert that correct events were yielded
-    activity_events = [e for e in events if e.get("type") == "activity"]
+    [e for e in events if e.get("type") == "activity"]
     tool_result_events = [e for e in events if e.get("type") == "tool_result"]
     ask_question_events = [e for e in events if e.get("type") == "ask_question"]
 

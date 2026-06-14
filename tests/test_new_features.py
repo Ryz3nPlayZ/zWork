@@ -25,7 +25,7 @@ class TestNewFeatures(unittest.TestCase):
         # 2. Append multiple messages
         msg1 = chatstore.append_message(c.id, "user", "Message 1")
         msg2 = chatstore.append_message(c.id, "assistant", "Message 2")
-        msg3 = chatstore.append_message(c.id, "user", "Message 3")
+        chatstore.append_message(c.id, "user", "Message 3")
         
         # Verify initial count
         c_loaded = chatstore.get(c.id)

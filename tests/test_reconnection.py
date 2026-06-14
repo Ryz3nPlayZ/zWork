@@ -36,7 +36,7 @@ def local_server():
     thread.start()
     
     # Wait for uvicorn to start up by polling the TCP port
-    start_time = time.time()
+    time.time()
     for _ in range(50):
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=0.1):
