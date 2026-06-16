@@ -266,46 +266,61 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
         // ─── Desktop control (cua-driver) ───
         schemas.push(json!({
             "name": "desktop_capture",
-            "description": "Capture the accessibility tree of an app window. Returns numbered elements you can click/type into. MUST be called before desktop_click, desktop_type, or desktop_scroll. Use app=\"Safari\" or app=\"Chrome\" to scope to a single app.",
+            "description": "Capture the accessibility tree of an app window as Markdown with [element_index N] tags on every actionable element. MUST be called before desktop_click/desktop_type/desktop_set_value/desktop_scroll — element indices are only valid from the most recent capture. Verify the returned window_title is the app you intended before acting. The tree is capped at ~100 elements; if `truncated` is true, indices beyond the cap are unavailable — scroll or narrow the target to see more.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "app": { "type": "string", "description": "App name to capture (e.g. \"Safari\", \"Chrome\", \"Finder\"). Omit for frontmost app." }
-                }
+                    "app": { "type": "string", "description": "App name to capture, e.g. \"Safari\", \"Google Chrome\", \"Finder\". Required." }
+                },
+                "required": ["app"]
             }
         }));
         schemas.push(json!({
             "name": "desktop_click",
-            "description": "Click an element by its index from the last desktop_capture. Element indices come from the capture output.",
+            "description": "Click an element by its element_index from the last desktop_capture of the app.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "element": { "type": "integer", "description": "Element index from desktop_capture output" },
-                    "app": { "type": "string", "description": "App to click in (optional, uses last capture target)" }
+                    "element": { "type": "integer", "description": "Element index from desktop_capture's [element_index N] tags" },
+                    "app": { "type": "string", "description": "App to click in (optional, defaults to the last captured app)" }
                 },
                 "required": ["element"]
             }
         }));
         schemas.push(json!({
             "name": "desktop_type",
-            "description": "Type text into the currently focused field. Use desktop_click first to focus the right input.",
+            "description": "Type text into the focused field, or a specific field if `element` is given. Preferred for free-form text entry. For <select> dropdowns or sliders use desktop_set_value.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "text": { "type": "string", "description": "Text to type" },
-                    "app": { "type": "string", "description": "App to type in (optional)" }
+                    "element": { "type": "integer", "description": "Optional element index to direct the text into a specific field" },
+                    "app": { "type": "string", "description": "App to type in (optional, defaults to last captured app)" }
                 },
                 "required": ["text"]
             }
         }));
         schemas.push(json!({
+            "name": "desktop_set_value",
+            "description": "Set a value on a UI element directly (no keystrokes, no focus reliance). The safe way to pick a <select> dropdown option or set a slider/stepper/date-picker. For free-form web text inputs, use desktop_type instead (WebKit ignores AXValue writes on text fields).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "element": { "type": "integer", "description": "Element index (the dropdown/slider) from desktop_capture" },
+                    "value": { "type": "string", "description": "Value to set. For dropdowns: the option's visible title, matched case-insensitively." },
+                    "app": { "type": "string", "description": "App (optional, defaults to last captured app)" }
+                },
+                "required": ["element", "value"]
+            }
+        }));
+        schemas.push(json!({
             "name": "desktop_scroll",
-            "description": "Scroll in a direction on the current window.",
+            "description": "Scroll the current window in a direction.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "direction": { "type": "string", "enum": ["up", "down", "left", "right"], "description": "Scroll direction" },
-                    "amount": { "type": "integer", "description": "Number of scroll ticks (default 3)" },
+                    "amount": { "type": "integer", "description": "Number of ticks (1–50, default 3)" },
                     "app": { "type": "string", "description": "App to scroll in (optional)" }
                 },
                 "required": ["direction"]
@@ -313,30 +328,30 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
         }));
         schemas.push(json!({
             "name": "desktop_key",
-            "description": "Press a keyboard shortcut or key. Use for navigation: cmd+l (address bar), cmd+t (new tab), cmd+w (close tab), return, escape, tab, space, arrow keys.",
+            "description": "Press a key or keyboard shortcut. Navigation: cmd+l (address bar), cmd+t (new tab), cmd+w (close tab), return, escape, tab, space, arrows. Format combos with + : \"cmd+l\", \"cmd+shift+g\", \"return\". Catastrophic combos are blocked: empty Trash (cmd+shift+backspace), log out (cmd+shift+q), force log out (cmd+option+shift+q), lock screen (cmd+ctrl+q).",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "keys": { "type": "string", "description": "Key combination: \"cmd+l\", \"cmd+t\", \"return\", \"escape\", \"tab\", \"cmd+shift+g\", \"up\", \"down\"" },
+                    "keys": { "type": "string", "description": "Key combo with + separators: \"cmd+l\", \"cmd+t\", \"return\", \"escape\", \"tab\", \"cmd+shift+g\", \"up\", \"down\"" },
                     "app": { "type": "string", "description": "App to send keys to (optional)" }
                 },
                 "required": ["keys"]
             }
         }));
         schemas.push(json!({
-            "name": "desktop_focus",
-            "description": "Focus a running application without raising its window. Use before desktop_capture to target a specific app.",
+            "name": "desktop_launch_app",
+            "description": "Launch an app (backgrounded) by name, e.g. \"Safari\", \"Calculator\", \"Finder\". Use when the app isn't running yet. After launching, call desktop_capture before interacting with it.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "app": { "type": "string", "description": "App name: \"Safari\", \"Chrome\", \"Finder\", \"Gemini\", \"Terminal\", etc." }
+                    "app": { "type": "string", "description": "App name to launch" }
                 },
                 "required": ["app"]
             }
         }));
         schemas.push(json!({
             "name": "desktop_list_apps",
-            "description": "List all running applications with their process IDs.",
+            "description": "List running and installed apps with their process IDs and running state.",
             "parameters": { "type": "object", "properties": {} }
         }));
         schemas.push(json!({
@@ -566,8 +581,9 @@ pub fn execute_tool(
             }
             "desktop_type" => {
                 let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                let element = params.get("element").and_then(|v| v.as_u64()).map(|v| v as u32);
                 let app = params.get("app").and_then(|v| v.as_str());
-                match crate::cua::type_text(text, app).await {
+                match crate::cua::type_text(text, element, app).await {
                     Ok(result) => Ok(serde_json::to_string_pretty(&result).unwrap_or_default()),
                     Err(e) => Err(e),
                 }
@@ -589,9 +605,18 @@ pub fn execute_tool(
                     Err(e) => Err(e),
                 }
             }
-            "desktop_focus" => {
+            "desktop_set_value" => {
+                let element = params.get("element").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let value = params.get("value").and_then(|v| v.as_str()).unwrap_or("");
+                let app = params.get("app").and_then(|v| v.as_str());
+                match crate::cua::set_value(element, value, app).await {
+                    Ok(result) => Ok(serde_json::to_string_pretty(&result).unwrap_or_default()),
+                    Err(e) => Err(e),
+                }
+            }
+            "desktop_launch_app" => {
                 let app = params.get("app").and_then(|v| v.as_str()).unwrap_or("");
-                match crate::cua::focus_app(app).await {
+                match crate::cua::launch_app(app).await {
                     Ok(result) => Ok(serde_json::to_string_pretty(&result).unwrap_or_default()),
                     Err(e) => Err(e),
                 }

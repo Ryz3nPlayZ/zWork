@@ -34,6 +34,8 @@ async fn main() {
     let app = Router::new()
         .route("/ws", get(browser_bridge::ws_handler))
         .route("/api/health", get(server::health))
+        .route("/api/desktop/status", get(server::desktop_status))
+        .route("/api/desktop/permissions/grant", post(server::desktop_grant))
         .route("/api/me", get(server::me))
         .route("/api/providers", get(server::get_providers))
         .route("/api/settings", get(server::get_settings).put(server::put_settings))

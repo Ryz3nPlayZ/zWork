@@ -467,8 +467,9 @@ const KNOWN_TOOLS: &[&str] = &[
     "save_memory", "deploy_web_app", "read_skill", "spawn_agent",
     "ask_question", "ask_user", "ask_user_for_permission", "detect_hardware",
     "manage_tasks", "manage_events", "get_stock_data",
-    "desktop_capture", "desktop_click", "desktop_type", "desktop_scroll",
-    "desktop_key", "desktop_focus", "desktop_list_apps", "desktop_wait",
+    "desktop_capture", "desktop_click", "desktop_type", "desktop_set_value",
+    "desktop_scroll", "desktop_key", "desktop_launch_app", "desktop_list_apps",
+    "desktop_wait",
     "browser_navigate", "browser_snapshot", "browser_click", "browser_type",
     "browser_eval", "browser_scroll", "browser_screenshot", "browser_tabs",
 ];

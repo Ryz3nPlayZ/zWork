@@ -647,6 +647,7 @@ function GeneralPanel({
 
   const accessibilityPermissionGranted = useApp((s) => s.accessibilityPermissionGranted);
   const screenRecordingPermissionGranted = useApp((s) => s.screenRecordingPermissionGranted);
+  const driverOk = useApp((s) => s.driverOk);
   const checkMacOSPermissions = useApp((s) => s.checkMacOSPermissions);
   const requestAccessibility = useApp((s) => s.requestAccessibility);
   const requestScreenRecording = useApp((s) => s.requestScreenRecording);
@@ -741,6 +742,24 @@ function GeneralPanel({
               Enable zWork to interact with your desktop and automate tasks. These are one-time OS permission requests.
             </p>
           </div>
+
+          {/* Driver not reachable — the prerequisite to everything below.
+              Permissions rows are pointless if CuaDriver.app isn't installed,
+              so surface that distinctly instead of silently showing "Required". */}
+          {driverOk === false && (
+            <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5">
+              <ShieldAlert className="h-4 w-4 shrink-0 text-amber-500 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <div className="text-[12px] font-medium text-ink">
+                  CuaDriver isn&rsquo;t reachable
+                </div>
+                <p className="text-[11px] text-ink-muted leading-relaxed mt-0.5">
+                  Desktop control runs through CuaDriver.app. Install it from
+                  &ldquo;trycua/cua&rdquo; on GitHub, then relaunch zWork.
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="border-t border-line my-3" />
 

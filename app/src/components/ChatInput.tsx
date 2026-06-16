@@ -6,6 +6,7 @@ import {
   useState,
   type ClipboardEvent,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import {
   ArrowUp,
@@ -18,6 +19,8 @@ import {
   Image as ImageIcon,
   Upload,
   Globe,
+  Plus,
+  MessageSquarePlus,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { needsLightweightRendering } from "../lib/platform";
@@ -47,15 +50,56 @@ interface ComposerAttachment {
   uploadedPath?: string;
 }
 
+function OverlayToolItem({
+  icon,
+  label,
+  active,
+  onClick,
+}: {
+  icon: ReactNode;
+  label: string;
+  active?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "press flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-[12.5px] font-medium text-ink-soft",
+        "hover:bg-paper-sunken hover:text-ink",
+        active && "text-ink",
+      )}
+    >
+      <span className={cn("text-ink-muted", active && "text-ink")}>{icon}</span>
+      {label}
+    </button>
+  );
+}
+
 interface Props {
   placeholder?: string;
   autoFocus?: boolean;
   onSend?: (text: string) => void;
   value?: string;
   onChange?: (val: string) => void;
+  /** Compact, Gemini-style chatbar for the overlay window. */
+  variant?: "default" | "overlay";
+  className?: string;
+  /** Called when the overlay should close (overlay variant only). */
+  onDismiss?: () => void;
 }
 
-export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, value: propValue, onChange: propOnChange }: Props) {
+export function ChatInput({
+  placeholder = "Send a message",
+  autoFocus,
+  onSend,
+  value: propValue,
+  onChange: propOnChange,
+  variant = "default",
+  className,
+  onDismiss,
+}: Props) {
   const [localValue, setLocalValue] = useState("");
   const isControlled = propValue !== undefined;
   const value = isControlled ? propValue : localValue;
@@ -83,8 +127,12 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, v
     { start: number; end: number; query: string } | null
   >(null);
   const [slashIndex, setSlashIndex] = useState(0);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const toolsRef = useRef<HTMLDivElement>(null);
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const isOverlay = variant === "overlay";
 
   const send = useApp((s) => s.send);
   const stop = useApp((s) => s.stop);
@@ -94,10 +142,15 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, v
   const setAutoApproveDestructive = useApp((s) => s.setAutoApproveDestructive);
   const webSearchEnabled = useApp((s) => s.webSearchEnabled);
   const setWebSearchEnabled = useApp((s) => s.setWebSearchEnabled);
+  const openLanding = useApp((s) => s.openLanding);
   const working = useApp((s) => {
     const id = s.activeChatId;
     return id ? (s.chats[id]?.working ?? false) : false;
   });
+  const model = useApp((s) => s.model);
+  const providers = useApp((s) => s.providers);
+  const currentModel = providers?.models.find((m) => m.id === model);
+  const modelLabel = currentModel?.name ?? (providers?.models.length ? "Model" : "No models");
 
   const slashMatches = useMemo(
     () => (slashState ? filterTemplates(templates, slashState.query) : []),
@@ -127,6 +180,18 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, v
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
+
+  // Close the overlay tools menu on outside click.
+  useEffect(() => {
+    if (!isOverlay || !toolsOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (!toolsRef.current?.contains(e.target as Node)) {
+        setToolsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [isOverlay, toolsOpen]);
 
   const canSend = value.trim().length > 0 && !working && !uploading;
 
@@ -351,6 +416,69 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, v
     await uploadFiles(files);
   };
 
+  const attachmentList = attachments.length > 0 && (
+    <div className={cn("flex flex-wrap gap-2", isOverlay ? "px-3 py-1.5" : "px-4 pt-3")}>
+      {attachments.map((a) => {
+        const classification = classifyFile(a.name, a.mime);
+        return (
+          <div
+            key={a.id}
+            className="flex items-center gap-2 rounded-xl border border-line bg-paper px-3 py-1.5 text-[12px] text-ink-muted transition-all"
+          >
+            {a.kind === "image" && a.previewUrl ? (
+              <img
+                src={a.previewUrl}
+                alt={a.name}
+                className="h-12 w-12 rounded-lg object-cover border border-line"
+              />
+            ) : a.kind === "image" ? (
+              <ImageIcon className="h-3.5 w-3.5 text-blue-500" />
+            ) : (
+              <FileText className="h-3.5 w-3.5 text-ink-faint" />
+            )}
+            <span className="max-w-[180px] truncate font-medium">{a.name}</span>
+
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[9px] font-bold uppercase tracking-wider select-none",
+                classification.colorClass,
+                classification.bgClass,
+              )}
+            >
+              <span>{classification.category}</span>
+            </span>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+                setAttachments((prev) => prev.filter((x) => x.id !== a.id));
+              }}
+              className="rounded-full p-0.5 text-ink-faint hover:bg-line/60 hover:text-ink ml-1"
+              aria-label={`Remove ${a.name}`}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  const slashMenu = slashOpen && slashState && (
+    <SlashMenu
+      templates={templates}
+      query={slashState.query}
+      activeIndex={slashIndex}
+      onActiveIndexChange={setSlashIndex}
+      onSelect={insertTemplate}
+      onManage={() => {
+        setSlashState(null);
+        openSettings("memory");
+      }}
+    />
+  );
+
   return (
     <>
       {/* Full-viewport drop overlay when dragging files */}
@@ -388,196 +516,274 @@ export function ChatInput({ placeholder = "Send a message", autoFocus, onSend, v
       )}
 
       <div
-      className={cn(
-        "group relative w-full rounded-2xl border border-line bg-paper-raised transition-[border-color,box-shadow]",
-        focused ? "border-line-strong shadow-pop" : "shadow-chat",
-        dragOver && "border-ink/30 border-dashed",
-      )}
-      onDragEnter={(e) => {
-        e.preventDefault();
-        dragCounter.current += 1;
-        if (dragCounter.current === 1) setDragOver(true);
-      }}
-      onDragOver={(e) => e.preventDefault()}
-      onDragLeave={(e) => {
-        e.preventDefault();
-        dragCounter.current -= 1;
-        if (dragCounter.current <= 0) {
-          dragCounter.current = 0;
-          setDragOver(false);
-        }
-      }}
-      onDrop={(e) => {
-        e.preventDefault();
-        setDragOver(false);
-        dragCounter.current = 0;
-        if (e.dataTransfer.files.length > 0) void uploadFiles(e.dataTransfer.files);
-      }}
-    >
-      {attachments.length > 0 && (
-        <div className="flex flex-wrap gap-2 px-4 pt-3">
-          {attachments.map((a) => {
-            const classification = classifyFile(a.name, a.mime);
-            return (
-              <div
-                key={a.id}
-                className="flex items-center gap-2 rounded-xl border border-line bg-paper px-3 py-1.5 text-[12px] text-ink-muted transition-all"
-              >
-                {a.kind === "image" && a.previewUrl ? (
-                  <img
-                    src={a.previewUrl}
-                    alt={a.name}
-                    className="h-12 w-12 rounded-lg object-cover border border-line"
-                  />
-                ) : a.kind === "image" ? (
-                  <ImageIcon className="h-3.5 w-3.5 text-blue-500" />
-                ) : (
-                  <FileText className="h-3.5 w-3.5 text-ink-faint" />
-                )}
-                <span className="max-w-[180px] truncate font-medium">{a.name}</span>
-
-                {/* Category Tag Chip */}
-                <span className={cn(
-                  "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[9px] font-bold uppercase tracking-wider select-none",
-                  classification.colorClass,
-                  classification.bgClass
-                )}>
-                  <span>{classification.category}</span>
-                </span>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
-                    setAttachments((prev) => prev.filter((x) => x.id !== a.id));
-                  }}
-                  className="rounded-full p-0.5 text-ink-faint hover:bg-line/60 hover:text-ink ml-1"
-                  aria-label={`Remove ${a.name}`}
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-      {slashOpen && slashState && (
-        <SlashMenu
-          templates={templates}
-          query={slashState.query}
-          activeIndex={slashIndex}
-          onActiveIndexChange={setSlashIndex}
-          onSelect={insertTemplate}
-          onManage={() => {
-            setSlashState(null);
-            openSettings("memory");
-          }}
-        />
-      )}
-
-
-
-      <textarea
-        ref={areaRef}
-        rows={1}
-        value={value}
-        placeholder={placeholder}
-        disabled={working}
-        onChange={(e) => {
-          const next = e.target.value;
-          setValue(next);
-          refreshSlashState(next, e.target.selectionStart ?? next.length);
-        }}
-        onKeyDown={onKey}
-        onKeyUp={(e) => {
-          const el = e.currentTarget;
-          refreshSlashState(el.value, el.selectionStart ?? el.value.length);
-        }}
-        onSelect={(e) => {
-          const el = e.currentTarget;
-          refreshSlashState(el.value, el.selectionStart ?? el.value.length);
-        }}
-        onPaste={onPaste}
-        onFocus={() => setFocused(true)}
-        onBlur={() => {
-          setFocused(false);
-          // Defer so click handlers inside the menu still fire.
-          setTimeout(() => setSlashState(null), 120);
-        }}
-        onCompositionStart={() => setComposing(true)}
-        onCompositionEnd={(e) => {
-          setComposing(false);
-          const el = e.currentTarget;
-          refreshSlashState(el.value, el.selectionStart ?? el.value.length);
-        }}
+        ref={isOverlay ? toolsRef : undefined}
         className={cn(
-          "block w-full resize-none bg-transparent px-5 pt-4 pb-2 text-[14.5px] leading-6 text-ink placeholder:text-ink-faint",
-          "focus:outline-none",
+          "group relative w-full border border-line bg-paper-raised transition-[border-color,box-shadow]",
+          isOverlay
+            ? cn(
+                "titlebar-drag flex items-center gap-1 rounded-full px-2 py-2 shadow-float",
+                focused && "border-line-strong",
+                attachments.length > 0 && "rounded-2xl",
+              )
+            : cn("rounded-2xl", focused ? "border-line-strong shadow-pop" : "shadow-chat"),
+          dragOver && "border-ink/30 border-dashed",
+          className,
         )}
-      />
-      <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5 pt-1">
-        <div className="flex items-center gap-1">
-          <IconButton
-            icon={<Paperclip />}
-            label="Attach file"
-            tooltipSide="top"
-            variant="ghost"
-            size="md"
-            onClick={() => fileInputRef.current?.click()}
-          />
-          <IconButton
-            icon={<FileText className="h-4 w-4" />}
-            label={documentMode ? "Document: on" : "Document"}
-            tooltipSide="top"
-            variant="ghost"
-            size="md"
-            active={documentMode}
-            onClick={() => setDocumentMode((v) => !v)}
-          />
-          <IconButton
-            icon={autoApproveDestructive ? <Unlock className="text-ink" /> : <Lock className="text-ink-muted" />}
-            label={autoApproveDestructive ? "Auto-approve: on" : "Auto-approve: off"}
-            tooltipSide="top"
-            variant="ghost"
-            size="md"
-            active={autoApproveDestructive}
-            onClick={() => setAutoApproveDestructive(!autoApproveDestructive)}
-          />
-          <IconButton
-            icon={<Globe className="h-4 w-4" />}
-            label={webSearchEnabled ? "Web Search: on" : "Web Search: off"}
-            tooltipSide="top"
-            variant="ghost"
-            size="md"
-            active={webSearchEnabled}
-            onClick={() => setWebSearchEnabled(!webSearchEnabled)}
+        onDragEnter={(e) => {
+          e.preventDefault();
+          dragCounter.current += 1;
+          if (dragCounter.current === 1) setDragOver(true);
+        }}
+        onDragOver={(e) => e.preventDefault()}
+        onDragLeave={(e) => {
+          e.preventDefault();
+          dragCounter.current -= 1;
+          if (dragCounter.current <= 0) {
+            dragCounter.current = 0;
+            setDragOver(false);
+          }
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          dragCounter.current = 0;
+          if (e.dataTransfer.files.length > 0) void uploadFiles(e.dataTransfer.files);
+        }}
+      >
+      {isOverlay && (
+        <button
+          type="button"
+          onClick={() => setToolsOpen((v) => !v)}
+          aria-label="More options"
+          data-no-drag
+          className="press ring-focus inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-muted hover:bg-paper-sunken hover:text-ink"
+        >
+          <Plus className="h-[18px] w-[18px]" />
+        </button>
+      )}
+
+      {isOverlay ? (
+        <div className="flex min-w-0 flex-1 flex-col justify-center">
+          {attachmentList}
+          {slashMenu}
+          <textarea
+            ref={areaRef}
+            rows={1}
+            value={value}
+            placeholder={placeholder}
+            disabled={working}
+            onChange={(e) => {
+              const next = e.target.value;
+              setValue(next);
+              refreshSlashState(next, e.target.selectionStart ?? next.length);
+            }}
+            onKeyDown={onKey}
+            onKeyUp={(e) => {
+              const el = e.currentTarget;
+              refreshSlashState(el.value, el.selectionStart ?? el.value.length);
+            }}
+            onSelect={(e) => {
+              const el = e.currentTarget;
+              refreshSlashState(el.value, el.selectionStart ?? el.value.length);
+            }}
+            onPaste={onPaste}
+            onFocus={() => setFocused(true)}
+            onBlur={() => {
+              setFocused(false);
+              // Defer so click handlers inside the menu still fire.
+              setTimeout(() => setSlashState(null), 120);
+            }}
+            onCompositionStart={() => setComposing(true)}
+            onCompositionEnd={(e) => {
+              setComposing(false);
+              const el = e.currentTarget;
+              refreshSlashState(el.value, el.selectionStart ?? el.value.length);
+            }}
+            className="block w-full min-h-0 max-h-[48px] flex-1 resize-none overflow-y-auto bg-transparent px-2 py-0 text-[14.5px] leading-6 text-ink placeholder:text-ink-faint focus:outline-none"
           />
         </div>
-      <div className="flex items-center gap-2">
-        <ModelPicker />
+      ) : (
+        <>
+          {attachmentList}
+          {slashMenu}
+          <textarea
+            ref={areaRef}
+            rows={1}
+            value={value}
+            placeholder={placeholder}
+            disabled={working}
+            onChange={(e) => {
+              const next = e.target.value;
+              setValue(next);
+              refreshSlashState(next, e.target.selectionStart ?? next.length);
+            }}
+            onKeyDown={onKey}
+            onKeyUp={(e) => {
+              const el = e.currentTarget;
+              refreshSlashState(el.value, el.selectionStart ?? el.value.length);
+            }}
+            onSelect={(e) => {
+              const el = e.currentTarget;
+              refreshSlashState(el.value, el.selectionStart ?? el.value.length);
+            }}
+            onPaste={onPaste}
+            onFocus={() => setFocused(true)}
+            onBlur={() => {
+              setFocused(false);
+              // Defer so click handlers inside the menu still fire.
+              setTimeout(() => setSlashState(null), 120);
+            }}
+            onCompositionStart={() => setComposing(true)}
+            onCompositionEnd={(e) => {
+              setComposing(false);
+              const el = e.currentTarget;
+              refreshSlashState(el.value, el.selectionStart ?? el.value.length);
+            }}
+            className="block w-full resize-none bg-transparent px-5 pt-4 pb-2 text-[14.5px] leading-6 text-ink placeholder:text-ink-faint focus:outline-none"
+          />
+        </>
+      )}
+      {isOverlay ? (
+        <div data-no-drag className="flex shrink-0 items-center gap-1.5 pr-1">
+          <span className="inline-flex max-w-[120px] items-center truncate text-[12px] font-medium text-ink-muted">
+            {modelLabel}
+          </span>
           <button
             type="button"
             aria-label={working ? "Stop" : "Send"}
             disabled={!working && !canSend}
             onClick={working ? stop : submit}
-          className={cn(
-            "press ring-focus inline-flex h-8 w-8 items-center justify-center rounded-full",
-            "transition-colors",
-            working
-              ? "bg-paper-sunken text-ink hover:bg-line/70"
-              : canSend
-                  ? "bg-paper-sunken text-ink hover:bg-paper hover:border-line-strong border border-line"
-                  : "bg-paper-sunken text-ink-faint cursor-not-allowed border border-line",
-          )}
-        >
-          {working ? (
-            <Square className="h-3 w-3 fill-ink" />
-          ) : (
-            <ArrowUp className="h-4 w-4" />
-          )}
-        </button>
+            className={cn(
+              "press ring-focus inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+              working
+                ? "bg-paper-sunken text-ink hover:bg-line/70"
+                : canSend
+                    ? "bg-ink text-paper hover:bg-ink/90"
+                    : "bg-paper-sunken text-ink-faint cursor-not-allowed",
+            )}
+          >
+            {working ? (
+              <Square className="h-3 w-3 fill-ink" />
+            ) : (
+              <ArrowUp className="h-4 w-4" />
+            )}
+          </button>
         </div>
-      </div>
+      ) : (
+        <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5 pt-1">
+          <div className="flex items-center gap-1">
+            <IconButton
+              icon={<Paperclip />}
+              label="Attach file"
+              tooltipSide="top"
+              variant="ghost"
+              size="md"
+              onClick={() => fileInputRef.current?.click()}
+            />
+            <IconButton
+              icon={<FileText className="h-4 w-4" />}
+              label={documentMode ? "Document: on" : "Document"}
+              tooltipSide="top"
+              variant="ghost"
+              size="md"
+              active={documentMode}
+              onClick={() => setDocumentMode((v) => !v)}
+            />
+            <IconButton
+              icon={autoApproveDestructive ? <Unlock className="text-ink" /> : <Lock className="text-ink-muted" />}
+              label={autoApproveDestructive ? "Auto-approve: on" : "Auto-approve: off"}
+              tooltipSide="top"
+              variant="ghost"
+              size="md"
+              active={autoApproveDestructive}
+              onClick={() => setAutoApproveDestructive(!autoApproveDestructive)}
+            />
+            <IconButton
+              icon={<Globe className="h-4 w-4" />}
+              label={webSearchEnabled ? "Web Search: on" : "Web Search: off"}
+              tooltipSide="top"
+              variant="ghost"
+              size="md"
+              active={webSearchEnabled}
+              onClick={() => setWebSearchEnabled(!webSearchEnabled)}
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <ModelPicker />
+            <button
+              type="button"
+              aria-label={working ? "Stop" : "Send"}
+              disabled={!working && !canSend}
+              onClick={working ? stop : submit}
+              className={cn(
+                "press ring-focus inline-flex h-8 w-8 items-center justify-center rounded-full",
+                "transition-colors",
+                working
+                  ? "bg-paper-sunken text-ink hover:bg-line/70"
+                  : canSend
+                      ? "bg-paper-sunken text-ink hover:bg-paper hover:border-line-strong border border-line"
+                      : "bg-paper-sunken text-ink-faint cursor-not-allowed border border-line",
+              )}
+            >
+              {working ? (
+                <Square className="h-3 w-3 fill-ink" />
+              ) : (
+                <ArrowUp className="h-4 w-4" />
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {isOverlay && toolsOpen && (
+        <div data-no-drag className="absolute bottom-full left-0 mb-2 w-56 animate-fade-in rounded-2xl border border-line bg-paper p-1.5 shadow-pop">
+          <OverlayToolItem
+            icon={<Paperclip className="h-4 w-4" />}
+            label="Attach file"
+            onClick={() => {
+              setToolsOpen(false);
+              fileInputRef.current?.click();
+            }}
+          />
+          <OverlayToolItem
+            icon={<FileText className="h-4 w-4" />}
+            label={documentMode ? "Document: on" : "Document"}
+            active={documentMode}
+            onClick={() => setDocumentMode((v) => !v)}
+          />
+          <OverlayToolItem
+            icon={autoApproveDestructive ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
+            label={autoApproveDestructive ? "Auto-approve: on" : "Auto-approve: off"}
+            active={autoApproveDestructive}
+            onClick={() => setAutoApproveDestructive(!autoApproveDestructive)}
+          />
+          <OverlayToolItem
+            icon={<Globe className="h-4 w-4" />}
+            label={webSearchEnabled ? "Web search: on" : "Web search: off"}
+            active={webSearchEnabled}
+            onClick={() => setWebSearchEnabled(!webSearchEnabled)}
+          />
+          <div className="my-1 h-px bg-line" />
+          <OverlayToolItem
+            icon={<MessageSquarePlus className="h-4 w-4" />}
+            label="New chat"
+            onClick={() => {
+              setToolsOpen(false);
+              openLanding();
+            }}
+          />
+          {onDismiss && (
+            <OverlayToolItem
+              icon={<X className="h-4 w-4" />}
+              label="Close"
+              onClick={() => {
+                setToolsOpen(false);
+                onDismiss();
+              }}
+            />
+          )}
+        </div>
+      )}
       <input
         ref={fileInputRef}
         type="file"

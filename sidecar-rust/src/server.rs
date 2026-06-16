@@ -51,6 +51,39 @@ pub async fn health() -> impl IntoResponse {
     Json(json!({ "ok": true }))
 }
 
+/// cua-driver TCC permission status (Accessibility + Screen Recording) as
+/// reported by the driver's own identity (`com.trycua.driver`) — the source of
+/// truth for whether desktop control will actually work. Read-only probe; also
+/// doubles as a driver-health check (`driver_ok` is false if the driver can't
+/// be reached). This is what the Settings permission rows should read.
+pub async fn desktop_status() -> impl IntoResponse {
+    Json(crate::cua::check_permissions(false).await.unwrap_or_else(|e| {
+        crate::cua::PermissionStatus {
+            driver_ok: false,
+            accessibility: false,
+            screen_recording: false,
+            source: String::new(),
+            error: e,
+        }
+    }))
+}
+
+/// Raise the macOS permission prompts for any missing grants, attributed to
+/// the driver identity (`com.trycua.driver`). Returns the live status after.
+/// This is the correct grant path — prompting from zWork's own identity would
+/// leave the driver (the process that actually does AX + CGEvents) blocked.
+pub async fn desktop_grant() -> impl IntoResponse {
+    Json(crate::cua::check_permissions(true).await.unwrap_or_else(|e| {
+        crate::cua::PermissionStatus {
+            driver_ok: false,
+            accessibility: false,
+            screen_recording: false,
+            source: String::new(),
+            error: e,
+        }
+    }))
+}
+
 pub async fn me() -> impl IntoResponse {
     let cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())

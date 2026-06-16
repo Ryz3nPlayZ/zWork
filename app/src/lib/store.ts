@@ -451,6 +451,13 @@ interface AppState {
   setAutoApproveDestructive: (v: boolean) => void;
   accessibilityPermissionGranted: boolean | null;
   screenRecordingPermissionGranted: boolean | null;
+  /**
+   * Whether the cua-driver daemon is reachable. The driver (CuaDriver.app,
+   * identity com.trycua.driver) is what actually performs desktop control and
+   * holds the TCC grants — so the two booleans above reflect ITS grants, and
+   * driverOk distinguishes "permissions missing" from "driver not installed".
+   */
+  driverOk: boolean | null;
   checkMacOSPermissions: () => Promise<void>;
   requestAccessibility: () => Promise<void>;
   requestScreenRecording: () => Promise<void>;
@@ -686,6 +693,7 @@ export const useApp = create<AppState>((set, get) => ({
   setAutoApproveDestructive: (v) => set({ autoApproveDestructive: v }),
   accessibilityPermissionGranted: null,
   screenRecordingPermissionGranted: null,
+  driverOk: null,
   webSearchEnabled: false,
   setWebSearchEnabled: (v) => set({ webSearchEnabled: v }),
 
@@ -704,30 +712,47 @@ export const useApp = create<AppState>((set, get) => ({
   checkMacOSPermissions: async () => {
     if (IS_WEB) return;
     try {
-      const access = await invoke<boolean>("check_accessibility_permission");
-      const screen = await invoke<boolean>("check_screen_recording_permission");
+      // Source of truth = the cua-driver daemon's identity (com.trycua.driver),
+      // not zWork's own — the driver is what actually performs the AX work.
+      const st = await api.desktopStatus();
       set({
-        accessibilityPermissionGranted: access,
-        screenRecordingPermissionGranted: screen,
+        driverOk: st.driver_ok,
+        accessibilityPermissionGranted: st.accessibility,
+        screenRecordingPermissionGranted: st.screen_recording,
       });
     } catch (e) {
-      console.error("Failed to check macOS permissions:", e);
+      // Backend itself unreachable — distinct from driver-not-installed.
+      console.error("Failed to check driver permissions:", e);
+      set({ driverOk: false });
     }
   },
   requestAccessibility: async () => {
     if (IS_WEB) return;
     try {
-      await invoke("request_accessibility_permission");
+      // One endpoint raises prompts for ALL missing grants attributed to the
+      // driver identity — the correct grant path. Both buttons hit it; polling
+      // picks up the granted state.
+      const st = await api.desktopGrant();
+      set({
+        driverOk: st.driver_ok,
+        accessibilityPermissionGranted: st.accessibility,
+        screenRecordingPermissionGranted: st.screen_recording,
+      });
     } catch (e) {
-      console.error("Failed to request Accessibility permission:", e);
+      console.error("Failed to grant driver permissions:", e);
     }
   },
   requestScreenRecording: async () => {
     if (IS_WEB) return;
     try {
-      await invoke("request_screen_recording_permission");
+      const st = await api.desktopGrant();
+      set({
+        driverOk: st.driver_ok,
+        accessibilityPermissionGranted: st.accessibility,
+        screenRecordingPermissionGranted: st.screen_recording,
+      });
     } catch (e) {
-      console.error("Failed to request Screen Recording permission:", e);
+      console.error("Failed to grant driver permissions:", e);
     }
   },
 

@@ -15,42 +15,58 @@ pub struct McpClient {
 }
 
 impl McpClient {
-    /// Resolve cua-driver binary.
+    /// Resolve the cua-driver binary.
+    ///
+    /// cua-driver is **not self-contained**: `cua-driver mcp` is a thin proxy
+    /// that `open -a CuaDriver`-launches the CuaDriver.app **daemon**, which is
+    /// the process that holds the Accessibility/Screen-Recording TCC grants.
+    /// A copy of the bare Mach-O ripped out of its `.app` bundle is unusable —
+    /// macOS kills it at exec (spctl: "signature modified") because the embedded
+    /// signature only validates as part of the CuaDriver.app bundle. So the
+    /// installed, notarized CuaDriver.app is the only working source.
+    ///
     /// Priority:
-    /// 1. Bundled as Tauri resource (Contents/Resources/binaries/cua-driver)
-    /// 2. Next to our own executable (dev layout)
-    /// 3. ~/.local/bin/cua-driver (user install)
-    /// 4. $PATH (fallback)
+    /// 1. `/Applications/CuaDriver.app` — canonical macOS install (notarized,
+    ///    signed com.trycua.driver, holds TCC grants).
+    /// 2. Next to our own executable (dev layout).
+    /// 3. Bundled Tauri resource (degenerate fallback — usually signature-killed).
+    /// 4. `cua-driver` on `$PATH` / `~/.local/bin` (user install).
     fn find_cua_binary() -> String {
-        // Check for cua-driver in Tauri app bundle resources
+        // 1. Canonical install — the driver's daemon + TCC grants live here.
+        let canonical = std::path::PathBuf::from(
+            "/Applications/CuaDriver.app/Contents/MacOS/cua-driver",
+        );
+        if canonical.exists() {
+            return canonical.to_string_lossy().to_string();
+        }
+
+        // 2/3. Relative to our own executable (dev: next-to-exe; bundled: resource).
         if let Ok(exe) = std::env::current_exe() {
-            // exe is at .../Contents/MacOS/zwork-backend (bundled)
-            // resources are at .../Contents/Resources/binaries/
-            if let Some(macos_dir) = exe.parent() {
-                // Bundled: ../Resources/binaries/cua-driver
-                let resources_bin = macos_dir
-                    .parent()  // MacOS -> Contents
-                    .map(|p| p.join("Resources").join("binaries").join("cua-driver"));
-                if let Some(ref path) = resources_bin {
-                    if path.exists() {
-                        return path.to_string_lossy().to_string();
-                    }
-                }
-                // Dev: next to our executable (both in sidecar-rust/target/ or binaries/)
-                let next_to_exe = macos_dir.join("cua-driver");
+            if let Some(dir) = exe.parent() {
+                let next_to_exe = dir.join("cua-driver");
                 if next_to_exe.exists() {
                     return next_to_exe.to_string_lossy().to_string();
                 }
+                // Bundled: .../Contents/MacOS -> .../Contents/Resources/binaries/
+                if let Some(contents) = dir.parent() {
+                    let resource = contents
+                        .join("Resources")
+                        .join("binaries")
+                        .join("cua-driver");
+                    if resource.exists() {
+                        return resource.to_string_lossy().to_string();
+                    }
+                }
             }
         }
-        // Check ~/.local/bin
+
+        // 4. User install (e.g. ~/.local/bin/cua-driver → CuaDriver.app) on PATH.
         if let Some(home) = dirs::home_dir() {
             let local = home.join(".local").join("bin").join("cua-driver");
             if local.exists() {
                 return local.to_string_lossy().to_string();
             }
         }
-        // Fallback to PATH
         "cua-driver".to_string()
     }
 
@@ -103,9 +119,30 @@ impl McpClient {
             child: Arc::new(Mutex::new(child)),
         };
 
-        // Initialize MCP session
+        // Initialize MCP session, then complete the MCP handshake. The driver
+        // answers tool calls without this notification, but sending it is
+        // spec-correct and avoids any version that gates on it.
         let _ = client.initialize().await?;
+        let _ = client.notify("notifications/initialized").await;
         Ok(client)
+    }
+
+    /// Send a JSON-RPC notification (no id, no response expected).
+    async fn notify(&self, method: &str) -> Result<(), String> {
+        let notif = json!({ "jsonrpc": "2.0", "method": method });
+        let line = serde_json::to_string(&notif)
+            .map_err(|e| format!("Serialization error: {}", e))?;
+        let mut stdin = self.stdin.lock().await;
+        stdin
+            .write_all(line.as_bytes())
+            .await
+            .map_err(|e| format!("Write error: {}", e))?;
+        stdin
+            .write_all(b"\n")
+            .await
+            .map_err(|e| format!("Write error: {}", e))?;
+        stdin.flush().await.map_err(|e| format!("Flush error: {}", e))?;
+        Ok(())
     }
 
     async fn initialize(&self) -> Result<Value, String> {
@@ -122,7 +159,13 @@ impl McpClient {
         self.send_and_receive(&init).await
     }
 
-    /// Send a JSON-RPC request and return the `result` field.
+    /// Invoke a driver tool. The driver speaks standard MCP, so tool invocations
+    /// go through the `tools/call` method (`{name, arguments}`), not as bare
+    /// top-level methods — bare method names return "Unknown method". The
+    /// response is unwrapped: prefer `structuredContent` (machine-readable —
+    /// where `check_permissions`'s booleans and `get_window_state`'s
+    /// `tree_markdown` live), fall back to `content[].text` (JSON-parsed when
+    /// possible), and turn an `isError` result into an `Err`.
     pub async fn call(&self, method: &str, params: Value) -> Result<Value, String> {
         let mut id_lock = self.next_id.lock().await;
         let id = *id_lock;
@@ -132,11 +175,45 @@ impl McpClient {
         let request = json!({
             "jsonrpc": "2.0",
             "id": id,
-            "method": method,
-            "params": params
+            "method": "tools/call",
+            "params": {
+                "name": method,
+                "arguments": params
+            }
         });
 
-        self.send_and_receive(&request).await
+        let result = self.send_and_receive(&request).await?;
+
+        // Tool-level error → surface the message from content[].text.
+        if result.get("isError").and_then(|v| v.as_bool()).unwrap_or(false) {
+            let msg = result
+                .get("content")
+                .and_then(|c| c.as_array())
+                .and_then(|c| c.first())
+                .and_then(|c| c.get("text"))
+                .and_then(|t| t.as_str())
+                .unwrap_or("tool error");
+            return Err(format!("cua-driver: {}", msg));
+        }
+
+        // Prefer structuredContent (machine-readable payload).
+        if let Some(sc) = result.get("structuredContent") {
+            return Ok(sc.clone());
+        }
+        // Fall back to content[].text, parsing as JSON if it looks structural.
+        if let Some(text) = result
+            .get("content")
+            .and_then(|c| c.as_array())
+            .and_then(|c| c.first())
+            .and_then(|c| c.get("text"))
+            .and_then(|t| t.as_str())
+        {
+            if let Ok(parsed) = serde_json::from_str::<Value>(text) {
+                return Ok(parsed);
+            }
+            return Ok(Value::String(text.to_string()));
+        }
+        Ok(result)
     }
 
     /// Write a JSON-RPC request to stdin and read the matching response from stdout.

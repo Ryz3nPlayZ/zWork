@@ -163,6 +163,7 @@ body {
 .titlebar-drag button,
 .titlebar-drag a,
 .titlebar-drag input,
+.titlebar-drag textarea,
 .titlebar-drag [data-no-drag] {
   -webkit-app-region: no-drag;
   app-region: no-drag;

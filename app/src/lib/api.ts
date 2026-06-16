@@ -213,6 +213,21 @@ export interface OnboardingStatus {
   zwork_md_exists?: boolean;
 }
 
+/**
+ * cua-driver TCC permission status. This is the DRIVER's identity
+ * (`com.trycua.driver`), not zWork's own — the driver is the process that
+ * actually performs Accessibility + CGEvent work, so its grants are the source
+ * of truth for whether desktop control will work. `driver_ok` is false when
+ * CuaDriver.app isn't installed or the daemon can't be reached.
+ */
+export interface DesktopStatus {
+  driver_ok: boolean;
+  accessibility: boolean;
+  screen_recording: boolean;
+  source?: string;
+  error?: string;
+}
+
 export interface OnboardingAnswer {
   key: string;
   question: string;
@@ -508,10 +523,18 @@ export const api = {
       body: JSON.stringify({ role, content }),
     }).then((r) => j<{ id: string; chat_id: string; role: string; content: string; created_at: string }>(r)),
 
+  // ---- Desktop control / driver permissions ----
+  desktopStatus: () =>
+    localFetch("/api/desktop/status").then((r) => j<DesktopStatus>(r)),
+
+  desktopGrant: () =>
+    localFetch("/api/desktop/permissions/grant", { method: "POST" }).then((r) =>
+      j<DesktopStatus>(r),
+    ),
+
   // ---- Skills + onboarding ----
   skills: () =>
     localFetch("/api/skills").then((r) => j<{ skills: SkillMeta[] }>(r)),
-
   onboardStatus: () =>
     localFetch("/api/onboard/status").then((r) => j<OnboardingStatus>(r)),
 

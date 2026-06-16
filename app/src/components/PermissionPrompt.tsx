@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Check, ChevronRight, Keyboard, Camera, RotateCw } from "lucide-react";
+import { api } from "../lib/api";
 
 const IS_TAURI = typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
 const DISMISS_KEY = "zwork:permission-prompt-dismissed";
@@ -9,6 +10,8 @@ type Status = "checking" | "missing" | "granted";
 export function PermissionPrompt() {
   const [a11y, setA11y] = useState<Status>("checking");
   const [screen, setScreen] = useState<Status>("checking");
+  // null = unchecked, true = driver reachable, false = CuaDriver not installed.
+  const [driverOk, setDriverOk] = useState<boolean | null>(null);
   const [dismissed, setDismissed] = useState(() => {
     if (!IS_TAURI) return true;
     return localStorage.getItem(DISMISS_KEY) === "true";
@@ -18,18 +21,18 @@ export function PermissionPrompt() {
   const refresh = async () => {
     if (!IS_TAURI) return;
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      const [hasA11y, hasScreen] = await Promise.all([
-        invoke<boolean>("check_accessibility_permission"),
-        invoke<boolean>("check_screen_recording_permission"),
-      ]);
-      setA11y(hasA11y ? "granted" : "missing");
-      setScreen(hasScreen ? "granted" : "missing");
-      if (hasA11y && hasScreen) {
+      // Source of truth = cua-driver daemon identity (com.trycua.driver),
+      // the process that actually performs Accessibility + CGEvent work.
+      const st = await api.desktopStatus();
+      setDriverOk(st.driver_ok);
+      setA11y(st.accessibility ? "granted" : "missing");
+      setScreen(st.screen_recording ? "granted" : "missing");
+      if (st.driver_ok && st.accessibility && st.screen_recording) {
         localStorage.setItem(DISMISS_KEY, "true");
         setDismissed(true);
       }
     } catch {
+      setDriverOk(false);
       setA11y("missing");
       setScreen("missing");
     }
@@ -56,14 +59,10 @@ export function PermissionPrompt() {
   const grant = async (which: "a11y" | "screen") => {
     setBusy(which);
     try {
-      const { invoke } = await import("@tauri-apps/api/core");
-      if (which === "a11y") {
-        // Triggers the native macOS prompt and registers zWork in the list.
-        await invoke<boolean>("request_accessibility_permission");
-      } else {
-        await invoke<boolean>("request_screen_recording_permission");
-      }
-      // Give the system a beat, then re-check.
+      // One endpoint raises prompts for ALL missing grants, attributed to the
+      // driver identity (com.trycua.driver) — the process that needs them.
+      // Both buttons hit it; polling picks up the granted state.
+      await api.desktopGrant();
       setTimeout(() => {
         void refresh();
         setBusy(null);
@@ -87,32 +86,50 @@ export function PermissionPrompt() {
             System Access
           </div>
           <h2 className="text-[16px] font-semibold text-ink leading-tight">
-            Grant permissions
+            {driverOk === false ? "Install CuaDriver" : "Grant permissions"}
           </h2>
           <p className="text-[12px] text-ink-muted mt-1 leading-relaxed">
-            zWork needs these to use the global shortcut and capture screenshots.
+            {driverOk === false
+              ? "Desktop control runs through CuaDriver.app. Install it, then relaunch zWork to grant permissions."
+              : "zWork drives your desktop through CuaDriver, which needs these macOS permissions."}
           </p>
         </div>
 
-        {/* Permission rows */}
-        <div className="px-3">
-          <PermissionRow
-            icon={<Keyboard className="h-4 w-4" />}
-            name="Accessibility"
-            hint="Global shortcut (⌃⌥Space)"
-            status={a11y}
-            busy={busy === "a11y"}
-            onGrant={() => grant("a11y")}
-          />
-          <PermissionRow
-            icon={<Camera className="h-4 w-4" />}
-            name="Screen Recording"
-            hint="Screenshot tool"
-            status={screen}
-            busy={busy === "screen"}
-            onGrant={() => grant("screen")}
-          />
-        </div>
+        {driverOk === false ? (
+          /* Driver unreachable — Enable buttons would do nothing, so show the
+             install guidance instead of the permission rows. */
+          <div className="px-5 pb-2">
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-3.5 py-3">
+              <p className="text-[12px] text-ink leading-relaxed">
+                Download CuaDriver from{" "}
+                <span className="font-mono text-[11px] text-ink-muted">
+                  github.com/trycua/cua
+                </span>
+                , run the installer, then relaunch zWork.
+              </p>
+            </div>
+          </div>
+        ) : (
+          /* Permission rows */
+          <div className="px-3">
+            <PermissionRow
+              icon={<Keyboard className="h-4 w-4" />}
+              name="Accessibility"
+              hint="Read & control app windows"
+              status={a11y}
+              busy={busy === "a11y"}
+              onGrant={() => grant("a11y")}
+            />
+            <PermissionRow
+              icon={<Camera className="h-4 w-4" />}
+              name="Screen Recording"
+              hint="See on-screen content"
+              status={screen}
+              busy={busy === "screen"}
+              onGrant={() => grant("screen")}
+            />
+          </div>
+        )}
 
         {/* Footer */}
         <div className="flex items-center justify-between px-5 py-4 mt-1">
