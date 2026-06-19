@@ -1,99 +1,67 @@
-use serde_json::{json, Value};
+use serde_json::Value;
 
-const COMPACT_THRESHOLD_CHARS: usize = 120_000;
-const KEEP_RECENT: usize = 4;
+/// Tool results bigger than this (chars) are treated as bulky captures /
+/// snapshots and evicted from history once a fresher one exists. AX trees and
+/// large page snapshots routinely hit 5–50 KB each; uncapped, they dominate the
+/// per-turn token cost because every turn re-sends the full history.
+const LARGE_RESULT_THRESHOLD: usize = 2_000;
 
-/// Estimate total character count across all messages.
-pub fn estimate_chars(messages: &[Value]) -> usize {
-    messages.iter().map(|m| {
-        m.get("content").map(|c| {
-            if let Some(s) = c.as_str() { s.len() }
-            else { c.to_string().len() }
-        }).unwrap_or(0)
-    }).sum()
-}
+/// Evict bulky `tool_result` contents from history, sparing the final
+/// `role:"user"` message (the freshest batch). Per the iron workflow the agent
+/// re-captures after every state change, so prior captures/snapshots are stale
+/// — their `element_index` tags no longer match the live UI — and only the
+/// latest is ever needed. Small results (click acks, command output) are
+/// preserved verbatim so working memory survives. The matching `tool_use_id`
+/// is left intact, so the assistant/tool_result pairing required by the
+/// Anthropic API stays valid.
+///
+/// This is cost + latency hygiene, not context survival. The model has a
+/// 1M-token window and captures will not come close to exhausting it; but they
+/// make every subsequent turn slower and more expensive, and a stale index
+/// could mislead the model into clicking the wrong element.
+pub fn evict_stale_bulky_results(history: &mut Vec<Value>) {
+    let last_user_idx = history
+        .iter()
+        .rposition(|m| m.get("role").and_then(|v| v.as_str()) == Some("user"));
+    let preserve_from = match last_user_idx {
+        Some(idx) => idx,
+        None => return,
+    };
 
-/// Determine if compaction should occur.
-pub fn should_compact(messages: &[Value]) -> bool {
-    let count = messages.len();
-    count > KEEP_RECENT + 2 && estimate_chars(messages) > COMPACT_THRESHOLD_CHARS
-}
-
-/// Plan compaction: split messages into head (keep), middle (compact), tail (keep).
-/// Returns (head_count, middle_messages, tail_count).
-pub fn plan_compaction(messages: &[Value]) -> (usize, Vec<Value>, usize) {
-    let total = messages.len();
-    let tail = KEEP_RECENT.min(total);
-    let head = 1; // Keep the system message (first message)
-    let middle_count = total.saturating_sub(head + tail);
-
-    let middle: Vec<Value> = messages[head..head + middle_count].to_vec();
-    (head, middle, tail)
-}
-
-/// Build a synthetic assistant message that summarizes the middle section.
-pub fn render_summary_message(summary: &str) -> Value {
-    json!({
-        "role": "assistant",
-        "content": format!("[Conversation summary]\n\n{}", summary),
-    })
-}
-
-/// Build the summarization prompt for the LLM.
-pub fn summarization_prompt(middle_messages: &[Value]) -> String {
-    let mut msg_text = String::new();
-    for m in middle_messages {
-        let role = m.get("role").and_then(|v| v.as_str()).unwrap_or("unknown");
-        let content = m.get("content").map(|c| {
-            if let Some(s) = c.as_str() { s.to_string() }
-            else { c.to_string() }
-        }).unwrap_or_default();
-
-        // Truncate individual messages to keep the prompt manageable
-        let truncated = if content.len() > 2000 {
-            format!("{}...[truncated]", &content[..2000])
-        } else {
-            content
+    let mut evicted = 0usize;
+    for (i, m) in history.iter_mut().enumerate() {
+        if i >= preserve_from {
+            break;
+        }
+        if m.get("role").and_then(|v| v.as_str()) != Some("user") {
+            continue;
+        }
+        let arr = match m.get_mut("content").and_then(|c| c.as_array_mut()) {
+            Some(a) => a,
+            None => continue,
         };
-
-        msg_text.push_str(&format!("[{}] {}\n\n", role, truncated));
+        for item in arr.iter_mut() {
+            if item.get("type").and_then(|v| v.as_str()) != Some("tool_result") {
+                continue;
+            }
+            let len = item
+                .get("content")
+                .and_then(|c| c.as_str())
+                .map(|s| s.len())
+                .unwrap_or(0);
+            if len > LARGE_RESULT_THRESHOLD {
+                let stub = format!(
+                    "[earlier tool output omitted to save context — was {len} chars. \
+                     Re-capture (desktop_capture / browser_snapshot) if you need the \
+                     current screen state.]"
+                );
+                item["content"] = Value::String(stub);
+                evicted += 1;
+            }
+        }
     }
 
-    format!(
-        "Summarize this conversation excerpt in 3-8 short markdown paragraphs.\n\
-         Preserve: goals, decisions made, files created/modified, tool results worth remembering, promises to the user.\n\
-         Drop: pleasantries, draft iterations, verbatim tool output, repetition.\n\
-         Be concise and factual.\n\n\
-         ---\n\n{}",
-        msg_text
-    )
-}
-
-/// Build the compacted message history: system + summary + recent tail.
-pub fn build_compacted_history(
-    messages: &[Value],
-    summary: &str,
-    head: usize,
-    tail: usize,
-) -> Vec<Value> {
-    let mut result = Vec::new();
-
-    // Keep head (system message)
-    if head > 0 {
-        result.extend_from_slice(&messages[..head]);
+    if evicted > 0 {
+        tracing::debug!("[compaction] evicted {evicted} bulky prior tool result(s)");
     }
-
-    // Add synthetic summary message
-    // Insert as user→assistant pair so the LLM context is coherent
-    result.push(json!({
-        "role": "user",
-        "content": "[System: Earlier conversation was summarized]"
-    }));
-    result.push(render_summary_message(summary));
-
-    // Keep tail
-    let tail_start = messages.len().saturating_sub(tail);
-    result.extend_from_slice(&messages[tail_start..]);
-
-    result
 }

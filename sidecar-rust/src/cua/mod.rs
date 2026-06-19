@@ -6,20 +6,140 @@ pub use types::{ActionResult, CaptureResult, PermissionStatus};
 use mcp_client::McpClient;
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::process::Stdio;
 use std::sync::{Arc, OnceLock};
-use tokio::sync::OnceCell;
+use std::time::{Duration, Instant};
+use tokio::sync::Mutex;
 
-/// Global persistent cua-driver connection. Initialized on first use.
-static CUA: OnceCell<Arc<McpClient>> = OnceCell::const_new();
+/// Cached cua-driver connection. Held in a `Mutex<Option<..>>` (not a
+/// `OnceCell`) so we can drop it on idle — see [`teardown_driver`].
+static CUA: Mutex<Option<Arc<McpClient>>> = Mutex::const_new(None);
 
-/// Get or initialize the cua-driver MCP client.
+/// Get or initialize the cua-driver MCP client. Lazily connects on first use;
+/// after [`teardown_driver`] clears the cache, the next call reconnects (which
+/// relaunches the daemon via the proxy's default relaunch behavior).
 pub async fn client() -> Result<Arc<McpClient>, String> {
-    CUA.get_or_try_init(|| async {
-        let c = McpClient::connect().await?;
-        Ok(Arc::new(c))
-    })
-    .await
-    .map(|c| c.clone())
+    let mut guard = CUA.lock().await;
+    if let Some(c) = guard.as_ref() {
+        return Ok(c.clone());
+    }
+    let c = Arc::new(McpClient::connect().await?);
+    *guard = Some(c.clone());
+    Ok(c)
+}
+
+/// Timestamp of the most recent desktop *control* operation (capture, click,
+/// type, key, scroll, set_value, launch_app). Read-only queries (list_apps,
+/// check_permissions) don't count — only real control work should keep the
+/// daemon alive. Read by [`idle_teardown_task`].
+fn last_desktop_use() -> &'static std::sync::Mutex<Instant> {
+    static V: OnceLock<std::sync::Mutex<Instant>> = OnceLock::new();
+    V.get_or_init(|| std::sync::Mutex::new(Instant::now()))
+}
+
+/// Mark that a desktop control operation just happened, extending the idle
+/// window before the daemon is torn down.
+pub fn mark_desktop_use() {
+    if let Ok(mut g) = last_desktop_use().lock() {
+        *g = Instant::now();
+    }
+}
+
+/// Run `cua-driver stop` to bring down the persistent CuaDriver daemon. The
+/// daemon is a separate LaunchServices process (`open -a CuaDriver`), so
+/// dropping our `cua-driver mcp` proxy (via `kill_on_drop` on the dropped
+/// client) does NOT stop it — this command does. Idempotent and best-effort.
+async fn stop_driver_process() {
+    let bin = McpClient::find_cua_binary();
+    let _ = tokio::process::Command::new(&bin)
+        .arg("stop")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true)
+        .status()
+        .await;
+    tracing::info!("[cua] stopped driver daemon via `{bin} stop`");
+}
+
+/// Tear down the driver: drop the cached connection (kills our `cua-driver mcp`
+/// proxy via `kill_on_drop`) and stop the persistent daemon. The next
+/// `client()` call reconnects on demand. The daemon's idle cursor-overlay
+/// render loop used to burn ~45% CPU (fixed upstream in cua-driver-rs 0.5.6,
+/// PR #1865), but tearing down on task completion is still good hygiene — it
+/// releases the process entirely instead of leaving it idle. Driven explicitly
+/// by the agent via [`end_session`] (see the system prompt), with a long idle
+/// backstop ([`idle_teardown_task`]) as a safety net for forgetful runs.
+pub async fn teardown_driver() {
+    {
+        let mut guard = CUA.lock().await;
+        *guard = None; // drop the Arc → kill_on_drop kills the mcp proxy
+    }
+    stop_driver_process().await;
+}
+
+/// Begin a desktop-control session: ensure the cua-driver daemon is up and
+/// reachable. Called by the agent's `desktop_start_session` tool before the
+/// first capture of a task. Idempotent — if already connected, returns
+/// immediately. Also marks activity so the idle backstop doesn't immediately
+/// tear down a freshly-started session.
+pub async fn start_session() -> Result<(), String> {
+    let _ = client().await?;
+    mark_desktop_use();
+    Ok(())
+}
+
+/// End a desktop-control session: tear the driver down completely. Called by
+/// the agent's `desktop_end_session` tool once ALL desktop work for the task is
+/// finished. Idempotent — safe to call when nothing is connected.
+pub async fn end_session() -> Result<(), String> {
+    teardown_driver().await;
+    Ok(())
+}
+
+/// Idle backstop: how long after the last desktop control op the daemon stays
+/// alive before the background loop tears it down. This is a SAFETY NET only —
+/// the primary lifecycle is the agent calling `desktop_start_session` /
+/// `desktop_end_session` explicitly (see the system prompt). The backstop
+/// catches a forgotten session: long enough to never interrupt an active
+/// multi-step task (inter-turn inference can take 10–30s and a sub-task can run
+/// minutes), but finite so a forgotten session eventually releases the daemon.
+/// Override with `ZWORK_IDLE_TEARDOWN_SECS`; set 0 to disable the backstop.
+fn idle_backstop_secs() -> u64 {
+    std::env::var("ZWORK_IDLE_TEARDOWN_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(1800)
+}
+
+/// Background safety-net loop: tears the driver down once desktop control has
+/// been idle for [`idle_backstop_secs`] — but only as a backstop. The agent is
+/// expected to end the session explicitly via `desktop_end_session`; this only
+/// fires if it doesn't. Spawned once at backend startup.
+pub async fn idle_teardown_task() {
+    loop {
+        tokio::time::sleep(Duration::from_secs(60)).await;
+        let backstop = idle_backstop_secs();
+        if backstop == 0 {
+            continue; // backstop disabled
+        }
+        let idle_secs = last_desktop_use()
+            .lock()
+            .map(|g| g.elapsed().as_secs())
+            .unwrap_or(0);
+        if idle_secs < backstop {
+            continue;
+        }
+        // Only tear down if a connection is currently held (driver is up).
+        let held = CUA.lock().await.is_some();
+        if !held {
+            continue;
+        }
+        tracing::info!(
+            "[cua] desktop control idle for {idle_secs}s (backstop {backstop}s) — tearing down driver daemon"
+        );
+        teardown_driver().await;
+    }
 }
 
 /// Per-app target cache: `app name -> (pid, window_id)`. Populated by
@@ -160,6 +280,7 @@ async fn resolve_window_id(c: &Arc<McpClient>, pid: i64) -> Result<i64, String> 
 /// Returns a Markdown tree with `[element_index N]` tags the agent references
 /// in click/type/set_value. Caches the window's (pid, window_id).
 pub async fn capture(app: Option<&str>) -> Result<CaptureResult, String> {
+    mark_desktop_use();
     let app_name = match app {
         Some(a) if !a.is_empty() => a.to_string(),
         _ => {
@@ -276,6 +397,7 @@ fn truncate_tree(tree: &str, max_elements: usize) -> (String, bool) {
 /// Click an element by its index from the last capture of `app` (or the last
 /// captured app if `app` is None).
 pub async fn click(element: u32, app: Option<&str>) -> Result<ActionResult, String> {
+    mark_desktop_use();
     let (pid, window_id) = resolve_target(app).await?;
     let c = client().await?;
     let mut params = json!({ "pid": pid, "element_index": element });
@@ -293,6 +415,7 @@ pub async fn type_text(
     element: Option<u32>,
     app: Option<&str>,
 ) -> Result<ActionResult, String> {
+    mark_desktop_use();
     let (pid, window_id) = resolve_target(app).await?;
     let c = client().await?;
     let mut params = json!({ "pid": pid, "text": text });
@@ -315,6 +438,7 @@ pub async fn type_text(
 /// are hard-blocked before they reach the driver — independent of any approval
 /// mode. These are irreversible one-keystroke accidents, not intentional work.
 pub async fn key(keys: &str, app: Option<&str>) -> Result<ActionResult, String> {
+    mark_desktop_use();
     let (pid, window_id) = resolve_target(app).await?;
     let parts: Vec<&str> = keys
         .split('+')
@@ -385,6 +509,7 @@ fn blocked_key_combo(parts: &[&str]) -> Option<&'static str> {
 /// Scroll a direction by `amount` ticks (clamped 1–50). left/right scroll
 /// horizontally.
 pub async fn scroll(direction: &str, amount: i32, app: Option<&str>) -> Result<ActionResult, String> {
+    mark_desktop_use();
     let (pid, window_id) = resolve_target(app).await?;
     let amount = amount.clamp(1, 50);
     let c = client().await?;
@@ -399,6 +524,7 @@ pub async fn scroll(direction: &str, amount: i32, app: Option<&str>) -> Result<A
 /// Set a value on a UI element directly (AXValue / AXPress). The safe way to
 /// pick a `<select>` option or move a slider — no focus reliance, no keystrokes.
 pub async fn set_value(element: u32, value: &str, app: Option<&str>) -> Result<ActionResult, String> {
+    mark_desktop_use();
     let (pid, window_id) = resolve_target(app).await?;
     if window_id == 0 {
         return Err(
@@ -416,6 +542,7 @@ pub async fn set_value(element: u32, value: &str, app: Option<&str>) -> Result<A
 /// Launch an app (backgrounded). Caches the returned pid + first window so the
 /// agent can act without a separate capture.
 pub async fn launch_app(app: &str) -> Result<ActionResult, String> {
+    mark_desktop_use();
     let c = client().await?;
     let result = c.call("launch_app", json!({ "name": app })).await?;
     let pid = result.get("pid").and_then(|v| v.as_i64()).unwrap_or(0);

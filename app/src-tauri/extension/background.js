@@ -3,11 +3,15 @@
 // handles browser-level actions, and forwards push events.
 
 const PORT = 8787;
+// 127.0.0.1 (not "localhost") avoids IPv6 (::1) resolution ambiguity and
+// matches the address the backend binds; the extension is exempt from
+// host_permissions concerns for loopback.
+const HOST = "127.0.0.1";
 let socket = null;
 
 // ─── WebSocket connection ─────────────────────────────────────
 function connect() {
-  socket = new WebSocket(`ws://localhost:${PORT}/ws`);
+  socket = new WebSocket(`ws://${HOST}:${PORT}/ws`);
 
   socket.onopen = () => {
     console.log("[zbctl] connected to daemon");

@@ -156,9 +156,19 @@ pub fn run_agent_turn(
             }));
         }
             
-        // Main multi-turn executor loop (max 5 turns)
-        let mut turn = 0;
-        let max_turns = 5;
+        // Main multi-turn executor loop. A "turn" is one model inference + its
+        // tool executions. Multi-step desktop/browser work (capture → act →
+        // re-capture → …) routinely needs 15–30+ turns, and long tasks can run
+        // for hundreds. The loop terminates *naturally* when the model stops
+        // emitting tool calls (task done) or the user hits Stop — there is no
+        // hard turn cap, because a fixed ceiling would abort legitimate long
+        // work. ZWORK_MAX_TURNS opts in a runaway-only cost backstop for anyone
+        // who wants one; when unset the loop runs unbounded.
+        let mut turn = 0u32;
+        let max_turns: Option<u32> = std::env::var("ZWORK_MAX_TURNS")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .filter(|&n| n > 0);
         
         // Initialize the assistant response message
         let assistant_msg = chatstore::append_message(&chat.id, "assistant", json!(""));
@@ -167,24 +177,22 @@ pub fn run_agent_turn(
         let mut accumulated_text = String::new();
         let mut accumulated_activities = Vec::new();
         
-        while turn < max_turns {
+        while max_turns.map_or(true, |cap| turn < cap) {
             turn += 1;
             let _ = tx.send(json!({
                 "type": "status",
                 "text": "Thinking"
             })).await;
             
-            // Format messages and tools payload
-            let (system, convo) = convert_input_messages(&history_messages);
             let endpoint = if shape == "anthropic" {
                 format!("{}/v1/messages", base_url)
             } else {
                 format!("{}/chat/completions", base_url)
             };
-            
+
             let mut headers = reqwest::header::HeaderMap::new();
             headers.insert("content-type", reqwest::header::HeaderValue::from_static("application/json"));
-            
+
             if shape == "anthropic" {
                 headers.insert("x-api-key", reqwest::header::HeaderValue::from_str(&api_key).unwrap_or_else(|_| reqwest::header::HeaderValue::from_static("")));
                 headers.insert("anthropic-version", reqwest::header::HeaderValue::from_static("2023-06-01"));
@@ -194,6 +202,20 @@ pub fn run_agent_turn(
             } else {
                 headers.insert("authorization", reqwest::header::HeaderValue::from_str(&format!("Bearer {}", api_key)).unwrap_or_else(|_| reqwest::header::HeaderValue::from_static("")));
             }
+
+            // Evict stale bulky tool results (old captures/snapshots) before
+            // formatting the request. This is cost + latency hygiene, not
+            // context survival: the model has a 1M-token window and captures
+            // won't come close to exhausting it, but every turn re-sends the
+            // full history, and the iron workflow re-captures after every state
+            // change — so old captures/snapshots are stale (their
+            // element_index tags no longer match the live UI), useless, and
+            // expensive. Evicting them keeps each turn fast/cheap and stops the
+            // model from acting on a stale index.
+            compaction::evict_stale_bulky_results(&mut history_messages);
+
+            // Format messages and tools payload
+            let (system, convo) = convert_input_messages(&history_messages);
             
             let tools_payload = if shape == "anthropic" {
                 let mut out = Vec::new();
@@ -469,7 +491,7 @@ const KNOWN_TOOLS: &[&str] = &[
     "manage_tasks", "manage_events", "get_stock_data",
     "desktop_capture", "desktop_click", "desktop_type", "desktop_set_value",
     "desktop_scroll", "desktop_key", "desktop_launch_app", "desktop_list_apps",
-    "desktop_wait",
+    "desktop_wait", "desktop_start_session", "desktop_end_session",
     "browser_navigate", "browser_snapshot", "browser_click", "browser_type",
     "browser_eval", "browser_scroll", "browser_screenshot", "browser_tabs",
 ];

@@ -262,6 +262,12 @@ fn start_packaged_backend(app: &tauri::AppHandle) -> Option<BackendChild> {
         }
     };
 
+    // Point the backend at its bundled resources dir so it can locate the
+    // bundled zWork-Skills (and other resources) inside the packaged app.
+    if let Ok(res) = app.path().resource_dir() {
+        sidecar = sidecar.env("ZWORK_RESOURCES", res.display().to_string());
+    }
+
     sidecar = sidecar
         .env("PYTHONUNBUFFERED", "1")
         .env("PYTHONUTF8", "1")
@@ -921,6 +927,135 @@ mod percent_decode_tests {
     }
 }
 
+/// Ensure the CuaDriver.app is installed somewhere LaunchServices can find it
+/// (so the cua-driver MCP proxy's `open -a CuaDriver` resolves). If the user
+/// already has it in /Applications or ~/Applications, leave it untouched (they
+/// may have a newer version than the bundled one — version skew is a parked
+/// issue). Otherwise copy the bundled copy (zWork.app/Contents/Resources/
+/// CuaDriver.app) to ~/Applications/CuaDriver.app using `ditto` (preserves the
+/// .app bundle structure, code signature, and extended attributes — cp -R can
+/// drop metadata that invalidates the signature), then register it with
+/// LaunchServices so `open -a CuaDriver` resolves on the first proxy launch.
+///
+/// Preserves trycua's signature and the `com.trycua.driver` TCC identity — see
+/// the cua-driver-dependency-model memory. Best-effort and non-fatal: any
+/// failure logs and falls back to the manual-install path. macOS-only. Called
+/// before the backend starts so the daemon is discoverable when the MCP client
+/// spins up.
+#[cfg(target_os = "macos")]
+fn ensure_cuadriver_installed(app: &tauri::AppHandle) {
+    use std::path::PathBuf;
+
+    let home = match std::env::var_os("HOME") {
+        Some(h) => PathBuf::from(h),
+        None => {
+            eprintln!("[cuadriver] no HOME set; skipping auto-install");
+            return;
+        }
+    };
+    let user_apps = home.join("Applications");
+    let dest = user_apps.join("CuaDriver.app");
+
+    // Already present in a standard location? Nothing to do. Never overwrite an
+    // existing install.
+    let std_loc = PathBuf::from("/Applications/CuaDriver.app");
+    if std_loc.exists() || dest.exists() {
+        return;
+    }
+
+    // Locate the bundled copy and confirm it's a real .app, not a placeholder
+    // dir (prepare-bundle.cjs leaves a placeholder when CuaDriver.app wasn't
+    // available at build time).
+    let bundled = match app.path().resource_dir() {
+        Ok(d) => d.join("CuaDriver.app"),
+        Err(e) => {
+            eprintln!("[cuadriver] no resource_dir: {e}");
+            return;
+        }
+    };
+    if !bundled.join("Contents/Info.plist").exists() {
+        eprintln!(
+            "[cuadriver] no usable bundled CuaDriver.app; user must install it manually"
+        );
+        return;
+    }
+
+    // ~/Applications is user-writable and a LaunchServices-indexed location.
+    if let Err(e) = std::fs::create_dir_all(&user_apps) {
+        eprintln!("[cuadriver] cannot create {}: {e}", user_apps.display());
+        return;
+    }
+
+    // ditto preserves bundle metadata + signature; cp -R does not reliably.
+    match Command::new("ditto")
+        .arg(&bundled)
+        .arg(&dest)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+    {
+        Ok(o) if o.status.success() => {
+            eprintln!("[cuadriver] installed CuaDriver.app -> {}", dest.display());
+        }
+        Ok(o) => {
+            eprintln!(
+                "[cuadriver] ditto failed ({}): {}",
+                o.status,
+                String::from_utf8_lossy(&o.stderr).trim()
+            );
+            // Remove a partial copy so a later retry isn't confused by it.
+            let _ = std::fs::remove_dir_all(&dest);
+            return;
+        }
+        Err(e) => {
+            eprintln!("[cuadriver] ditto exec failed: {e}");
+            return;
+        }
+    }
+
+    // Register with LaunchServices so `open -a CuaDriver` resolves immediately,
+    // without waiting for the background indexer. Non-fatal.
+    let lsregister = "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister";
+    let _ = Command::new(lsregister)
+        .arg("-f")
+        .arg(&dest)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+#[cfg(not(target_os = "macos"))]
+fn ensure_cuadriver_installed(_app: &tauri::AppHandle) {}
+
+/// Stop the persistent CuaDriver daemon when zWork quits. The daemon is a
+/// separate LaunchServices process that survives zWork exiting; without this it
+/// keeps burning ~45% CPU (cursor-overlay render loop, can't be disabled in
+/// 0.5.5) until reboot. Best-effort — the backend's own idle teardown handles
+/// the in-app-idle case; this covers "user closed zWork".
+#[cfg(target_os = "macos")]
+fn stop_cua_driver_on_quit() {
+    for bin in [
+        "/Applications/CuaDriver.app/Contents/MacOS/cua-driver",
+        "cua-driver",
+    ] {
+        let ok = Command::new(bin)
+            .arg("stop")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok();
+        if ok {
+            break;
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn stop_cua_driver_on_quit() {}
+
 fn main() {
     configure_linux_webview_env();
 
@@ -1029,6 +1164,9 @@ fn main() {
         .expect("error while building zWork");
 
     let app_handle = app.handle().clone();
+    // Make CuaDriver.app discoverable before the backend's MCP client tries to
+    // launch the daemon. No-op if already installed; best-effort otherwise.
+    ensure_cuadriver_installed(&app_handle);
     if let Some(backend) = app_handle.try_state::<Backend>() {
         if let Ok(mut guard) = backend.0.lock() {
             guard.child = spawn_backend_initial(&app_handle);
@@ -1049,6 +1187,8 @@ fn main() {
                     }
                 }
             }
+            // Stop the CuaDriver daemon so it doesn't keep burning CPU after quit.
+            stop_cua_driver_on_quit();
         }
     });
 }

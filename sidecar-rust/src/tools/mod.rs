@@ -365,6 +365,16 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
                 "required": ["seconds"]
             }
         }));
+        schemas.push(json!({
+            "name": "desktop_start_session",
+            "description": "Start a desktop-control session: bring the cua-driver daemon up and connect to it. Call this ONCE, before your first desktop_capture of any task that touches the desktop. Idempotent — safe to call again. The session stays up across all your captures/clicks/types for the whole task.",
+            "parameters": { "type": "object", "properties": {} }
+        }));
+        schemas.push(json!({
+            "name": "desktop_end_session",
+            "description": "End the desktop-control session: tear the cua-driver daemon down completely, freeing the process. Call this ONCE, after you have finished ALL desktop work for the task and will not interact with the desktop again. Idempotent. Do NOT call it between steps of an ongoing task — keep the session up for the entire task.",
+            "parameters": { "type": "object", "properties": {} }
+        }));
         // ─── Browser control (zbctl → user's Chrome) ───
         schemas.push(json!({
             "name": "browser_navigate",
@@ -641,6 +651,14 @@ pub fn execute_tool(
                     Err(e) => Err(e),
                 }
             }
+            "desktop_start_session" => match crate::cua::start_session().await {
+                Ok(()) => Ok("desktop-control session started; cua-driver is up.".to_string()),
+                Err(e) => Err(e),
+            },
+            "desktop_end_session" => match crate::cua::end_session().await {
+                Ok(()) => Ok("desktop-control session ended; cua-driver torn down.".to_string()),
+                Err(e) => Err(e),
+            },
             // ─── Browser control (zbctl) ───
             "browser_navigate" => {
                 let url = params.get("url").and_then(|v| v.as_str()).unwrap_or("");

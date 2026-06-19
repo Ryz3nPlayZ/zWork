@@ -31,7 +31,7 @@ impl McpClient {
     /// 2. Next to our own executable (dev layout).
     /// 3. Bundled Tauri resource (degenerate fallback — usually signature-killed).
     /// 4. `cua-driver` on `$PATH` / `~/.local/bin` (user install).
-    fn find_cua_binary() -> String {
+    pub(crate) fn find_cua_binary() -> String {
         // 1. Canonical install — the driver's daemon + TCC grants live here.
         let canonical = std::path::PathBuf::from(
             "/Applications/CuaDriver.app/Contents/MacOS/cua-driver",

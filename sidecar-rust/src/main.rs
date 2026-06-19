@@ -2,7 +2,7 @@ use axum::{
     routing::{get, post, patch, delete},
     Router,
 };
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowPrivateNetwork, CorsLayer};
 use tracing::info;
 
 mod paths;
@@ -93,11 +93,23 @@ async fn main() {
         .route("/api/scrape", post(server::scrape_url))
         .route("/api/export/docx", post(server::export_docx))
         .route("/api/export/pdf", post(server::export_pdf))
-        .layer(CorsLayer::permissive());
+        // `allow_private_network` lets the zbctl Chrome extension
+        // (chrome-extension:// origin) reach this loopback server. Modern
+        // Chrome blocks cross-context requests to private/loopback addresses
+        // (Private Network Access) unless the preflight echoes this header back.
+        .layer(
+            CorsLayer::permissive().allow_private_network(AllowPrivateNetwork::yes()),
+        );
 
     let addr = format!("{}:{}", host, port);
     info!("rWork Rust Backend -> http://{} (pid={})", addr, std::process::id());
-    
+
+    // Idle backstop for the cua-driver daemon. The primary lifecycle is the
+    // agent calling desktop_start/end_session explicitly; this safety net tears
+    // the daemon down only if a desktop session is left idle past
+    // ZWORK_IDLE_TEARDOWN_SECS (default 1800s). See cua::idle_teardown_task.
+    tokio::spawn(cua::idle_teardown_task());
+
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
