@@ -461,6 +461,9 @@ interface AppState {
   checkMacOSPermissions: () => Promise<void>;
   requestAccessibility: () => Promise<void>;
   requestScreenRecording: () => Promise<void>;
+  /** Whether the zbctl Chrome extension WebSocket is connected to the backend. */
+  extensionConnected: boolean | null;
+  checkBrowserBridge: () => Promise<void>;
   webSearchEnabled: boolean;
   setWebSearchEnabled: (v: boolean) => void;
 
@@ -694,6 +697,7 @@ export const useApp = create<AppState>((set, get) => ({
   accessibilityPermissionGranted: null,
   screenRecordingPermissionGranted: null,
   driverOk: null,
+  extensionConnected: null,
   webSearchEnabled: false,
   setWebSearchEnabled: (v) => set({ webSearchEnabled: v }),
 
@@ -744,15 +748,29 @@ export const useApp = create<AppState>((set, get) => ({
   },
   requestScreenRecording: async () => {
     if (IS_WEB) return;
+    // Screen Recording can't be reliably raised by the driver's grant flow
+    // (it tends to surface the Accessibility prompt), and current desktop
+    // capture is AX-only so it isn't even required. Deep-link the user to the
+    // Screen Recording pane to toggle CuaDriver on, then re-poll.
     try {
-      const st = await api.desktopGrant();
-      set({
-        driverOk: st.driver_ok,
-        accessibilityPermissionGranted: st.accessibility,
-        screenRecordingPermissionGranted: st.screen_recording,
-      });
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("open_macos_privacy_pane", { pane: "screen_recording" });
+      setTimeout(() => {
+        get().checkMacOSPermissions().catch(() => {});
+      }, 1500);
     } catch (e) {
-      console.error("Failed to grant driver permissions:", e);
+      console.error("Failed to open Screen Recording settings:", e);
+    }
+  },
+
+  checkBrowserBridge: async () => {
+    if (IS_WEB) return;
+    try {
+      const st = await api.browserBridgeStatus();
+      set({ extensionConnected: st.connected });
+    } catch (e) {
+      console.error("Failed to check browser bridge:", e);
+      set({ extensionConnected: false });
     }
   },
 

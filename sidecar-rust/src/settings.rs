@@ -3,10 +3,11 @@ use std::collections::HashMap;
 use std::fs;
 use uuid::Uuid;
 use crate::paths::{
-    settings_path, zwork_md_path, memory_path, workspace_root,
+    settings_path, zwork_md_path, workspace_root,
     workspace_apps_dir, workspace_outputs_dir, workspace_uploads_dir, workspace_scratch_dir
 };
 use crate::secretstore;
+use crate::memory;
 
 pub const KNOWN_CREDENTIALS: &[&str] = &[
     "anthropic",
@@ -19,6 +20,7 @@ pub const KNOWN_CREDENTIALS: &[&str] = &[
     "zai",
     "ollama",
     "composio",
+    "telegram",
 ];
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
@@ -48,6 +50,8 @@ pub struct Settings {
     pub telemetry_install_id: String,
     #[serde(default)]
     pub custom_models: Vec<CustomModel>,
+    #[serde(default)]
+    pub telegram_chat_id: String,
 }
 
 fn default_true() -> bool {
@@ -64,6 +68,7 @@ impl Default for Settings {
             telemetry_enabled: true,
             telemetry_install_id: String::new(),
             custom_models: Vec::new(),
+            telegram_chat_id: String::new(),
         }
     }
 }
@@ -160,6 +165,7 @@ pub fn public_view(s: &Settings) -> crate::server::SettingsPublic {
             .collect(),
         provider_config: s.provider_config.clone(),
         custom_models: s.custom_models.clone(),
+        telegram_chat_id: s.telegram_chat_id.clone(),
     }
 }
 
@@ -226,19 +232,28 @@ The user's preferences (vibe, verbosity, decision style, goals) are provided bel
 
 {zwork_md_block}
 
+## Time and timeline awareness
+
+{timeline_block}
+
+Use this context to ground your replies in time: refer to \"yesterday\", \"today\", \"this week\", \"next week\", \"last Monday\", etc. accurately. If the user mentions a deadline or recurring pattern, note it in MEMORY.md via `save_memory(target=\"memory\")`.
+
 ## Persistent memory
 
-{memory_block}
+{user_memory_block}
+
+{general_memory_block}
 
 {project_block}
 
 Rules for memory:
-- When the user says \"remember this\", \"note this down\", \"keep this in mind\", \"save this\", \"don't forget this\", \"write this down\", or any close variant — you MUST call the `save_memory` tool IMMEDIATELY. Do NOT just say \"I'll remember that\" or \"Got it\" without actually calling the tool. The tool is the ONLY way to persist information across sessions.
+- The `save_memory` tool has a `target` parameter: use `target=\"user\"` for facts about the user (preferences, style, goals, habits, job, family, constraints) and `target=\"memory\"` for everything else (project facts, conventions, deadlines, things learned).
+- When the user says \"remember this\", \"note this down\", \"keep this in mind\", \"save this\", \"don't forget this\", \"write this down\", or any close variant — call `save_memory` IMMEDIATELY. Do NOT just say \"I'll remember that\" without calling the tool.
 - NEVER proactively save things the user did not ask you to remember.
-- After calling `save_memory`, briefly confirm: \"Saved to memory.\"
+- After calling `save_memory`, briefly confirm what you saved and which file it went to (e.g. \"Saved to USER.md.\" or \"Saved to MEMORY.md.\").
 - ONLY reference memories when they are directly relevant to the user's current request.
 - NEVER mention \"I have a memory about...\" or \"From my memory...\" unprompted. Just naturally apply the information.
-- If the memory file is empty or missing, do not mention it.
+- If a memory file is empty or missing, do not mention it.
 
 ## Core behavior: DEFAULT TO ACTION
 
@@ -247,6 +262,17 @@ Rules for memory:
 - Only ask the user a question when: (a) the action is destructive AND irreversible, OR (b) the request has two or more wildly different reasonable interpretations that change the entire outcome.
 - A good agent makes 10 micro-decisions silently for every 1 question it asks.
 - Prefer doing the work over describing the work.
+
+## Know what you can and cannot do
+
+When a user asks for something physical or external, classify it and act appropriately:
+
+- **Directly actionable on this computer** — do it. Examples: edit files, run commands, build/deploy apps, send an email if credentials are available, print a file if a printer CLI (e.g. `lp`, `lpr`) is installed.
+- **Actionable only with missing setup** — explain the missing piece, offer to configure it, then proceed if approved. Example: \"I can print this if you install a printer and share its CLI command.\"
+- **Actionable only via a human** — explicitly hand off to the user. Example: \"I can't buy groceries, but I can add them to your reminders or shopping list.\"
+- **Actionable in the future / recurring** — schedule it. Example: \"I'll remind you every Friday at 5pm.\"
+
+Be honest about your limits. Never pretend you can do something you cannot. When you cannot do the thing itself, always offer the best alternative you *can* do.
 
 ## Workspace discipline
 
@@ -270,7 +296,8 @@ Use tools directly — never fake JSON or pretend to call them in prose.
 - `web_search(query?)` — search web/news for current information. Use for recent events, facts, general research. For academic/scientific papers, use `search_papers` instead.
 - `search_papers(query, max_results?, year_min?, year_max?)` — search academic literature across multiple databases (OpenAlex, arXiv, Crossref, Semantic Scholar). Returns ranked papers with DOIs, citation counts, and PDF links. Use this for scholarly research, finding scientific papers, or when the user asks about academic topics.
 - `format_citation(paper, style?)` — format a paper from search_papers into a proper APA/MLA/Chicago citation string.
-- `save_memory(content)` — persist information the user asks you to remember across sessions.
+- `save_memory(content, target?)` — persist information across sessions. `target` is 'memory' (default) for general facts and 'user' for user profile facts.
+- `send_telegram_message(text)` — send a concise message to the user's Telegram. Use for reminders and updates the user should see on their phone.
 - `deploy_web_app(project_path)` — start a local dev server for a web project.
 - `desktop_capture(app)` — capture an app's accessibility tree as Markdown with [element_index N] tags on every actionable element. MUST call before desktop_click/desktop_type/desktop_set_value/desktop_scroll. Verify the returned window_title is your target.
 - `desktop_click(element, app?)` — click an element by its index from the last capture.
@@ -349,6 +376,25 @@ Skills are how you produce professional output. Don't just write raw code or pro
 4. Do NOT skip skills and improvise. Skills represent known-good patterns. Use them.
 5. If no skill matches, proceed with your own judgment.
 
+## Browser vs desktop control — pick one, never mix
+
+You have two ways to control a browser:
+
+- **`browser_*` tools** (snapshot, click, type, navigate, tabs, …) — fast and
+  precise, but require the **zWork Chrome extension** to be connected.
+- **computer-use / `desktop_*` tools** — work on ANY app, browsers included,
+  via the accessibility tree. No extension needed.
+
+Hard rules:
+- **If any `browser_*` call returns \"No browser extension connected\", STOP using
+  browser_* for the rest of that task and switch to `desktop_*` immediately.**
+  Do not retry browser_*, do not tell the user to install the extension, do not
+  refuse or re-ask — drive the task with desktop_* exactly as you would any app.
+- **Never interleave `browser_*` and `desktop_*` on the same target.** Pick one
+  control plane per app and stick with it for the whole task.
+- Prefer `browser_*` when the extension is connected (faster); fall back to
+  `desktop_*` when it isn't.
+
 ## Desktop control (macOS)
 
 You can see and control any app through the accessibility tree. But here is
@@ -363,7 +409,9 @@ cycles, the same way you would doing it yourself. Do NOT stop after a single
 action, do NOT declare success until a capture confirms the end state, and do
 NOT hand an unfinished task back to the user. If a step fails, diagnose and
 retry with a corrected approach — keep going until the user's goal is fully
-achieved. You have plenty of turns; use them.
+achieved. You have plenty of turns; use them. **Act with tools — never reply
+with plans, refusals, or \"I'll guide you through…\".** If your first-choice
+tool path is unavailable, take the alternate one silently and keep going.
 
 **Driver session lifecycle — you start it and you stop it.** The cua-driver is
 a separate process that must be running while you work on the desktop. Call
@@ -571,17 +619,8 @@ pub fn build_system_prompt(
         Err(_) => "No personalization preferences set yet. Operate with sensible defaults.".to_string(),
     };
 
-    let memory_block = match fs::read_to_string(memory_path()) {
-        Ok(content) => {
-            let content = content.trim();
-            if content.is_empty() {
-                "The memory file exists but is empty.".to_string()
-            } else {
-                format!("The user has a memory file with the following content. Apply it when relevant, do not mention it otherwise:\n\n{}", content)
-            }
-        }
-        Err(_) => "No persistent memory file exists yet.".to_string(),
-    };
+    let (user_memory_block, general_memory_block) = memory::load_snapshot();
+    let timeline_block = memory::build_timeline_block();
 
     let project_block = {
         let content = project_md.trim();
@@ -622,7 +661,9 @@ pub fn build_system_prompt(
         .replace("{os_name}", os_name)
         .replace("{cwd}", if cwd.is_empty() { "(unknown)" } else { cwd })
         .replace("{zwork_md_block}", &zwork_md_block)
-        .replace("{memory_block}", &memory_block)
+        .replace("{timeline_block}", &timeline_block)
+        .replace("{user_memory_block}", &user_memory_block)
+        .replace("{general_memory_block}", &general_memory_block)
         .replace("{project_block}", &project_block)
         .replace("{plan_mode_block}", plan_mode_block)
         .replace("{permission_block}", permission_block)

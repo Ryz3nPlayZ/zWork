@@ -171,7 +171,7 @@ const ALLOWED_MODELS: &[&str] = &[
     "zwork-flash",
     "zwork-pro",
     "zwork-vision",
-    "gemma4:31b-cloud",
+    "gemma4:31b",
     "llama-3.2-90b-vision",
     "meta-llama/llama-4-scout-17b-16e-instruct",
 ];
@@ -180,7 +180,7 @@ const PRO_ONLY_MODELS: &[&str] = &[
     "deepseek-v4-pro",
     "zwork-pro",
     "zwork-vision",
-    "gemma4:31b-cloud",
+    "gemma4:31b",
     "meta-llama/llama-4-scout-17b-16e-instruct",
 ];
 
@@ -189,7 +189,7 @@ fn resolve_upstream_model(model: &str) -> &str {
     match model {
         "zwork-flash" => "deepseek-v4-flash",
         "zwork-pro" => "deepseek-v4-pro",
-        "zwork-vision" => "gemma4:31b-cloud",
+        "zwork-vision" => "gemma4:31b",
         other => other,
     }
 }
@@ -238,7 +238,7 @@ fn load_gateway_providers() -> Vec<GatewayProvider> {
 
         let key = std::env::var(&key_env).unwrap_or_default();
         let base_url = std::env::var(&base_env).unwrap_or_default();
-        let model = std::env::var(&model_env).unwrap_or_else(|_| "gemma4:31b-cloud".to_string());
+        let model = std::env::var(&model_env).unwrap_or_else(|_| "gemma4:31b".to_string());
 
         if !base_url.trim().is_empty() {
             providers.push(GatewayProvider {

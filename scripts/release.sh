@@ -4,9 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-"$ROOT_DIR/.venv/bin/python" "$ROOT_DIR/scripts/check-version-sync.py"
+python3 "$ROOT_DIR/scripts/check-version-sync.py"
 
-TAG="${1:-v$("$ROOT_DIR/.venv/bin/python" - <<'PY'
+TAG="${1:-v$(python3 - <<'PY'
 import json
 from pathlib import Path
 print(json.loads(Path("app/package.json").read_text())["version"])
@@ -28,7 +28,7 @@ if [[ ${#assets[@]} -eq 0 ]]; then
   exit 1
 fi
 
-"$ROOT_DIR/.venv/bin/python" "$ROOT_DIR/scripts/generate-updater-manifest.py" --dist dist --tag "$TAG" --repo "${ZWORK_REPO:-Ryz3nPlayZ/zWork}" || echo "Warning: updater manifest not generated (no updater-capable assets in dist/ or missing signatures)"
+python3 "$ROOT_DIR/scripts/generate-updater-manifest.py" --dist dist --tag "$TAG" --repo "${ZWORK_REPO:-Ryz3nPlayZ/zWork}" || echo "Warning: updater manifest not generated (no updater-capable assets in dist/ or missing signatures)"
 
 assets=()
 while IFS= read -r -d '' file; do

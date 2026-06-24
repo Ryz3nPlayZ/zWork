@@ -211,6 +211,31 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
                 "required": ["explanation"]
             }
         }),
+        json!({
+            "name": "write_research_paper",
+            "description": "Write a complete academic research paper draft on a topic. Searches literature, creates an outline, drafts all sections, and saves to workspace outputs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": { "type": "string", "description": "Research topic or hypothesis to write about" },
+                    "style": { "type": "string", "description": "Writing style: 'academic', 'technical', 'survey'" },
+                    "word_count": { "type": "integer", "description": "Target word count per section" }
+                },
+                "required": ["topic"]
+            }
+        }),
+        json!({
+            "name": "review_paper",
+            "description": "Review and critique a research paper draft, providing an overall score (0-10) and recommendations.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "paper_content": { "type": "string", "description": "The paper text to review" },
+                    "review_type": { "type": "string", "description": "Type of review: 'peer_review', 'technical', 'editorial'" }
+                },
+                "required": ["paper_content"]
+            }
+        }),
     ];
 
     if !plan_mode {
@@ -242,13 +267,25 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
         }));
         schemas.push(json!({
             "name": "save_memory",
-            "description": "Save a fact to the agent's persistent memory file.",
+            "description": "Save a fact to the agent's persistent memory. Use target='user' for facts about the user (preferences, style, goals, habits, job, family, constraints) and target='memory' for everything else (project facts, conventions, deadlines, things learned).",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "content": { "type": "string", "description": "The fact to remember" }
+                    "content": { "type": "string", "description": "The fact to remember" },
+                    "target": { "type": "string", "description": "Which memory file to write to. Use 'memory' (default) or 'user'." }
                 },
                 "required": ["content"]
+            }
+        }));
+        schemas.push(json!({
+            "name": "send_telegram_message",
+            "description": "Send a plain text message to the user's Telegram. Use for reminders, updates, or anything the user should be notified about when they are away from zWork. Requires Telegram bot token and chat ID to be configured in settings.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": { "type": "string", "description": "Message text to send. Keep it concise. Markdown is supported." }
+                },
+                "required": ["text"]
             }
         }));
         schemas.push(json!({
@@ -544,6 +581,17 @@ pub fn execute_tool(
                 let cit = crate::academic::format_citation(paper, style);
                 Ok(cit)
             }
+            "write_research_paper" => {
+                let topic = params.get("topic").and_then(|v| v.as_str()).unwrap_or("");
+                let style = params.get("style").and_then(|v| v.as_str()).unwrap_or("academic");
+                let word_count = params.get("word_count").and_then(|v| v.as_u64()).unwrap_or(500) as u32;
+                crate::academic::write_research_paper(topic, style, word_count, &tx).await
+            }
+            "review_paper" => {
+                let paper_content = params.get("paper_content").and_then(|v| v.as_str()).unwrap_or("");
+                let review_type = params.get("review_type").and_then(|v| v.as_str()).unwrap_or("peer_review");
+                crate::academic::review_paper(paper_content, review_type).await
+            }
             "read_skill" => {
                 let slug = params.get("slug").and_then(|v| v.as_str()).unwrap_or("");
                 match crate::skills::read_skill(slug) {
@@ -553,16 +601,19 @@ pub fn execute_tool(
             }
             "save_memory" => {
                 let content = params.get("content").and_then(|v| v.as_str()).unwrap_or("");
-                let mem_path = crate::paths::memory_path();
-                let _ = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&mem_path)
-                    .and_then(|mut f| {
-                        use std::io::Write;
-                        writeln!(f, "- {}", content)
-                    });
-                Ok("Saved to memory.".to_string())
+                let target_str = params.get("target").and_then(|v| v.as_str()).unwrap_or("memory");
+                let target = target_str.parse::<crate::memory::MemoryTarget>().unwrap_or(crate::memory::MemoryTarget::Memory);
+                match crate::memory::append(target, content) {
+                    Ok(msg) => Ok(msg),
+                    Err(e) => Ok(format!("Could not save memory: {}", e)),
+                }
+            }
+            "send_telegram_message" => {
+                let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                match crate::telegram::send_message_from_settings(text).await {
+                    Ok(msg) => Ok(msg),
+                    Err(e) => Ok(format!("Could not send Telegram message: {}", e)),
+                }
             }
             "extract_document" => doc_extract::execute_extract_document(&params).await,
             "detect_hardware" => {

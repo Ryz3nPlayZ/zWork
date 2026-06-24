@@ -166,7 +166,7 @@ async function healthFetch() {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5_000);
   return fetch(u("/api/health"), { signal: controller.signal })
-    .then((r) => j<{ ok: boolean }>(r))
+    .then((r) => j<{ ok: boolean; version: string }>(r))
     .finally(() => clearTimeout(timeout));
 }
 
@@ -530,6 +530,11 @@ export const api = {
   desktopGrant: () =>
     localFetch("/api/desktop/permissions/grant", { method: "POST" }).then((r) =>
       j<DesktopStatus>(r),
+    ),
+
+  browserBridgeStatus: () =>
+    localFetch("/api/browser-bridge/status").then((r) =>
+      j<{ connected: boolean }>(r),
     ),
 
   // ---- Skills + onboarding ----

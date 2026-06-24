@@ -4,7 +4,7 @@
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{Manager, RunEvent, WindowEvent};
@@ -24,31 +24,21 @@ use tauri_plugin_updater::Builder as UpdaterBuilder;
 
 enum BackendChild {
     Packaged(CommandChild),
-    Dev(Child),
 }
 
 impl BackendChild {
     fn pid(&self) -> u32 {
-        match self {
-            BackendChild::Packaged(child) => child.pid(),
-            BackendChild::Dev(child) => child.id(),
-        }
+        let BackendChild::Packaged(child) = self;
+        child.pid()
     }
 
     fn shutdown(self) {
-        match self {
-            BackendChild::Packaged(child) => {
-                let _ = child.kill();
-                // Clean the Python backend's PID lock so the next spawn
-                // doesn't refuse to start ("already running").
-                let pid_path = zwork_sidecar_home().join("state").join("backend.pid");
-                let _ = std::fs::remove_file(&pid_path);
-            }
-            BackendChild::Dev(mut child) => {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-        }
+        let BackendChild::Packaged(child) = self;
+        let _ = child.kill();
+        // Clean the backend's PID lock so the next spawn doesn't refuse to
+        // start ("already running").
+        let pid_path = zwork_sidecar_home().join("state").join("backend.pid");
+        let _ = std::fs::remove_file(&pid_path);
     }
 }
 
@@ -192,67 +182,6 @@ fn configure_linux_webview_env() {
 #[cfg(not(target_os = "linux"))]
 fn configure_linux_webview_env() {}
 
-fn find_dev_repo_root() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("ZWORK_ROOT") {
-        let p = PathBuf::from(p);
-        if p.join("sidecar").is_dir() && p.join(".venv").is_dir() {
-            return Some(p);
-        }
-    }
-
-    if let Ok(exe) = std::env::current_exe() {
-        let mut cur = exe.parent().map(|p| p.to_path_buf());
-        while let Some(dir) = cur {
-            if dir.join("sidecar").is_dir() && dir.join(".venv").is_dir() {
-                return Some(dir);
-            }
-            cur = dir.parent().map(|p| p.to_path_buf());
-        }
-    }
-
-    if let Ok(cwd) = std::env::current_dir() {
-        let mut cur: Option<PathBuf> = Some(cwd);
-        while let Some(dir) = cur {
-            if dir.join("sidecar").is_dir() && dir.join(".venv").is_dir() {
-                return Some(dir);
-            }
-            cur = dir.parent().map(|p| p.to_path_buf());
-        }
-    }
-
-    if let Some(home) = dirs::home_dir() {
-        let p = home.join("zwork");
-        if p.join("sidecar").is_dir() && p.join(".venv").is_dir() {
-            return Some(p);
-        }
-    }
-
-    None
-}
-
-fn python_executable(root: &PathBuf) -> PathBuf {
-    if let Ok(value) = std::env::var("ZWORK_PYTHON") {
-        return PathBuf::from(value);
-    }
-
-    let python = root.join(".venv").join("bin").join("python3");
-    if python.exists() {
-        return python;
-    }
-
-    let python = root.join(".venv").join("bin").join("python");
-    if python.exists() {
-        return python;
-    }
-
-    let python = root.join(".venv").join("Scripts").join("python.exe");
-    if python.exists() {
-        return python;
-    }
-
-    PathBuf::from("python3")
-}
-
 fn start_packaged_backend(app: &tauri::AppHandle) -> Option<BackendChild> {
     let mut sidecar = match app.shell().sidecar("zwork-backend") {
         Ok(cmd) => cmd,
@@ -315,69 +244,6 @@ fn start_packaged_backend(app: &tauri::AppHandle) -> Option<BackendChild> {
     }
 }
 
-fn start_dev_backend() -> Option<BackendChild> {
-    let root = find_dev_repo_root()?;
-    let python_exe = python_executable(&root);
-    let sidecar_home = zwork_sidecar_home();
-
-    let log = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open({
-            let mut path = zwork_data_dir();
-            let _ = std::fs::create_dir_all(&path);
-            path.push("backend.log");
-            path
-        })
-        .ok();
-
-    let mut cmd = Command::new(&python_exe);
-    cmd.current_dir(&root)
-        .arg("-m")
-        .arg("sidecar.server")
-        .env("PYTHONUNBUFFERED", "1")
-        .env("PYTHONUTF8", "1")
-        .env("PYTHONIOENCODING", "utf-8")
-        .env("ZWORK_HOME", sidecar_home.as_os_str());
-
-    if let Some(f) = log {
-        if let Ok(f2) = f.try_clone() {
-            cmd.stdout(Stdio::from(f));
-            cmd.stderr(Stdio::from(f2));
-        }
-    } else {
-        cmd.stdout(Stdio::null()).stderr(Stdio::null());
-    }
-
-    append_log(&format!(
-        "Spawning dev backend: python={} root={} zwork_home={}",
-        python_exe.display(),
-        root.display(),
-        sidecar_home.display(),
-    ));
-
-    match cmd.spawn() {
-        Ok(mut child) => {
-            append_log(&format!("Dev backend spawned pid={}", child.id()));
-            match child.try_wait() {
-                Ok(Some(status)) => {
-                    append_log(&format!("Dev backend exited immediately: {status}"));
-                    None
-                }
-                Ok(None) => Some(BackendChild::Dev(child)),
-                Err(err) => {
-                    append_log(&format!("Dev backend liveness check failed: {err}"));
-                    Some(BackendChild::Dev(child))
-                }
-            }
-        }
-        Err(err) => {
-            append_log(&format!("Dev backend spawn failed: {err}"));
-            None
-        }
-    }
-}
-
 fn kill_stale_on_port(port: u16) {
     let port_str = port.to_string();
     // Kill any process already bound to the backend port. This handles stale
@@ -407,10 +273,7 @@ fn spawn_backend(app: &tauri::AppHandle) -> Option<BackendChild> {
     // crash, relaunch) without cleaning up its PID file.
     let pid_path = zwork_sidecar_home().join("state").join("backend.pid");
     let _ = std::fs::remove_file(&pid_path);
-    if let Some(child) = start_packaged_backend(app) {
-        return Some(child);
-    }
-    start_dev_backend()
+    start_packaged_backend(app)
 }
 
 /// Initial spawn at app startup: clean up any leftover backend from a
@@ -437,24 +300,17 @@ fn ensure_backend_running(app: &tauri::AppHandle, backend: &Backend) -> Result<b
     }
 
     // Don't kill a freshly spawned backend before it has time to bind.
-    // PyInstaller cold-start on slow machines can take 20+ seconds.
-    // However, if the process has already terminated/crashed, bypass this check.
+    // A cold start on a slow machine can take 20+ seconds. However, if the
+    // process has already terminated/crashed, bypass this check.
     let is_fresh = if let Some(spawned_at) = guard.spawned_at {
         spawned_at.elapsed() < Duration::from_secs(45)
     } else {
         false
     };
 
-    let mut is_dead = false;
-    if let Some(ref mut child) = guard.child {
-        if let BackendChild::Dev(c) = child {
-            if let Ok(Some(_)) = c.try_wait() {
-                is_dead = true;
-            }
-        }
-    } else {
-        is_dead = true;
-    }
+    // The packaged backend's child handle is cleared by its output-stream task
+    // when the process exits, so an absent child means the backend died.
+    let is_dead = guard.child.is_none();
 
     if is_fresh && !is_dead {
         return Ok(false);
@@ -505,156 +361,34 @@ fn is_http_url(url: &str) -> bool {
     }
 }
 
-/// macOS Accessibility trust check via CoreFoundation + ApplicationServices.
-///
-/// `AXIsProcessTrusted()` only reports cached state and never adds the app to
-/// the Accessibility list. `AXIsProcessTrustedWithOptions` with the
-/// `kAXTrustedCheckOptionPrompt` key set to true makes macOS show the native
-/// "would like to control this computer" dialog AND registers the app in the
-/// list so the user can toggle it. This is the only reliable way to request
-/// the permission — without it the app never appears in System Settings.
-#[cfg(target_os = "macos")]
-mod macos_a11y {
-    use std::ffi::c_void;
-    use std::os::raw::c_char;
-
-    /// CFDictionary callbacks are structs (5 function pointers on 64-bit)
-    /// passed by reference. We only need their address, so an opaque sized
-    /// type is sufficient.
-    #[repr(C)]
-    struct CfDictCallBacks {
-        _opaque: [usize; 5],
-    }
-
-    #[link(name = "CoreFoundation", kind = "framework")]
-    extern "C" {
-        static kCFAllocatorDefault: *const c_void;
-        static kCFTypeDictionaryKeyCallBacks: CfDictCallBacks;
-        static kCFTypeDictionaryValueCallBacks: CfDictCallBacks;
-        static kCFBooleanTrue: *const c_void;
-        fn CFStringCreateWithCString(
-            alloc: *const c_void,
-            c_str: *const c_char,
-            encoding: u32,
-        ) -> *const c_void;
-        fn CFDictionaryCreate(
-            alloc: *const c_void,
-            keys: *const *const c_void,
-            values: *const *const c_void,
-            num_values: isize,
-            key_callbacks: *const CfDictCallBacks,
-            value_callbacks: *const CfDictCallBacks,
-        ) -> *const c_void;
-        fn CFRelease(cf: *const c_void);
-    }
-
-    #[link(name = "ApplicationServices", kind = "framework")]
-    extern "C" {
-        fn AXIsProcessTrustedWithOptions(options: *const c_void) -> bool;
-    }
-
-    // kCFStringEncodingUTF8
-    const UTF8: u32 = 0x0800_0100;
-
-    /// Returns whether the process is Accessibility-trusted.
-    /// When `prompt` is true, macOS shows its native grant dialog and adds the
-    /// app to the Accessibility list (if missing). When false, this is a pure
-    /// non-interactive status check.
-    pub fn is_trusted(prompt: bool) -> bool {
-        unsafe {
-            if !prompt {
-                return AXIsProcessTrustedWithOptions(std::ptr::null());
-            }
-
-            let key = CFStringCreateWithCString(
-                kCFAllocatorDefault,
-                b"AXTrustedCheckOptionPrompt\0".as_ptr() as *const c_char,
-                UTF8,
-            );
-            let value = kCFBooleanTrue;
-            let keys: [*const c_void; 1] = [key];
-            let values: [*const c_void; 1] = [value];
-            let options = CFDictionaryCreate(
-                kCFAllocatorDefault,
-                keys.as_ptr(),
-                values.as_ptr(),
-                1,
-                &kCFTypeDictionaryKeyCallBacks,
-                &kCFTypeDictionaryValueCallBacks,
-            );
-
-            let trusted = AXIsProcessTrustedWithOptions(options);
-
-            if !options.is_null() {
-                CFRelease(options);
-            }
-            if !key.is_null() {
-                CFRelease(key);
-            }
-            trusted
+/// Open a macOS Privacy & Security pane in System Settings. The Settings
+/// permission UI uses this to deep-link the user to the right pane to grant
+/// CuaDriver a permission the driver's own grant flow can't reliably raise
+/// (Screen Recording). The pane name is validated; macOS opens it via `open`,
+/// other platforms resolve the name but do nothing.
+#[tauri::command]
+fn open_macos_privacy_pane(pane: String) -> Result<(), String> {
+    let url = match pane.as_str() {
+        "accessibility" => {
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
         }
-    }
-}
-
-#[cfg(target_os = "macos")]
-#[link(name = "CoreGraphics", kind = "framework")]
-extern "C" {
-    fn CGPreflightScreenCaptureAccess() -> bool;
-    fn CGRequestScreenCaptureAccess() -> bool;
-}
-
-#[tauri::command]
-fn check_accessibility_permission() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        macos_a11y::is_trusted(false)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        true
-    }
-}
-
-#[tauri::command]
-fn check_screen_recording_permission() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        unsafe { CGPreflightScreenCaptureAccess() }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        true
-    }
-}
-
-/// Triggers the native macOS Accessibility prompt (which also registers zWork
-/// in the Accessibility list) and returns the current trust state.
-#[tauri::command]
-fn request_accessibility_permission() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        macos_a11y::is_trusted(true)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        true
-    }
-}
-
-#[tauri::command]
-fn request_screen_recording_permission() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        unsafe {
-            CGRequestScreenCaptureAccess();
-            // Re-preflight after requesting so the caller gets the live state.
-            CGPreflightScreenCaptureAccess()
+        "screen_recording" => {
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
         }
+        other => return Err(format!("unknown privacy pane: {other}")),
+    };
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(url)
+            .status()
+            .map_err(|e| format!("failed to open System Settings: {e}"))?;
     }
     #[cfg(not(target_os = "macos"))]
     {
-        true
+        let _ = url;
     }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1083,10 +817,7 @@ fn main() {
             ensure_backend,
             restart_backend,
             begin_desktop_auth,
-            check_accessibility_permission,
-            check_screen_recording_permission,
-            request_accessibility_permission,
-            request_screen_recording_permission,
+            open_macos_privacy_pane,
             register_overlay_shortcut,
             get_overlay_shortcut
         ])

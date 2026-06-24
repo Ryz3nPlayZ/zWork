@@ -8,7 +8,7 @@ This guide covers common development tasks and workflows for contributing to zWo
 |------|---------|
 | Start dev server | `./run.sh` |
 | Run frontend tests | `cd app && npm test` |
-| Run backend tests | `.venv/bin/pytest` |
+| Run backend tests | `cd sidecar-rust && cargo test` |
 | Build release | `./scripts/build-linux-release.sh` (Linux) |
 | Format code | `cd app && npm run format` |
 | Lint code | `cd app && npm run lint` |
@@ -50,13 +50,10 @@ Closes #123
 
 ```bash
 # Run all backend tests
-.venv/bin/pytest
-
-# Run specific test file
-.venv/bin/pytest tests/test_home.py
+cd sidecar-rust && cargo test
 
 # Run tests with verbose output
-.venv/bin/pytest -v
+cd sidecar-rust && cargo test -- --nocapture
 
 # Run frontend tests
 npm test -- --watch

@@ -85,6 +85,10 @@ pub async fn teardown_driver() {
 /// tear down a freshly-started session.
 pub async fn start_session() -> Result<(), String> {
     let _ = client().await?;
+    // The daemon is legitimately up for this session, so refresh the cached
+    // permission state (read-only — no prompt). This keeps the Settings badge
+    // accurate without the status poll ever needing to launch the daemon.
+    let _ = read_and_cache_perms(false).await;
     mark_desktop_use();
     Ok(())
 }
@@ -588,37 +592,25 @@ pub async fn wait(seconds: f64) -> Result<ActionResult, String> {
     })
 }
 
-/// TCC permission status reported by the driver's own identity
-/// (`com.trycua.driver`). With `prompt: true`, raises the system permission
-/// dialogs attributed to the driver — the correct grant path. Returns
-/// `driver_ok: false` (with an `error`) if the driver can't be reached, so the
-/// caller always gets a uniform shape.
-pub async fn check_permissions(prompt: bool) -> Result<PermissionStatus, String> {
-    let c = match client().await {
-        Ok(c) => c,
-        Err(e) => {
-            return Ok(PermissionStatus {
-                driver_ok: false,
-                accessibility: false,
-                screen_recording: false,
-                source: String::new(),
-                error: e,
-            })
-        }
-    };
-    let result = match c.call("check_permissions", json!({ "prompt": prompt })).await {
-        Ok(r) => r,
-        Err(e) => {
-            return Ok(PermissionStatus {
-                driver_ok: false,
-                accessibility: false,
-                screen_recording: false,
-                source: String::new(),
-                error: e,
-            })
-        }
-    };
-    Ok(PermissionStatus {
+/// Cached last-known driver permission state. Read-only status checks
+/// (`check_permissions(false)`) return this WITHOUT launching the driver
+/// daemon. Launching the daemon merely to poll status keeps it alive, and the
+/// daemon's screen-capture stream requests Screen Recording (+ audio) on every
+/// cycle while ungranted — with the Settings page polling every 2s that became
+/// an infinite "record screen and audio" prompt loop. The daemon is now
+/// launched only by an explicit Grant (`check_permissions(true)`) or a real
+/// desktop-control session, each of which refreshes this cache.
+static LAST_PERMS: Mutex<Option<PermissionStatus>> = Mutex::const_new(None);
+
+/// Read the driver's permission state via a live MCP `check_permissions` call
+/// and cache it. Only called from the Grant path and [`start_session`], where
+/// the daemon is legitimately up — never from the read-only status poll.
+async fn read_and_cache_perms(prompt: bool) -> Result<PermissionStatus, String> {
+    let c = client().await?;
+    let result = c
+        .call("check_permissions", json!({ "prompt": prompt }))
+        .await?;
+    let st = PermissionStatus {
         driver_ok: true,
         accessibility: result
             .get("accessibility")
@@ -642,7 +634,47 @@ pub async fn check_permissions(prompt: bool) -> Result<PermissionStatus, String>
             })
             .unwrap_or_default(),
         error: String::new(),
-    })
+    };
+    *LAST_PERMS.lock().await = Some(st.clone());
+    Ok(st)
+}
+
+/// TCC permission status reported by the driver's own identity
+/// (`com.trycua.driver`), not zWork's. With `prompt: true`, launches the daemon
+/// and raises the system dialogs attributed to the driver — the correct grant
+/// path — then caches the result. With `prompt: false`, returns the last-known
+/// state WITHOUT launching the daemon; polling must never keep the daemon alive
+/// (see [`LAST_PERMS`]). Always returns a uniform shape.
+pub async fn check_permissions(prompt: bool) -> Result<PermissionStatus, String> {
+    // Read-only: never launch the daemon. Return the cached state, or a clear
+    // "not running" status if we've never checked.
+    if !prompt {
+        return Ok(LAST_PERMS
+            .lock()
+            .await
+            .clone()
+            .unwrap_or(PermissionStatus {
+                driver_ok: false,
+                accessibility: false,
+                screen_recording: false,
+                source: String::new(),
+                error: "CuaDriver isn't running. It starts when you use desktop control \
+                        or click Grant."
+                    .to_string(),
+            }));
+    }
+
+    // Grant path: launch the daemon, raise its prompts, read + cache the state.
+    match read_and_cache_perms(true).await {
+        Ok(st) => Ok(st),
+        Err(e) => Ok(PermissionStatus {
+            driver_ok: false,
+            accessibility: false,
+            screen_recording: false,
+            source: String::new(),
+            error: e,
+        }),
+    }
 }
 
 /// Read an app's display name from a `list_apps` entry, checking the likely

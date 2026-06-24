@@ -403,3 +403,244 @@ fn format_chicago(authors: &[String], year: Option<u32>, title: &str, journal: &
     // Chicago is very similar to APA in block representation
     format_apa(authors, year, title, journal, doi)
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Autonomous Paper Writing Pipeline & Peer Review (AutoResearchClaw-inspired)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async fn call_llm(system: &str, prompt: &str) -> Result<String, String> {
+    let s = crate::settings::load();
+    let model_id = if !s.default_model.is_empty() { &s.default_model } else { "deepseek-v4-flash" };
+
+    let (api_key, base_url, shape, real_model) = if let Some(m) = s.custom_models.iter().find(|m| m.id == model_id) {
+        let real = if m.model_id.is_empty() { "deepseek-v4-flash".to_string() } else { m.model_id.clone() };
+        if let Some(cred) = crate::server::resolve(&m.credential, &s, &m.base_url_override) {
+            (cred.api_key, cred.base_url, cred.shape, real)
+        } else {
+            return Err("No credentials configured for model".to_string());
+        }
+    } else {
+        match crate::server::resolve("zwork_router", &s, "") {
+            Some(cred) => (cred.api_key, cred.base_url, cred.shape, "deepseek-v4-flash".to_string()),
+            None => {
+                // Try fallback to anthropic or openai directly from env
+                if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+                    (key, "https://api.anthropic.com".to_string(), "anthropic".to_string(), "claude-3-5-sonnet-latest".to_string())
+                } else if let Ok(key) = std::env::var("OPENAI_API_KEY") {
+                    (key, "https://api.openai.com/v1".to_string(), "openai".to_string(), "gpt-4o-mini".to_string())
+                } else {
+                    return Err("No model credentials available. Please set ANTHROPIC_API_KEY or OPENAI_API_KEY in your settings/environment.".to_string());
+                }
+            }
+        }
+    };
+
+    let endpoint = if shape == "anthropic" {
+        format!("{}/v1/messages", base_url)
+    } else {
+        format!("{}/chat/completions", base_url)
+    };
+
+    let messages = if shape == "anthropic" {
+        serde_json::json!([
+            {"role": "user", "content": prompt}
+        ])
+    } else {
+        serde_json::json!([
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt}
+        ])
+    };
+
+    let req_body = if shape == "anthropic" {
+        serde_json::json!({
+            "model": real_model,
+            "system": system,
+            "messages": messages,
+            "max_tokens": 4000
+        })
+    } else {
+        serde_json::json!({
+            "model": real_model,
+            "messages": messages,
+            "max_tokens": 4000
+        })
+    };
+
+    let client = reqwest::Client::new();
+    let mut req = client.post(&endpoint).json(&req_body);
+    if shape == "anthropic" {
+        req = req.header("x-api-key", &api_key).header("anthropic-version", "2023-06-01");
+    } else {
+        req = req.header("authorization", format!("Bearer {}", api_key));
+    }
+
+    match req.send().await {
+        Ok(resp) => {
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let txt = resp.text().await.unwrap_or_default();
+                return Err(format!("LLM request failed (status={}): {}", status, txt));
+            }
+            let text = resp.text().await.unwrap_or_default();
+            if let Ok(val) = serde_json::from_str::<Value>(&text) {
+                let content = if shape == "anthropic" {
+                    val.get("content").and_then(|c| c.get(0)).and_then(|c| c.get("text")).and_then(|t| t.as_str()).unwrap_or(&text).to_string()
+                } else {
+                    val.get("choices").and_then(|c| c.get(0)).and_then(|c| c.get("message")).and_then(|m| m.get("content")).and_then(|t| t.as_str()).unwrap_or(&text).to_string()
+                };
+                Ok(content)
+            } else {
+                Err("Failed to parse LLM response".to_string())
+            }
+        }
+        Err(e) => Err(format!("LLM request failed: {}", e)),
+    }
+}
+
+pub async fn write_research_paper(
+    topic: &str,
+    style: &str,
+    word_count: u32,
+    tx: &tokio::sync::mpsc::Sender<Value>,
+) -> Result<String, String> {
+    let activity_id = format!("act_paper_{}", uuid::Uuid::new_v4().simple());
+    
+    // 1. Search prior art literature
+    let _ = tx.send(serde_json::json!({
+        "type": "activity",
+        "id": &activity_id,
+        "label": "Searching literature & validation",
+        "done": false
+    })).await;
+    
+    let papers = search_academic_literature(topic, 5, None, None).await;
+    
+    // Format literature references for prompting
+    let mut ref_string = String::new();
+    let mut bib_list = Vec::new();
+    for (i, p) in papers.iter().enumerate() {
+        let p_val = serde_json::to_value(p).unwrap_or(Value::Null);
+        let cit = format_citation(&p_val, "apa");
+        ref_string.push_str(&format!("{}. {}\n\n", i + 1, cit));
+        bib_list.push(cit);
+    }
+    
+    if ref_string.is_empty() {
+        ref_string = "No matching reference papers found in academic databases.".to_string();
+    }
+
+    // 2. Outline Generation
+    let _ = tx.send(serde_json::json!({
+        "type": "activity",
+        "id": &activity_id,
+        "label": "Generating paper outline",
+        "done": false
+    })).await;
+    
+    let outline_prompt = format!(
+        "We are writing a research paper on the topic: \"{}\".\n\
+        The style requested is: \"{}\".\n\
+        Here is the relevant literature found:\n\n\
+        {}\n\n\
+        Draft a detailed paper outline in Markdown format. The outline should contain exactly the following sections:\n\
+        1. Abstract\n\
+        2. Introduction\n\
+        3. Related Work\n\
+        4. Methodology\n\
+        5. Experiments & Results\n\
+        6. Conclusion\n\n\
+        For each section, specify 2-3 brief sub-points or key hypotheses we will cover. Return ONLY the Markdown outline.",
+        topic, style, ref_string
+    );
+    
+    let outline = call_llm("You are an expert academic paper writer.", &outline_prompt).await?;
+    
+    // 3. Draft Sections sequentially
+    let sections = vec![
+        ("Abstract", "Write a concise abstract summarizing the paper, covering background, proposed method, experiments, and results."),
+        ("Introduction", "Write the introduction motivating the research, outlining the problem statement, and defining our contributions."),
+        ("Related Work", "Write the related work section discussing existing papers from our literature list and explaining how our approach differs."),
+        ("Methodology", "Detail our proposed methodology, introducing equations (LaTeX math block style, e.g., $...$ or $$...$$) and architectural details."),
+        ("Experiments & Results", "Draft the experiments and results section, describing the hardware setup, hyperparameters, and structured tables showing results comparison."),
+        ("Conclusion", "Summarize our contributions, state potential limitations, and identify areas for future work.")
+    ];
+    
+    let mut compiled_paper = format!("# {}\n\n## Outline\n{}\n\n", topic, outline);
+    
+    for (sec_name, sec_instruction) in sections {
+        let _ = tx.send(serde_json::json!({
+            "type": "activity",
+            "id": &activity_id,
+            "label": format!("Drafting section: {}", sec_name),
+            "done": false
+        })).await;
+        
+        let draft_prompt = format!(
+            "We are writing a research paper on \"{}\" in \"{}\" style.\n\
+            Here is our paper outline:\n\n\
+            {}\n\n\
+            Here is our literature base:\n\n\
+            {}\n\n\
+            Draft the section: \"{}\".\n\
+            Instruction: {}\n\
+            Target word count: {} words.\n\n\
+            Write the full content for this section. Ground all claims in the literature base (use cite numbers like [1] or [2] matching the literature base). Return ONLY the section text (do not repeat the section header).",
+            topic, style, outline, ref_string, sec_name, sec_instruction, word_count
+        );
+        
+        let sec_content = call_llm("You are a professional academic manuscript editor.", &draft_prompt).await?;
+        compiled_paper.push_str(&format!("## {}\n\n{}\n\n", sec_name, sec_content));
+    }
+    
+    // 4. Append references
+    compiled_paper.push_str("## References\n\n");
+    for (i, bib) in bib_list.iter().enumerate() {
+        compiled_paper.push_str(&format!("{}. {}\n", i + 1, bib));
+    }
+    
+    // 5. Save paper to workspace output directory
+    let _ = tx.send(serde_json::json!({
+        "type": "activity",
+        "id": &activity_id,
+        "label": "Saving paper to workspace output folder",
+        "done": false
+    })).await;
+    
+    let filename = format!("research_paper_{}.md", topic.to_lowercase().replace(char::is_whitespace, "_").replace(|c: char| !c.is_alphanumeric() && c != '_', ""));
+    let output_dir = crate::paths::workspace_outputs_dir();
+    let _ = std::fs::create_dir_all(&output_dir);
+    let paper_path = output_dir.join(&filename);
+    let _ = std::fs::write(&paper_path, &compiled_paper);
+    
+    let _ = tx.send(serde_json::json!({
+        "type": "activity",
+        "id": &activity_id,
+        "label": "Paper writing complete",
+        "done": true
+    })).await;
+    
+    let path_str = paper_path.to_string_lossy().to_string();
+    Ok(format!("Successfully generated research paper at: {}\n\nPreview:\n\n{}", path_str, &compiled_paper[..1000.min(compiled_paper.len())]))
+}
+
+pub async fn review_paper(
+    paper_content: &str,
+    review_type: &str,
+) -> Result<String, String> {
+    let review_prompt = format!(
+        "You are an expert peer reviewer for a major academic conference. Conduct a thorough \"{}\" review of the following paper draft:\n\n\
+        {}\n\n\
+        Critique the paper and provide a structured feedback report. The report MUST include:\n\
+        1. Overall Quality Score (0 to 10)\n\
+        2. Key Strengths\n\
+        3. Key Weaknesses & Gaps\n\
+        4. Detailed Section-by-Section Feedback\n\
+        5. Actionable Recommendations for improvement\n\n\
+        Return the feedback in Markdown format.",
+        review_type, paper_content
+    );
+    
+    let feedback = call_llm("You are a rigorous academic peer reviewer.", &review_prompt).await?;
+    Ok(feedback)
+}

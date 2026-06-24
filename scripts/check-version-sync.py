@@ -14,13 +14,11 @@ def main() -> int:
     package_version = json.loads((ROOT / "app/package.json").read_text(encoding="utf-8"))["version"]
     tauri_version = json.loads((ROOT / "app/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))["version"]
     cargo_version = tomllib.loads((ROOT / "app/src-tauri/Cargo.toml").read_text(encoding="utf-8"))["package"]["version"]
-    pyproject_version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
 
     versions = {
         "app/package.json": package_version,
         "app/src-tauri/tauri.conf.json": tauri_version,
         "app/src-tauri/Cargo.toml": cargo_version,
-        "pyproject.toml": pyproject_version,
     }
 
     unique_versions = set(versions.values())

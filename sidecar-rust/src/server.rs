@@ -44,11 +44,30 @@ pub struct ChatStreamRequest {
     pub plan_mode: bool,
     #[serde(default)]
     pub auto_approve_destructive: bool,
+    #[serde(default)]
+    pub attachments: Vec<Attachment>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct Attachment {
+    pub client_id: Option<String>,
+    pub name: String,
+    pub path: String,
+    pub mime: String,
+    pub kind: String,
+    #[serde(default)]
+    pub size: Option<u64>,
 }
 
 // REST Handlers
 pub async fn health() -> impl IntoResponse {
-    Json(json!({ "ok": true }))
+    Json(json!({ "ok": true, "version": env!("CARGO_PKG_VERSION") }))
+}
+
+/// Whether the zbctl Chrome extension WebSocket is currently connected. The
+/// Settings UI polls this to show live browser-bridge connection state.
+pub async fn browser_bridge_status() -> impl IntoResponse {
+    Json(json!({ "connected": crate::browser_bridge::extension_connected().await }))
 }
 
 /// cua-driver TCC permission status (Accessibility + Screen Recording) as
@@ -517,6 +536,7 @@ pub struct SettingsPatch {
     pub default_model: Option<String>,
     pub use_claude_code_config: Option<bool>,
     pub telemetry_enabled: Option<bool>,
+    pub telegram_chat_id: Option<String>,
 }
 
 pub async fn put_settings(Json(patch): Json<SettingsPatch>) -> impl IntoResponse {
@@ -548,6 +568,9 @@ pub async fn put_settings(Json(patch): Json<SettingsPatch>) -> impl IntoResponse
     if let Some(te) = patch.telemetry_enabled {
         s.telemetry_enabled = te;
     }
+    if let Some(chat_id) = patch.telegram_chat_id {
+        s.telegram_chat_id = chat_id;
+    }
 
     settings::save(&mut s);
     Json(settings::public_view(&s))
@@ -562,6 +585,7 @@ pub struct SettingsPublic {
     pub api_keys: HashMap<String, String>,
     pub provider_config: HashMap<String, HashMap<String, String>>,
     pub custom_models: Vec<settings::CustomModel>,
+    pub telegram_chat_id: String,
 }
 
 pub async fn list_chats() -> impl IntoResponse {
@@ -649,6 +673,7 @@ pub async fn chat_stream_route(
         chat_id,
         model_id,
         req.message,
+        req.attachments,
         project_id,
         req.plan_mode,
         req.auto_approve_destructive,
@@ -1122,6 +1147,11 @@ pub struct ContentBody {
     pub content: String,
 }
 
+#[derive(Deserialize)]
+pub struct TelegramSendBody {
+    pub text: String,
+}
+
 pub async fn get_memory() -> impl IntoResponse {
     let content = std::fs::read_to_string(crate::paths::memory_path()).unwrap_or_default();
     Json(json!({ "content": content }))
@@ -1148,6 +1178,16 @@ pub async fn put_user_md(Json(body): Json<ContentBody>) -> impl IntoResponse {
     }
     let _ = std::fs::write(&p, &body.content);
     Json(json!({ "ok": true }))
+}
+
+pub async fn telegram_send(Json(body): Json<TelegramSendBody>) -> impl IntoResponse {
+    match crate::telegram::send_message_from_settings(&body.text).await {
+        Ok(msg) => Json(json!({ "ok": true, "message": msg })).into_response(),
+        Err(e) => (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({ "ok": false, "error": e }))
+        ).into_response(),
+    }
 }
 
 // ─── Telemetry ────────────────────────────────────────────────────────────────
@@ -1401,6 +1441,7 @@ pub async fn upload_files(Json(body): Json<UploadBody>) -> impl IntoResponse {
             "client_id": item.client_id,
             "name": item.name,
             "filename": filename,
+            "path": path.to_string_lossy(),
             "mime": item.mime,
             "size": path.metadata().map(|m| m.len()).unwrap_or(0),
         }));

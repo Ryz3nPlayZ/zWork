@@ -44,6 +44,7 @@ pub fn run_agent_turn(
     chat_id: String,
     model_id: String,
     user_message: String,
+    attachments: Vec<crate::server::Attachment>,
     project_id: String,
     plan_mode: bool,
     auto_approve: bool,
@@ -71,11 +72,12 @@ pub fn run_agent_turn(
         })).await;
 
         // Append user message if not already appended
+        let user_content = prompts::build_user_content(&user_message, &attachments);
         let is_dup = chat.messages.last().map_or(false, |m| {
-            m.role == "user" && m.content.as_str().unwrap_or("").trim() == user_message.trim()
+            m.role == "user" && m.content == user_content
         });
-        if !is_dup && !user_message.is_empty() {
-            chatstore::append_message(&chat.id, "user", json!(user_message));
+        if !is_dup && (!user_message.is_empty() || !attachments.is_empty()) {
+            chatstore::append_message(&chat.id, "user", user_content);
             chat = chatstore::get(&chat.id).unwrap();
         }
         
@@ -193,14 +195,20 @@ pub fn run_agent_turn(
             let mut headers = reqwest::header::HeaderMap::new();
             headers.insert("content-type", reqwest::header::HeaderValue::from_static("application/json"));
 
+            use reqwest::header::HeaderValue;
             if shape == "anthropic" {
-                headers.insert("x-api-key", reqwest::header::HeaderValue::from_str(&api_key).unwrap_or_else(|_| reqwest::header::HeaderValue::from_static("")));
-                headers.insert("anthropic-version", reqwest::header::HeaderValue::from_static("2023-06-01"));
+                let x_api_key = HeaderValue::try_from(api_key.clone()).unwrap_or_else(|_| HeaderValue::from_static(""));
+                headers.insert("x-api-key", x_api_key);
+                headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
                 if !api_key.starts_with("sk-ant-") && !api_key.is_empty() {
-                    headers.insert("authorization", reqwest::header::HeaderValue::from_str(&format!("Bearer {}", api_key)).unwrap_or_else(|_| reqwest::header::HeaderValue::from_static("")));
+                    let auth_str = format!("Bearer {}", api_key);
+                    let auth_val = HeaderValue::try_from(auth_str).unwrap_or_else(|_| HeaderValue::from_static(""));
+                    headers.insert("authorization", auth_val);
                 }
             } else {
-                headers.insert("authorization", reqwest::header::HeaderValue::from_str(&format!("Bearer {}", api_key)).unwrap_or_else(|_| reqwest::header::HeaderValue::from_static("")));
+                let auth_str = format!("Bearer {}", api_key);
+                let auth_val = HeaderValue::try_from(auth_str).unwrap_or_else(|_| HeaderValue::from_static(""));
+                headers.insert("authorization", auth_val);
             }
 
             // Evict stale bulky tool results (old captures/snapshots) before

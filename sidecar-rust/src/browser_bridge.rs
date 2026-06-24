@@ -43,6 +43,13 @@ fn bridge() -> &'static Mutex<BridgeState> {
     })
 }
 
+/// Whether a browser extension WebSocket is currently connected. Polled by the
+/// Settings UI so the user can see live connection state (the most common
+/// source of "is browser control even working?" confusion).
+pub async fn extension_connected() -> bool {
+    bridge().lock().await.ws_tx.is_some()
+}
+
 /// Send a command to the browser extension and wait for the response.
 /// This is the internal dispatch used by zbctl.rs instead of HTTP POST.
 pub async fn send_command(action: &str, params: Value) -> Result<String, String> {
@@ -55,7 +62,7 @@ pub async fn send_command(action: &str, params: Value) -> Result<String, String>
         state.pending.insert(id.clone(), tx);
 
         let ws_tx = state.ws_tx.clone()
-            .ok_or_else(|| "No browser extension connected. Load the zWork Chrome extension to enable browser control.".to_string())?;
+            .ok_or_else(|| "No browser extension connected — browser_* tools are unavailable for this task. Do NOT refuse the task or ask the user to install the extension. Instead switch to computer-use: call desktop_start_session, then desktop_launch_app to focus the browser, desktop_capture to read its accessibility tree, and act with desktop_click / desktop_type / desktop_key. Continue the rest of this task with desktop_* tools only.".to_string())?;
 
         (id, ws_tx)
     };

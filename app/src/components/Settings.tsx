@@ -643,6 +643,7 @@ function GeneralPanel({
   onSave: (patch: { default_model?: string; use_claude_code_config?: boolean; telemetry_enabled?: boolean }) => Promise<void>;
 }) {
   const [appVersion, setAppVersion] = useState(fallbackAppVersion());
+  const [backendVersion, setBackendVersion] = useState<string | null>(null);
   const providers = useApp((s) => s.providers);
 
   const accessibilityPermissionGranted = useApp((s) => s.accessibilityPermissionGranted);
@@ -651,17 +652,31 @@ function GeneralPanel({
   const checkMacOSPermissions = useApp((s) => s.checkMacOSPermissions);
   const requestAccessibility = useApp((s) => s.requestAccessibility);
   const requestScreenRecording = useApp((s) => s.requestScreenRecording);
+  const extensionConnected = useApp((s) => s.extensionConnected);
+  const checkBrowserBridge = useApp((s) => s.checkBrowserBridge);
   const autoApproveDestructive = useApp((s) => s.autoApproveDestructive);
   const setAutoApproveDestructive = useApp((s) => s.setAutoApproveDestructive);
 
   useEffect(() => {
     if (IS_WEB) return;
     checkMacOSPermissions();
+    checkBrowserBridge();
     const interval = setInterval(() => {
       checkMacOSPermissions();
+      checkBrowserBridge();
     }, 2000);
-    return () => clearInterval(interval);
-  }, [checkMacOSPermissions]);
+    // Re-check the instant the window regains focus — e.g. the user just
+    // returned from System Settings after toggling CuaDriver on.
+    const onFocus = () => {
+      checkMacOSPermissions();
+      checkBrowserBridge();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [checkMacOSPermissions, checkBrowserBridge]);
 
   const models = providers?.models ?? [];
   const [defaultModel, setDefaultModel] = useState(settings?.default_model ?? "");
@@ -683,6 +698,12 @@ function GeneralPanel({
     void resolveAppVersion().then((version) => {
       if (!cancelled) setAppVersion(version);
     });
+    void api
+      .health()
+      .then((h) => {
+        if (!cancelled && h?.version) setBackendVersion(h.version);
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -802,23 +823,43 @@ function GeneralPanel({
                   "px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase",
                   screenRecordingPermissionGranted
                     ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
-                    : "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                    : "bg-ink-faint/10 text-ink-muted border border-line"
                 )}>
-                  {screenRecordingPermissionGranted ? "Granted" : "Required"}
+                  {screenRecordingPermissionGranted ? "Granted" : "Optional"}
                 </span>
               </div>
               <p className="text-[11.5px] text-ink-muted">
-                Allows capturing screenshots to understand visual content on demand. Screenshots stay local.
+                Optional — only needed for future screenshot/vision mode. Current desktop control uses the accessibility tree and does not require this.
               </p>
             </div>
-            {!screenRecordingPermissionGranted && (
-              <button
-                onClick={requestScreenRecording}
-                className="press px-3 py-1.5 text-[11px] font-medium border border-line bg-paper-raised hover:bg-paper-sunken text-ink rounded-lg transition-all cursor-pointer shrink-0"
-              >
-                Grant
-              </button>
-            )}
+            <button
+              onClick={requestScreenRecording}
+              className="press px-3 py-1.5 text-[11px] font-medium border border-line bg-paper-raised hover:bg-paper-sunken text-ink rounded-lg transition-all cursor-pointer shrink-0"
+            >
+              Open Settings
+            </button>
+          </div>
+
+          <div className="border-t border-line-soft" />
+
+          {/* Perm 3: Browser Bridge (zbctl Chrome extension) */}
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <div className="text-[13px] font-medium text-ink flex items-center gap-2">
+                <span>Browser Bridge</span>
+                <span className={cn(
+                  "px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase",
+                  extensionConnected
+                    ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
+                    : "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                )}>
+                  {extensionConnected === null ? "…" : extensionConnected ? "Connected" : "Disconnected"}
+                </span>
+              </div>
+              <p className="text-[11.5px] text-ink-muted">
+                The zbctl Chrome extension for direct browser control. Load it unpacked from the zWork app&rsquo;s extension folder; it connects to the backend on port 8787.
+              </p>
+            </div>
           </div>
 
           <div className="border-t border-line" />
@@ -862,10 +903,13 @@ function GeneralPanel({
 
       {/* Version check */}
       <section className="rounded-xl border border-line bg-paper-raised p-4">
-        <Field label="Version" description="The currently installed desktop build.">
-          <div className="inline-flex items-center gap-2 rounded-lg border border-line bg-paper px-3 py-2 text-[12.5px] text-ink">
+        <Field label="Version" description="The installed app and running backend build. If these don't match after an update, fully quit (Cmd+Q) and relaunch zWork.">
+          <div className="inline-flex flex-wrap items-center gap-2 rounded-lg border border-line bg-paper px-3 py-2 text-[12.5px] text-ink">
             <span className="font-medium">zWork</span>
             <span className="font-mono text-ink-muted">{appVersion}</span>
+            <span className="text-ink-faint">·</span>
+            <span className="text-ink-muted">backend</span>
+            <span className="font-mono text-ink-muted">{backendVersion ?? "…"}</span>
           </div>
         </Field>
       </section>

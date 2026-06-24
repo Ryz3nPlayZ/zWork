@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::env;
 
 pub fn home_dir() -> PathBuf {
@@ -58,6 +58,24 @@ pub fn zwork_md_path() -> PathBuf {
 
 pub fn memory_path() -> PathBuf {
     home_dir().join("memory.md")
+}
+
+pub fn memories_dir() -> PathBuf {
+    let d = home_dir().join("memories");
+    let _ = std::fs::create_dir_all(&d);
+    d
+}
+
+pub fn user_md_path() -> PathBuf {
+    memories_dir().join("USER.md")
+}
+
+pub fn memory_md_path() -> PathBuf {
+    memories_dir().join("MEMORY.md")
+}
+
+pub fn timeline_md_path() -> PathBuf {
+    memories_dir().join("TIMELINE.md")
 }
 
 pub fn workspace_root() -> PathBuf {

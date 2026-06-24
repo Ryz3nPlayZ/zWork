@@ -19,6 +19,8 @@ mod server;
 mod cua;
 mod zbctl;
 mod browser_bridge;
+mod memory;
+mod telegram;
 
 #[tokio::main]
 async fn main() {
@@ -36,6 +38,7 @@ async fn main() {
         .route("/api/health", get(server::health))
         .route("/api/desktop/status", get(server::desktop_status))
         .route("/api/desktop/permissions/grant", post(server::desktop_grant))
+        .route("/api/browser-bridge/status", get(server::browser_bridge_status))
         .route("/api/me", get(server::me))
         .route("/api/providers", get(server::get_providers))
         .route("/api/settings", get(server::get_settings).put(server::put_settings))
@@ -89,6 +92,7 @@ async fn main() {
         .route("/api/uploads/:filename", get(server::get_upload))
         .route("/api/screenshot", post(server::screenshot))
         .route("/api/run-python", post(server::run_python))
+        .route("/api/telegram/send", post(server::telegram_send))
         .route("/api/refactor", post(server::refactor_code))
         .route("/api/scrape", post(server::scrape_url))
         .route("/api/export/docx", post(server::export_docx))

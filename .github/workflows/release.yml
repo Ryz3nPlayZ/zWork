@@ -202,6 +202,17 @@ jobs:
           cp /tmp/cua-driver app/src-tauri/binaries/cua-driver
           chmod +x app/src-tauri/binaries/cua-driver
 
+      - name: Download CuaDriver.app bundle (for first-run auto-install)
+        run: |
+          CUA_VERSION="0.5.7"
+          curl -fsSL "https://github.com/trycua/cua/releases/download/cua-driver-rs-v${CUA_VERSION}/cua-driver-rs-${CUA_VERSION}-darwin-universal.tar.gz" -o /tmp/cua-app.tar.gz
+          tar -xzf /tmp/cua-app.tar.gz -C /tmp/
+          # prepare-bundle.cjs reads ZWORK_CUADRIVER_APP and dittos the real
+          # .app into the bundle. Without this, the CI runner has no
+          # /Applications/CuaDriver.app, so the build ships a placeholder and
+          # the first-run auto-install is silently broken.
+          echo "ZWORK_CUADRIVER_APP=/tmp/cua-driver-rs-${CUA_VERSION}-darwin-universal/CuaDriver.app" >> "$GITHUB_ENV"
+
       - name: Build universal macOS app
         run: bash scripts/build-macos-universal-release.sh
 
