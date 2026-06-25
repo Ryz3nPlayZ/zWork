@@ -6,6 +6,7 @@ import {
   useState,
   type ClipboardEvent,
   type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
 import {
@@ -88,6 +89,8 @@ interface Props {
   className?: string;
   /** Called when the overlay should close (overlay variant only). */
   onDismiss?: () => void;
+  /** Reports the overlay bar's rendered height so the window can grow with the draft. */
+  onHeightChange?: (height: number) => void;
 }
 
 export function ChatInput({
@@ -99,6 +102,7 @@ export function ChatInput({
   variant = "default",
   className,
   onDismiss,
+  onHeightChange,
 }: Props) {
   const [localValue, setLocalValue] = useState("");
   const isControlled = propValue !== undefined;
@@ -128,6 +132,7 @@ export function ChatInput({
   >(null);
   const [slashIndex, setSlashIndex] = useState(0);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [multiline, setMultiline] = useState(false);
   const toolsRef = useRef<HTMLDivElement>(null);
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -163,7 +168,13 @@ export function ChatInput({
     if (!el) return;
     el.style.height = "0px";
     el.style.height = Math.min(el.scrollHeight, 200) + "px";
-  }, [value]);
+    setMultiline(el.scrollHeight > 28);
+    // Report the overlay bar's height so the overlay window grows with the draft.
+    if (isOverlay && onHeightChange) {
+      const bar = toolsRef.current;
+      if (bar) onHeightChange(bar.scrollHeight);
+    }
+  }, [value, isOverlay, onHeightChange, setMultiline]);
 
   useEffect(() => {
     if (autoFocus) areaRef.current?.focus();
@@ -416,6 +427,18 @@ export function ChatInput({
     await uploadFiles(files);
   };
 
+  // Drag the overlay window by grabbing the chatbar (not the textarea/buttons).
+  // `.titlebar-drag` / `-webkit-app-region` is an Electron-ism WKWebView ignores,
+  // so we drive the drag explicitly via the Tauri window API.
+  const onBarMouseDown = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if (!isOverlay || e.button !== 0) return;
+    const target = e.target as HTMLElement | null;
+    if (target?.closest("textarea, input, button, a, select, [data-no-drag]")) return;
+    void import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+      getCurrentWindow().startDragging().catch(() => {});
+    });
+  };
+
   const attachmentList = attachments.length > 0 && (
     <div className={cn("flex flex-wrap gap-2", isOverlay ? "px-3 py-1.5" : "px-4 pt-3")}>
       {attachments.map((a) => {
@@ -517,13 +540,14 @@ export function ChatInput({
 
       <div
         ref={isOverlay ? toolsRef : undefined}
+        onMouseDown={isOverlay ? onBarMouseDown : undefined}
         className={cn(
           "group relative w-full border border-line bg-paper-raised transition-[border-color,box-shadow]",
           isOverlay
             ? cn(
-                "titlebar-drag flex items-center gap-1 rounded-full px-2 py-2 shadow-float",
+                "titlebar-drag flex items-center gap-1 px-2 py-2 shadow-float",
+                (multiline || attachments.length > 0) ? "rounded-2xl" : "rounded-full",
                 focused && "border-line-strong",
-                attachments.length > 0 && "rounded-2xl",
               )
             : cn("rounded-2xl", focused ? "border-line-strong shadow-pop" : "shadow-chat"),
           dragOver && "border-ink/30 border-dashed",
@@ -599,7 +623,7 @@ export function ChatInput({
               const el = e.currentTarget;
               refreshSlashState(el.value, el.selectionStart ?? el.value.length);
             }}
-            className="block w-full min-h-0 max-h-[48px] flex-1 resize-none overflow-y-auto bg-transparent px-2 py-0 text-[14.5px] leading-6 text-ink placeholder:text-ink-faint focus:outline-none"
+            className="block w-full min-h-0 flex-1 resize-none overflow-y-auto bg-transparent px-2 py-0 text-[14.5px] leading-6 text-ink placeholder:text-ink-faint focus:outline-none"
           />
         </div>
       ) : (

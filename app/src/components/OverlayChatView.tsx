@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
-import { fitOverlayWindow } from "../lib/overlayGeometry";
+import { attachPositionPersistence, fitOverlayWindow } from "../lib/overlayGeometry";
 import { Message } from "./Message";
 import { ChatInput } from "./ChatInput";
 
@@ -23,6 +23,7 @@ import { ChatInput } from "./ChatInput";
 
 export function OverlayChatView() {
   const [mounted, setMounted] = useState(false);
+  const [barHeight, setBarHeight] = useState(0);
 
   const bootstrap = useApp((s) => s.bootstrap);
   const send = useApp((s) => s.send);
@@ -41,17 +42,20 @@ export function OverlayChatView() {
     return () => cancelAnimationFrame(frame);
   }, []);
 
-  // Make the overlay window truly transparent; the global body bg would
-  // otherwise paint over the transparent Tauri window.
+  // Make the overlay window truly transparent. The `overlay-window` class on
+  // <html> forces html/body/#root transparent (see index.css) so the global
+  // `bg-paper` body doesn't paint a dark rectangle behind the window.
   useEffect(() => {
     if (typeof document === "undefined") return;
     const html = document.documentElement;
     const body = document.body;
+    html.classList.add("overlay-window");
     const originalHtmlBg = html.style.backgroundColor;
     const originalBodyBg = body.style.backgroundColor;
     html.style.backgroundColor = "transparent";
     body.style.backgroundColor = "transparent";
     return () => {
+      html.classList.remove("overlay-window");
       html.style.backgroundColor = originalHtmlBg;
       body.style.backgroundColor = originalBodyBg;
     };
@@ -62,11 +66,26 @@ export function OverlayChatView() {
     void bootstrap();
   }, [bootstrap]);
 
-  // Position/resize the overlay window: idle chatbar when empty, expanded
-  // chat panel when a conversation is active.
+  // Position/resize the overlay window: idle chatbar (growing with the typed
+  // draft) when empty, expanded chat panel when a conversation is active.
   useEffect(() => {
-    void fitOverlayWindow(hasMessages ? "chat" : "idle");
-  }, [hasMessages]);
+    void fitOverlayWindow(hasMessages ? "chat" : "idle", { contentHeight: barHeight || undefined });
+  }, [hasMessages, barHeight]);
+
+  // Persist the overlay position across drags; restore-on-launch is handled by
+  // fitOverlayWindow's first call.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    void attachPositionPersistence().then((u) => {
+      if (cancelled) u?.();
+      else unlisten = u;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 
   // Auto-scroll to the latest message / streaming delta (mirrors ChatView).
   useEffect(() => {
@@ -112,7 +131,7 @@ export function OverlayChatView() {
         )}
       >
         {hasMessages && chat && (
-          <div className="mb-3 w-full max-w-[720px] flex-1 min-h-0 overflow-hidden rounded-2xl border border-line bg-paper/95 shadow-float backdrop-blur-xl">
+          <div className="mb-3 w-full max-w-[720px] flex-1 min-h-0 overflow-hidden rounded-2xl border border-line bg-paper shadow-float">
             <div ref={scrollRef} className="h-full overflow-y-auto overflow-x-hidden px-5 py-5">
               <div className="mx-auto flex max-w-[640px] flex-col gap-4 pb-2">
                 {chat.messages.map((m, idx) => {
@@ -149,6 +168,7 @@ export function OverlayChatView() {
             autoFocus
             placeholder="Ask zWork…"
             onDismiss={dismiss}
+            onHeightChange={setBarHeight}
           />
         </div>
       </div>
