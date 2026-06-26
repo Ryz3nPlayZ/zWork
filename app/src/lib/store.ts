@@ -1579,23 +1579,34 @@ export const useApp = create<AppState>((set, get) => ({
     const controller = new AbortController();
     set({ _abort: controller });
 
-    // Safety timeout: if the stream hasn't resolved in 5 minutes, abort it
-    // so the working spinner can't get stuck forever.
-    const safetyTimer = setTimeout(() => {
-      if (get().chats[localId]?.working) {
-        controller.abort();
-        set((s) => {
-          const c = s.chats[localId];
-          if (!c) return s;
-          return {
-            chats: {
-              ...s.chats,
-              [localId]: { ...c, working: false, status: undefined, error: "Stream timed out. Please try again." },
-            },
-          };
-        });
-      }
-    }, 5 * 60 * 1000);
+    // Silence watchdog: multi-step agent work (capture → act → re-capture …)
+    // streams events continuously and legitimately runs well past a few
+    // minutes. A fixed wall-clock cap aborts those tasks mid-flight (the
+    // "random termination" on long browser/desktop jobs), so instead we
+    // re-arm this timer on every received event. It only fires if the stream
+    // goes truly silent (dead connection / stuck spinner) for this long.
+    // Cleared in the finally block below.
+    const SILENCE_MS = 5 * 60 * 1000;
+    let safetyTimer: ReturnType<typeof setTimeout> | undefined;
+    const armWatchdog = () => {
+      clearTimeout(safetyTimer);
+      safetyTimer = setTimeout(() => {
+        if (get().chats[localId]?.working) {
+          controller.abort();
+          set((s) => {
+            const c = s.chats[localId];
+            if (!c) return s;
+            return {
+              chats: {
+                ...s.chats,
+                [localId]: { ...c, working: false, status: undefined, error: "The stream went quiet for too long and was disconnected. Try again, or press Stop to cancel." },
+              },
+            };
+          });
+        }
+      }, SILENCE_MS);
+    };
+    armWatchdog();
 
     try {
       await streamChat(
@@ -1611,6 +1622,9 @@ export const useApp = create<AppState>((set, get) => ({
           web_search_enabled: get().webSearchEnabled,
         },
         (evt) => {
+          // Any event means the stream is alive — push the silence watchdog
+          // out so long multi-step tasks aren't aborted on a wall-clock cap.
+          armWatchdog();
           if (evt.type === "chat") {
             // Server assigned an id — reconcile if we were provisional.
             const prevId = localId;
