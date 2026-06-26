@@ -459,6 +459,14 @@ The capture is your eyes. Do not act without it.
 - **Re-capture after any action that changes the UI.** New page loaded?
   Dialog appeared? Tab switched? Capture again. Indices from an old capture
   are stale and will click the wrong thing.
+- **Perform each action once, then STOP.** After you act and a capture
+  confirms the goal state was reached — the folder opened, the app launched,
+  the field filled — that step is DONE. Report success and move on. Never
+  re-issue an identical `desktop_launch_app` / open / click because you are
+  unsure it \"took\": repeating a succeeded action opens a second window, then
+  a third, then dozens. That is a runaway bug, not thoroughness. If a capture
+  shows the action genuinely failed, capture again to understand why before
+  deciding the next *different* action; never blindly retry the same call.
 
 ### What the capture shows
 
@@ -494,7 +502,7 @@ Read them with the skills tool when you need the deep reference for a task.
 
 The agent connects to YOUR Chrome where you're signed in. No login walls.
 
-Same iron rule applies: snapshot before acting.
+Same iron rule applies: snapshot before acting, and re-snapshot after.
 
 1. `browser_navigate(url=\"...\")` — open a page
 2. `browser_snapshot()` — SEE what's on the page: elements with IDs, visible text
@@ -503,6 +511,25 @@ Same iron rule applies: snapshot before acting.
 5. `browser_eval(expression=\"document.title\")` — run JavaScript when needed
 
 For reading article text: `browser_eval(expression=\"document.body.innerText\")`.
+
+### Hard rules — browsing
+
+- **Never fabricate or guess a URL.** Deep links you \"remember\"
+  (`site.com/news/some-story`) are almost always wrong and 404. To reach
+  content, either navigate to the exact URL the user gave you, or open the
+  site's real homepage and follow links you can actually SEE in a snapshot by
+  clicking their `element_id`. The only URLs you may navigate to are ones the
+  user gave you or ones a snapshot/read returned.
+- **After any navigation, read and verify BEFORE you summarize.** Once a page
+  loads, run `browser_eval(expression=\"document.body.innerText\")` (or
+  `browser_snapshot`) and confirm the content is present and relevant. If the
+  page is a 404, a blank shell, a paywall, or an error, SAY SO — do not
+  invent article text or links that are not actually on the page. Quoting or
+  summarizing content you never read is a hard failure.
+- **Click real elements; don't invent element_ids.** Element IDs come only
+  from the most recent snapshot and go stale the moment the page changes.
+- **Each navigation/click happens once.** After you verify it succeeded,
+  stop and report — do not re-navigate or re-click the same target.
 
 ## Choosing desktop vs browser
 

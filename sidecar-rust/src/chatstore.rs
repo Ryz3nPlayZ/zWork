@@ -141,6 +141,41 @@ pub fn rename(chat_id: &str, title: &str) -> Option<Chat> {
     Some(c)
 }
 
+/// Extract displayable plain text from a stored message `content` value.
+///
+/// `content` is normally a JSON string, but older chats stored Anthropic
+/// content blocks — either a single `{type,text}` object or an array of them
+/// — which the frontend cannot render (React #31: "object with keys {text,
+/// type}") and which `as_str()` cannot read. This normalizes every shape to a
+/// plain string so display, auto-titling, and de-dup all compare text.
+pub fn content_to_text(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        Value::Array(items) => items
+            .iter()
+            .filter_map(|b| {
+                if b.get("type").and_then(|t| t.as_str()) == Some("text") {
+                    b.get("text").and_then(|t| t.as_str()).map(str::to_string)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+        Value::Object(_) => {
+            if v.get("type").and_then(|t| t.as_str()) == Some("text") {
+                v.get("text")
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            } else {
+                String::new()
+            }
+        }
+        _ => String::new(),
+    }
+}
+
 pub fn append_message(chat_id: &str, role: &str, content: Value) -> Option<ChatMessage> {
     let mut c = get(chat_id)?;
     let msg = ChatMessage {
@@ -156,14 +191,14 @@ pub fn append_message(chat_id: &str, role: &str, content: Value) -> Option<ChatM
     
     // Auto-title from first user message
     if c.title == "New chat" && role == "user" {
-        if let Some(txt) = content.as_str() {
+        let txt = content_to_text(&content);
+        if !txt.is_empty() {
             let first_line = txt.lines().next().unwrap_or("").trim();
-            let mut title_len = first_line.len();
-            if title_len > 64 {
-                title_len = 64;
-            }
-            if title_len > 0 {
-                c.title = first_line[..title_len].to_string();
+            // Slice on char boundaries so multi-byte (emoji/CJK) first lines
+            // don't panic the backend mid-turn.
+            let title: String = first_line.chars().take(64).collect();
+            if !title.is_empty() {
+                c.title = title;
             }
         }
     }

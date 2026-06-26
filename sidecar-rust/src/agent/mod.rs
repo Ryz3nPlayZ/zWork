@@ -63,23 +63,30 @@ pub fn run_agent_turn(
             }
         };
 
-        // Emit chat reconciliation event so the frontend can map its
-        // provisional tmp_ ID to the real server-assigned chat ID.
+        // Append the user message. We store the plain display text as the
+        // message `content` — the frontend renders `message.content` as a
+        // string, so storing Anthropic content blocks here crashed it (React
+        // #31: "object with keys {text,type}"). The multimodal content-blocks
+        // form is built separately below, only for the model payload.
+        let user_display = user_message.clone();
+        let is_dup = chat.messages.last().map_or(false, |m| {
+            m.role == "user" && chatstore::content_to_text(&m.content) == user_display
+        });
+        if !is_dup && (!user_message.is_empty() || !attachments.is_empty()) {
+            chatstore::append_message(&chat.id, "user", json!(user_display));
+            chat = chatstore::get(&chat.id).unwrap();
+        }
+
+        // Emit chat reconciliation event AFTER appending so the title — which
+        // append_message auto-derives from the first user message — is current.
+        // (Still the first event on the stream, so the frontend can map its
+        // provisional tmp_ ID to the real server-assigned chat ID before any
+        // tokens arrive.)
         let _ = tx.send(json!({
             "type": "chat",
             "id": chat.id,
             "title": chat.title
         })).await;
-
-        // Append user message if not already appended
-        let user_content = prompts::build_user_content(&user_message, &attachments);
-        let is_dup = chat.messages.last().map_or(false, |m| {
-            m.role == "user" && m.content == user_content
-        });
-        if !is_dup && (!user_message.is_empty() || !attachments.is_empty()) {
-            chatstore::append_message(&chat.id, "user", user_content);
-            chat = chatstore::get(&chat.id).unwrap();
-        }
         
         // 1. Resolve credentials
         let (api_key, base_url, shape, real_model_id, provider_display_name) = if model_id == "__claude_code__" {
@@ -156,6 +163,18 @@ pub fn run_agent_turn(
                 "role": msg.role,
                 "content": msg.content
             }));
+        }
+        // The current user turn may carry attachments (e.g. images) that the
+        // stored display-string content cannot represent. When attachments are
+        // present, replace the last user message's content with the full
+        // content-block payload so the model actually receives them.
+        if !attachments.is_empty() {
+            let user_blocks = prompts::build_user_content(&user_message, &attachments);
+            if let Some(last) = history_messages.last_mut() {
+                if last.get("role").and_then(|r| r.as_str()) == Some("user") {
+                    last["content"] = user_blocks;
+                }
+            }
         }
             
         // Main multi-turn executor loop. A "turn" is one model inference + its

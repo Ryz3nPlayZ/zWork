@@ -86,6 +86,25 @@ export interface Message {
   feedback?: "bad" | "good";
 }
 
+/**
+ * Coerce a backend message `content` value into a plain display string.
+ *
+ * New chats store content as a string, but chats written before the
+ * content-shape fix stored Anthropic content blocks — a single `{type,text}`
+ * object or an array of them. Rendering either as a React child throws
+ * ("Minified React error #31: object with keys {text,type}"). This normalizes
+ * every shape so those older chats still open instead of crashing the view.
+ */
+export function contentToText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!content) return "";
+  const blocks = Array.isArray(content) ? content : [content];
+  return blocks
+    .map((b: any) => (b && b.type === "text" && typeof b.text === "string" ? b.text : ""))
+    .filter(Boolean)
+    .join("\n");
+}
+
 export interface Activity {
   id: string;
   label: string;
@@ -1167,7 +1186,7 @@ export const useApp = create<AppState>((set, get) => ({
           .map((m) => ({
             id: m.id,
             role: m.role as Role,
-            content: m.content,
+            content: contentToText(m.content),
             createdAt: m.created_at,
             activities: m.activities || [],
           }));
@@ -1601,7 +1620,14 @@ export const useApp = create<AppState>((set, get) => ({
                 if (!c) return s;
                 const { [prevId]: _, ...rest } = s.chats;
                 void _;
-                const updated: Chat = { ...c, id: evt.id, title: evt.title };
+                // Trust the server's title, but never let a stale placeholder
+                // ("New chat") overwrite a meaningful local title we already
+                // derived from the user's first message.
+                const serverTitle =
+                  evt.title && evt.title !== "New chat" && evt.title !== "New Chat"
+                    ? evt.title
+                    : c.title;
+                const updated: Chat = { ...c, id: evt.id, title: serverTitle };
                 return {
                   chats: { ...rest, [evt.id]: updated },
                   activeChatId: evt.id,
