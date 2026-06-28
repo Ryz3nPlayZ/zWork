@@ -8,11 +8,11 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::settings;
 use crate::chatstore;
 mod prompts;
-mod stream;
+mod llm;
 mod compaction;
 
 use prompts::convert_input_messages;
-use stream::stream_upstream;
+use llm::{stream_llm, trace as llm_trace, LlmEvent};
 use crate::tools::{execute_tool, evaluate_tool_risk, get_tool_schemas, Risk};
 
 fn pending_permission_gates() -> &'static Mutex<HashMap<String, oneshot::Sender<bool>>> {
@@ -305,63 +305,109 @@ pub fn run_agent_turn(
                 })
             };
             
-            // Call upstream token stream
-            let mut stream = stream_upstream(endpoint, headers, body, shape.clone());
+            // Trace the outgoing request: model, message count, advertised
+            // tools, and live browser status — so any later failure can be
+            // correlated to exactly what the model was asked to do.
+            {
+                let schemas = get_tool_schemas(plan_mode);
+                let tool_names: Vec<&str> = schemas
+                    .iter()
+                    .filter_map(|t| t.get("name").and_then(|v| v.as_str()))
+                    .collect();
+                llm_trace(
+                    &chat_id,
+                    turn,
+                    "request",
+                    json!({
+                        "model": real_model_id,
+                        "shape": shape,
+                        "messages": convo.len(),
+                        "tools": tool_names,
+                        "browser_connected": browser_connected,
+                        "plan_mode": plan_mode,
+                    }),
+                );
+            }
+
+            // Call upstream via the unified streaming layer: one parser per
+            // provider wire format, loud errors, no silent frame/arg drops.
+            let mut stream = stream_llm(endpoint, headers, body, shape.clone(), turn, chat_id.clone());
             let mut assistant_content_blocks: Vec<serde_json::Value> = Vec::new();
             let mut tool_calls = Vec::new();
-            
+            let mut turn_error: Option<String> = None;
+
             while let Some(evt_res) = stream.next().await {
                 let evt = match evt_res {
                     Ok(e) => e,
                     Err(_) => continue,
                 };
-                
-                let et = evt.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                if et == "delta" {
-                    let text = evt.get("text").and_then(|v| v.as_str()).unwrap_or("");
-                    accumulated_text.push_str(text);
-                    
-                    if !text.is_empty() {
-                        let mut merged = false;
-                        if let Some(last_block) = assistant_content_blocks.last_mut() {
-                            if last_block.get("type").and_then(|v| v.as_str()) == Some("text") {
-                                if let Some(last_text) = last_block.get_mut("text") {
-                                    if let Some(t_str) = last_text.as_str() {
-                                        *last_text = json!(format!("{}{}", t_str, text));
-                                        merged = true;
+                match evt {
+                    LlmEvent::TextDelta { text } => {
+                        accumulated_text.push_str(&text);
+
+                        if !text.is_empty() {
+                            let mut merged = false;
+                            if let Some(last_block) = assistant_content_blocks.last_mut() {
+                                if last_block.get("type").and_then(|v| v.as_str()) == Some("text") {
+                                    if let Some(last_text) = last_block.get_mut("text") {
+                                        if let Some(t_str) = last_text.as_str() {
+                                            *last_text = json!(format!("{}{}", t_str, text));
+                                            merged = true;
+                                        }
                                     }
                                 }
                             }
+                            if !merged {
+                                assistant_content_blocks.push(json!({
+                                    "type": "text",
+                                    "text": text
+                                }));
+                            }
                         }
-                        if !merged {
-                            assistant_content_blocks.push(json!({
-                                "type": "text",
-                                "text": text
-                            }));
-                        }
+
+                        // Update chat storage and stream to frontend
+                        let _ = chatstore::update_message(
+                            &chat_id,
+                            &assistant_msg_id,
+                            Some(json!(accumulated_text)),
+                            Some(accumulated_activities.clone())
+                        );
+                        let _ = tx.send(json!({ "type": "delta", "text": text })).await;
                     }
-                    
-                    // Update chat storage and stream to frontend
-                    let _ = chatstore::update_message(
-                        &chat_id,
-                        &assistant_msg_id,
-                        Some(json!(accumulated_text)),
-                        Some(accumulated_activities.clone())
-                    );
-                    let _ = tx.send(evt).await;
-                } else if et == "tool_call" {
-                    tool_calls.push(evt.clone());
-                    assistant_content_blocks.push(json!({
-                        "type": "tool_use",
-                        "id": evt.get("id"),
-                        "name": evt.get("name"),
-                        "input": evt.get("input")
-                    }));
-                } else if et == "error" {
-                    let _ = tx.send(evt).await;
+                    LlmEvent::ReasoningDelta { .. } => {
+                        // Model chain-of-thought: surfaced to the SSE frame log
+                        // only when ZWORK_TRACE_SSE=1; never shown to the UI.
+                    }
+                    LlmEvent::ToolCall { id, name, input } => {
+                        tool_calls.push(json!({
+                            "id": id.clone(),
+                            "name": name.clone(),
+                            "input": input.clone()
+                        }));
+                        assistant_content_blocks.push(json!({
+                            "type": "tool_use",
+                            "id": id,
+                            "name": name,
+                            "input": input
+                        }));
+                    }
+                    LlmEvent::Usage(_) | LlmEvent::Finish { .. } => {
+                        // Diagnostic only; already traced inside stream_llm.
+                    }
+                    LlmEvent::ProviderError { message, .. } => {
+                        turn_error = Some(message.clone());
+                        let _ = tx.send(json!({ "type": "error", "text": message })).await;
+                    }
+                    LlmEvent::Done => break,
                 }
             }
-            
+
+            // A hard stream error ends the turn/task rather than executing any
+            // partially-collected tool calls.
+            if turn_error.is_some() {
+                break;
+            }
+
             // Append assistant response to history
             history_messages.push(json!({
                 "role": "assistant",
@@ -387,7 +433,14 @@ pub fn run_agent_turn(
                 let name = tc.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 let params = tc.get("input").cloned().unwrap_or(json!({}));
                 let tc_id = tc.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                
+
+                llm_trace(
+                    &chat_id,
+                    turn,
+                    "tool_dispatch",
+                    json!({ "id": tc_id, "name": name, "input": params }),
+                );
+
                 // Safety permissions gate check
                 let risk = evaluate_tool_risk(name, &params);
                 let mut execute_allowed = true;
@@ -487,6 +540,18 @@ pub fn run_agent_turn(
                         "content": final_result_txt,
                         "is_error": !final_result_ok
                     }));
+
+                    llm_trace(
+                        &chat_id,
+                        turn,
+                        "tool_result",
+                        json!({
+                            "name": name,
+                            "ok": final_result_ok,
+                            "len": final_result_txt.len(),
+                            "preview": final_result_txt.chars().take(200).collect::<String>(),
+                        }),
+                    );
                 } else {
                     let refusal_msg = "Permission denied by user. Action aborted.";
                     let _ = tx.send(json!({
@@ -502,6 +567,13 @@ pub fn run_agent_turn(
                         "content": refusal_msg,
                         "is_error": true
                     }));
+
+                    llm_trace(
+                        &chat_id,
+                        turn,
+                        "tool_result",
+                        json!({ "name": name, "ok": false, "len": refusal_msg.len(), "preview": refusal_msg, "denied": true }),
+                    );
                 }
             }
             
