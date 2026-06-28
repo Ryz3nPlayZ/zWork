@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+  <!--
+    Offscreen document: owns the persistent WebSocket to the zWork backend.
+    Chrome suspends MV3 service workers after ~30s of idleness, which kills any
+    socket the worker owns and (critically) cancels its pending reconnect
+    timers. Offscreen documents are NOT subject to that suspension, so the
+    connection laid out in offscreen.js stays alive while the user isn't
+    actively interacting with Chrome — which is exactly when the agent needs it.
+  -->
+  <head><meta charset="utf-8" /><title>zbctl offscreen</title></head>
+  <body>
+    <script src="offscreen.js"></script>
+  </body>
+</html>

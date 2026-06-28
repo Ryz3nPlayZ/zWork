@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "zbctl Bridge",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Chrome Extension Bridge for zbctl / zWork Desktop Agent",
-  "permissions": ["activeTab", "tabs", "scripting"],
+  "permissions": ["activeTab", "tabs", "scripting", "offscreen"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"

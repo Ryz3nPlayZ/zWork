@@ -1,53 +1,30 @@
-// zbctl background service worker
-// Maintains WebSocket to daemon, routes commands to content scripts,
-// handles browser-level actions, and forwards push events.
+// zbctl background service worker.
+//
+// ROLE CHANGE: this worker used to own the backend WebSocket directly. That was
+// the bug — Chrome suspends MV3 workers after ~30s of idleness, killing the
+// socket and cancelling its reconnect timer, so the bridge silently dropped
+// while the user wasn't interacting with Chrome. The WebSocket now lives in the
+// offscreen document (offscreen.js), which is never suspended. This worker is
+// the ACTION EXECUTOR only: all chrome.tabs / chrome.scripting calls happen
+// here. Commands arrive from the offscreen doc over a private named Port; that
+// delivery wakes this worker on demand if Chrome had suspended it, and the
+// response is posted back over the same port.
 
-const PORT = 8787;
-// 127.0.0.1 (not "localhost") avoids IPv6 (::1) resolution ambiguity and
-// matches the address the backend binds; the extension is exempt from
-// host_permissions concerns for loopback.
-const HOST = "127.0.0.1";
-let socket = null;
-
-// ─── WebSocket connection ─────────────────────────────────────
-function connect() {
-  socket = new WebSocket(`ws://${HOST}:${PORT}/ws`);
-
-  socket.onopen = () => {
-    console.log("[zbctl] connected to daemon");
-  };
-
-  socket.onmessage = async (event) => {
-    const data = JSON.parse(event.data);
-    const { id, action, params } = data;
-
-    try {
-      const result = await handleAction(id, action, params || {});
-      // Page actions return the content script response directly (has id/ok/snapshot)
-      // Browser actions return { result: <value> }
-      if (result && result.id) {
-        socketSend(result);
-      } else {
-        socketSend({ id, ok: true, result: result?.result ?? null });
-      }
-    } catch (error) {
-      socketSend({ id, ok: false, error: error.message });
-    }
-  };
-
-  socket.onclose = () => {
-    console.log("[zbctl] disconnected, reconnecting in 3s...");
-    setTimeout(connect, 3000);
-  };
-
-  socket.onerror = (err) => {
-    console.error("[zbctl] socket error", err);
-  };
-}
-
-function socketSend(data) {
-  if (socket && socket.readyState === WebSocket.OPEN) {
-    socket.send(JSON.stringify(data));
+// ─── Offscreen document (persistent WS transport) ─────────────
+async function ensureOffscreen() {
+  try {
+    const existing = await chrome.runtime.getContexts({
+      contextTypes: ["OFFSCREEN_DOCUMENT"],
+    });
+    if (existing && existing.length > 0) return;
+    await chrome.offscreen.createDocument({
+      url: "offscreen.html",
+      reasons: ["WEB_RTC"],
+      justification:
+        "Holds the persistent WebSocket bridge to the zWork backend so it survives service-worker suspension.",
+    });
+  } catch (e) {
+    console.warn("[zbctl/bg] ensureOffscreen failed:", e && e.message);
   }
 }
 
@@ -160,31 +137,62 @@ async function ensureContentScript(tabId) {
   }
 }
 
-// ─── Push events from content script → daemon ─────────────────
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === "settled" && sender.tab) {
-    // Content script detected page settled — forward to daemon
-    socketSend({
-      type: "settled",
-      tabId: sender.tab.id,
-      url: sender.tab.url,
-      snapshot: message.snapshot,
-    });
-  }
-  // Respond to pings from ensureContentScript
-  if (message.action === "ping") {
-    sendResponse({ ok: true });
+// ─── Control port from the offscreen WS document ──────────────
+let bgPort = null;
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "zbctl-ws") return;
+  bgPort = port;
+
+  port.onMessage.addListener(async (msg) => {
+    if (!msg || msg.dir !== "cmd") return;
+    const { id, action, params } = msg;
+    let body;
+    try {
+      const result = await handleAction(id, action, params || {});
+      // Page actions return the content script response directly (has id/ok/snapshot)
+      // Browser actions return { result: <value> }
+      body = result && result.id
+        ? result
+        : { id, ok: true, result: result?.result ?? null };
+    } catch (error) {
+      body = { id, ok: false, error: (error && error.message) ? error.message : String(error) };
+    }
+    try {
+      port.postMessage({ dir: "res", body });
+    } catch {
+      /* port went away; offscreen will reconnect */
+    }
+  });
+
+  port.onDisconnect.addListener(() => {
+    if (bgPort === port) bgPort = null;
+  });
+});
+
+// ─── Push events from content script → offscreen → backend ────
+chrome.runtime.onMessage.addListener((message, sender) => {
+  if (message && message.type === "settled" && sender.tab && bgPort) {
+    try {
+      bgPort.postMessage({
+        dir: "settled",
+        tabId: sender.tab.id,
+        url: sender.tab.url,
+        snapshot: message.snapshot,
+      });
+    } catch {
+      /* port gone */
+    }
   }
 });
 
 // ─── Tab lifecycle ────────────────────────────────────────────
-// When a tab finishes loading, push an initial snapshot
+// When a tab finishes loading, ensure the content script is present so its
+// MutationObserver can detect settle and push snapshots.
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   if (changeInfo.status === "complete" && tab.url) {
     try {
       await ensureContentScript(tabId);
-      // Content script's MutationObserver will handle settle detection
-      // and push a snapshot automatically. No need to request one here.
     } catch {
       // Can't inject on this tab (chrome:// pages, etc.)
     }
@@ -199,4 +207,5 @@ async function getActiveTabId() {
 }
 
 // ─── Start ────────────────────────────────────────────────────
-connect();
+// Run on every worker startup (initial load and each wake after suspension).
+ensureOffscreen();
