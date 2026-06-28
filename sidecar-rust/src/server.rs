@@ -70,25 +70,6 @@ pub async fn browser_bridge_status() -> impl IntoResponse {
     Json(json!({ "connected": crate::browser_bridge::extension_connected().await }))
 }
 
-/// Direct bridge command endpoint — sends an action (snapshot, click, type, etc.)
-/// to the Chrome extension via the WebSocket bridge and returns the result.
-pub async fn browser_command(
-    Json(body): Json<serde_json::Value>,
-) -> impl IntoResponse {
-    let action = body.get("action").and_then(|v| v.as_str()).unwrap_or("");
-    let params = body.get("params").cloned().unwrap_or(json!({}));
-    match crate::browser_bridge::send_command(action, params).await {
-        Ok(result) => {
-            // Try to parse as JSON, otherwise wrap as raw string
-            match serde_json::from_str::<serde_json::Value>(&result) {
-                Ok(json_val) => Json(json!({ "ok": true, "result": json_val })),
-                Err(_) => Json(json!({ "ok": true, "result": result })),
-            }
-        }
-        Err(e) => Json(json!({ "ok": false, "error": e })),
-    }
-}
-
 /// cua-driver TCC permission status (Accessibility + Screen Recording) as
 /// reported by the driver's own identity (`com.trycua.driver`) — the source of
 /// truth for whether desktop control will actually work. Read-only probe; also

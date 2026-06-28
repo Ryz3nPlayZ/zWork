@@ -39,7 +39,6 @@ async fn main() {
         .route("/api/desktop/status", get(server::desktop_status))
         .route("/api/desktop/permissions/grant", post(server::desktop_grant))
         .route("/api/browser-bridge/status", get(server::browser_bridge_status))
-        .route("/api/browser/command", post(server::browser_command))
         .route("/api/me", get(server::me))
         .route("/api/providers", get(server::get_providers))
         .route("/api/settings", get(server::get_settings).put(server::put_settings))
