@@ -1,10 +1,9 @@
 use axum::{
-    extract::{Path, State},
+    extract::Path,
     response::sse::{Event, Sse},
     response::IntoResponse,
     Json,
 };
-use futures_util::stream::Stream;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -49,6 +48,7 @@ pub struct ChatStreamRequest {
 }
 
 #[derive(Deserialize, Debug, Clone)]
+#[allow(dead_code)]
 pub struct Attachment {
     pub client_id: Option<String>,
     pub name: String,
@@ -1249,6 +1249,7 @@ pub async fn telemetry_event(Json(body): Json<TelemetryEventBody>) -> impl IntoR
 // ─── Chat answer-question ────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 pub struct AnswerQuestionBody {
     pub answer: String,
 }
@@ -1319,6 +1320,7 @@ pub async fn get_project_timeline(Path(project_id): Path<String>) -> impl IntoRe
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 pub struct UploadItem {
     pub client_id: Option<String>,
     pub name: String,
@@ -1523,6 +1525,7 @@ pub async fn scrape_url(Json(body): Json<ScrapeRequest>) -> impl IntoResponse {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 pub struct RefactorRequest {
     pub code: String,
     pub instruction: String,
@@ -1614,48 +1617,7 @@ fn default_export_title() -> String { "Document".to_string() }
 
 pub async fn export_docx(Json(body): Json<ExportRequest>) -> impl IntoResponse {
     // Use Python to convert markdown → docx via python-docx
-    let script = r#"
-import sys, json
-try:
-    from docx import Document
-    from docx.shared import Pt, Inches
-    doc = Document()
-    for line in sys.stdin.read().split('\n'):
-        if line.startswith('# '):
-            doc.add_heading(line[2:], level=1)
-        elif line.startswith('## '):
-            doc.add_heading(line[3:], level=2)
-        elif line.startswith('### '):
-            doc.add_heading(line[4:], level=3)
-        elif line.startswith('- ') or line.startswith('* '):
-            doc.add_paragraph(line[2:], style='List Bullet')
-        elif line.startswith('```'):
-            pass
-        else:
-            doc.add_paragraph(line)
-    import tempfile, os, base64
-    fd, path = tempfile.mkstemp(suffix='.docx')
-    doc.save(path)
-    with open(path, 'rb') as f:
-        print(base64.b64encode(f.read()).decode())
-    os.unlink(path)
-except Exception as e:
-    print(json.dumps({"error": str(e)}))
-"#;
-    let output = tokio::process::Command::new("python3")
-        .arg("-c").arg(script)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .ok()
-        .and_then(|mut child| {
-            use tokio::io::AsyncWriteExt;
-            child.stdin.take().and_then(|mut stdin| {
-                // Can't easily do async write here in sync context, fall back to blocking
-                Some(child)
-            })
-        });
+    // Script and command block removed
 
     // Simpler approach: write to temp file, run python, read result
     let tmp_md = std::env::temp_dir().join(format!("zwork_export_{}.md", uuid::Uuid::new_v4().simple()));
@@ -1797,7 +1759,6 @@ pub async fn screenshot() -> impl IntoResponse {
 
 fn standard_b64_decode(input: &str) -> Result<Vec<u8>, String> {
     // Manual base64 decode without adding a dependency
-    use std::io::Read;
     let trimmed = input.trim().replace('\n', "").replace('\r', "").replace(' ', "");
     let decoded = base64_decode_bytes(trimmed.as_bytes());
     decoded.ok_or_else(|| "Invalid base64".to_string())

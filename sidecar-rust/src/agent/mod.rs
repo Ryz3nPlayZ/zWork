@@ -40,6 +40,69 @@ pub fn reject_gate(gate_id: &str) -> bool {
     }
 }
 
+fn check_desktop_browser_active(user_message: &str, messages: &[crate::chatstore::ChatMessage]) -> bool {
+    let msg_lower = user_message.to_lowercase();
+    let keywords = &[
+        "desktop", "click", "type", "capture", "safari", "chrome",
+        "browser", "navigate", "website", "http", "window", "screen",
+        "scroll", "keypress", "key combo", "double click", "right click",
+        "app name", "launch app"
+    ];
+    if keywords.iter().any(|k| msg_lower.contains(k)) {
+        return true;
+    }
+
+    for m in messages {
+        if m.role == "assistant" {
+            if let Some(arr) = m.content.as_array() {
+                for block in arr {
+                    if block.get("type").and_then(|v| v.as_str()) == Some("tool_use") {
+                        if let Some(name) = block.get("name").and_then(|v| v.as_str()) {
+                            if name.starts_with("desktop_") || name.starts_with("browser_") {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+fn check_academic_finance_active(user_message: &str, messages: &[crate::chatstore::ChatMessage]) -> bool {
+    let msg_lower = user_message.to_lowercase();
+    let keywords = &[
+        "paper", "citation", "research", "stock", "ticker", "extract",
+        "pdf", "arxiv", "financial", "share price", "moving average",
+        "technical indicator"
+    ];
+    if keywords.iter().any(|k| msg_lower.contains(k)) {
+        return true;
+    }
+
+    for m in messages {
+        if m.role == "assistant" {
+            if let Some(arr) = m.content.as_array() {
+                for block in arr {
+                    if block.get("type").and_then(|v| v.as_str()) == Some("tool_use") {
+                        if let Some(name) = block.get("name").and_then(|v| v.as_str()) {
+                            let academic_tools = &[
+                                "search_papers", "format_citation", "write_research_paper",
+                                "review_paper", "extract_document", "get_stock_data"
+                            ];
+                            if academic_tools.contains(&name) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
 pub fn run_agent_turn(
     chat_id: String,
     model_id: String,
@@ -138,6 +201,30 @@ pub fn run_agent_turn(
         let skills = crate::skills::list_skills();
         let example_slug = skills.first().map(|s| s.slug.as_str()).unwrap_or("frontend-design");
 
+        let include_desktop = check_desktop_browser_active(&user_message, &chat.messages);
+        let include_academic = check_academic_finance_active(&user_message, &chat.messages);
+
+        let get_scoped_schemas = |plan_mode_val: bool| -> Vec<Value> {
+            let all = get_tool_schemas(plan_mode_val);
+            all.into_iter().filter(|t| {
+                let name = t.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                if name.starts_with("desktop_") || name.starts_with("browser_") {
+                    return include_desktop;
+                }
+                let academic_tools = &[
+                    "search_papers", "format_citation", "write_research_paper",
+                    "review_paper", "extract_document", "get_stock_data", "detect_hardware"
+                ];
+                if academic_tools.contains(&name) {
+                    return include_academic;
+                }
+                if name == "manage_tasks" || name == "manage_events" || name == "send_telegram_message" {
+                    return include_academic || include_desktop;
+                }
+                true
+            }).collect::<Vec<_>>()
+        };
+
         let system_prompt = settings::build_system_prompt(
             &real_model_id,
             &provider_display_name,
@@ -149,7 +236,9 @@ pub fn run_agent_turn(
             plan_mode,
             auto_approve,
             &skills_list,
-            example_slug
+            example_slug,
+            include_desktop,
+            include_academic,
         );
 
         // Inject the LIVE environment status so the model actually knows its
@@ -192,20 +281,34 @@ pub fn run_agent_turn(
                 }
             }
         }
+        
+        repair_history_alternation(&mut history_messages);
+        let mut doom_loop_detector = DoomLoopDetector::new();
             
         // Main multi-turn executor loop. A "turn" is one model inference + its
         // tool executions. Multi-step desktop/browser work (capture → act →
-        // re-capture → …) routinely needs 15–30+ turns, and long tasks can run
-        // for hundreds. The loop terminates *naturally* when the model stops
-        // emitting tool calls (task done) or the user hits Stop — there is no
-        // hard turn cap, because a fixed ceiling would abort legitimate long
-        // work. ZWORK_MAX_TURNS opts in a runaway-only cost backstop for anyone
-        // who wants one; when unset the loop runs unbounded.
+        // re-capture → …) routinely needs 15–30+ turns. The loop terminates
+        // *naturally* when the model stops emitting tool calls (task done), the
+        // DoomLoopDetector halts exact-repeat loops, the user hits Stop, or a
+        // stream error ends the turn.
+        //
+        // On top of those, a hard runaway cap is the last line of defense: a
+        // buggy fallback or a model that never converges once burned the user's
+        // entire request quota (199 turns → HTTP 429) before any guard fired.
+        // 80 turns is generous headroom over what real tasks need. Override
+        // with ZWORK_MAX_TURNS; set it to 0 for the old unbounded behaviour.
         let mut turn = 0u32;
-        let max_turns: Option<u32> = std::env::var("ZWORK_MAX_TURNS")
-            .ok()
-            .and_then(|v| v.parse::<u32>().ok())
-            .filter(|&n| n > 0);
+        const DEFAULT_MAX_TURNS: u32 = 80;
+        let max_turns: u32 = match std::env::var("ZWORK_MAX_TURNS") {
+            Ok(v) => v
+                .trim()
+                .parse::<u32>()
+                .ok()
+                .filter(|&n| n > 0)
+                .unwrap_or(DEFAULT_MAX_TURNS),
+            Err(_) => DEFAULT_MAX_TURNS,
+        };
+        let mut hit_turn_cap = false;
         
         // Initialize the assistant response message
         let assistant_msg = chatstore::append_message(&chat.id, "assistant", json!(""));
@@ -214,8 +317,12 @@ pub fn run_agent_turn(
         let mut accumulated_text = String::new();
         let mut accumulated_activities = Vec::new();
         
-        while max_turns.map_or(true, |cap| turn < cap) {
+        loop {
             turn += 1;
+            if turn > max_turns {
+                hit_turn_cap = true;
+                break;
+            }
             let _ = tx.send(json!({
                 "type": "status",
                 "text": "Thinking"
@@ -262,7 +369,7 @@ pub fn run_agent_turn(
             
             let tools_payload = if shape == "anthropic" {
                 let mut out = Vec::new();
-                for t in get_tool_schemas(plan_mode) {
+                for t in get_scoped_schemas(plan_mode) {
                     out.push(json!({
                         "name": t["name"],
                         "description": t["description"],
@@ -272,7 +379,7 @@ pub fn run_agent_turn(
                 out
             } else {
                 let mut out = Vec::new();
-                for t in get_tool_schemas(plan_mode) {
+                for t in get_scoped_schemas(plan_mode) {
                     out.push(json!({
                         "type": "function",
                         "function": {
@@ -309,7 +416,7 @@ pub fn run_agent_turn(
             // tools, and live browser status — so any later failure can be
             // correlated to exactly what the model was asked to do.
             {
-                let schemas = get_tool_schemas(plan_mode);
+                let schemas = get_scoped_schemas(plan_mode);
                 let tool_names: Vec<&str> = schemas
                     .iter()
                     .filter_map(|t| t.get("name").and_then(|v| v.as_str()))
@@ -414,10 +521,21 @@ pub fn run_agent_turn(
                 "content": assistant_content_blocks
             }));
 
-            // If no structured tool_calls came through, check if the model
-            // output tool call syntax as plain text (common for providers
-            // that don't support the `tools` API parameter).
-            if tool_calls.is_empty() && !accumulated_text.is_empty() {
+            // Text-parsed tool calls are a FALLBACK for providers that genuinely
+            // lack the `tools` API. Every provider zWork ships (DeepSeek,
+            // Anthropic, OpenAI-shape) emits structured tool calls — and
+            // scraping a tool name out of the model's PROSE narration turns
+            // innocent text ("I'll grab a browser_snapshot first") into a
+            // phantom tool call that loops forever: one real run executed
+            // browser_snapshot 190× in a row until the request quota 429'd.
+            // Default OFF; opt in with ZWORK_TEXT_TOOL_FALLBACK=1 for a
+            // raw-completion model that can't call tools natively.
+            if tool_calls.is_empty()
+                && !accumulated_text.is_empty()
+                && std::env::var("ZWORK_TEXT_TOOL_FALLBACK")
+                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false)
+            {
                 if let Some(parsed) = parse_text_tool_calls(&accumulated_text) {
                     tool_calls = parsed;
                 }
@@ -427,155 +545,207 @@ pub fn run_agent_turn(
                 break; // No more tool calls: loop completed
             }
             
-            // Execute tool calls and collect results
-            let mut tool_results = Vec::new();
-            for tc in tool_calls {
+            // Doom Loop Check
+            let mut is_doomed = false;
+            for tc in &tool_calls {
                 let name = tc.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 let params = tc.get("input").cloned().unwrap_or(json!({}));
-                let tc_id = tc.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                if doom_loop_detector.push(name, &params) {
+                    is_doomed = true;
+                    break;
+                }
+            }
 
-                llm_trace(
-                    &chat_id,
-                    turn,
-                    "tool_dispatch",
-                    json!({ "id": tc_id, "name": name, "input": params }),
-                );
+            if is_doomed {
+                let err_msg = "Doom loop detected: consecutive duplicate tool calls. Halting execution.";
+                let _ = tx.send(json!({
+                    "type": "error",
+                    "text": err_msg
+                })).await;
+                break;
+            }
 
-                // Safety permissions gate check
-                let risk = evaluate_tool_risk(name, &params);
-                let mut execute_allowed = true;
+            // Execute tool calls and collect results concurrently
+            let mut tool_results = Vec::new();
+            let accumulated_activities_arc = std::sync::Arc::new(std::sync::Mutex::new(accumulated_activities));
+            let db_lock = std::sync::Arc::new(tokio::sync::Mutex::new(()));
+            
+            let mut tasks = Vec::new();
+            for tc in tool_calls {
+                let name = tc.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let params = tc.get("input").cloned().unwrap_or(json!({}));
+                let tc_id = tc.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 
-                if let Risk::Destructive { reason } = risk {
-                    if !auto_approve {
-                        let gate_id = format!("gate_{}", uuid::Uuid::new_v4().simple());
+                let tx = tx.clone();
+                let accumulated_activities = accumulated_activities_arc.clone();
+                let db_lock = db_lock.clone();
+                let chat_id = chat_id.clone();
+                let assistant_msg_id = assistant_msg_id.clone();
+                let accumulated_text = accumulated_text.clone();
+                let auto_approve = auto_approve;
+                
+                tasks.push(tokio::spawn(async move {
+                    llm_trace(
+                        &chat_id,
+                        turn,
+                        "tool_dispatch",
+                        json!({ "id": tc_id, "name": name, "input": params }),
+                    );
 
-                        // Yield permission request
-                        let _ = tx.send(json!({
-                            "type": "permission",
-                            "tool": name,
-                            "reason": reason,
-                            "blocked": true,
-                            "gate_id": gate_id
-                        })).await;
-                        
-                        let (gate_tx, gate_rx) = oneshot::channel();
-                        {
-                            let mut map = pending_permission_gates().lock().unwrap();
-                            map.insert(gate_id.clone(), gate_tx);
-                        }
-                        
-                        // Wait for user approval, with a long safety timeout so
-                        // an unanswered prompt (UI closed, SSE stream dropped)
-                        // can't hang the agent loop forever. On expiry we
-                        // auto-deny and surface it to the user.
-                        const GATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
-                        match tokio::time::timeout(GATE_TIMEOUT, gate_rx).await {
-                            Ok(Ok(approved)) => {
-                                execute_allowed = approved;
+                    // Safety permissions gate check
+                    let risk = evaluate_tool_risk(&name, &params);
+                    let mut execute_allowed = true;
+                    
+                    if let Risk::Destructive { reason } = risk {
+                        if !auto_approve {
+                            let gate_id = format!("gate_{}", uuid::Uuid::new_v4().simple());
+
+                            // Yield permission request
+                            let _ = tx.send(json!({
+                                "type": "permission",
+                                "tool": name,
+                                "reason": reason,
+                                "blocked": true,
+                                "gate_id": gate_id
+                            })).await;
+                            
+                            let (gate_tx, gate_rx) = oneshot::channel();
+                            {
+                                let mut map = pending_permission_gates().lock().unwrap();
+                                map.insert(gate_id.clone(), gate_tx);
                             }
-                            Ok(Err(_)) => {
-                                // Gate dropped without a decision — deny.
-                                execute_allowed = false;
-                            }
-                            Err(_) => {
-                                let _ = tx.send(json!({
-                                    "type": "status",
-                                    "text": "Permission request timed out after 10 minutes and was auto-denied."
-                                })).await;
-                                execute_allowed = false;
+                            
+                            // Wait for user approval, with a long safety timeout so
+                            // an unanswered prompt (UI closed, SSE stream dropped)
+                            // can't hang the agent loop forever. On expiry we
+                            // auto-deny and surface it to the user.
+                            const GATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+                            match tokio::time::timeout(GATE_TIMEOUT, gate_rx).await {
+                                Ok(Ok(approved)) => {
+                                    execute_allowed = approved;
+                                }
+                                Ok(Err(_)) => {
+                                    // Gate dropped without a decision — deny.
+                                    execute_allowed = false;
+                                }
+                                Err(_) => {
+                                    let _ = tx.send(json!({
+                                        "type": "status",
+                                        "text": "Permission request timed out after 10 minutes and was auto-denied."
+                                    })).await;
+                                    execute_allowed = false;
+                                }
                             }
                         }
                     }
-                }
-                
-                if execute_allowed {
-                    // Stream executing events
-                    let mut tool_stream = execute_tool(name, params, &chat_id);
+                    
                     let mut final_result_txt = String::new();
                     let mut final_result_ok = true;
                     
-                    while let Some(t_evt_res) = tool_stream.next().await {
-                        let t_evt = match t_evt_res {
-                            Ok(e) => e,
-                            Err(_) => continue,
-                        };
-                        let type_str = t_evt.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                        if type_str == "activity" {
-                            // Update activity block
-                            let act_id = t_evt.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                            let act_label = t_evt.get("label").and_then(|v| v.as_str()).unwrap_or("");
-                            let act_done = t_evt.get("done").and_then(|v| v.as_bool()).unwrap_or(false);
-                            
-                            let entry = json!({
-                                "id": act_id,
-                                "label": act_label,
-                                "done": act_done
-                            });
-                            
-                            if let Some(pos) = accumulated_activities.iter().position(|x| x["id"] == act_id) {
-                                accumulated_activities[pos] = entry;
+                    if execute_allowed {
+                        // Stream executing events
+                        let mut tool_stream = execute_tool(&name, params, &chat_id);
+                        
+                        while let Some(t_evt_res) = tool_stream.next().await {
+                            let t_evt = match t_evt_res {
+                                Ok(e) => e,
+                                Err(_) => continue,
+                            };
+                            let type_str = t_evt.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                            if type_str == "activity" {
+                                // Update activity block under mutex
+                                let act_id = t_evt.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                                let act_label = t_evt.get("label").and_then(|v| v.as_str()).unwrap_or("");
+                                let act_done = t_evt.get("done").and_then(|v| v.as_bool()).unwrap_or(false);
+                                
+                                let entry = json!({
+                                    "id": act_id,
+                                    "label": act_label,
+                                    "done": act_done
+                                });
+                                
+                                let current_activities = {
+                                    let mut act_lock = accumulated_activities.lock().unwrap();
+                                    if let Some(pos) = act_lock.iter().position(|x| x["id"] == act_id) {
+                                        act_lock[pos] = entry;
+                                    } else {
+                                        act_lock.push(entry);
+                                    }
+                                    act_lock.clone()
+                                };
+                                
+                                // Serialize database updates using db_lock to avoid SQLite locks
+                                {
+                                    let _guard = db_lock.lock().await;
+                                    let _ = chatstore::update_message(
+                                        &chat_id,
+                                        &assistant_msg_id,
+                                        Some(json!(accumulated_text)),
+                                        Some(current_activities)
+                                    );
+                                }
+                                let _ = tx.send(t_evt).await;
+                            } else if type_str == "tool_result" {
+                                final_result_txt = t_evt.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                final_result_ok = t_evt.get("ok").and_then(|v| v.as_bool()).unwrap_or(true);
+                                let _ = tx.send(t_evt).await;
                             } else {
-                                accumulated_activities.push(entry);
+                                let _ = tx.send(t_evt).await;
                             }
-                            
-                            let _ = chatstore::update_message(
-                                &chat_id,
-                                &assistant_msg_id,
-                                Some(json!(accumulated_text)),
-                                Some(accumulated_activities.clone())
-                            );
-                            let _ = tx.send(t_evt).await;
-                        } else if type_str == "tool_result" {
-                            final_result_txt = t_evt.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                            final_result_ok = t_evt.get("ok").and_then(|v| v.as_bool()).unwrap_or(true);
-                            let _ = tx.send(t_evt).await;
-                        } else {
-                            let _ = tx.send(t_evt).await;
                         }
+
+                        llm_trace(
+                            &chat_id,
+                            turn,
+                            "tool_result",
+                            json!({
+                                "name": name,
+                                "ok": final_result_ok,
+                                "len": final_result_txt.len(),
+                                "preview": final_result_txt.chars().take(200).collect::<String>(),
+                            }),
+                        );
+                    } else {
+                        final_result_txt = "Permission denied by user. Action aborted.".to_string();
+                        final_result_ok = false;
+                        
+                        let _ = tx.send(json!({
+                            "type": "tool_result",
+                            "tool": name,
+                            "ok": false,
+                            "message": final_result_txt
+                        })).await;
+
+                        llm_trace(
+                            &chat_id,
+                            turn,
+                            "tool_result",
+                            json!({ "name": name, "ok": false, "len": final_result_txt.len(), "preview": final_result_txt, "denied": true }),
+                        );
                     }
                     
-                    tool_results.push(json!({
+                    json!({
                         "type": "tool_result",
                         "tool_use_id": tc_id,
                         "content": final_result_txt,
                         "is_error": !final_result_ok
-                    }));
-
-                    llm_trace(
-                        &chat_id,
-                        turn,
-                        "tool_result",
-                        json!({
-                            "name": name,
-                            "ok": final_result_ok,
-                            "len": final_result_txt.len(),
-                            "preview": final_result_txt.chars().take(200).collect::<String>(),
-                        }),
-                    );
-                } else {
-                    let refusal_msg = "Permission denied by user. Action aborted.";
-                    let _ = tx.send(json!({
-                        "type": "tool_result",
-                        "tool": name,
-                        "ok": false,
-                        "message": refusal_msg
-                    })).await;
-                    
-                    tool_results.push(json!({
-                        "type": "tool_result",
-                        "tool_use_id": tc_id,
-                        "content": refusal_msg,
-                        "is_error": true
-                    }));
-
-                    llm_trace(
-                        &chat_id,
-                        turn,
-                        "tool_result",
-                        json!({ "name": name, "ok": false, "len": refusal_msg.len(), "preview": refusal_msg, "denied": true }),
-                    );
+                    })
+                }));
+            }
+            
+            // Await all tasks concurrently
+            let completed_results = futures_util::future::join_all(tasks).await;
+            for res in completed_results {
+                if let Ok(result_val) = res {
+                    tool_results.push(result_val);
                 }
             }
+            
+            // Extract accumulated_activities back to local variable
+            accumulated_activities = {
+                let lock = accumulated_activities_arc.lock().unwrap();
+                lock.clone()
+            };
             
             // Append tool results to history messages for next completion turn
             history_messages.push(json!({
@@ -583,7 +753,14 @@ pub fn run_agent_turn(
                 "content": tool_results
             }));
         }
-        
+
+        if hit_turn_cap {
+            let _ = tx.send(json!({
+                "type": "error",
+                "text": format!("Reached the {}-turn runaway cap and stopped to protect your request quota — the task wasn't converging on its own. Try rephrasing, switching models, or set ZWORK_MAX_TURNS (0 = unbounded).", max_turns)
+            })).await;
+        }
+
         let _ = tx.send(json!({
             "type": "done"
         })).await;
@@ -599,7 +776,7 @@ pub fn run_agent_turn(
 /// Known tool names that the text parser is allowed to match.
 /// Anything else is ignored to prevent false positives from normal English text.
 const KNOWN_TOOLS: &[&str] = &[
-    "read_file", "list_dir", "write_file", "run_command",
+    "read_file", "list_dir", "write_file", "replace_file_content", "grep_search", "run_command",
     "extract_document", "web_search", "search_papers", "format_citation",
     "save_memory", "deploy_web_app", "read_skill", "spawn_agent",
     "ask_question", "ask_user", "ask_user_for_permission", "detect_hardware",
@@ -722,4 +899,175 @@ fn parse_tool_args(args_str: &str) -> Value {
         }
     }
     Value::Object(args)
+}
+
+struct DoomLoopDetector {
+    last_calls: Vec<(String, Value)>,
+}
+
+impl DoomLoopDetector {
+    fn new() -> Self {
+        Self {
+            last_calls: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, name: &str, input: &Value) -> bool {
+        self.last_calls.push((name.to_string(), input.clone()));
+        if self.last_calls.len() > 3 {
+            self.last_calls.remove(0);
+        }
+        if self.last_calls.len() == 3 {
+            let first = &self.last_calls[0];
+            let second = &self.last_calls[1];
+            let third = &self.last_calls[2];
+            if first.0 == second.0 && second.0 == third.0 && first.1 == second.1 && second.1 == third.1 {
+                return true;
+            }
+        }
+        false
+    }
+}
+
+fn repair_history_alternation(messages: &mut Vec<Value>) {
+    if messages.is_empty() {
+        return;
+    }
+    let mut system_messages = Vec::new();
+    let mut conversational = Vec::new();
+    for msg in messages.drain(..) {
+        if msg.get("role").and_then(|r| r.as_str()) == Some("system") {
+            system_messages.push(msg);
+        } else {
+            conversational.push(msg);
+        }
+    }
+    let mut repaired: Vec<Value> = Vec::new();
+    for msg in conversational {
+        let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("user").to_string();
+        let content = msg.get("content").cloned().unwrap_or(json!(""));
+        if let Some(last) = repaired.last_mut() {
+            let last_role = last.get("role").and_then(|r| r.as_str()).unwrap_or("user");
+            if last_role == role {
+                if role == "user" {
+                    let mut merged_arr = Vec::new();
+                    if let Some(arr) = last.get("content").and_then(|c| c.as_array()) {
+                        merged_arr.extend(arr.clone());
+                    } else {
+                        merged_arr.push(json!({
+                            "type": "text",
+                            "text": last.get("content").and_then(|c| c.as_str()).unwrap_or("").to_string()
+                        }));
+                    }
+                    if let Some(arr) = content.as_array() {
+                        merged_arr.extend(arr.clone());
+                    } else {
+                        merged_arr.push(json!({
+                            "type": "text",
+                            "text": content.as_str().unwrap_or("").to_string()
+                        }));
+                    }
+                    last["content"] = json!(merged_arr);
+                } else {
+                    let last_str = last.get("content").and_then(|c| c.as_str()).unwrap_or("").to_string();
+                    let new_str = content.as_str().unwrap_or("").to_string();
+                    last["content"] = json!(format!("{}\n\n{}", last_str, new_str));
+                }
+                continue;
+            }
+        }
+        repaired.push(msg);
+    }
+    messages.extend(system_messages);
+    messages.extend(repaired);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_repair_history_alternation() {
+        let mut messages = vec![
+            json!({
+                "role": "system",
+                "content": "sys-1"
+            }),
+            json!({
+                "role": "user",
+                "content": "user-1"
+            }),
+            json!({
+                "role": "user",
+                "content": "user-2"
+            }),
+            json!({
+                "role": "assistant",
+                "content": "assistant-1"
+            }),
+            json!({
+                "role": "assistant",
+                "content": "assistant-2"
+            }),
+            json!({
+                "role": "user",
+                "content": "user-3"
+            }),
+        ];
+
+        repair_history_alternation(&mut messages);
+
+        assert_eq!(messages.len(), 4);
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(messages[1]["role"], "user");
+        assert_eq!(messages[2]["role"], "assistant");
+        assert_eq!(messages[3]["role"], "user");
+
+        // The user messages should be merged as content array blocks:
+        let user1_2_content = &messages[1]["content"];
+        assert!(user1_2_content.is_array());
+        assert_eq!(user1_2_content[0]["text"], "user-1");
+        assert_eq!(user1_2_content[1]["text"], "user-2");
+
+        // The assistant messages should be merged as a single text:
+        let assistant_content = messages[2]["content"].as_str().unwrap();
+        assert!(assistant_content.contains("assistant-1"));
+        assert!(assistant_content.contains("assistant-2"));
+    }
+
+    #[test]
+    fn test_doom_loop_detector() {
+        let mut detector = DoomLoopDetector::new();
+        
+        // Push different calls
+        assert!(!detector.push("read_file", &json!({"path": "a.rs"})));
+        assert!(!detector.push("read_file", &json!({"path": "b.rs"})));
+        assert!(!detector.push("read_file", &json!({"path": "a.rs"})));
+        
+        // Push duplicate calls consecutively
+        let mut detector = DoomLoopDetector::new();
+        assert!(!detector.push("read_file", &json!({"path": "a.rs"})));
+        assert!(!detector.push("read_file", &json!({"path": "a.rs"})));
+        // The third duplicate call must trigger a doom loop!
+        assert!(detector.push("read_file", &json!({"path": "a.rs"})));
+    }
+
+    /// Regression guard for the catastrophic loop that burned a user's quota.
+    /// `parse_text_tool_calls` WILL scrape a tool name out of the model's prose
+    /// narration — which is exactly why the agent loop gates it behind
+    /// ZWORK_TEXT_TOOL_FALLBACK (default OFF). This test documents the danger:
+    /// given innocent narration containing `browser_snapshot()`, the parser
+    /// fabricates a tool call. If this ever stops fabricating, the gate can be
+    /// reconsidered; until then the gate MUST stay default-off.
+    #[test]
+    fn test_text_parser_fabricates_from_prose() {
+        let prose = "Let me look at the page. I'll call browser_snapshot() \
+                     first to see what's there, then decide what to click.";
+        let parsed = parse_text_tool_calls(prose).expect("parser should match the bare call");
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0]["name"], "browser_snapshot");
+        // Fabricated id, not a real provider tool_use id:
+        assert!(parsed[0]["id"].as_str().unwrap().starts_with("text_tc_"));
+    }
 }

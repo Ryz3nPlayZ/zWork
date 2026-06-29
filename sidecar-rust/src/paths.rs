@@ -23,6 +23,7 @@ pub fn chats_dir() -> PathBuf {
     d
 }
 
+#[allow(dead_code)]
 pub fn runs_dir() -> PathBuf {
     let d = home_dir().join("runs");
     let _ = std::fs::create_dir_all(&d);
@@ -74,6 +75,7 @@ pub fn memory_md_path() -> PathBuf {
     memories_dir().join("MEMORY.md")
 }
 
+#[allow(dead_code)]
 pub fn timeline_md_path() -> PathBuf {
     memories_dir().join("TIMELINE.md")
 }

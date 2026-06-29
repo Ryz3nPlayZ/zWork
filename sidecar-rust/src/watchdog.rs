@@ -24,11 +24,13 @@ pub fn unregister_process(chat_id: &str, pid: u32) {
     }
 }
 
+#[allow(dead_code)]
 pub fn register_canceller(chat_id: &str, tx: oneshot::Sender<()>) {
     let mut map = active_cancellers().lock().unwrap();
     map.insert(chat_id.to_string(), tx);
 }
 
+#[allow(dead_code)]
 pub fn unregister_canceller(chat_id: &str) {
     let mut map = active_cancellers().lock().unwrap();
     map.remove(chat_id);

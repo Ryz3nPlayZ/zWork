@@ -151,6 +151,7 @@ pub fn append(target: MemoryTarget, content: &str) -> Result<String, String> {
 }
 
 /// Replace the first entry that contains `substring` with `content`.
+#[allow(dead_code)]
 pub fn replace(target: MemoryTarget, substring: &str, content: &str) -> Result<String, String> {
     let content = content.trim();
     if content.is_empty() {
@@ -185,6 +186,7 @@ pub fn replace(target: MemoryTarget, substring: &str, content: &str) -> Result<S
 }
 
 /// Remove the first entry that contains `substring`.
+#[allow(dead_code)]
 pub fn remove(target: MemoryTarget, substring: &str) -> Result<String, String> {
     let path = target.path();
     let mut entries = read_entries(&path);
@@ -208,6 +210,7 @@ pub fn remove(target: MemoryTarget, substring: &str) -> Result<String, String> {
 }
 
 /// Read all entries from the target memory file.
+#[allow(dead_code)]
 pub fn read(target: MemoryTarget) -> String {
     let entries = read_entries(&target.path());
     if entries.is_empty() {

@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
 use std::time::Duration;
-use futures_util::future::join_all;
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct PaperResult {
@@ -331,7 +329,7 @@ fn format_authors_apa(authors: &[String]) -> String {
         let last = formatted.pop().unwrap();
         return format!("{}, & {}", formatted.join(", "), last);
     }
-    let mut formatted: Vec<String> = authors.iter().take(6).map(|a| format_one(a)).collect();
+    let formatted: Vec<String> = authors.iter().take(6).map(|a| format_one(a)).collect();
     let last = format_one(authors.last().unwrap());
     format!("{}, ... {}", formatted.join(", "), last)
 }

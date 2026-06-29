@@ -95,6 +95,20 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
             }
         }),
         json!({
+            "name": "grep_search",
+            "description": "Search recursively inside a directory for matching queries. Returns paths, line numbers, and matching line content.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "The query string or regex pattern to search for" },
+                    "path": { "type": "string", "description": "Search directory path (default: '.')" },
+                    "is_regex": { "type": "boolean", "description": "Treat query as regex (default: false)" },
+                    "case_insensitive": { "type": "boolean", "description": "Perform case-insensitive search (default: false)" }
+                },
+                "required": ["query"]
+            }
+        }),
+        json!({
             "name": "web_search",
             "description": "Search the web/news for current information without opening a browser.",
             "parameters": {
@@ -250,6 +264,21 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
                     "content": { "type": "string", "description": "Full content" }
                 },
                 "required": ["path", "content"]
+            }
+        }));
+        schemas.push(json!({
+            "name": "replace_file_content",
+            "description": "Replace a target substring in a file with a replacement substring. Use start_line and end_line if the target content matches multiple lines in the file.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Relative or absolute file path" },
+                    "target_content": { "type": "string", "description": "The exact string block to replace" },
+                    "replacement_content": { "type": "string", "description": "The new string block to replace the target block with" },
+                    "start_line": { "type": "integer", "description": "Optional 1-based starting line range" },
+                    "end_line": { "type": "integer", "description": "Optional 1-based ending line range" }
+                },
+                "required": ["path", "target_content", "replacement_content"]
             }
         }));
         schemas.push(json!({
@@ -564,6 +593,8 @@ pub fn execute_tool(
         let result = match name.as_str() {
             "read_file" => fs::execute_read_file(&params).await,
             "write_file" => fs::execute_write_file(&params).await,
+            "replace_file_content" => fs::execute_replace_file_content(&params).await,
+            "grep_search" => fs::execute_grep_search(&params).await,
             "list_dir" => fs::execute_list_dir(&params).await,
             "run_command" => shell::execute_run_command(&params, &chat_id, &tx).await,
             "web_search" => search::execute_web_search(&params).await,

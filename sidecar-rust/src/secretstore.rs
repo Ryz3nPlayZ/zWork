@@ -41,6 +41,7 @@ fn write_secrets(keys: HashMap<String, String>) {
     }
 }
 
+#[allow(dead_code)]
 pub fn get_api_key(credential: &str) -> String {
     if credential.is_empty() {
         return String::new();
@@ -61,6 +62,7 @@ pub fn set_api_key(credential: &str, value: &str) {
     write_secrets(current);
 }
 
+#[allow(dead_code)]
 pub fn delete_api_key(credential: &str) {
     set_api_key(credential, "");
 }

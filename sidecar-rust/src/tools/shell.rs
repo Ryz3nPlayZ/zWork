@@ -5,8 +5,6 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use crate::watchdog::{register_process, unregister_process};
 
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
 
 pub async fn execute_run_command(
     params: &Value,

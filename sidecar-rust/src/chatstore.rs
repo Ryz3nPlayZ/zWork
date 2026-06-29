@@ -133,6 +133,7 @@ pub fn delete(chat_id: &str) -> bool {
     }
 }
 
+#[allow(dead_code)]
 pub fn rename(chat_id: &str, title: &str) -> Option<Chat> {
     let mut c = get(chat_id)?;
     c.title = title.to_string();
@@ -234,6 +235,7 @@ pub fn update_message(
     updated
 }
 
+#[allow(dead_code)]
 pub fn set_project(chat_id: &str, project_id: &str) -> Option<Chat> {
     let mut c = get(chat_id)?;
     c.project_id = project_id.to_string();
@@ -242,6 +244,7 @@ pub fn set_project(chat_id: &str, project_id: &str) -> Option<Chat> {
     Some(c)
 }
 
+#[allow(dead_code)]
 pub fn set_compaction(chat_id: &str, summary: &str, cursor: u64) -> Option<Chat> {
     let mut c = get(chat_id)?;
     c.compacted_summary = summary.to_string();
