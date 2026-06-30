@@ -12,6 +12,7 @@
 //!      [`LlmEvent::ProviderError`], never a phantom empty-args call.
 
 use serde_json::Value;
+use std::collections::HashMap;
 
 use super::event::{FinishReason, LlmEvent, Usage};
 use super::tool_stream::{FinishedTool, ToolParseError, ToolStream};
@@ -25,6 +26,20 @@ pub struct OpenAIChatParser {
     finish_reason: Option<FinishReason>,
     had_tool_calls: bool,
     finalized: bool,
+    /// Maps the provider's stream-local `tool_calls[].index` to the internal
+    /// accumulator key we allocated for it, plus the last tool-call `id` seen
+    /// at that index. The standard OpenAI contract uses a distinct `index` per
+    /// tool call (id/name appear only on the first delta for that index), so
+    /// keying by `index` alone is correct. But some OpenAI-compatible providers
+    /// — DeepSeek among them — stream each tool call as its own delta carrying
+    /// a fresh `id` while omitting `index` (every delta then defaults to index
+    /// 0). Keying purely by `index` would funnel all those calls into one
+    /// accumulator bucket and concatenate their arguments
+    /// (`{"element_id":4}{"element_id":8}…`), which then fails to parse. We
+    /// therefore treat a delta that carries a NEW `id` at an already-seen
+    /// index as the start of a brand-new tool call and allocate a fresh key.
+    index_to_key: HashMap<usize, (usize, String)>,
+    next_key: usize,
 }
 
 impl OpenAIChatParser {
@@ -35,6 +50,8 @@ impl OpenAIChatParser {
             finish_reason: None,
             had_tool_calls: false,
             finalized: false,
+            index_to_key: HashMap::new(),
+            next_key: 0,
         }
     }
 }
@@ -109,7 +126,37 @@ impl ProtocolParser for OpenAIChatParser {
                     .and_then(|f| f.get("arguments"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                if let Err(e) = self.tools.append_or_start(ROUTE, idx, id, name, args) {
+
+                // Resolve the accumulator key (see `index_to_key` doc). A new
+                // `id` at an already-seen index means a new tool call reusing
+                // that index — split it into its own bucket. An arg-only delta
+                // (no id) routes to whatever call currently owns that index.
+                let key = match (id, self.index_to_key.get(&idx)) {
+                    (Some(new_id), Some((_prev_key, prev_id))) if prev_id != new_id => {
+                        let k = self.next_key;
+                        self.next_key += 1;
+                        self.index_to_key.insert(idx, (k, new_id.to_string()));
+                        k
+                    }
+                    (Some(new_id), None) => {
+                        let k = self.next_key;
+                        self.next_key += 1;
+                        self.index_to_key.insert(idx, (k, new_id.to_string()));
+                        k
+                    }
+                    (_, Some((prev_key, _))) => *prev_key,
+                    (None, None) => {
+                        // Args/fragment with no prior start at this index:
+                        // allocate a fresh key so append_or_start emits the loud
+                        // "missing id" error rather than colliding with an
+                        // existing bucket.
+                        let k = self.next_key;
+                        self.next_key += 1;
+                        k
+                    }
+                };
+
+                if let Err(e) = self.tools.append_or_start(ROUTE, key, id, name, args) {
                     out.push(parse_error_to_event(e));
                     return out;
                 }
@@ -199,5 +246,91 @@ fn parse_error_to_event(e: ToolParseError) -> LlmEvent {
     LlmEvent::ProviderError {
         message: e.message,
         raw: Some(e.raw),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Build one streamed chunk carrying a single `tool_calls` delta.
+    fn tc_chunk(index: Option<u64>, id: Option<&str>, name: Option<&str>, args: &str) -> Value {
+        let mut func = json!({ "arguments": args });
+        if let Some(n) = name {
+            func["name"] = json!(n);
+        }
+        let mut tc = json!({});
+        if let Some(i) = index {
+            tc["index"] = json!(i);
+        }
+        if let Some(i) = id {
+            tc["id"] = json!(i);
+        }
+        tc["function"] = func;
+        json!({ "choices": [{ "delta": { "tool_calls": [tc] } }] })
+    }
+
+    fn terminal(reason: &str) -> Value {
+        json!({ "choices": [{ "delta": {}, "finish_reason": reason }] })
+    }
+
+    fn tool_calls(events: Vec<LlmEvent>) -> Vec<(String, String, Value)> {
+        events
+            .into_iter()
+            .filter_map(|e| match e {
+                LlmEvent::ToolCall { id, name, input } => Some((id, name, input)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The bug: DeepSeek streams each tool call as its own delta with a fresh
+    /// `id` but the SAME `index` (0). They must NOT be concatenated.
+    #[test]
+    fn deepseek_multi_call_same_index_stays_separate() {
+        let mut p = OpenAIChatParser::new();
+        let _ = p.step(tc_chunk(Some(0), Some("call_A"), Some("browser_click"), r#"{"element_id":4}"#));
+        let _ = p.step(tc_chunk(Some(0), Some("call_B"), Some("browser_click"), r#"{"element_id":8}"#));
+        let _ = p.step(tc_chunk(Some(0), Some("call_C"), Some("browser_click"), r#"{"element_id":10}"#));
+        let events = p.step(terminal("tool_calls"));
+        let calls = tool_calls(events);
+
+        assert_eq!(calls.len(), 3, "three calls must stay separate, not concatenated");
+        assert_eq!(calls[0].0, "call_A");
+        assert_eq!(calls[0].2["element_id"], 4);
+        assert_eq!(calls[1].0, "call_B");
+        assert_eq!(calls[1].2["element_id"], 8);
+        assert_eq!(calls[2].0, "call_C");
+        assert_eq!(calls[2].2["element_id"], 10);
+    }
+
+    /// Same, but `index` omitted entirely (also observed from providers that
+    /// default every delta to index 0).
+    #[test]
+    fn deepseek_multi_call_no_index_stays_separate() {
+        let mut p = OpenAIChatParser::new();
+        let _ = p.step(tc_chunk(None, Some("call_A"), Some("browser_click"), r#"{"element_id":4}"#));
+        let _ = p.step(tc_chunk(None, Some("call_B"), Some("browser_click"), r#"{"element_id":8}"#));
+        let events = p.step(terminal("tool_calls"));
+        assert_eq!(tool_calls(events).len(), 2);
+    }
+
+    /// Regression guard for the standard OpenAI contract: distinct indices,
+    /// id/name only on the first delta, args streamed as fragments.
+    #[test]
+    fn standard_openai_fragmented_args_assemble() {
+        let mut p = OpenAIChatParser::new();
+        let _ = p.step(tc_chunk(Some(0), Some("call_A"), Some("read_file"), ""));
+        let _ = p.step(tc_chunk(Some(0), None, None, r#"{"path":"a"#));
+        let _ = p.step(tc_chunk(Some(0), None, None, r#".rs"}"#));
+        let _ = p.step(tc_chunk(Some(1), Some("call_B"), Some("read_file"), ""));
+        let _ = p.step(tc_chunk(Some(1), None, None, r#"{"path":"b.rs"}"#));
+        let events = p.step(terminal("tool_calls"));
+        let calls = tool_calls(events);
+
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].2["path"], "a.rs");
+        assert_eq!(calls[1].2["path"], "b.rs");
     }
 }
