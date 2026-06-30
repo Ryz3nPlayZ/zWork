@@ -369,12 +369,20 @@ pub fn run_agent_turn(
             // into one message so the model never hits its context ceiling.
             // No-op below the threshold; a summarization failure is logged and
             // never aborts the turn (the model still gets the full history).
+            //
+            // Summarization always runs on the cheap tier of the main model's
+            // provider (flash/haiku/mini) — NOT the model driving the chat — so
+            // this background chore can't burn the expensive model's quota. The
+            // endpoint/headers are provider-level (one key serves every model on
+            // that base_url), so only the model id changes.
+            let compaction_model =
+                compaction::compaction_model_id(&shape, &real_model_id);
             if let Err(e) = compaction::compact_conversation_history(
                 &mut history_messages,
                 &endpoint,
                 &headers,
                 &shape,
-                &real_model_id,
+                &compaction_model,
             )
             .await
             {
