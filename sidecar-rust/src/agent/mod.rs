@@ -364,6 +364,23 @@ pub fn run_agent_turn(
             // model from acting on a stale index.
             compaction::evict_stale_bulky_results(&mut history_messages);
 
+            // Opportunistic summarization compaction: once the conversation
+            // crosses ~200k tokens (800k chars), summarize the middle history
+            // into one message so the model never hits its context ceiling.
+            // No-op below the threshold; a summarization failure is logged and
+            // never aborts the turn (the model still gets the full history).
+            if let Err(e) = compaction::compact_conversation_history(
+                &mut history_messages,
+                &endpoint,
+                &headers,
+                &shape,
+                &real_model_id,
+            )
+            .await
+            {
+                llm_trace(&chat_id, turn, "compaction_error", json!({ "error": e }));
+            }
+
             // Format messages and tools payload
             let (system, convo) = convert_input_messages(&history_messages);
             
@@ -521,28 +538,14 @@ pub fn run_agent_turn(
                 "content": assistant_content_blocks
             }));
 
-            // Text-parsed tool calls are a FALLBACK for providers that genuinely
-            // lack the `tools` API. Every provider zWork ships (DeepSeek,
-            // Anthropic, OpenAI-shape) emits structured tool calls — and
-            // scraping a tool name out of the model's PROSE narration turns
-            // innocent text ("I'll grab a browser_snapshot first") into a
-            // phantom tool call that loops forever: one real run executed
-            // browser_snapshot 190× in a row until the request quota 429'd.
-            // Default OFF; opt in with ZWORK_TEXT_TOOL_FALLBACK=1 for a
-            // raw-completion model that can't call tools natively.
-            if tool_calls.is_empty()
-                && !accumulated_text.is_empty()
-                && std::env::var("ZWORK_TEXT_TOOL_FALLBACK")
-                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                    .unwrap_or(false)
-            {
-                if let Some(parsed) = parse_text_tool_calls(&accumulated_text) {
-                    tool_calls = parsed;
-                }
-            }
-
+            // Tool calls arrive ONLY as structured `LlmEvent::ToolCall` events,
+            // assembled complete by the unified streaming layer (see `llm/`).
+            // There is no prose-scraping fallback: a tool name can never be
+            // invented from the model's narration, so the phantom-tool-loop
+            // class (browser_snapshot ×190 → quota 429) is structurally
+            // impossible. No tool calls this turn ⇒ the task is done.
             if tool_calls.is_empty() {
-                break; // No more tool calls: loop completed
+                break;
             }
             
             // Doom Loop Check
@@ -773,134 +776,6 @@ pub fn run_agent_turn(
     ReceiverStream::new(rx).map(Ok)
 }
 
-/// Known tool names that the text parser is allowed to match.
-/// Anything else is ignored to prevent false positives from normal English text.
-const KNOWN_TOOLS: &[&str] = &[
-    "read_file", "list_dir", "write_file", "replace_file_content", "grep_search", "run_command",
-    "extract_document", "web_search", "search_papers", "format_citation",
-    "save_memory", "deploy_web_app", "read_skill", "spawn_agent",
-    "ask_question", "ask_user", "ask_user_for_permission", "detect_hardware",
-    "manage_tasks", "manage_events", "get_stock_data",
-    "desktop_capture", "desktop_click", "desktop_type", "desktop_set_value",
-    "desktop_scroll", "desktop_key", "desktop_launch_app", "desktop_list_apps",
-    "desktop_wait", "desktop_start_session", "desktop_end_session",
-    "browser_navigate", "browser_snapshot", "browser_click", "browser_type",
-    "browser_eval", "browser_scroll", "browser_screenshot", "browser_tabs",
-];
-
-/// Parse tool calls that a model outputted as plain text instead of
-/// structured tool_use blocks. Handles patterns like:
-///   ```json\n{"name": "read_file", "arguments": {"path": "foo.rs"}}\n```
-///   read_file(path="foo.rs")
-///
-/// STRICT mode: only matches known tool names, caps at 3 calls max,
-/// and requires arguments to contain key=value or JSON syntax.
-fn parse_text_tool_calls(text: &str) -> Option<Vec<Value>> {
-    let mut calls = Vec::new();
-
-    // Pattern 1: JSON code blocks with "name" field referencing a known tool
-    // e.g. ```json\n{"name": "read_file", "arguments": {"path": "foo.rs"}}\n```
-    if let Some(start) = text.find("```json") {
-        if let Some(end) = text[start + 7..].find("```") {
-            let json_str = &text[start + 7..start + 7 + end];
-            if let Ok(parsed) = serde_json::from_str::<Value>(json_str.trim()) {
-                let name = parsed.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                if KNOWN_TOOLS.contains(&name) {
-                    let args = parsed.get("arguments")
-                        .or_else(|| parsed.get("parameters"))
-                        .cloned()
-                        .unwrap_or(json!({}));
-                    calls.push(json!({
-                        "id": format!("text_tc_{}", calls.len()),
-                        "name": name,
-                        "input": args
-                    }));
-                }
-            }
-        }
-    }
-
-    // Pattern 2: bare function_call syntax BUT only for known tool names.
-    // Matches: tool_name(key="value", ...) or tool_name({"json": "args"})
-    for tool_name in KNOWN_TOOLS {
-        if calls.len() >= 3 { break; } // Cap at 3 text-parsed calls
-        // Look for `tool_name(` in the text — the opening paren after the exact tool name
-        let needle = format!("{}(", tool_name);
-        let mut search_from = 0;
-        while let Some(pos) = text[search_from..].find(&needle) {
-            if calls.len() >= 3 { break; }
-            let abs_pos = search_from + pos;
-            // Make sure it's not part of a longer word (e.g. "deploy_web_app" shouldn't match inside "my_deploy_web_app")
-            if abs_pos > 0 {
-                let prev_char = text.as_bytes()[abs_pos - 1];
-                if prev_char.is_ascii_alphanumeric() || prev_char == b'_' {
-                    search_from = abs_pos + needle.len();
-                    continue;
-                }
-            }
-            // Extract the content between the parentheses (balanced)
-            let open_paren = abs_pos + tool_name.len();
-            if let Some((args_str, _end)) = extract_balanced_parens(text, open_paren) {
-                let args = parse_tool_args(&args_str);
-                calls.push(json!({
-                    "id": format!("text_tc_{}", calls.len()),
-                    "name": tool_name,
-                    "input": args
-                }));
-            }
-            search_from = abs_pos + needle.len();
-        }
-    }
-
-    if calls.is_empty() { None } else { Some(calls) }
-}
-
-/// Extract balanced parenthesized content starting at `start` (which should point to '(').
-/// Returns the inner content and the position after the closing ')'.
-fn extract_balanced_parens(text: &str, start: usize) -> Option<(String, usize)> {
-    let bytes = text.as_bytes();
-    if start >= bytes.len() || bytes[start] != b'(' { return None; }
-    let mut depth = 1;
-    let mut i = start + 1;
-    let mut inner = String::new();
-    while i < bytes.len() && depth > 0 {
-        let ch = bytes[i];
-        if ch == b'(' { depth += 1; }
-        else if ch == b')' { depth -= 1; }
-        if depth > 0 { inner.push(ch as char); }
-        i += 1;
-    }
-    if depth == 0 { Some((inner, i)) } else { None }
-}
-
-/// Parse tool arguments from a string like `key="value", key2="value2"` or JSON.
-fn parse_tool_args(args_str: &str) -> Value {
-    let trimmed = args_str.trim();
-
-    // Try JSON first
-    if trimmed.starts_with('{') {
-        if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
-            return parsed;
-        }
-    }
-
-    // Fall back to key=value pair parsing
-    let mut args = serde_json::Map::new();
-    for pair in trimmed.split(',') {
-        let pair = pair.trim();
-        if let Some(eq) = pair.find('=') {
-            let key = pair[..eq].trim().trim_matches('"').trim();
-            let val = pair[eq + 1..].trim()
-                .trim_matches('"')
-                .to_string();
-            if !key.is_empty() {
-                args.insert(key.to_string(), json!(val));
-            }
-        }
-    }
-    Value::Object(args)
-}
-
 struct DoomLoopDetector {
     last_calls: Vec<(String, Value)>,
 }
@@ -1051,23 +926,5 @@ mod tests {
         assert!(!detector.push("read_file", &json!({"path": "a.rs"})));
         // The third duplicate call must trigger a doom loop!
         assert!(detector.push("read_file", &json!({"path": "a.rs"})));
-    }
-
-    /// Regression guard for the catastrophic loop that burned a user's quota.
-    /// `parse_text_tool_calls` WILL scrape a tool name out of the model's prose
-    /// narration — which is exactly why the agent loop gates it behind
-    /// ZWORK_TEXT_TOOL_FALLBACK (default OFF). This test documents the danger:
-    /// given innocent narration containing `browser_snapshot()`, the parser
-    /// fabricates a tool call. If this ever stops fabricating, the gate can be
-    /// reconsidered; until then the gate MUST stay default-off.
-    #[test]
-    fn test_text_parser_fabricates_from_prose() {
-        let prose = "Let me look at the page. I'll call browser_snapshot() \
-                     first to see what's there, then decide what to click.";
-        let parsed = parse_text_tool_calls(prose).expect("parser should match the bare call");
-        assert_eq!(parsed.len(), 1);
-        assert_eq!(parsed[0]["name"], "browser_snapshot");
-        // Fabricated id, not a real provider tool_use id:
-        assert!(parsed[0]["id"].as_str().unwrap().starts_with("text_tc_"));
     }
 }

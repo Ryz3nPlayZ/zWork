@@ -1,4 +1,4 @@
-use serde_json::Value;
+use serde_json::{json, Value};
 
 /// Tool results bigger than this (chars) are treated as bulky captures /
 /// snapshots and evicted from history once a fresher one exists. AX trees and
@@ -14,11 +14,6 @@ const LARGE_RESULT_THRESHOLD: usize = 2_000;
 /// preserved verbatim so working memory survives. The matching `tool_use_id`
 /// is left intact, so the assistant/tool_result pairing required by the
 /// Anthropic API stays valid.
-///
-/// This is cost + latency hygiene, not context survival. The model has a
-/// 1M-token window and captures will not come close to exhausting it; but they
-/// make every subsequent turn slower and more expensive, and a stale index
-/// could mislead the model into clicking the wrong element.
 pub fn evict_stale_bulky_results(history: &mut Vec<Value>) {
     let last_user_idx = history
         .iter()
@@ -63,5 +58,245 @@ pub fn evict_stale_bulky_results(history: &mut Vec<Value>) {
 
     if evicted > 0 {
         tracing::debug!("[compaction] evicted {evicted} bulky prior tool result(s)");
+    }
+}
+
+/// Compact conversation history if it grows too large.
+/// Format the history from index 1 to history.len() - 3, send a request to the LLM to
+/// summarize it, and replace that chunk with a single summary message.
+pub async fn compact_conversation_history(
+    history: &mut Vec<Value>,
+    endpoint: &str,
+    headers: &reqwest::header::HeaderMap,
+    shape: &str,
+    model_id: &str,
+) -> Result<(), String> {
+    let total_chars: usize = history
+        .iter()
+        .map(|m| m.get("content").map(|c| c.to_string().len()).unwrap_or(0))
+        .sum();
+
+    // Trigger compaction if character count exceeds 800,000 characters (~200,000 tokens)
+    // and there are enough messages to compact. We want to preserve system prompt (index 0)
+    // and at least the last 3 messages (to preserve immediate conversational context).
+    if total_chars <= 800_000 || history.len() <= 4 {
+        return Ok(());
+    }
+
+    tracing::info!("[compaction] history has {total_chars} chars, triggering compaction pass");
+
+    let end_idx = history.len() - 3;
+    let messages_to_compact = &history[1..end_idx];
+
+    let mut text_to_summarize = String::new();
+    for m in messages_to_compact {
+        let role = m.get("role").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let content_val = m.get("content").unwrap_or(&Value::Null);
+        
+        let content_str = match content_val {
+            Value::String(s) => s.clone(),
+            Value::Array(arr) => arr
+                .iter()
+                .filter_map(|item| {
+                    if let Some(txt) = item.get("text").and_then(|v| v.as_str()) {
+                        Some(txt.to_string())
+                    } else if item.get("type").and_then(|v| v.as_str()) == Some("tool_result") {
+                        let tool_name = item.get("tool_use_id").and_then(|v| v.as_str()).unwrap_or("tool");
+                        let res_content = item.get("content").unwrap_or(&Value::Null);
+                        let res_str = match res_content {
+                            Value::String(s) => s.clone(),
+                            other => other.to_string(),
+                        };
+                        let preview: String = res_str.chars().take(200).collect();
+                        Some(format!("Tool result [{}]: {}...", tool_name, preview))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            other => other.to_string(),
+        };
+
+        text_to_summarize.push_str(&format!("{}: {}\n\n", role.to_uppercase(), content_str));
+    }
+
+    let client = reqwest::Client::new();
+    let body = if shape == "anthropic" {
+        json!({
+            "model": model_id,
+            "max_tokens": 1000,
+            "system": "You are a concise context compaction engine. Summarize the conversation history.",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": format!(
+                        "Summarize the following conversation history concisely. Highlight key actions taken, file changes made, current status, and outstanding goals. Keep the summary under 500 words.\n\n### HISTORY:\n{}",
+                        text_to_summarize
+                    )
+                }
+            ],
+            "stream": false
+        })
+    } else {
+        json!({
+            "model": model_id,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a concise context compaction engine. Summarize the conversation history."
+                },
+                {
+                    "role": "user",
+                    "content": format!(
+                        "Summarize the following conversation history concisely. Highlight key actions taken, file changes made, current status, and outstanding goals. Keep the summary under 500 words.\n\n### HISTORY:\n{}",
+                        text_to_summarize
+                    )
+                }
+            ],
+            "stream": false
+        })
+    };
+
+    let resp = client
+        .post(endpoint)
+        .headers(headers.clone())
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to request summarization: {e}"))?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let err_txt = resp.text().await.unwrap_or_default();
+        return Err(format!("Summarization request failed with status {status}: {err_txt}"));
+    }
+
+    let resp_json: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse summarization JSON: {e}"))?;
+
+    let summary = if shape == "anthropic" {
+        resp_json
+            .get("content")
+            .and_then(|v| v.as_array())
+            .and_then(|a| a.first())
+            .and_then(|f| f.get("text"))
+            .and_then(|t| t.as_str())
+            .ok_or_else(|| format!("Invalid Anthropic response structure: {resp_json}"))?
+            .to_string()
+    } else {
+        resp_json
+            .get("choices")
+            .and_then(|v| v.as_array())
+            .and_then(|a| a.first())
+            .and_then(|f| f.get("message"))
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .ok_or_else(|| format!("Invalid OpenAI response structure: {resp_json}"))?
+            .to_string()
+    };
+
+    let summary_msg = json!({
+        "role": "user",
+        "content": format!(
+            "[Your context was compacted. Here is a summary of the conversation history so far:\n\n{}\n\nDo not mention that you read a summary. Just continue naturally.]",
+            summary
+        )
+    });
+
+    history.drain(1..end_idx);
+    history.insert(1, summary_msg);
+
+    tracing::info!("[compaction] successfully compacted conversation history");
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{routing::post, Json, Router};
+    use reqwest::header::HeaderMap;
+
+    #[tokio::test]
+    async fn test_compaction_flow() {
+        let app = Router::new().route(
+            "/chat/completions",
+            post(|Json(payload): Json<Value>| async move {
+                let messages = payload.get("messages").unwrap().as_array().unwrap();
+                assert_eq!(messages[0]["role"], "system");
+                assert!(messages[1]["content"].as_str().unwrap().contains("Pele: uma lenda do futebol"));
+
+                Json(json!({
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "This is a summary of Pele."
+                            }
+                        }
+                    ]
+                }))
+            }),
+        );
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        let bulky_text = "A".repeat(850_000);
+        let mut history = vec![
+            json!({
+                "role": "system",
+                "content": "System Prompt"
+            }),
+            json!({
+                "role": "user",
+                "content": format!("Pele: uma lenda do futebol. {}", bulky_text)
+            }),
+            json!({
+                "role": "assistant",
+                "content": "Pele was a legendary player."
+            }),
+            json!({
+                "role": "user",
+                "content": "This is message 3."
+            }),
+            json!({
+                "role": "assistant",
+                "content": "This is message 4."
+            }),
+            json!({
+                "role": "user",
+                "content": "Tell me more about Pelé."
+            }),
+        ];
+
+        let endpoint = format!("http://{}/chat/completions", addr);
+        let headers = HeaderMap::new();
+
+        let res = compact_conversation_history(
+            &mut history,
+            &endpoint,
+            &headers,
+            "openai",
+            "mock-model",
+        ).await;
+
+        assert!(res.is_ok());
+        assert_eq!(history.len(), 5);
+        assert_eq!(history[0]["role"], "system");
+        assert_eq!(history[1]["role"], "user");
+        assert!(history[1]["content"].as_str().unwrap().contains("This is a summary of Pele."));
+        assert_eq!(history[2]["role"], "user");
+        assert_eq!(history[2]["content"], "This is message 3.");
+        assert_eq!(history[3]["role"], "assistant");
+        assert_eq!(history[3]["content"], "This is message 4.");
+        assert_eq!(history[4]["role"], "user");
+        assert_eq!(history[4]["content"], "Tell me more about Pelé.");
     }
 }
