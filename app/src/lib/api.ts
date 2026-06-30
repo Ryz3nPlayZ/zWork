@@ -750,17 +750,39 @@ async function streamChatWeb(
     : "";
 
   const isPro = body.model === "zwork-pro";
-  const resolvedModel = isPro ? "deepseek-v4-pro" : "deepseek-v4-flash";
-  const anthropicBody = {
-    model: resolvedModel,
-    system: `You are zWork, an action-oriented AI work assistant created by Zemu Liu. Respond in the same language the user writes in. Be concise, direct, and helpful. If the user writes in English, respond in English. Under the hood you are ${resolvedModel} from DeepSeek.`,
-    messages: [{ role: "user" as const, content: body.message }],
-    stream: true,
-    max_tokens: 16384,
-  };
+  const isVision = body.model === "zwork-vision";
+  const resolvedModel = isPro ? "deepseek-v4-pro" : isVision ? "zwork-vision" : "deepseek-v4-flash";
+  const useOpenAi = isVision;
 
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (cloudToken) headers["authorization"] = `Bearer ${cloudToken}`;
+
+  const userContent = isVision && body.attachments?.length
+    ? [
+        { type: "text" as const, text: body.message },
+        ...body.attachments
+          .filter((a) => a.mime.startsWith("image/"))
+          .map((a) => ({
+            type: "image_url" as const,
+            image_url: { url: a.path },
+          })),
+      ]
+    : body.message;
+
+  const upstreamBody = useOpenAi
+    ? {
+        model: resolvedModel,
+        messages: [{ role: "user" as const, content: userContent }],
+        stream: true,
+        max_tokens: 16384,
+      }
+    : {
+        model: resolvedModel,
+        system: `You are zWork, an action-oriented AI work assistant created by Zemu Liu. Respond in the same language the user writes in. Be concise, direct, and helpful. If the user writes in English, respond in English. Under the hood you are ${resolvedModel} from DeepSeek.`,
+        messages: [{ role: "user" as const, content: body.message }],
+        stream: true,
+        max_tokens: 16384,
+      };
 
   // Create or reuse a server-side web chat for persistence
   let serverChatId = body.chat_id;
@@ -789,10 +811,11 @@ async function streamChatWeb(
   onEvent({ type: "chat", id: serverChatId || `web_${Date.now()}`, title: body.message.slice(0, 56) });
   onEvent({ type: "status", text: "Thinking" });
 
-  const resp = await fetch(u("/api/v1/messages"), {
+  const endpoint = useOpenAi ? "/api/v1/chat/completions" : "/api/v1/messages";
+  const resp = await fetch(u(endpoint), {
     method: "POST",
     headers,
-    body: JSON.stringify(anthropicBody),
+    body: JSON.stringify(upstreamBody),
     signal,
   });
 

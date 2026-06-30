@@ -265,6 +265,12 @@ export const MODEL_CATALOG: Record<CredentialPreset["id"], ModelChoice[]> = {
       description: "Hosted through the zWork router and pinned to DeepSeek V4 Pro (advanced reasoning).",
       cost: "Managed by zWork",
     },
+    {
+      id: "zwork-vision",
+      label: "zWork Vision",
+      description: "Hosted through the zWork router and pinned to Gemma 4 31B Cloud for vision and images.",
+      cost: "Managed by zWork",
+    },
   ],
   openai: [
     {

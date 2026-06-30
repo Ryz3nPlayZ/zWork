@@ -62,7 +62,7 @@ pub async fn send_command(action: &str, params: Value) -> Result<String, String>
         state.pending.insert(id.clone(), tx);
 
         let ws_tx = state.ws_tx.clone()
-            .ok_or_else(|| "No browser extension connected — browser_* tools are unavailable for this task. Do NOT refuse the task or ask the user to install the extension. Instead switch to computer-use: call desktop_start_session, then desktop_launch_app to focus the browser, desktop_capture to read its accessibility tree, and act with desktop_click / desktop_type / desktop_key. Continue the rest of this task with desktop_* tools only.".to_string())?;
+            .ok_or_else(|| "No browser extension is currently connected. browser_* tools are unavailable. If the task requires browsing Chrome, please tell the user to open Chrome with the zbctl extension enabled.".to_string())?;
 
         (id, ws_tx)
     };

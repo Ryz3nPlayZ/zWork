@@ -130,3 +130,77 @@ Files to touch when implementing: `app/src-tauri/tauri.conf.json`, `app/src/inde
 - Everything this session is **uncommitted** on `feat/rust-backend-rewrite`; nothing tagged. The prior alpha.16 work (Python removal, permission UI rework, browser-bridge fallback + status endpoint, docs) is also still uncommitted.
 - **Antigravity** (Google agentic IDE) is also running on this machine and is another screen/audio-capturing agent — if prompts return while zWork is closed, check whether the dialog names CuaDriver or Antigravity.
 - Saved a memory of the prompt-loop finding: `permission-poll-launches-cuadriver.md`.
+
+
+---
+
+# zWork Session Scratchpad — 2026-06-20 (zwork-vision focus)
+
+## Goal
+
+Fully implement and integrate `zwork-vision` (Gemma 4 31B via Ollama Cloud) end-to-end.
+
+## What was missing / diagnosed
+
+1. `zwork-vision` was not exposed in the frontend model picker or onboarding.
+2. The desktop Rust sidecar accepted attachments but never wired them into the LLM request.
+3. The frontend upload response didn't include `path`, so `uploadedPath` was undefined and attachments were dropped.
+4. Web mode always used Anthropic `/api/v1/messages`, which only routes to Anthropic-protocol gateway providers. Ollama Cloud is configured as `GatewayProtocol::OpenAi`, so web-mode `zwork-vision` requests would never reach it.
+
+## Changes made
+
+### Frontend (`app/`)
+
+- `app/src/lib/store.ts`:
+  - Added `zwork-vision` to managed-router migration and token-sync.
+  - Added `zwork-vision` to the synthetic web-mode providers list.
+  - `needsManagedRouterMigration()` now checks for `zwork-vision` and re-migrates if missing/corrupted.
+- `app/src/components/Onboarding.tsx`:
+  - Added `zwork-vision` to the `zwork_managed` model catalog.
+- `app/src/lib/api.ts`:
+  - `streamChatWeb` now sends OpenAI Chat Completions format to `/api/v1/chat/completions` when `model === "zwork-vision"`.
+  - Basic image attachment support in web mode (desktop is the primary path).
+
+### Rust sidecar (`sidecar-rust/`)
+
+- `src/server.rs`:
+  - `ChatStreamRequest` now accepts `attachments: Vec<Attachment>`.
+  - `Attachment` struct added.
+  - `/api/uploads` response now includes `path`.
+  - `zwork-vision` gets subtitle "Vision and images".
+- `src/agent/mod.rs`:
+  - `run_agent_turn` takes `attachments`.
+  - Replaces the last user message content with full content blocks when attachments are present.
+  - Fallback branch maps `model_id.contains("vision")` → `zwork-vision`.
+- `src/agent/prompts.rs`:
+  - `build_user_content(text, attachments)` creates Anthropic-style content blocks (text + base64 image blocks).
+  - `convert_convo_for_openai()` translates Anthropic image blocks to OpenAI `image_url` blocks and fixes the user-content-array handling (was pushing one message per block).
+
+### Cloud gateway (`cloud-src/`)
+
+- `cloud-src/api/src/main.rs` already had the `gemma4:31b` model-ID fix from earlier in the session.
+- `zwork-vision` resolves to `gemma4:31b` via `resolve_upstream_model()`.
+- The `ai_proxy` OpenAI endpoint matches Ollama Cloud because its `primary_model` is `gemma4:31b`.
+
+## Verified flow (desktop / Tauri)
+
+1. User picks **zWork Vision** in the model picker.
+2. Desktop app uploads image → `/api/uploads` returns absolute `path`.
+3. App sends `POST /api/chat/stream` with `model: "zwork-vision"` and `attachments`.
+4. Rust sidecar builds OpenAI Chat Completions request (shape "openai" for `zwork_router`) with `image_url` content parts.
+5. Sidecar POSTs to `https://api.tryzwork.app/api/chat/completions`.
+6. Gateway resolves model `zwork-vision` → `gemma4:31b`, picks Ollama Cloud provider (primary model match).
+7. Gateway forwards OpenAI request to `https://ollama.com/v1/chat/completions`.
+8. Ollama Cloud serves Gemma 4 31B with the image.
+
+## Build status
+
+- `sidecar-rust`: `cargo build` succeeds.
+- `app`: `npm run build` succeeds.
+- `cloud-src/api`: `cargo check` succeeds.
+
+## Limitations
+
+- Web mode image attachments reference local file paths (`image_url.url: a.path`), which the gateway cannot access. Full web-mode vision needs either base64-in-request or a public upload URL.
+- Gateway `ai_proxy` currently buffers the whole upstream response before streaming it to the client; large images may be slow but should still work.
+- zwork-vision is not gated behind a pro tier in code; it follows the same managed-router access as Flash/Pro.

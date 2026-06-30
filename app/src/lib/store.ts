@@ -274,10 +274,11 @@ function needsManagedRouterMigration(settings: SettingsPublic): boolean {
   const customModels = settings.custom_models || [];
   const flash = customModels.find((m) => m.id === "zwork-flash");
   const pro = customModels.find((m) => m.id === "zwork-pro");
+  const vision = customModels.find((m) => m.id === "zwork-vision");
   const hasOldRouter = customModels.some((model) => model.id === "zwork-router");
   const hasLegacyCustomModel = customModels.some((model) => LEGACY_MANAGED_MODEL_IDS.has(model.id) || LEGACY_MANAGED_MODEL_IDS.has(model.model_id));
 
-  // Check that flash/pro exist AND have correct names/model_ids
+  // Check that flash/pro/vision exist AND have correct names/model_ids
   const flashCorrupted = !flash
     || flash.name !== "zWork Flash"
     || flash.model_id !== "deepseek-v4-flash"
@@ -286,6 +287,10 @@ function needsManagedRouterMigration(settings: SettingsPublic): boolean {
     || pro.name !== "zWork Pro"
     || pro.model_id !== "deepseek-v4-pro"
     || pro.credential !== "zwork_router";
+  const visionMissing = !vision
+    || vision.name !== "zWork Vision"
+    || vision.model_id !== "zwork-vision"
+    || vision.credential !== "zwork_router";
 
   return (
     LEGACY_MANAGED_BASE_URLS.has(settings.provider_config?.openai?.base_url || "") ||
@@ -294,7 +299,8 @@ function needsManagedRouterMigration(settings: SettingsPublic): boolean {
     hasLegacyCustomModel ||
     hasOldRouter ||
     flashCorrupted ||
-    proCorrupted
+    proCorrupted ||
+    visionMissing
   );
 }
 
@@ -336,6 +342,15 @@ async function migrateManagedRouterSettings(settings: SettingsPublic): Promise<S
     base_url_override: ROUTER_BASE_URL,
   });
 
+  await api.upsertCustomModel({
+    id: "zwork-vision",
+    name: "zWork Vision",
+    shape: "openai",
+    credential: "zwork_router",
+    model_id: "zwork-vision",
+    base_url_override: ROUTER_BASE_URL,
+  });
+
   return await api.getSettings();
 }
 
@@ -364,6 +379,15 @@ async function syncManagedRouterToken() {
     shape: "anthropic",
     credential: "zwork_router",
     model_id: "deepseek-v4-pro",
+    base_url_override: ROUTER_BASE_URL,
+  });
+
+  await api.upsertCustomModel({
+    id: "zwork-vision",
+    name: "zWork Vision",
+    shape: "openai",
+    credential: "zwork_router",
+    model_id: "zwork-vision",
     base_url_override: ROUTER_BASE_URL,
   });
 }
@@ -955,6 +979,16 @@ export const useApp = create<AppState>((set, get) => ({
             shape: "openai",
             credential: "managed",
             model_id: "zwork-pro",
+            configured: true,
+            synthesized: false,
+          },
+          {
+            id: "zwork-vision",
+            name: "zWork Vision",
+            subtitle: "Vision and images",
+            shape: "openai",
+            credential: "managed",
+            model_id: "zwork-vision",
             configured: true,
             synthesized: false,
           },

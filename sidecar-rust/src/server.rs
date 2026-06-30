@@ -453,7 +453,9 @@ pub async fn get_providers() -> impl IntoResponse {
         let cred = resolve(&m.credential, &s, &m.base_url_override);
         
         let subtitle = if m.credential == "zwork_router" {
-            if m.model_id.to_lowercase().contains("pro") {
+            if m.model_id.to_lowercase().contains("vision") {
+                "Vision and images".to_string()
+            } else if m.model_id.to_lowercase().contains("pro") {
                 "Most capable model".to_string()
             } else {
                 "Fast and efficient".to_string()
