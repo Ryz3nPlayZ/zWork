@@ -543,6 +543,7 @@ interface AppState {
         client_id?: string | null;
         name: string;
         path: string;
+        data_url?: string;
         mime: string;
         kind: string;
         size?: number;
@@ -1509,8 +1510,9 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   send: async (text, options) => {
+    const attachments = options?.attachments ?? [];
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed && attachments.length === 0) return;
 
     const currentId = get().view === "projects" ? null : get().activeChatId;
     if (currentId) {
@@ -1529,7 +1531,6 @@ export const useApp = create<AppState>((set, get) => ({
     const artifactMode = (options?.artifactMode ?? get().artifactMode) || !!inferredArtifactKind;
     const planMode = options?.planMode ?? get().planMode;
     const autoApproveDestructive = options?.autoApproveDestructive ?? get().autoApproveDestructive;
-    const attachments = options?.attachments ?? [];
     const activeProjectId = get().activeProjectId;
 
     // Optimistically place the user message into a local chat.
@@ -1537,6 +1538,12 @@ export const useApp = create<AppState>((set, get) => ({
     // server will assign the real id via the "chat" SSE event and we reconcile.
     let localId = currentId ?? `tmp_${uid()}`;
     const userMsgText = trimmed;
+    const hasImageAttachment = attachments.some((a) => a.kind === "image");
+    const chatTitle = userMsgText
+      ? userMsgText.slice(0, 56) + (userMsgText.length > 56 ? "…" : "")
+      : hasImageAttachment
+        ? "Image"
+        : "New chat";
     const userMsg: Message = {
       id: uid(),
       role: "user",
@@ -1563,19 +1570,18 @@ export const useApp = create<AppState>((set, get) => ({
           status: "Thinking",
           error: undefined,
           needsSetup: false,
-          lastUserMessage: userMsgText,
+          lastUserMessage: userMsgText || chatTitle,
           activities: [],
           updatedAt: Date.now(),
         }
         : {
           id: localId,
-          title:
-            userMsgText.slice(0, 56) + (userMsgText.length > 56 ? "…" : ""),
+          title: chatTitle,
           updatedAt: Date.now(),
           messages: [userMsg],
           working: true,
           status: "Thinking",
-          lastUserMessage: userMsgText,
+          lastUserMessage: userMsgText || chatTitle,
           activities: [],
           artifactPanelOpen: false,
           activeArtifactId: null,

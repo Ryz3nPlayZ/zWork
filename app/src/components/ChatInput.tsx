@@ -26,7 +26,7 @@ import {
 import { cn } from "../lib/cn";
 import { needsLightweightRendering } from "../lib/platform";
 import { useApp } from "../lib/store";
-import { api, type UploadedFile } from "../lib/api";
+import { api, IS_WEB, type UploadedFile } from "../lib/api";
 import {
   filterTemplates,
   findSlashTrigger,
@@ -49,6 +49,7 @@ interface ComposerAttachment {
   size: number;
   previewUrl?: string;
   uploadedPath?: string;
+  dataUrl?: string;
 }
 
 function OverlayToolItem({
@@ -204,7 +205,7 @@ export function ChatInput({
     return () => document.removeEventListener("mousedown", onClick);
   }, [isOverlay, toolsOpen]);
 
-  const canSend = value.trim().length > 0 && !working && !uploading;
+  const canSend = (value.trim().length > 0 || attachments.length > 0) && !working && !uploading;
 
   const readAsDataUrl = (file: File) =>
     new Promise<string>((resolve, reject) => {
@@ -238,8 +239,10 @@ export function ChatInput({
       };
     }
 
+    const dataUrl = await readAsDataUrl(file);
     return {
-      payload: { ...base, data_url: await readAsDataUrl(file) },
+      payload: { ...base, data_url: dataUrl },
+      dataUrl,
       previewUrl,
       size: file.size,
       kind,
@@ -261,6 +264,26 @@ export function ChatInput({
           return { id, file, ...item };
         }),
       );
+
+      // In web mode there is no local sidecar to stage files on disk, so we
+      // keep the base64 data URL and send it inline with the chat request.
+      if (IS_WEB) {
+        setAttachments((prev) => [
+          ...prev,
+          ...prepared.map((item) => ({
+            id: item.id,
+            name: item.file.name || `upload-${item.id}`,
+            mime: item.file.type || "application/octet-stream",
+            kind: item.kind as "file" | "image",
+            size: item.size,
+            previewUrl: item.previewUrl,
+            dataUrl: item.dataUrl,
+            uploadedPath: item.dataUrl,
+          })),
+        ]);
+        return;
+      }
+
       setAttachments((prev) => [
         ...prev,
         ...prepared.map((item) => ({
@@ -270,6 +293,7 @@ export function ChatInput({
           kind: item.kind as "file" | "image",
           size: item.size,
           previewUrl: item.previewUrl,
+          dataUrl: item.dataUrl,
         })),
       ]);
 
@@ -282,6 +306,7 @@ export function ChatInput({
       );
     } catch (e) {
       console.error(e);
+      alert(`Failed to upload attachment${list.length > 1 ? "s" : ""}. Please try again.`);
     } finally {
       setUploading(false);
     }
@@ -356,6 +381,9 @@ export function ChatInput({
     if (tryHandleSaveCommand(text)) {
       return;
     }
+    const readyAttachments = attachments.filter(
+      (a): a is ComposerAttachment & { uploadedPath: string } => !!a.uploadedPath,
+    );
     setValue("");
     for (const a of attachments) {
       if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
@@ -367,17 +395,16 @@ export function ChatInput({
       artifactMode: documentMode,
       planMode: false,
       autoApproveDestructive,
-      attachments: attachments
-        .filter((a): a is ComposerAttachment & { uploadedPath: string } => !!a.uploadedPath)
-        .map((a) => ({
-          client_id: a.id,
-          name: a.name,
-          path: a.uploadedPath,
-          mime: a.mime,
-          kind: a.kind,
-          size: a.size,
-          previewUrl: a.previewUrl,
-        })),
+      attachments: readyAttachments.map((a) => ({
+        client_id: a.id,
+        name: a.name,
+        path: a.uploadedPath,
+        data_url: a.dataUrl,
+        mime: a.mime,
+        kind: a.kind,
+        size: a.size,
+        previewUrl: a.previewUrl,
+      })),
     });
   };
 

@@ -57,6 +57,8 @@ pub struct Attachment {
     pub kind: String,
     #[serde(default)]
     pub size: Option<u64>,
+    #[serde(default)]
+    pub data_url: Option<String>,
 }
 
 // REST Handlers
@@ -1424,22 +1426,43 @@ pub async fn list_uploads() -> impl IntoResponse {
 
 pub async fn upload_files(Json(body): Json<UploadBody>) -> impl IntoResponse {
     let dir = crate::paths::workspace_uploads_dir();
-    let _ = std::fs::create_dir_all(&dir);
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": format!("Failed to create uploads directory: {}", e) }))).into_response();
+    }
     let mut created = Vec::new();
+    let mut errors = Vec::new();
     for item in &body.files {
         let id = uuid::Uuid::new_v4().simple();
         let filename = format!("{}_{}", id, sanitize_filename(&item.name));
         let path = dir.join(&filename);
-        if let Some(ref text) = item.text_content {
-            let _ = std::fs::write(&path, text);
+
+        let write_result = if let Some(ref text) = item.text_content {
+            std::fs::write(&path, text)
         } else if let Some(ref data_url) = item.data_url {
-            if let Some(b64) = data_url.split(',').nth(1) {
-                match standard_b64_decode(b64) {
-                    Ok(bytes) => { let _ = std::fs::write(&path, bytes); }
-                    Err(_) => continue,
+            let b64 = match data_url.split(',').nth(1) {
+                Some(b) => b,
+                None => {
+                    errors.push(format!("{}: invalid data URL", item.name));
+                    continue;
+                }
+            };
+            match standard_b64_decode(b64) {
+                Ok(bytes) => std::fs::write(&path, bytes),
+                Err(e) => {
+                    errors.push(format!("{}: base64 decode failed: {}", item.name, e));
+                    continue;
                 }
             }
+        } else {
+            errors.push(format!("{}: no content provided", item.name));
+            continue;
+        };
+
+        if let Err(e) = write_result {
+            errors.push(format!("{}: write failed: {}", item.name, e));
+            continue;
         }
+
         created.push(json!({
             "id": id.to_string(),
             "client_id": item.client_id,
@@ -1450,7 +1473,12 @@ pub async fn upload_files(Json(body): Json<UploadBody>) -> impl IntoResponse {
             "size": path.metadata().map(|m| m.len()).unwrap_or(0),
         }));
     }
-    Json(json!({ "files": created }))
+
+    if !errors.is_empty() && created.is_empty() {
+        return (axum::http::StatusCode::BAD_REQUEST, Json(json!({ "error": errors.join("; ") }))).into_response();
+    }
+
+    Json(json!({ "files": created, "errors": errors })).into_response()
 }
 
 pub async fn get_upload(Path(filename): Path<String>) -> impl IntoResponse {

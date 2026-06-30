@@ -737,6 +737,7 @@ async function streamChatWeb(
       client_id?: string | null;
       name: string;
       path: string;
+      data_url?: string;
       mime: string;
       kind: string;
     }>;
@@ -759,12 +760,12 @@ async function streamChatWeb(
 
   const userContent = isVision && body.attachments?.length
     ? [
-        { type: "text" as const, text: body.message },
+        ...(body.message ? [{ type: "text" as const, text: body.message }] : []),
         ...body.attachments
-          .filter((a) => a.mime.startsWith("image/"))
+          .filter((a) => a.mime.startsWith("image/") && a.data_url)
           .map((a) => ({
             type: "image_url" as const,
-            image_url: { url: a.path },
+            image_url: { url: a.data_url },
           })),
       ]
     : body.message;
@@ -784,6 +785,12 @@ async function streamChatWeb(
         max_tokens: 16384,
       };
 
+  const webChatTitle = body.message
+    ? body.message.slice(0, 56)
+    : body.attachments?.some((a) => a.kind === "image")
+      ? "Image"
+      : "New chat";
+
   // Create or reuse a server-side web chat for persistence
   let serverChatId = body.chat_id;
   if (!serverChatId || serverChatId.startsWith("tmp_") || serverChatId.startsWith("web_")) {
@@ -791,7 +798,7 @@ async function streamChatWeb(
       const chat = await fetch(u("/api/web/chats"), {
         method: "POST",
         headers,
-        body: JSON.stringify({ title: body.message.slice(0, 56) }),
+        body: JSON.stringify({ title: webChatTitle }),
       }).then((r) => r.json() as Promise<{ id: string }>);
       serverChatId = chat.id;
     } catch { /* persistence failure is non-fatal */ }
@@ -803,12 +810,12 @@ async function streamChatWeb(
       await fetch(u(`/api/web/chats/${serverChatId}/messages`), {
         method: "POST",
         headers,
-        body: JSON.stringify({ role: "user", content: body.message }),
+        body: JSON.stringify({ role: "user", content: body.message || webChatTitle }),
       });
     } catch { /* non-fatal */ }
   }
 
-  onEvent({ type: "chat", id: serverChatId || `web_${Date.now()}`, title: body.message.slice(0, 56) });
+  onEvent({ type: "chat", id: serverChatId || `web_${Date.now()}`, title: webChatTitle });
   onEvent({ type: "status", text: "Thinking" });
 
   const endpoint = useOpenAi ? "/api/v1/chat/completions" : "/api/v1/messages";
@@ -913,6 +920,7 @@ export async function streamChat(
       client_id?: string | null;
       name: string;
       path: string;
+      data_url?: string;
       mime: string;
       kind: string;
     }>;
