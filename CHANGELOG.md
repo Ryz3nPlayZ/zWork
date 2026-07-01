@@ -2,6 +2,18 @@
 
 All notable changes to zWork are documented here.
 
+## v0.5.0-alpha.19
+
+**Critical fix: the app no longer silently terminates on every message.**
+
+- Fixes a regression introduced in v0.5.0-alpha.18 where every message terminated instantly — no response, no error, no loading state. The agent harness had been switched to a `goose` subprocess that exited with code 1 on launch for all models (zWork Pro / Flash / Vision).
+- Restored the proven native `stream_llm` agent loop (unified `LlmEvent` layer, per-protocol Anthropic/OpenAI parsers, loud tool-JSON failure). DeepSeek v4 Pro responds and streams again.
+- Removed the goose subprocess scaffolding (stdio MCP bridge and `mcp` subcommand). Live tool activity, permission gating for destructive tools, and single-source chat history are restored.
+- Preserved structured agent logging: run-scoped `turn_start` / `provider_resolved` lifecycle events alongside the per-turn `request` / `tool_call` / `finish` trace in `agent.jsonl`.
+- Updated version to 0.5.0-alpha.19.
+
+> ⚠️ If you installed v0.5.0-alpha.18, update to this build — alpha.18 cannot respond to any message.
+
 ## v0.5.0-alpha.13
 
 **Desktop control via cua-driver, embedded browser bridge, redesigned overlay.**
