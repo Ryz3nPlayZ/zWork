@@ -1820,16 +1820,26 @@ async fn ai_proxy(
     }
 
     for provider in providers_to_try {
-        let models = if provider.fallback_model.trim().is_empty()
-            || provider.fallback_model.trim() == provider.primary_model.trim()
+        // Build the list of models to try for this provider. If the provider
+        // claims to support the requested model (primary or fallback matches),
+        // prefer the requested model so users actually get what they selected.
+        // Otherwise fall back to the provider's configured models.
+        let supports_requested = provider.primary_model == resolved_model
+            || provider.fallback_model == resolved_model;
+
+        let mut models: Vec<String> = Vec::new();
+        if supports_requested {
+            models.push(resolved_model.to_string());
+        }
+        if !supports_requested || provider.primary_model != resolved_model {
+            models.push(provider.primary_model.clone());
+        }
+        if !provider.fallback_model.trim().is_empty()
+            && provider.fallback_model != provider.primary_model
+            && provider.fallback_model != resolved_model
         {
-            vec![provider.primary_model.clone()]
-        } else {
-            vec![
-                provider.primary_model.clone(),
-                provider.fallback_model.clone(),
-            ]
-        };
+            models.push(provider.fallback_model.clone());
+        }
 
         for model_name in models {
             let mut attempt_body = body_json.clone();
