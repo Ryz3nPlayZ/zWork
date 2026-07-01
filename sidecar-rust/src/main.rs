@@ -28,13 +28,6 @@ async fn main() {
     // Initialize logging
     tracing_subscriber::fmt::init();
 
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() > 1 && args[1] == "mcp" {
-        let chat_id = args.get(2).cloned().unwrap_or_else(|| "mcp_session".to_string());
-        tools::mcp_server::run_stdio_mcp_server(chat_id).await;
-        return;
-    }
-
     let host = std::env::var("ZWORK_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
     let port = std::env::var("ZWORK_PORT")
         .unwrap_or_else(|_| "8787".to_string())
