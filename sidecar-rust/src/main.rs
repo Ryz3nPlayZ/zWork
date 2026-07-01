@@ -3,6 +3,7 @@ use axum::{
     Router,
 };
 use tower_http::cors::{AllowPrivateNetwork, CorsLayer};
+use tower_http::trace::TraceLayer;
 use tracing::info;
 
 mod paths;
@@ -26,6 +27,13 @@ mod telegram;
 async fn main() {
     // Initialize logging
     tracing_subscriber::fmt::init();
+
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 && args[1] == "mcp" {
+        let chat_id = args.get(2).cloned().unwrap_or_else(|| "mcp_session".to_string());
+        tools::mcp_server::run_stdio_mcp_server(chat_id).await;
+        return;
+    }
 
     let host = std::env::var("ZWORK_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
     let port = std::env::var("ZWORK_PORT")
@@ -104,6 +112,12 @@ async fn main() {
         .layer(
             CorsLayer::permissive().allow_private_network(AllowPrivateNetwork::yes()),
         );
+
+    let app = app.layer(
+        TraceLayer::new_for_http()
+            .make_span_with(tower_http::trace::DefaultMakeSpan::new().level(tracing::Level::INFO))
+            .on_response(tower_http::trace::DefaultOnResponse::new().level(tracing::Level::INFO)),
+    );
 
     let addr = format!("{}:{}", host, port);
     info!("rWork Rust Backend -> http://{} (pid={})", addr, std::process::id());

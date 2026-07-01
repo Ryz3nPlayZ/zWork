@@ -188,6 +188,12 @@ pub fn telemetry_log_path() -> PathBuf {
     home_dir().join("telemetry.jsonl")
 }
 
+pub fn agent_log_path() -> PathBuf {
+    let d = home_dir().join("logs");
+    let _ = std::fs::create_dir_all(&d);
+    d.join("agent.jsonl")
+}
+
 pub fn is_safe_id(id_str: &str) -> bool {
     if id_str.is_empty() {
         return false;

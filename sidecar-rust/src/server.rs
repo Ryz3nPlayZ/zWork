@@ -36,6 +36,8 @@ pub struct PatchMessageRequest {
 #[derive(Deserialize, Debug)]
 pub struct ChatStreamRequest {
     pub chat_id: Option<String>,
+    #[serde(default)]
+    pub run_id: String,
     pub message: String,
     pub model: Option<String>,
     pub project_id: Option<String>,
@@ -675,6 +677,7 @@ pub async fn chat_stream_route(
     
     let stream = run_agent_turn(
         chat_id,
+        req.run_id,
         model_id,
         req.message,
         req.attachments,

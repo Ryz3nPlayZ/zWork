@@ -27,9 +27,9 @@ const AdminPage = lazy(() => import("./components/AdminPage").then((m) => ({ def
 const TasksPage = lazy(() => import("./components/tasks/TasksPage").then((m) => ({ default: m.TasksPage })));
 const InboxPage = lazy(() => import("./components/InboxPage").then((m) => ({ default: m.InboxPage })));
 const OverlayChatView = lazy(() => import("./components/OverlayChatView").then((m) => ({ default: m.OverlayChatView })));
-import { Logo } from "./components/Logo";
 import { KeybindingsModal } from "./components/KeybindingsModal";
 import { PermissionPrompt } from "./components/PermissionPrompt";
+import { BootProgress } from "./components/BootProgress";
 
 
 function OfflineBanner() {
@@ -474,16 +474,7 @@ export default function App() {
   // Without this, providers/settings/connectors all load as empty.
   const isTauri = typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
   if (isTauri && !backendReady) {
-    return (
-      <div className="flex h-screen w-screen items-center justify-center bg-paper">
-        <div className="flex flex-col items-center gap-4">
-          <div className="animate-[pulse_2s_ease-in-out_infinite]">
-            <Logo size={48} className="text-ink" />
-          </div>
-          <span className="text-[12px] text-ink-faint">Warming up…</span>
-        </div>
-      </div>
-    );
+    return <BootProgress />;
   }
 
   return (

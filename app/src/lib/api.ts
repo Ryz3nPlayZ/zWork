@@ -9,6 +9,7 @@
  * In web mode (app.tryzwork.app), Caddy proxies `/api/*` to the Axum cloud API.
  */
 import { invoke } from "@tauri-apps/api/core";
+import packageJson from "../../package.json";
 
 const IS_TAURI =
   typeof window !== "undefined" &&
@@ -23,6 +24,23 @@ export const IS_WEB =
   !IS_TAURI &&
   window.location.origin !== "http://localhost:1420" &&
   window.location.origin !== "http://127.0.0.1:1420";
+
+const APP_VERSION = packageJson.version ?? "unknown";
+
+function clientPlatform(): string {
+  if (typeof window === "undefined") return "server";
+  if (IS_TAURI) return "desktop";
+  const nav = window.navigator as any;
+  if (nav?.userAgentData?.platform) return nav.userAgentData.platform;
+  return nav?.platform ?? "web";
+}
+
+function clientHeaders(): Record<string, string> {
+  return {
+    "x-zwork-app-version": APP_VERSION,
+    "x-zwork-os": clientPlatform(),
+  };
+}
 
 const API_BASE = IS_TAURI ? "http://127.0.0.1:8787" : "";
 
@@ -713,6 +731,9 @@ export type StreamEvent =
   | { type: "activity"; id: string; label: string; icon?: string; done?: boolean }
   | { type: "tool_result"; tool: string; ok: boolean; message: string }
   | { type: "tool_progress"; tool_id: string; label: string }
+  | { type: "tool_start"; tool: string; input?: unknown }
+  | { type: "tool_complete"; tool: string; ok: boolean; message: string }
+  | { type: "usage"; prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
   | { type: "permission"; tool: string; risk: "safe" | "sensitive" | "destructive"; reason: string; blocked: boolean }
   | { type: "compaction"; summarized_messages: number; kept_recent: number; summary_chars?: number; status: "summarizing" | "done" | "failed"; error?: string }
   | { type: "subagent_started"; task_id: string; description: string }
@@ -727,6 +748,7 @@ export type StreamEvent =
 async function streamChatWeb(
   body: {
     chat_id?: string;
+    run_id?: string;
     message: string;
     model?: string;
     artifact_mode?: boolean;
@@ -755,7 +777,13 @@ async function streamChatWeb(
   const resolvedModel = isPro ? "deepseek-v4-pro" : isVision ? "zwork-vision" : "deepseek-v4-flash";
   const useOpenAi = isVision;
 
-  const headers: Record<string, string> = { "content-type": "application/json" };
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    ...clientHeaders(),
+    ...(body.run_id ? { "x-zwork-run-id": body.run_id } : {}),
+    ...(body.chat_id ? { "x-zwork-chat-id": body.chat_id } : {}),
+    ...(body.project_id ? { "x-zwork-project-id": body.project_id } : {}),
+  };
   if (cloudToken) headers["authorization"] = `Bearer ${cloudToken}`;
 
   const userContent = isVision && body.attachments?.length
@@ -910,6 +938,7 @@ async function streamChatWeb(
 export async function streamChat(
   body: {
     chat_id?: string;
+    run_id?: string;
     message: string;
     model?: string;
     artifact_mode?: boolean;
@@ -962,7 +991,13 @@ export async function streamChat(
   const readStream = async () => {
     const resp = await fetch(u("/api/chat/stream"), {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...clientHeaders(),
+        ...(body.run_id ? { "x-zwork-run-id": body.run_id } : {}),
+        ...(body.chat_id ? { "x-zwork-chat-id": body.chat_id } : {}),
+        ...(body.project_id ? { "x-zwork-project-id": body.project_id } : {}),
+      },
       body: JSON.stringify(body),
       signal,
     });

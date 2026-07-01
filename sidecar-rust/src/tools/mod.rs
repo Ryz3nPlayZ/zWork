@@ -10,6 +10,7 @@ pub mod shell;
 pub mod search;
 pub mod doc_extract;
 pub mod stock;
+pub mod mcp_server;
 
 // Risk evaluation for permission checking
 pub enum Risk {

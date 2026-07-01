@@ -1514,6 +1514,7 @@ export const useApp = create<AppState>((set, get) => ({
     const trimmed = text.trim();
     if (!trimmed && attachments.length === 0) return;
 
+    const runId = uid();
     const currentId = get().view === "projects" ? null : get().activeChatId;
     if (currentId) {
       const activeChat = get().chats[currentId];
@@ -1652,6 +1653,7 @@ export const useApp = create<AppState>((set, get) => ({
       await streamChat(
         {
           chat_id: currentId && !currentId.startsWith("tmp_") ? currentId : undefined,
+          run_id: runId,
           message: trimmed,
           model,
           artifact_mode: artifactMode,
