@@ -4,13 +4,16 @@ This document tracks the high-level direction of zWork. For archived implementat
 
 ---
 
-## Current Release: v0.4.x
+## Current Release: v0.5.x
 
-Cross-platform desktop AI assistant with chat, file operations, web research, local execution, and academic research capabilities.
+Cross-platform desktop AI agent with chat, scheduled autonomous tasks, app integrations, desktop & browser control, and local execution.
 
 - macOS (Intel + Apple Silicon), Windows, and Linux (AppImage)
 - Chat-first interface with streaming responses and activity updates
-- Local file management, command execution, and browser automation
+- **Scheduled agents**: recurring jobs that run on their own and post to an inbox
+- **App integrations**: Composio (Gmail, Calendar, Slack, …) and arbitrary MCP servers
+- **Desktop & browser control**: cua-driver for native macOS apps, embedded Chrome bridge
+- Local file management, command execution, and web research
 - Reusable skills library
 - **Academic research pipeline**: novelty check, hardware detection, full paper drafting, and review
 - Anonymous telemetry (opt-out) and in-app updater

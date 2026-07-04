@@ -1,6 +1,44 @@
 # Changelog
 
-All notable changes to zWork are documented here.
+All notable changes to zWork are documented in this file.
+
+## v0.5.0-beta.2
+
+**UI polish, navigation fixes, and connector branding fixes.**
+
+### Fixes
+- **Back arrow on project chats** — the "back to project" arrow in the chat header now appears immediately when a chat is started from a project (previously it only showed after reloading the chat, because the project context wasn't carried onto the optimistically-created chat object).
+- **Connector logos render correctly** — brand marks on the Connectors page were showing as solid colored squares because the CDN-hosted SVG `mask-image` was blocked by the Tauri CSP on macOS/Windows webviews. Logos are now inlined as SVG paths, eliminating the network fetch and CSP interaction entirely. Also refreshed the GitHub brand color to the current `#181717`.
+- **`Cmd/Ctrl+S` toggles the sidebar** — new keyboard shortcut (alongside the existing `Cmd/Ctrl+\`) with `preventDefault` so the browser's "Save Page" dialog no longer fires. Documented in the keyboard shortcuts cheatsheet.
+
+### Documentation
+- New `docs/INTEGRATIONS.md` covering the Composio connector architecture, the full data flow, and a step-by-step checklist for enabling new toolkits (e.g. Linear). Documents that the "linear is not yet configured" error is a Composio dashboard auth-config task, not a code gap — the integration plumbing is complete and identical to the working apps.
+
+## v0.5.0-beta.1
+
+**Scheduled agents, app integrations, and a Rust-native backend rewrite.**
+
+This release turns zWork from a chat assistant into a persistent agent: it can run jobs on a schedule, reach into your real apps, and control the desktop — all on a rewritten Rust backend.
+
+### Backend rewrite
+- **Local engine is now Rust (Axum).** The Python/FastAPI sidecar has been replaced by a native Rust sidecar (`sidecar-rust/`) — faster startup, lower memory, no Python runtime to ship. Same HTTP surface and chat UX.
+- Structured agent logging preserved: run-scoped lifecycle events alongside per-turn `request`/`tool_call`/`finish` trace in `agent.jsonl`.
+
+### New capabilities
+- **Scheduled agents** — define recurring tasks (every N minutes, or daily at HH:MM on selected weekdays); a background scheduler fires them on their own and posts results to the inbox. Includes a "Run now" button and free-tier task cap.
+- **Inbox** — a dedicated surface for scheduled-task output (summaries, flags, errors), with read/unread and delete.
+- **Composio integrations** — connect Gmail, Calendar, Slack, and hundreds more; their actions are exposed to the agent as `composio__*` tools. The platform API key is proxied through zWork Cloud and never touches the client.
+- **MCP runtime** — any stdio MCP server from `~/.zwork/mcp.json` (Claude-Desktop shape) is loaded and exposed as `mcp__<server>__<tool>` tools.
+- **`desktop_office` tool** — semantic `.docx`/`.xlsx` editing without a GUI.
+- **`deploy_web_app` tool** — serves a local web app (npm dev or static) and returns a live URL.
+
+### Desktop & browser control (carried forward from alpha.13)
+- cua-driver for native macOS automation (capture AX tree, click, type, scroll, keys).
+- Embedded Chrome bridge for element-level browser automation.
+
+### Docs
+- README and architecture docs updated to reflect the Rust backend and the new feature surface.
+- Roadmap refreshed to v0.5.x.
 
 ## v0.5.0-alpha.19
 

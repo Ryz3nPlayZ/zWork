@@ -86,6 +86,10 @@ pub enum LlmEvent {
     /// Model reasoning / chain-of-thought chunk (kept separate from visible
     /// text). Currently traced but not forwarded to the UI.
     ReasoningDelta { text: String },
+    /// A fully-assembled Anthropic extended-thinking block, emitted at
+    /// `content_block_stop`. The `signature` is required to replay the
+    /// thinking block on the next turn for models that use extended thinking.
+    ThinkingBlock { thinking: String, signature: String },
     /// A fully-assembled tool call: id + name + parsed input. Emitted exactly
     /// once per call, at the call's completion boundary. Malformed tool JSON
     /// never reaches here — it surfaces as `ProviderError` instead.

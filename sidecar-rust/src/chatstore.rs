@@ -32,7 +32,14 @@ pub struct Chat {
     pub compacted_summary: String,
     #[serde(default)]
     pub compaction_cursor: u64,
+    /// `"chat"` (interactive, user-initiated — default) or `"automation"`
+    /// (a scheduled-task run). The frontend filters `automation` chats out of
+    /// the main chat list; they surface inside the scheduled task's run history.
+    #[serde(default = "default_chat_kind")]
+    pub kind: String,
 }
+
+fn default_chat_kind() -> String { "chat".to_string() }
 
 fn chat_file_path(chat_id: &str) -> PathBuf {
     chats_dir().join(format!("{}.json", chat_id))
@@ -50,6 +57,12 @@ fn uid() -> String {
 }
 
 pub fn create(title: &str, model: &str, project_id: &str) -> Chat {
+    create_kind(title, model, project_id, "chat")
+}
+
+/// Create a chat with an explicit kind. Use `"automation"` for scheduled-task
+/// runs so they can be filtered out of the main chat list.
+pub fn create_kind(title: &str, model: &str, project_id: &str, kind: &str) -> Chat {
     let now = now_ms();
     let c = Chat {
         id: uid(),
@@ -61,6 +74,7 @@ pub fn create(title: &str, model: &str, project_id: &str) -> Chat {
         project_id: project_id.to_string(),
         compacted_summary: String::new(),
         compaction_cursor: 0,
+        kind: kind.to_string(),
     };
     save(&c);
     c
@@ -82,7 +96,8 @@ pub fn list_all() -> Vec<Value> {
                         let message_count = d.get("messages").and_then(|v| v.as_array()).map_or(0, |a| a.len());
                         let model = d.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
                         let project_id = d.get("project_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                        
+                        let kind = d.get("kind").and_then(|v| v.as_str()).unwrap_or("chat").to_string();
+
                         out.push(serde_json::json!({
                             "id": id,
                             "title": title,
@@ -90,7 +105,8 @@ pub fn list_all() -> Vec<Value> {
                             "updated_at": updated_at,
                             "message_count": message_count,
                             "model": model,
-                            "project_id": project_id
+                            "project_id": project_id,
+                            "kind": kind
                         }));
                     }
                 }

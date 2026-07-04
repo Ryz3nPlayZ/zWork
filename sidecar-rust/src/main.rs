@@ -1,10 +1,21 @@
 use axum::{
+    extract::DefaultBodyLimit,
     routing::{get, post, patch, delete},
     Router,
 };
 use tower_http::cors::{AllowPrivateNetwork, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::info;
+
+/// Maximum accepted HTTP request body size.
+///
+/// Axum's `Json` extractor rejects bodies larger than 2 MB by default. Image
+/// uploads are base64-encoded (≈33% overhead), so even a modest phone photo or
+/// screenshot exceeds that and the upload endpoint returned HTTP 413 — which
+/// surfaced to the user as "images can't be uploaded" (the attachment was
+/// silently dropped before ever reaching the agent). 100 MB comfortably covers
+/// large photos, screenshots, and PDFs while still bounding the server.
+const MAX_BODY_BYTES: usize = 100 * 1024 * 1024;
 
 mod paths;
 mod secretstore;
@@ -16,12 +27,19 @@ mod watchdog;
 mod tools;
 mod agent;
 mod taskstore;
+mod schedulestore;
+mod inboxstore;
+mod scheduler;
 mod server;
 mod cua;
 mod zbctl;
 mod browser_bridge;
 mod memory;
 mod telegram;
+mod composio;
+mod deploy;
+mod mcp;
+mod office;
 
 #[tokio::main]
 async fn main() {
@@ -89,6 +107,18 @@ async fn main() {
         .route("/api/tasks/:task_id/column", patch(server::update_task_column_handler))
         .route("/api/events", get(server::list_events).post(server::create_event_handler))
         .route("/api/events/:event_id", delete(server::delete_event_handler))
+        .route("/api/schedules", get(server::list_schedules).post(server::create_schedule))
+        .route(
+            "/api/schedules/:task_id",
+            patch(server::update_schedule).delete(server::delete_schedule),
+        )
+        .route("/api/schedules/:task_id/run", post(server::run_schedule_now))
+        .route("/api/inbox", get(server::list_inbox))
+        .route("/api/inbox/all-read", post(server::mark_all_inbox_read))
+        .route(
+            "/api/inbox/:item_id",
+            patch(server::mark_inbox_read).delete(server::delete_inbox_item),
+        )
         .route("/api/uploads", get(server::list_uploads).post(server::upload_files))
         .route("/api/uploads/:filename", get(server::get_upload))
         .route("/api/screenshot", post(server::screenshot))
@@ -112,6 +142,10 @@ async fn main() {
             .on_response(tower_http::trace::DefaultOnResponse::new().level(tracing::Level::INFO)),
     );
 
+    // Raise the default request body limit so image/PDF uploads (base64-encoded
+    // in JSON) aren't rejected with HTTP 413. See `MAX_BODY_BYTES`.
+    let app = app.layer(DefaultBodyLimit::max(MAX_BODY_BYTES));
+
     let addr = format!("{}:{}", host, port);
     info!("rWork Rust Backend -> http://{} (pid={})", addr, std::process::id());
 
@@ -120,6 +154,11 @@ async fn main() {
     // the daemon down only if a desktop session is left idle past
     // ZWORK_IDLE_TEARDOWN_SECS (default 1800s). See cua::idle_teardown_task.
     tokio::spawn(cua::idle_teardown_task());
+
+    // Scheduled-task runner. Fires user-configured recurring tasks on their
+    // schedules (every N min, or daily at HH:MM) and posts findings to the
+    // inbox. See scheduler::scheduler_loop.
+    tokio::spawn(scheduler::scheduler_loop());
 
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app).await.unwrap();

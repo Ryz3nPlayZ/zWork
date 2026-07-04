@@ -180,6 +180,29 @@ pub fn tasks_path() -> PathBuf {
     home_dir().join("tasks.json")
 }
 
+pub fn schedules_path() -> PathBuf {
+    home_dir().join("schedules.json")
+}
+
+pub fn inbox_path() -> PathBuf {
+    home_dir().join("inbox.json")
+}
+
+/// Per-task aggregated memory. Each scheduled task keeps its own notes file so
+/// that, e.g., the invoice-monitor task doesn't pollute the calendar task's
+/// context. Mirrors the USER.md / MEMORY.md markdown idiom but scoped per task.
+pub fn task_memory_path(task_id: &str) -> PathBuf {
+    // Task ids are uuid-v4 simple (hex); validate defensively so a crafted id
+    // can't escape the memories dir via path traversal.
+    let safe = is_safe_id(task_id);
+    let name = if safe {
+        format!("task_{}.md", task_id)
+    } else {
+        "task_invalid.md".to_string()
+    };
+    memories_dir().join(name)
+}
+
 pub fn activity_log_path() -> PathBuf {
     home_dir().join("state").join("activity_log.json")
 }

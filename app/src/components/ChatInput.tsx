@@ -11,21 +11,23 @@ import {
 } from "react";
 import {
   ArrowUp,
-  Paperclip,
-  Lock,
-  Unlock,
+  Plus,
   Square,
   X,
   FileText,
   Image as ImageIcon,
   Upload,
-  Globe,
-  Plus,
+  ChevronDown,
+  Hand,
+  ShieldCheck,
+  NotebookPen,
+  ShieldAlert,
   MessageSquarePlus,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { needsLightweightRendering } from "../lib/platform";
 import { useApp } from "../lib/store";
+import type { SecurityPreset } from "../lib/store";
 import { api, IS_WEB, type UploadedFile } from "../lib/api";
 import {
   filterTemplates,
@@ -79,6 +81,105 @@ function OverlayToolItem({
   );
 }
 
+const PRESET_META: Record<
+  SecurityPreset,
+  { icon: ReactNode; label: string; description: string }
+> = {
+  ask: {
+    icon: <Hand className="h-4 w-4" />,
+    label: "Ask before changes",
+    description: "Ask before file changes.",
+  },
+  edit: {
+    icon: <ShieldCheck className="h-4 w-4" />,
+    label: "Edit automatically",
+    description: "Edit files automatically.",
+  },
+  plan: {
+    icon: <NotebookPen className="h-4 w-4" />,
+    label: "Plan mode",
+    description: "Plan before editing.",
+  },
+  full: {
+    icon: <ShieldAlert className="h-4 w-4" />,
+    label: "Full access",
+    description: "Run with fewer confirmations.",
+  },
+};
+
+function SecurityPresetPicker({
+  value,
+  onChange,
+}: {
+  value: SecurityPreset;
+  onChange: (preset: SecurityPreset) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const current = PRESET_META[value];
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-label="Security preset"
+        aria-expanded={open}
+        className={cn(
+          "press ring-focus inline-flex items-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-paper-sunken",
+          open && "bg-paper-sunken border-line-strong",
+        )}
+      >
+        <span className="text-ink-muted">{current.icon}</span>
+        <span className="hidden sm:inline">{current.label}</span>
+        <ChevronDown
+          className={cn("h-3.5 w-3.5 text-ink-muted transition-transform", open && "rotate-180")}
+        />
+      </button>
+      {open && (
+        <div className="absolute bottom-full left-0 z-50 mb-2 w-64 animate-fade-in rounded-2xl border border-line bg-paper-raised p-1.5 shadow-lift">
+          {(Object.keys(PRESET_META) as SecurityPreset[]).map((key) => {
+            const meta = PRESET_META[key];
+            const active = key === value;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => {
+                  onChange(key);
+                  setOpen(false);
+                }}
+                className={cn(
+                  "press flex w-full items-start gap-3 rounded-xl px-2.5 py-2 text-left transition-colors",
+                  active
+                    ? "bg-paper-sunken text-ink"
+                    : "text-ink-soft hover:bg-paper-sunken hover:text-ink",
+                )}
+              >
+                <span className={cn("mt-0.5 text-ink-muted", active && "text-ink")}>{meta.icon}</span>
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-[12.5px] font-medium">{meta.label}</span>
+                  <span className="text-[11px] text-ink-muted leading-4">{meta.description}</span>
+                </span>
+                {active && <span className="ml-auto text-[10px] text-success">●</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface Props {
   placeholder?: string;
   autoFocus?: boolean;
@@ -121,7 +222,7 @@ export function ChatInput({
   };
 
   const [focused, setFocused] = useState(false);
-  const [documentMode, setDocumentMode] = useState(false);
+  const [artifactMode, setArtifactMode] = useState(false);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [composing, setComposing] = useState(false);
@@ -133,8 +234,10 @@ export function ChatInput({
   >(null);
   const [slashIndex, setSlashIndex] = useState(0);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [presetOpen, setPresetOpen] = useState(false);
   const [multiline, setMultiline] = useState(false);
   const toolsRef = useRef<HTMLDivElement>(null);
+  const presetRef = useRef<HTMLDivElement>(null);
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -144,10 +247,8 @@ export function ChatInput({
   const stop = useApp((s) => s.stop);
   const focusChatInput = useApp((s) => s.focusChatInput);
   const openSettings = useApp((s) => s.openSettings);
-  const autoApproveDestructive = useApp((s) => s.autoApproveDestructive);
-  const setAutoApproveDestructive = useApp((s) => s.setAutoApproveDestructive);
-  const webSearchEnabled = useApp((s) => s.webSearchEnabled);
-  const setWebSearchEnabled = useApp((s) => s.setWebSearchEnabled);
+  const securityPreset = useApp((s) => s.securityPreset);
+  const setSecurityPreset = useApp((s) => s.setSecurityPreset);
   const openLanding = useApp((s) => s.openLanding);
   const working = useApp((s) => {
     const id = s.activeChatId;
@@ -205,6 +306,18 @@ export function ChatInput({
     return () => document.removeEventListener("mousedown", onClick);
   }, [isOverlay, toolsOpen]);
 
+  // Close the security-preset menu on outside click.
+  useEffect(() => {
+    if (!presetOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (!presetRef.current?.contains(e.target as Node)) {
+        setPresetOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [presetOpen]);
+
   const canSend = (value.trim().length > 0 || attachments.length > 0) && !working && !uploading;
 
   const readAsDataUrl = (file: File) =>
@@ -213,6 +326,54 @@ export function ChatInput({
       reader.onerror = () => reject(new Error("Could not read file"));
       reader.onload = () => resolve(String(reader.result || ""));
       reader.readAsDataURL(file);
+    });
+
+  /**
+   * Downscale a raster image so its base64 payload fits comfortably under the
+   * upstream model router's request-body limit. Vision models don't benefit
+   * from megapixel images (Anthropic/OpenAI both recommend ≤1568px on the long
+   * edge), so we cap at 1568px and re-encode as JPEG q85. This typically shrinks
+   * a phone photo / screenshot by ~90% with no perceptible quality loss for the
+   * model. GIFs are returned as-is (canvas would collapse animation frames),
+   * and any canvas failure falls back to the original bytes.
+   */
+  const downscaleImage = (file: File, maxEdge = 1568, quality = 0.85): Promise<string> =>
+    new Promise((resolve) => {
+      if (file.type === "image/gif" || file.type === "image/svg+xml") {
+        readAsDataUrl(file).then(resolve, () => resolve(""));
+        return;
+      }
+      const objUrl = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(objUrl);
+        try {
+          let { width, height } = img;
+          const scale = Math.min(1, maxEdge / Math.max(width, height));
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) {
+            readAsDataUrl(file).then(resolve, () => resolve(""));
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          // PNGs with transparency would gain a black background if flattened
+          // to JPEG; keep PNG for those, otherwise JPEG is far smaller.
+          const outMime = file.type === "image/png" ? "image/png" : "image/jpeg";
+          resolve(canvas.toDataURL(outMime, quality));
+        } catch {
+          readAsDataUrl(file).then(resolve, () => resolve(""));
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(objUrl);
+        readAsDataUrl(file).then(resolve, () => resolve(""));
+      };
+      img.src = objUrl;
     });
 
   const fileToPayload = async (file: File, clientId: string) => {
@@ -239,7 +400,11 @@ export function ChatInput({
       };
     }
 
-    const dataUrl = await readAsDataUrl(file);
+    // Downscale raster images so the payload stays under the upstream router's
+    // request-body cap; raw phone photos/screenshots exceed it (see `downscaleImage`).
+    const dataUrl = mime.startsWith("image/")
+      ? (await downscaleImage(file)) || (await readAsDataUrl(file))
+      : await readAsDataUrl(file);
     return {
       payload: { ...base, data_url: dataUrl },
       dataUrl,
@@ -392,9 +557,7 @@ export function ChatInput({
     setSlashState(null);
     onSend?.(text);
     void send(text, {
-      artifactMode: documentMode,
-      planMode: false,
-      autoApproveDestructive,
+      artifactMode,
       attachments: readyAttachments.map((a) => ({
         client_id: a.id,
         name: a.name,
@@ -576,7 +739,7 @@ export function ChatInput({
                 (multiline || attachments.length > 0) ? "rounded-2xl" : "rounded-full",
                 focused && "border-line-strong",
               )
-            : cn("rounded-2xl", focused ? "border-line-strong shadow-pop" : "shadow-chat"),
+            : cn("rounded-2xl", focused ? "border-line-strong shadow-lift" : "shadow-chat"),
           dragOver && "border-ink/30 border-dashed",
           className,
         )}
@@ -722,41 +885,24 @@ export function ChatInput({
         </div>
       ) : (
         <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5 pt-1">
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
             <IconButton
-              icon={<Paperclip />}
+              icon={<Plus className="h-4 w-4" />}
               label="Attach file"
               tooltipSide="top"
               variant="ghost"
               size="md"
               onClick={() => fileInputRef.current?.click()}
             />
+            <SecurityPresetPicker value={securityPreset} onChange={setSecurityPreset} />
             <IconButton
               icon={<FileText className="h-4 w-4" />}
-              label={documentMode ? "Document: on" : "Document"}
+              label={artifactMode ? "Artifact: on" : "Artifact"}
               tooltipSide="top"
               variant="ghost"
               size="md"
-              active={documentMode}
-              onClick={() => setDocumentMode((v) => !v)}
-            />
-            <IconButton
-              icon={autoApproveDestructive ? <Unlock className="text-ink" /> : <Lock className="text-ink-muted" />}
-              label={autoApproveDestructive ? "Auto-approve: on" : "Auto-approve: off"}
-              tooltipSide="top"
-              variant="ghost"
-              size="md"
-              active={autoApproveDestructive}
-              onClick={() => setAutoApproveDestructive(!autoApproveDestructive)}
-            />
-            <IconButton
-              icon={<Globe className="h-4 w-4" />}
-              label={webSearchEnabled ? "Web Search: on" : "Web Search: off"}
-              tooltipSide="top"
-              variant="ghost"
-              size="md"
-              active={webSearchEnabled}
-              onClick={() => setWebSearchEnabled(!webSearchEnabled)}
+              active={artifactMode}
+              onClick={() => setArtifactMode((v) => !v)}
             />
           </div>
           <div className="flex items-center gap-2">
@@ -787,9 +933,9 @@ export function ChatInput({
       )}
 
       {isOverlay && toolsOpen && (
-        <div data-no-drag className="absolute bottom-full left-0 mb-2 w-56 animate-fade-in rounded-2xl border border-line bg-paper p-1.5 shadow-pop">
+        <div data-no-drag className="absolute bottom-full left-0 mb-2 w-56 animate-fade-in rounded-2xl hairline bg-paper p-1.5 shadow-lift">
           <OverlayToolItem
-            icon={<Paperclip className="h-4 w-4" />}
+            icon={<Plus className="h-4 w-4" />}
             label="Attach file"
             onClick={() => {
               setToolsOpen(false);
@@ -798,21 +944,9 @@ export function ChatInput({
           />
           <OverlayToolItem
             icon={<FileText className="h-4 w-4" />}
-            label={documentMode ? "Document: on" : "Document"}
-            active={documentMode}
-            onClick={() => setDocumentMode((v) => !v)}
-          />
-          <OverlayToolItem
-            icon={autoApproveDestructive ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
-            label={autoApproveDestructive ? "Auto-approve: on" : "Auto-approve: off"}
-            active={autoApproveDestructive}
-            onClick={() => setAutoApproveDestructive(!autoApproveDestructive)}
-          />
-          <OverlayToolItem
-            icon={<Globe className="h-4 w-4" />}
-            label={webSearchEnabled ? "Web search: on" : "Web search: off"}
-            active={webSearchEnabled}
-            onClick={() => setWebSearchEnabled(!webSearchEnabled)}
+            label={artifactMode ? "Artifact: on" : "Artifact"}
+            active={artifactMode}
+            onClick={() => setArtifactMode((v) => !v)}
           />
           <div className="my-1 h-px bg-line" />
           <OverlayToolItem

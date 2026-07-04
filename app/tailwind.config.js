@@ -31,6 +31,22 @@ export default {
           DEFAULT: "rgb(var(--bubble) / <alpha-value>)",
           fg: "rgb(var(--bubble-fg) / <alpha-value>)",
         },
+        success: {
+          DEFAULT: "rgb(var(--success) / <alpha-value>)",
+          fg: "rgb(var(--success-fg) / <alpha-value>)",
+        },
+        warning: {
+          DEFAULT: "rgb(var(--warning) / <alpha-value>)",
+          fg: "rgb(var(--warning-fg) / <alpha-value>)",
+        },
+        error: {
+          DEFAULT: "rgb(var(--error) / <alpha-value>)",
+          fg: "rgb(var(--error-fg) / <alpha-value>)",
+        },
+        info: {
+          DEFAULT: "rgb(var(--info) / <alpha-value>)",
+          fg: "rgb(var(--info-fg) / <alpha-value>)",
+        },
       },
       fontFamily: {
         sans: [
@@ -54,6 +70,9 @@ export default {
       boxShadow: {
         chat: "0 1px 2px rgb(var(--shadow) / 0.04), 0 8px 24px rgb(var(--shadow) / 0.06)",
         pop:  "0 1px 2px rgb(var(--shadow) / 0.05), 0 12px 32px rgb(var(--shadow) / 0.10)",
+        // Soft floating elevation — layered (contact → ambient), pools below.
+        // Pairs with the .hairline class on borderless surfaces.
+        lift: "var(--shadow-lift)",
       },
       borderRadius: {
         xxl: "1.25rem",

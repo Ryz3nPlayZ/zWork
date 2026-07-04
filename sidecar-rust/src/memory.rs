@@ -1,11 +1,14 @@
 use std::fs;
 use std::path::PathBuf;
 
-use crate::paths::{memories_dir, memory_md_path, user_md_path, memory_path};
+use crate::paths::{memories_dir, memory_md_path, user_md_path, memory_path, task_memory_path};
 
 const ENTRY_DELIMITER: &str = "\n§\n";
 const MEMORY_CHAR_LIMIT: usize = 2200;
 const USER_CHAR_LIMIT: usize = 1375;
+/// Per-task memory files get a smaller budget — they hold task-specific
+/// findings, not a full user profile.
+const TASK_CHAR_LIMIT: usize = 1500;
 
 /// Which memory file to target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,6 +150,48 @@ pub fn append(target: MemoryTarget, content: &str) -> Result<String, String> {
     match fs::write(&path, serialized) {
         Ok(_) => Ok(format!("Saved to {}.", target.label())),
         Err(e) => Err(format!("Failed to write {}: {}", target.label(), e)),
+    }
+}
+
+// ─── Per-task memory ──────────────────────────────────────────────────────────
+//
+// Scheduled tasks keep their own memory file (`~/.zwork/memories/task_<id>.md`)
+// so that, e.g., the invoice-monitor task doesn't pollute the calendar task's
+// notes. The append/dedup/budget logic mirrors the global files but is keyed by
+// task id. Only valid inside a scheduled-task run — interactive chats cannot
+// write to a task file (there's no task context to key on).
+
+/// Append a new entry to a scheduled task's memory file.
+pub fn append_task(task_id: &str, content: &str) -> Result<String, String> {
+    let content = content.trim();
+    if content.is_empty() {
+        return Err("Memory content is empty.".to_string());
+    }
+
+    let path = task_memory_path(task_id);
+    let _ = memories_dir();
+
+    let mut entries = read_entries(&path);
+
+    if entries.iter().any(|e| e == content) {
+        return Ok("Already recorded for this task.".to_string());
+    }
+
+    let current_chars: usize = entries.iter().map(|e| e.len()).sum::<usize>()
+        + if entries.is_empty() { 0 } else { entries.len() * ENTRY_DELIMITER.len() };
+    if current_chars + content.len() > TASK_CHAR_LIMIT {
+        return Err(format!(
+            "This task's memory is near its size limit ({} chars). Remove older entries before adding new ones.",
+            TASK_CHAR_LIMIT
+        ));
+    }
+
+    entries.push(content.to_string());
+    let serialized = entries.join(ENTRY_DELIMITER);
+
+    match fs::write(&path, serialized) {
+        Ok(_) => Ok("Saved to task memory.".to_string()),
+        Err(e) => Err(format!("Failed to write task memory: {}", e)),
     }
 }
 

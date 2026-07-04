@@ -11,6 +11,7 @@ use crate::chatstore;
 mod prompts;
 mod llm;
 mod compaction;
+mod orientation;
 
 use prompts::convert_input_messages;
 use llm::{stream_llm, trace as llm_trace, LlmEvent};
@@ -41,6 +42,70 @@ fn log_agent_event(chat_id: &str, run_id: &str, event: &str, payload: Value) {
     }
 }
 
+/// Sensible output-token ceiling per model family. Anthropic *requires*
+/// `max_tokens` in every request (the API 400s without it), and other providers
+/// apply a sensible cap when one is supplied. Mirrors the Python
+/// `providers._max_tokens_for`.
+fn max_tokens_for(model_id: &str) -> u64 {
+    let mid = model_id.to_lowercase();
+    if mid.contains("claude-sonnet-4") || mid.contains("claude-opus-4") || mid.contains("claude-4") {
+        return 64000;
+    }
+    if mid.contains("claude-3-5") || mid.contains("claude-3.5") {
+        return 8192;
+    }
+    if mid.contains("claude") {
+        return 8192;
+    }
+    if mid.contains("deepseek-v4-flash") {
+        return 65536;
+    }
+    // OpenAI / OpenAI-compatible: a safe general default.
+    16384
+}
+
+/// Keyword-detect the kind of artifact a message likely wants and return the
+/// steering instruction the Python backend appended to the prompt. Mirrors
+/// `server._artifact_hint`.
+fn artifact_hint(message: &str) -> String {
+    let t = message.to_lowercase();
+    let hint = if ["document", "doc", "brief", "report", "note", "summary", "outline", "write a", "draft a", "make a document"]
+        .iter().any(|k| t.contains(k)) {
+        "The user's request clearly wants a document. Create a sidebar document of kind doc. Do not wrap it in code fences. Do not emit the words Text, Open, or undefined."
+    } else if ["table", "sheet", "spreadsheet", "csv", "tsv", "rows", "columns"]
+        .iter().any(|k| t.contains(k)) {
+        "The user's request clearly wants a table or spreadsheet. Create a sidebar document of kind sheet. Do not wrap it in code fences. Do not emit the words Text, Open, or undefined."
+    } else if ["chart", "graph", "plot", "visualization", "visualise", "visualize"]
+        .iter().any(|k| t.contains(k)) {
+        "The user's request clearly wants a graph. Create a sidebar document of kind graph. Do not wrap it in code fences. Do not emit the words Text, Open, or undefined."
+    } else if ["code snippet", "script", "example code", "runnable example"]
+        .iter().any(|k| t.contains(k)) {
+        "The user's request clearly wants a code snippet. Create a sidebar document of kind code. Do not wrap it in code fences. Do not emit the words Text, Open, or undefined."
+    } else {
+        "The user's request may or may not want a document. If the output is best represented as an editable deliverable, create one. If you create one, do not wrap it in code fences and do not emit the words Text, Open, or undefined."
+    };
+    hint.to_string()
+}
+
+/// Run a quick web search on the message and format the results as grounding
+/// context for the system prompt. Returns None on any failure so the turn
+/// proceeds without grounding rather than erroring.
+async fn web_search_grounding(message: &str) -> Option<String> {
+    let query = message.split_whitespace().take(80).collect::<Vec<_>>().join(" ");
+    if query.trim().is_empty() {
+        return None;
+    }
+    // Reuse the existing web_search tool so the query/parse logic stays in one place.
+    let params = json!({ "query": query, "max_results": 5 });
+    let results = crate::tools::search::execute_web_search(&params).await.ok()?;
+    // The tool returns a formatted string; surface it verbatim as grounding.
+    if results.trim().is_empty() {
+        None
+    } else {
+        Some(results)
+    }
+}
+
 fn pending_permission_gates() -> &'static Mutex<HashMap<String, oneshot::Sender<bool>>> {
     static INSTANCE: OnceLock<Mutex<HashMap<String, oneshot::Sender<bool>>>> = OnceLock::new();
     INSTANCE.get_or_init(|| Mutex::new(HashMap::new()))
@@ -66,68 +131,72 @@ pub fn reject_gate(gate_id: &str) -> bool {
     }
 }
 
-fn check_desktop_browser_active(user_message: &str, messages: &[crate::chatstore::ChatMessage]) -> bool {
-    let msg_lower = user_message.to_lowercase();
-    let keywords = &[
-        "desktop", "click", "type", "capture", "safari", "chrome",
-        "browser", "navigate", "website", "http", "window", "screen",
-        "scroll", "keypress", "key combo", "double click", "right click",
-        "app name", "launch app"
-    ];
-    if keywords.iter().any(|k| msg_lower.contains(k)) {
-        return true;
-    }
-
-    for m in messages {
-        if m.role == "assistant" {
-            if let Some(arr) = m.content.as_array() {
-                for block in arr {
-                    if block.get("type").and_then(|v| v.as_str()) == Some("tool_use") {
-                        if let Some(name) = block.get("name").and_then(|v| v.as_str()) {
-                            if name.starts_with("desktop_") || name.starts_with("browser_") {
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    false
+// ── Pending interactive questions (ask_question / ask_user) ──────────────────
+// One in-flight question per chat_id, mirroring the permission-gate pattern.
+// The tool blocks on a oneshot until the frontend POSTs the answer.
+fn pending_questions() -> &'static Mutex<HashMap<String, oneshot::Sender<String>>> {
+    static INSTANCE: OnceLock<Mutex<HashMap<String, oneshot::Sender<String>>>> = OnceLock::new();
+    INSTANCE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn check_academic_finance_active(user_message: &str, messages: &[crate::chatstore::ChatMessage]) -> bool {
-    let msg_lower = user_message.to_lowercase();
-    let keywords = &[
-        "paper", "citation", "research", "stock", "ticker", "extract",
-        "pdf", "arxiv", "financial", "share price", "moving average",
-        "technical indicator"
-    ];
-    if keywords.iter().any(|k| msg_lower.contains(k)) {
-        return true;
+/// Resolve a pending question for a chat. Called by the /answer-question route.
+pub fn answer_pending_question(chat_id: &str, answer: &str) -> bool {
+    let mut map = pending_questions().lock().unwrap();
+    if let Some(tx) = map.remove(chat_id) {
+        let _ = tx.send(answer.to_string());
+        true
+    } else {
+        false
     }
-
-    for m in messages {
-        if m.role == "assistant" {
-            if let Some(arr) = m.content.as_array() {
-                for block in arr {
-                    if block.get("type").and_then(|v| v.as_str()) == Some("tool_use") {
-                        if let Some(name) = block.get("name").and_then(|v| v.as_str()) {
-                            let academic_tools = &[
-                                "search_papers", "format_citation", "write_research_paper",
-                                "review_paper", "extract_document", "get_stock_data"
-                            ];
-                            if academic_tools.contains(&name) {
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    false
 }
+
+/// Register a pending question (called from the tool dispatcher).
+pub fn register_pending_question(chat_id: &str, tx: oneshot::Sender<String>) {
+    let mut map = pending_questions().lock().unwrap();
+    map.insert(chat_id.to_string(), tx);
+}
+
+/// Drop a pending question (e.g. on timeout).
+pub fn clear_pending_question(chat_id: &str) {
+    let mut map = pending_questions().lock().unwrap();
+    map.remove(chat_id);
+}
+
+// ── Per-run approved-commands allowlist ──────────────────────────────────────
+// When the user approves a run_command (via ask_user_for_permission), the
+// normalized command is added here so subsequent identical calls skip the
+// destructive gate — mirroring Python's run.approved_commands.
+fn approved_commands() -> &'static Mutex<HashMap<String, std::collections::HashSet<String>>> {
+    static INSTANCE: OnceLock<Mutex<HashMap<String, std::collections::HashSet<String>>>> = OnceLock::new();
+    INSTANCE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Add a command to the per-chat approved list.
+pub fn approve_command(chat_id: &str, command: &str) {
+    let normalized = normalize_command(command);
+    let mut map = approved_commands().lock().unwrap();
+    map.entry(chat_id.to_string()).or_default().insert(normalized);
+}
+
+/// Check whether a command was already approved for this chat.
+pub fn is_command_approved(chat_id: &str, command: &str) -> bool {
+    let normalized = normalize_command(command);
+    let map = approved_commands().lock().unwrap();
+    map.get(chat_id).map(|set| set.contains(&normalized)).unwrap_or(false)
+}
+
+/// Strip a command down to its program + first arg so trivial env-var /
+/// whitespace differences don't defeat the allowlist.
+fn normalize_command(command: &str) -> String {
+    command.trim().split_whitespace().take(2).collect::<Vec<_>>().join(" ")
+}
+
+/// Clear a chat's approved-commands (called when a run ends).
+pub fn clear_approved_commands(chat_id: &str) {
+    let mut map = approved_commands().lock().unwrap();
+    map.remove(chat_id);
+}
+
 
 pub fn run_agent_turn(
     chat_id: String,
@@ -138,10 +207,20 @@ pub fn run_agent_turn(
     project_id: String,
     plan_mode: bool,
     auto_approve: bool,
+    artifact_mode: bool,
+    web_search_enabled: bool,
+    extra_system_prompt: Option<String>,
 ) -> impl futures_util::Stream<Item = Result<Value, Infallible>> {
     let (tx, rx) = mpsc::channel(100);
-    
-    tokio::spawn(async move {
+
+    let run_chat_id = chat_id.clone();
+    let turn_handle = tokio::spawn(async move {
+        // Ensure the run is unregistered even if the turn returns early or
+        // panics, so a stale handle never blocks a future turn from being
+        // registered/cancelled.
+        let chat_id_for_cleanup = chat_id.clone();
+        let _guard = RunGuard(chat_id_for_cleanup);
+
         let s = settings::load();
         let run_id = if run_id.is_empty() { chat_id.clone() } else { run_id };
         log_agent_event(&chat_id, &run_id, "turn_start", json!({
@@ -232,6 +311,26 @@ pub fn run_agent_turn(
             "real_model_id": real_model_id,
         }));
 
+        // Surface the resolved provider/model to the frontend so the model
+        // picker shows accurate info, and flag needs-setup when no credentials
+        // are configured (the Python backend's no-model SSE path).
+        let _ = tx.send(json!({
+            "type": "meta",
+            "provider": provider_display_name,
+            "resolved_model": real_model_id,
+            "upstream_provider": shape,
+        })).await;
+
+        if api_key.trim().is_empty() {
+            let _ = tx.send(json!({
+                "type": "needs_setup",
+                "message": "No model credentials are configured. Add an API key in Settings to start chatting."
+            })).await;
+            let _ = tx.send(json!({ "type": "done" })).await;
+            let _ = tx.send(json!({ "type": "end" })).await;
+            return;
+        }
+
         // 2. Build system prompt
         let user_name = crate::server::display_name();
         let os_name = std::env::consts::OS.to_string();
@@ -243,28 +342,55 @@ pub fn run_agent_turn(
         let skills = crate::skills::list_skills();
         let example_slug = skills.first().map(|s| s.slug.as_str()).unwrap_or("frontend-design");
 
-        let include_desktop = check_desktop_browser_active(&user_message, &chat.messages);
-        let include_academic = check_academic_finance_active(&user_message, &chat.messages);
+        // All tools are advertised every turn — non-technical users shouldn't
+        // have to manage "scopes", and modern tool-calling models pick the
+        // right tool from the full menu better than any keyword heuristic
+        // (the frontier harnesses Goose, Claude Code, and opencode all bet
+        // this way). `plan_mode` remains the only tool gate (read-only subset).
+        // Per-tool-group workflow guidance lives in the system prompt instead.
+        let include_desktop = true;
+        let include_academic = true;
+
+        // Fetch connected-app (Composio) tools once per turn so the model can
+        // call `composio__*` actions. Empty when the user isn't connected, so
+        // this is a no-op for the common case.
+        let composio_schemas = crate::composio::all_tool_schemas().await;
+        let composio_apps = crate::composio::connected_apps().await;
+        let connected_apps_block =
+            crate::composio::build_connected_apps_block(&composio_schemas, &composio_apps);
+        // MCP tools from configured stdio servers (~/.zwork/mcp.json).
+        let mcp_schemas = crate::mcp::all_tool_schemas();
 
         let get_scoped_schemas = |plan_mode_val: bool| -> Vec<Value> {
-            let all = get_tool_schemas(plan_mode_val);
-            all.into_iter().filter(|t| {
-                let name = t.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                if name.starts_with("desktop_") || name.starts_with("browser_") {
-                    return include_desktop;
-                }
-                let academic_tools = &[
-                    "search_papers", "format_citation", "write_research_paper",
-                    "review_paper", "extract_document", "get_stock_data", "detect_hardware"
-                ];
-                if academic_tools.contains(&name) {
-                    return include_academic;
-                }
-                if name == "manage_tasks" || name == "manage_events" || name == "send_telegram_message" {
-                    return include_academic || include_desktop;
-                }
-                true
-            }).collect::<Vec<_>>()
+            let mut all = get_tool_schemas(plan_mode_val);
+            all.extend(composio_schemas.clone());
+            all.extend(mcp_schemas.clone());
+            // Stable name-sort so the tool list (and thus the tool-order
+            // sensitive prompt-cache prefix) doesn't reshuffle across turns
+            // when MCP/Composio servers connect/disconnect mid-session.
+            all.sort_by(|a, b| {
+                a.get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .cmp(b.get("name").and_then(|v| v.as_str()).unwrap_or(""))
+            });
+            all
+        };
+
+        // Load the active project's name + context so the prompt reflects it.
+        // The Python backend injects project.md context; here we read the same
+        // project dir used by the /api/projects/* routes.
+        let (project_name, project_md) = if !project_id.is_empty() {
+            let dir = crate::paths::project_dir(&project_id);
+            let name = std::fs::read_to_string(dir.join("project.json"))
+                .ok()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                .and_then(|v| v.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()))
+                .unwrap_or_default();
+            let ctx = std::fs::read_to_string(dir.join("context.md")).unwrap_or_default();
+            (name, ctx)
+        } else {
+            (String::new(), String::new())
         };
 
         let system_prompt = settings::build_system_prompt(
@@ -273,14 +399,15 @@ pub fn run_agent_turn(
             &user_name,
             &os_name,
             &cwd,
-            "", // Project name optional
-            "", // Project context optional
+            &project_name,
+            &project_md,
             plan_mode,
             auto_approve,
             &skills_list,
             example_slug,
             include_desktop,
             include_academic,
+            &connected_apps_block,
         );
 
         // Inject the LIVE environment status so the model actually knows its
@@ -290,7 +417,7 @@ pub fn run_agent_turn(
         // guessing URLs or claiming it can't browse — even when the zbctl
         // bridge shows Connected in Settings.
         let browser_connected = crate::browser_bridge::extension_connected().await;
-        let system_prompt = format!(
+        let mut system_prompt = format!(
             "{system_prompt}\n\n## Live environment status\n{}",
             if browser_connected {
                 "- Chrome browser bridge: CONNECTED. Your browser_* tools are LIVE and drive the user's real Chrome (signed-in sessions, no login walls). For ANY task involving a website, web app, web form, login-gated page, or anything browser-based, USE the browser_* tools (browser_navigate / browser_snapshot / browser_click / browser_type / browser_eval). Do not claim you cannot browse, and do not guess URLs from memory — navigate to a real URL or snapshot and click real links."
@@ -298,6 +425,46 @@ pub fn run_agent_turn(
                 "- Chrome browser bridge: NOT connected. browser_* tools will fail until the user opens Chrome with the zbctl extension loaded and zWork running. If the task needs the browser, tell the user to connect it rather than guessing."
             }
         );
+
+        // Artifact mode: steer the model toward rich deliverables. The hint
+        // keyword-detects the likely artifact kind (doc/sheet/graph/code) the
+        // way the Python backend did, so the same phrasings produce artifacts.
+        if artifact_mode {
+            system_prompt.push_str("\n\n## Artifact mode\n");
+            system_prompt.push_str(&artifact_hint(&user_message));
+        }
+
+        // Web-search grounding: when enabled, run a quick search on the
+        // message and inject the results as grounding context (mirrors Python).
+        if web_search_enabled {
+            if let Some(grounding) = web_search_grounding(&user_message).await {
+                system_prompt.push_str("\n\n## Web Search Results (Grounding Context)\n");
+                system_prompt.push_str(&grounding);
+            }
+        }
+
+        // Attachment framing: name and surface each attachment so the model
+        // treats them as interaction context, not just inline bytes.
+        if !attachments.is_empty() {
+            let listing = attachments
+                .iter()
+                .map(|a| format!("- {} → {}", a.name, a.path_or_url()))
+                .collect::<Vec<_>>()
+                .join("\n");
+            system_prompt.push_str(&format!(
+                "\n\n## Current interaction context\nThe user attached:\n{listing}"
+            ));
+        }
+
+        // Caller-supplied extra system-prompt block. Used by the scheduler to
+        // inject scheduled-task identity, trigger description, and per-task
+        // memory. Interactive (HTTP) turns pass `None` — no-op here.
+        if let Some(extra) = &extra_system_prompt {
+            if !extra.trim().is_empty() {
+                system_prompt.push_str("\n\n");
+                system_prompt.push_str(extra);
+            }
+        }
 
         let mut history_messages = Vec::new();
         // Insert system prompt first
@@ -419,16 +586,73 @@ pub fn run_agent_turn(
             // that base_url), so only the model id changes.
             let compaction_model =
                 compaction::compaction_model_id(&shape, &real_model_id);
-            if let Err(e) = compaction::compact_conversation_history(
+            let pre_len: usize = history_messages.iter()
+                .map(|m| m.to_string().len())
+                .sum();
+            let compaction_result = compaction::compact_conversation_history(
                 &mut history_messages,
                 &endpoint,
                 &headers,
                 &shape,
                 &compaction_model,
             )
-            .await
+            .await;
+            match &compaction_result {
+                Ok(()) => {
+                    let post_len: usize = history_messages.iter()
+                        .map(|m| m.to_string().len())
+                        .sum();
+                    // Only notify the UI if compaction actually shrank history.
+                    if post_len < pre_len {
+                        let _ = tx.send(json!({
+                            "type": "compaction",
+                            "status": "complete",
+                            "before_chars": pre_len,
+                            "after_chars": post_len,
+                            "model": compaction_model,
+                        })).await;
+                    }
+                }
+                Err(e) => {
+                    llm_trace(&chat_id, turn, "compaction_error", json!({ "error": e }));
+                    let _ = tx.send(json!({
+                        "type": "compaction",
+                        "status": "failed",
+                        "error": e,
+                    })).await;
+                }
+            }
+
+            // Inject the per-turn orientation block (Goose "moim" pattern) into
+            // the latest user message. Volatile facts (time, cwd, git, budget)
+            // go here rather than the system prompt so the cached system prefix
+            // stays stable; the system prompt teaches the model how to read it.
+            let turn_ctx = orientation::turn_context_block(turn, max_turns, &cwd);
+            if let Some(last_user) = history_messages
+                .iter_mut()
+                .rev()
+                .find(|m| m.get("role").and_then(|v| v.as_str()) == Some("user"))
             {
-                llm_trace(&chat_id, turn, "compaction_error", json!({ "error": e }));
+                if let Some(content) = last_user.get_mut("content") {
+                    if let Some(s) = content.as_str() {
+                        // Don't double-inject if a previous turn already prepended.
+                        if !s.contains("<turn-context>") {
+                            *content = json!(format!("{}\n\n{}", turn_ctx, s));
+                        }
+                    } else if let Some(arr) = content.as_array_mut() {
+                        // Anthropic content-blocks shape: prepend a text block.
+                        // Avoid duplicates across turns.
+                        let already = arr.iter().any(|b| {
+                            b.get("text")
+                                .and_then(|t| t.as_str())
+                                .map(|t| t.contains("<turn-context>"))
+                                .unwrap_or(false)
+                        });
+                        if !already {
+                            arr.insert(0, json!({ "type": "text", "text": turn_ctx }));
+                        }
+                    }
+                }
             }
 
             // Format messages and tools payload
@@ -460,12 +684,38 @@ pub fn run_agent_turn(
             };
             
             let body = if shape == "anthropic" {
+                // Anthropic prompt caching: mark the (large, stable) system
+                // prompt and tool catalog with `cache_control: ephemeral` so
+                // subsequent turns pay the ~10% cache-read price instead of
+                // full input cost. Only valid against the real Anthropic API.
+                let caching_eligible = base_url.to_lowercase().contains("api.anthropic.com");
+                let (system_field, tools_field): (Value, Value) = if caching_eligible {
+                    let mut tools = tools_payload.clone();
+                    if let Some(last) = tools.last_mut() {
+                        last.as_object_mut()
+                            .expect("tool entry is an object")
+                            .insert("cache_control".to_string(), json!({"type": "ephemeral"}));
+                    }
+                    let sys_blocks = if system.is_empty() {
+                        Value::Null
+                    } else {
+                        json!([{
+                            "type": "text",
+                            "text": system,
+                            "cache_control": {"type": "ephemeral"}
+                        }])
+                    };
+                    (sys_blocks, Value::Array(tools))
+                } else {
+                    (Value::String(system.clone()), Value::Array(tools_payload.clone()))
+                };
                 json!({
                     "model": real_model_id,
-                    "system": system,
+                    "system": system_field,
                     "messages": convo,
                     "stream": true,
-                    "tools": tools_payload
+                    "tools": tools_field,
+                    "max_tokens": max_tokens_for(&real_model_id)
                 })
             } else {
                 let mut messages_payload = vec![json!({"role": "system", "content": system})];
@@ -509,6 +759,11 @@ pub fn run_agent_turn(
             let mut assistant_content_blocks: Vec<serde_json::Value> = Vec::new();
             let mut tool_calls = Vec::new();
             let mut turn_error: Option<String> = None;
+            // Accumulator for streamed reasoning chunks within this turn.
+            // Anthropic/DeepSeek emit reasoning as many small deltas; we
+            // forward each delta live (so the UI can render a streaming
+            // "thinking" dropdown) and flush the buffer when the segment ends.
+            let mut reasoning_buffer = String::new();
 
             while let Some(evt_res) = stream.next().await {
                 let evt = match evt_res {
@@ -548,11 +803,52 @@ pub fn run_agent_turn(
                         );
                         let _ = tx.send(json!({ "type": "delta", "text": text })).await;
                     }
-                    LlmEvent::ReasoningDelta { .. } => {
-                        // Model chain-of-thought: surfaced to the SSE frame log
-                        // only when ZWORK_TRACE_SSE=1; never shown to the UI.
+                    LlmEvent::ReasoningDelta { text } => {
+                        // Forward reasoning deltas to the UI so a streaming
+                        // "thinking" dropdown can render chain-of-thought. The
+                        // frontend treats `thinking_delta` events as a distinct
+                        // segment kind (separate from visible `delta` text), so
+                        // the model's reasoning never blends into the answer.
+                        if !text.is_empty() {
+                            reasoning_buffer.push_str(&text);
+                            let _ = tx.send(json!({
+                                "type": "thinking_delta",
+                                "text": text
+                            })).await;
+                        }
+                    }
+                    LlmEvent::ThinkingBlock { thinking, signature } => {
+                        // Preserve the extended-thinking block (with its
+                        // signature) so it can be replayed on the next turn —
+                        // Anthropic requires prior thinking blocks, signed, to
+                        // be present when continuing a thinking-enabled turn.
+                        let mut block = json!({
+                            "type": "thinking",
+                            "thinking": thinking,
+                        });
+                        if !signature.is_empty() {
+                            block["signature"] = json!(signature);
+                        }
+                        assistant_content_blocks.push(block);
+                        // Close the streamed thinking segment so the UI can
+                        // finalize (and auto-collapse) its dropdown. A turn may
+                        // produce reasoning via `ReasoningDelta` *or* a single
+                        // assembled `ThinkingBlock`; either way this signals
+                        // "thinking segment done".
+                        if !reasoning_buffer.is_empty() {
+                            reasoning_buffer.clear();
+                            let _ = tx.send(json!({ "type": "thinking_end" })).await;
+                        }
                     }
                     LlmEvent::ToolCall { id, name, input } => {
+                        // Close any open reasoning segment before the tool call:
+                        // a tool_use event implicitly terminates the preceding
+                        // text/thinking segment in the frontend's parts[]
+                        // timeline.
+                        if !reasoning_buffer.is_empty() {
+                            reasoning_buffer.clear();
+                            let _ = tx.send(json!({ "type": "thinking_end" })).await;
+                        }
                         tool_calls.push(json!({
                             "id": id.clone(),
                             "name": name.clone(),
@@ -564,6 +860,16 @@ pub fn run_agent_turn(
                             "name": name,
                             "input": input
                         }));
+                        // Announce the tool call positionally so the frontend
+                        // can open a `tool` part at the right point in the
+                        // timeline — before the activity/tool_result frames
+                        // arrive from the spawned execution task.
+                        let _ = tx.send(json!({
+                            "type": "tool_use",
+                            "id": id,
+                            "name": name,
+                            "input": input
+                        })).await;
                     }
                     LlmEvent::Usage(_) | LlmEvent::Finish { .. } => {
                         // Diagnostic only; already traced inside stream_llm.
@@ -650,7 +956,13 @@ pub fn run_agent_turn(
                     let mut execute_allowed = true;
                     
                     if let Risk::Destructive { reason } = risk {
-                        if !auto_approve {
+                        // A command the user already approved this run (via
+                        // ask_user_for_permission) skips the gate entirely.
+                        let already_approved = name == "run_command"
+                            && params.get("command").and_then(|v| v.as_str())
+                                .map(|c| is_command_approved(&chat_id, c))
+                                .unwrap_or(false);
+                        if !auto_approve && !already_approved {
                             let gate_id = format!("gate_{}", uuid::Uuid::new_v4().simple());
 
                             // Yield permission request
@@ -659,7 +971,8 @@ pub fn run_agent_turn(
                                 "tool": name,
                                 "reason": reason,
                                 "blocked": true,
-                                "gate_id": gate_id
+                                "gate_id": gate_id,
+                                "tool_use_id": tc_id
                             })).await;
                             
                             let (gate_tx, gate_rx) = oneshot::channel();
@@ -710,13 +1023,13 @@ pub fn run_agent_turn(
                                 let act_id = t_evt.get("id").and_then(|v| v.as_str()).unwrap_or("");
                                 let act_label = t_evt.get("label").and_then(|v| v.as_str()).unwrap_or("");
                                 let act_done = t_evt.get("done").and_then(|v| v.as_bool()).unwrap_or(false);
-                                
+
                                 let entry = json!({
                                     "id": act_id,
                                     "label": act_label,
                                     "done": act_done
                                 });
-                                
+
                                 let current_activities = {
                                     let mut act_lock = accumulated_activities.lock().unwrap();
                                     if let Some(pos) = act_lock.iter().position(|x| x["id"] == act_id) {
@@ -726,7 +1039,7 @@ pub fn run_agent_turn(
                                     }
                                     act_lock.clone()
                                 };
-                                
+
                                 // Serialize database updates using db_lock to avoid SQLite locks
                                 {
                                     let _guard = db_lock.lock().await;
@@ -737,11 +1050,20 @@ pub fn run_agent_turn(
                                         Some(current_activities)
                                     );
                                 }
-                                let _ = tx.send(t_evt).await;
+                                // Stamp the model's tool_use_id so the frontend
+                                // can correlate this activity with the `tool_use`
+                                // event that opened the tool part in its timeline.
+                                let mut forwarded = t_evt;
+                                forwarded["tool_use_id"] = json!(tc_id);
+                                let _ = tx.send(forwarded).await;
                             } else if type_str == "tool_result" {
                                 final_result_txt = t_evt.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string();
                                 final_result_ok = t_evt.get("ok").and_then(|v| v.as_bool()).unwrap_or(true);
-                                let _ = tx.send(t_evt).await;
+                                // Stamp the model's tool_use_id for correlation
+                                // with the `tool_use` timeline part.
+                                let mut forwarded = t_evt;
+                                forwarded["tool_use_id"] = json!(tc_id);
+                                let _ = tx.send(forwarded).await;
                             } else {
                                 let _ = tx.send(t_evt).await;
                             }
@@ -766,7 +1088,8 @@ pub fn run_agent_turn(
                             "type": "tool_result",
                             "tool": name,
                             "ok": false,
-                            "message": final_result_txt
+                            "message": final_result_txt,
+                            "tool_use_id": tc_id
                         })).await;
 
                         llm_trace(
@@ -822,8 +1145,202 @@ pub fn run_agent_turn(
             "type": "end"
         })).await;
     });
-    
+
+    // Register the turn so Stop can abort it. The RunGuard inside the task
+    // unregisters on completion; this registration covers the live window.
+    crate::watchdog::register_run(&run_chat_id, turn_handle);
+
     ReceiverStream::new(rx).map(Ok)
+}
+
+/// Spawn a sub-agent that runs a real, bounded, READ-ONLY agent loop to
+/// complete a task, streaming `subagent_started` / `subagent_delta` /
+/// `subagent_done` events to the parent's SSE stream. Returns the sub-agent's
+/// final text result.
+///
+/// Safety rails (sub-agents are deliberately conservative, mirroring Python's
+/// `auto_approve_destructive=False`):
+///  - only non-destructive tools (read/list/search/web/academic);
+///  - hard cap of 12 turns;
+///  - no nested spawn_agent (would risk unbounded recursion).
+pub async fn spawn_subagent(
+    chat_id: &str,
+    parent_run_id: &str,
+    task: &str,
+    model_id: &str,
+    tx: &mpsc::Sender<Value>,
+) -> Result<String, String> {
+    use crate::agent::llm::{stream_llm, LlmEvent};
+    use futures_util::StreamExt;
+
+    let task_id = format!("subagent_{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
+    let _ = tx.send(json!({
+        "type": "subagent_started",
+        "task_id": task_id,
+        "description": task,
+    })).await;
+
+    // Resolve the same model the parent uses.
+    let s = settings::load();
+    let (api_key, base_url, shape, real_model_id, provider_display_name) = if model_id == "__claude_code__" {
+        let cc_model = crate::server::read_claude_code_model().unwrap_or_default();
+        let real = if cc_model.is_empty() || cc_model == "(default)" { "claude-3-5-sonnet-latest".to_string() } else { cc_model };
+        if let Some(cred) = crate::server::resolve("claude_code", &s, "") {
+            (cred.api_key, cred.base_url, cred.shape, real, "local credentials".to_string())
+        } else {
+            ("".to_string(), "https://api.anthropic.com".to_string(), "anthropic".to_string(), real, "local credentials".to_string())
+        }
+    } else if let Some(m) = s.custom_models.iter().find(|m| m.id == model_id) {
+        let real = if m.model_id.is_empty() || m.model_id == "(default)" { "claude-3-5-sonnet-latest".to_string() } else { m.model_id.clone() };
+        if let Some(cred) = crate::server::resolve(&m.credential, &s, &m.base_url_override) {
+            (cred.api_key, cred.base_url, cred.shape, real, m.credential.clone())
+        } else {
+            return Err("No credentials for sub-agent model".to_string());
+        }
+    } else {
+        let real = if model_id.contains("pro") { "deepseek-v4-pro".to_string() } else { "deepseek-v4-flash".to_string() };
+        if let Some(cred) = crate::server::resolve("zwork_router", &s, "") {
+            (cred.api_key, cred.base_url, cred.shape, real, "zWork Cloud Router".to_string())
+        } else {
+            return Err("No credentials for sub-agent model".to_string());
+        }
+    };
+    let _ = provider_display_name; // resolved but not surfaced for sub-agents
+
+    if api_key.trim().is_empty() {
+        let _ = tx.send(json!({"type": "subagent_done", "task_id": task_id, "error": "No credentials configured"})).await;
+        return Err("No credentials configured".to_string());
+    }
+
+    // Read-only toolset: sub-agents must NOT mutate state.
+    let readonly_schemas: Vec<Value> = get_tool_schemas(false).into_iter()
+        .filter(|t| {
+            matches!(
+                t.get("name").and_then(|v| v.as_str()).unwrap_or(""),
+                "read_file" | "list_dir" | "grep_search" | "web_search"
+                | "search_papers" | "format_citation" | "extract_document"
+            )
+        })
+        .collect();
+
+    let system = format!(
+        "You are a focused sub-agent. Complete this task: {}\n\n\
+         You have READ-ONLY tools (read/list/search). Do the task, then stop. \
+         Be concise — your full text output is returned to the parent agent.",
+        task
+    );
+    let mut history: Vec<Value> = vec![json!({"role": "system", "content": system})];
+    let user_msg = prompts::build_user_content(task, &[]);
+    history.push(json!({"role": "user", "content": user_msg}));
+
+    let endpoint = if shape == "anthropic" { format!("{}/v1/messages", base_url) } else { format!("{}/chat/completions", base_url) };
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert("content-type", reqwest::header::HeaderValue::from_static("application/json"));
+    if shape == "anthropic" {
+        use reqwest::header::HeaderValue;
+        headers.insert("x-api-key", HeaderValue::try_from(api_key.clone()).unwrap_or_else(|_| HeaderValue::from_static("")));
+        headers.insert("anthropic-version", HeaderValue::from_static("2023-06-01"));
+    } else {
+        use reqwest::header::HeaderValue;
+        headers.insert("authorization", HeaderValue::try_from(format!("Bearer {}", api_key)).unwrap_or_else(|_| HeaderValue::from_static("")));
+    }
+
+    let mut accumulated = String::new();
+    const MAX_SUBAGENT_TURNS: u32 = 12;
+
+    for turn in 1..=MAX_SUBAGENT_TURNS {
+        let (sys, convo) = prompts::convert_input_messages(&history);
+        let tools_payload: Vec<Value> = if shape == "anthropic" {
+            readonly_schemas.iter().map(|t| json!({"name": t["name"], "description": t["description"], "input_schema": t["parameters"]})).collect()
+        } else {
+            readonly_schemas.iter().map(|t| json!({"type":"function","function":{"name": t["name"], "description": t["description"], "parameters": t["parameters"]}})).collect()
+        };
+        let body = if shape == "anthropic" {
+            json!({"model": real_model_id, "system": sys, "messages": convo, "stream": true, "tools": tools_payload, "max_tokens": max_tokens_for(&real_model_id)})
+        } else {
+            let mut msgs = vec![json!({"role":"system","content": sys})];
+            msgs.extend(convo.clone());
+            json!({"model": real_model_id, "messages": msgs, "stream": true, "tools": tools_payload})
+        };
+
+        let mut stream = stream_llm(endpoint.clone(), headers.clone(), body, shape.clone(), turn, chat_id.to_string());
+        let mut text = String::new();
+        let mut tool_calls: Vec<Value> = Vec::new();
+        let mut assistant_blocks: Vec<Value> = Vec::new();
+        while let Some(evt_res) = stream.next().await {
+            match evt_res {
+                Ok(LlmEvent::TextDelta { text: t }) => {
+                    text.push_str(&t);
+                    accumulated.push_str(&t);
+                    let _ = tx.send(json!({"type":"subagent_delta","task_id": task_id, "text": t})).await;
+                    // merge into last text block
+                    if let Some(last) = assistant_blocks.last_mut() {
+                        if last.get("type").and_then(|v| v.as_str()) == Some("text") {
+                            if let Some(tt) = last.get_mut("text").and_then(|v| v.as_str()) {
+                                let combined = format!("{}{}", tt, t);
+                                *last.get_mut("text").unwrap() = json!(combined);
+                                continue;
+                            }
+                        }
+                    }
+                    assistant_blocks.push(json!({"type":"text","text": t}));
+                }
+                Ok(LlmEvent::ToolCall { id, name, input }) => {
+                    tool_calls.push(json!({"id": id, "name": name, "input": input}));
+                }
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+
+        // Append the assistant turn to history.
+        if !assistant_blocks.is_empty() && shape == "anthropic" {
+            history.push(json!({"role":"assistant","content": assistant_blocks}));
+        } else if !text.is_empty() {
+            history.push(json!({"role":"assistant","content": text}));
+        }
+        if tool_calls.is_empty() {
+            break; // no more work
+        }
+
+        // Execute the read-only tools and append results. Call the tool
+        // functions directly (not through the streaming execute_tool
+        // dispatcher) to avoid an opaque-type recursion cycle.
+        for tc in &tool_calls {
+            let name = tc.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let input = tc.get("input").cloned().unwrap_or(json!({}));
+            let id = tc.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let result = match name {
+                "read_file" => crate::tools::fs::execute_read_file(&input).await,
+                "list_dir" => crate::tools::fs::execute_list_dir(&input).await,
+                "grep_search" => crate::tools::fs::execute_grep_search(&input).await,
+                "web_search" => crate::tools::search::execute_web_search(&input).await,
+                "extract_document" => crate::tools::doc_extract::execute_extract_document(&input).await,
+                _ => Err(format!("Sub-agents cannot use tool '{}'", name)),
+            };
+            let final_msg = result.unwrap_or_else(|e| format!("Error: {}", e));
+            if shape == "anthropic" {
+                history.push(json!({"role":"user","content":[{"type":"tool_result","tool_use_id": id, "content": final_msg}]}));
+            } else {
+                history.push(json!({"role":"tool","tool_call_id": id, "content": final_msg}));
+            }
+        }
+    }
+
+    let _ = log_agent_event(chat_id, parent_run_id, "subagent_done", json!({"task_id": task_id, "chars": accumulated.len()}));
+    let _ = tx.send(json!({"type":"subagent_done","task_id": task_id, "result": accumulated})).await;
+    Ok(accumulated)
+}
+
+/// RAII guard that unregisters a chat's run from the watchdog when the agent
+/// turn ends (normally or via panic), preventing stale handles.
+struct RunGuard(String);
+impl Drop for RunGuard {
+    fn drop(&mut self) {
+        crate::watchdog::unregister_run(&self.0);
+        // Clear per-run approved commands so they don't leak into the next run.
+        clear_approved_commands(&self.0);
+    }
 }
 
 struct DoomLoopDetector {

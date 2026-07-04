@@ -1,5 +1,5 @@
 use axum::{
-    extract::Path,
+    extract::{Path, Query},
     response::sse::{Event, Sse},
     response::IntoResponse,
     Json,
@@ -31,6 +31,8 @@ pub struct PatchChatRequest {
 #[derive(Deserialize)]
 pub struct PatchMessageRequest {
     pub content: Option<Value>,
+    #[serde(default)]
+    pub activities: Option<Vec<Value>>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -41,12 +43,26 @@ pub struct ChatStreamRequest {
     pub message: String,
     pub model: Option<String>,
     pub project_id: Option<String>,
+    /// Caller-provided title for a newly created chat.
+    #[serde(default)]
+    pub new_chat_title: Option<String>,
     #[serde(default)]
     pub plan_mode: bool,
     #[serde(default)]
     pub auto_approve_destructive: bool,
     #[serde(default)]
     pub attachments: Vec<Attachment>,
+    /// Whether the assistant should render rich artifacts. Defaults to true
+    /// (the Python backend's default) to preserve the artifact UX.
+    #[serde(default = "default_true")]
+    pub artifact_mode: bool,
+    /// When true, the message is grounded with live web-search results.
+    #[serde(default)]
+    pub web_search_enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -61,6 +77,24 @@ pub struct Attachment {
     pub size: Option<u64>,
     #[serde(default)]
     pub data_url: Option<String>,
+}
+
+impl Attachment {
+    /// Best-effort locator for prompt framing: prefer the on-disk path, then
+    /// any data URL, then the original (often relative) path string.
+    pub fn path_or_url(&self) -> String {
+        if !self.path.is_empty() {
+            self.path.clone()
+        } else if let Some(u) = &self.data_url {
+            if u.len() > 60 {
+                format!("{}…", &u[..60])
+            } else {
+                u.clone()
+            }
+        } else {
+            "(no path)".to_string()
+        }
+    }
 }
 
 // REST Handlers
@@ -362,7 +396,8 @@ pub fn resolve(credential: &str, settings: &settings::Settings, override_base_ur
             settings.provider_config.get(credential)
                 .and_then(|m| m.get("base_url"))
                 .cloned()
-                .unwrap_or_default()
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| default_base_url(credential))
         };
         return Some(Credentials {
             shape,
@@ -371,7 +406,7 @@ pub fn resolve(credential: &str, settings: &settings::Settings, override_base_ur
             source: "byok".to_string(),
         });
     }
-    
+
     // Check uppercase env var
     let env_var_name = format!("{}_API_KEY", credential.to_uppercase());
     if let Ok(tok) = std::env::var(&env_var_name) {
@@ -379,7 +414,10 @@ pub fn resolve(credential: &str, settings: &settings::Settings, override_base_ur
             let base = if !override_base_url.is_empty() {
                 override_base_url.to_string()
             } else {
-                std::env::var(format!("{}_BASE_URL", credential.to_uppercase())).unwrap_or_default()
+                std::env::var(format!("{}_BASE_URL", credential.to_uppercase()))
+                    .ok()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| default_base_url(credential))
             };
             return Some(Credentials {
                 shape,
@@ -391,6 +429,25 @@ pub fn resolve(credential: &str, settings: &settings::Settings, override_base_ur
     }
 
     None
+}
+
+/// Hard-coded default base URLs for OpenAI-compatible providers that aren't
+/// given a dedicated `resolve` branch. Without these, a user who enters only a
+/// Groq/DeepSeek/etc. API key resolves to an empty base_url and every request
+/// fails. Mirrors Python's `OPENAI_COMPAT_PROVIDERS` table.
+fn default_base_url(credential: &str) -> String {
+    match credential {
+        "groq" => "https://api.groq.com/openai/v1".to_string(),
+        "cerebras" => "https://api.cerebras.ai/v1".to_string(),
+        "deepseek" => "https://api.deepseek.com/v1".to_string(),
+        "zai" => "https://api.z.ai/api/paas/v4".to_string(),
+        "together" => "https://api.together.xyz/v1".to_string(),
+        "mistral" => "https://api.mistral.ai/v1".to_string(),
+        "perplexity" => "https://api.perplexity.ai".to_string(),
+        "fireworks" => "https://api.fireworks.ai/inference/v1".to_string(),
+        "openrouter" => "https://openrouter.ai/api/v1".to_string(),
+        _ => String::new(),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -476,6 +533,16 @@ pub async fn get_providers() -> impl IntoResponse {
                 "openai" => "OpenAI-compatible",
                 "claude_code" => "Local credentials",
                 "zwork_router" => "Managed",
+                "ollama" => "Ollama",
+                "groq" => "Groq",
+                "cerebras" => "Cerebras",
+                "deepseek" => "DeepSeek",
+                "zai" => "z.ai",
+                "together" => "Together AI",
+                "mistral" => "Mistral",
+                "perplexity" => "Perplexity",
+                "fireworks" => "Fireworks AI",
+                "openrouter" => "OpenRouter",
                 other => other,
             };
             
@@ -543,6 +610,9 @@ pub struct SettingsPatch {
     pub use_claude_code_config: Option<bool>,
     pub telemetry_enabled: Option<bool>,
     pub telegram_chat_id: Option<String>,
+    /// Synced from the cloud session (`CloudUser.tier`) by the desktop app.
+    /// The sidecar uses it to enforce the free-tier scheduled-task cap.
+    pub account_tier: Option<String>,
 }
 
 pub async fn put_settings(Json(patch): Json<SettingsPatch>) -> impl IntoResponse {
@@ -577,6 +647,14 @@ pub async fn put_settings(Json(patch): Json<SettingsPatch>) -> impl IntoResponse
     if let Some(chat_id) = patch.telegram_chat_id {
         s.telegram_chat_id = chat_id;
     }
+    if let Some(tier) = patch.account_tier {
+        // Normalize: accept cloud-tier values, default anything odd to "free".
+        let t = tier.to_ascii_lowercase();
+        s.account_tier = match t.as_str() {
+            "pro" | "max" => t,
+            _ => "free".to_string(),
+        };
+    }
 
     settings::save(&mut s);
     Json(settings::public_view(&s))
@@ -592,6 +670,7 @@ pub struct SettingsPublic {
     pub provider_config: HashMap<String, HashMap<String, String>>,
     pub custom_models: Vec<settings::CustomModel>,
     pub telegram_chat_id: String,
+    pub account_tier: String,
 }
 
 pub async fn list_chats() -> impl IntoResponse {
@@ -644,7 +723,7 @@ pub async fn patch_message(
     Path((chat_id, message_id)): Path<(String, String)>,
     Json(req): Json<PatchMessageRequest>,
 ) -> impl IntoResponse {
-    let updated = chatstore::update_message(&chat_id, &message_id, req.content, None);
+    let updated = chatstore::update_message(&chat_id, &message_id, req.content, req.activities);
     Json(json!({ "success": updated.is_some(), "message": updated }))
 }
 
@@ -668,13 +747,33 @@ pub async fn chat_stream_route(
     Json(req): Json<ChatStreamRequest>,
 ) -> impl IntoResponse {
     let chat_id = req.chat_id.unwrap_or_else(|| {
-        let chat = chatstore::create("New chat", &req.model.clone().unwrap_or_default(), &req.project_id.clone().unwrap_or_default());
+        let title = req.new_chat_title.as_deref().unwrap_or("New chat");
+        let chat = chatstore::create(
+            title,
+            &req.model.clone().unwrap_or_default(),
+            &req.project_id.clone().unwrap_or_default(),
+        );
         chat.id
     });
-    
+
     let model_id = req.model.unwrap_or_else(|| "deepseek-v4-flash".to_string());
     let project_id = req.project_id.unwrap_or_default();
-    
+
+    // Plan mode can be toggled by the explicit flag OR by keywords in the
+    // message ("plan a feature", "create a plan", …). Mirrors the Python
+    // backend so the same phrasings auto-enter plan mode.
+    let mut plan_mode = req.plan_mode;
+    if !plan_mode {
+        let msg_lower = req.message.to_lowercase();
+        const PLAN_KEYWORDS: &[&str] = &[
+            "plan a ", "plan an ", "plan feature", "create a plan",
+            "make a plan", "plan mode", "planda", "planla",
+        ];
+        if PLAN_KEYWORDS.iter().any(|k| msg_lower.contains(k)) {
+            plan_mode = true;
+        }
+    }
+
     let stream = run_agent_turn(
         chat_id,
         req.run_id,
@@ -682,17 +781,20 @@ pub async fn chat_stream_route(
         req.message,
         req.attachments,
         project_id,
-        req.plan_mode,
+        plan_mode,
         req.auto_approve_destructive,
+        req.artifact_mode,
+        req.web_search_enabled,
+        None,
     );
-    
+
     // Map Value to Event
     let mapped = stream.map(|res| {
         let val = res.unwrap_or_default();
         let s = serde_json::to_string(&val).unwrap_or_default();
         Ok::<Event, Infallible>(Event::default().data(s))
     });
-    
+
     Sse::new(mapped).keep_alive(axum::response::sse::KeepAlive::default())
 }
 
@@ -1063,6 +1165,56 @@ pub async fn list_integrations() -> impl IntoResponse {
         "path": ollama_path.unwrap_or_default(),
     }));
 
+    // Detect OpenAI Codex CLI (~/.codex/)
+    let codex_dir = dirs::home_dir().map(|h| h.join(".codex")).filter(|p| p.exists());
+    integrations.push(serde_json::json!({
+        "id": "codex",
+        "name": "OpenAI Codex CLI",
+        "detected": codex_dir.is_some(),
+        "can_reuse_credentials": false,
+        "detail": if codex_dir.is_some() {
+            "Codex CLI config detected at ~/.codex/.".to_string()
+        } else {
+            "Codex CLI is not installed.".to_string()
+        },
+        "path": codex_dir.map(|p| p.display().to_string()).unwrap_or_default(),
+    }));
+
+    // Detect GitHub Copilot (~/.config/github-copilot/)
+    let copilot_dir = dirs::home_dir()
+        .map(|h| h.join(".config").join("github-copilot"))
+        .filter(|p| p.exists());
+    integrations.push(serde_json::json!({
+        "id": "github_copilot",
+        "name": "GitHub Copilot",
+        "detected": copilot_dir.is_some(),
+        "can_reuse_credentials": false,
+        "detail": if copilot_dir.is_some() {
+            "GitHub Copilot config detected at ~/.config/github-copilot/.".to_string()
+        } else {
+            "GitHub Copilot is not signed in on this machine.".to_string()
+        },
+        "path": copilot_dir.map(|p| p.display().to_string()).unwrap_or_default(),
+    }));
+
+    // Detect MLX (Apple Silicon local runtime). Only meaningful on arm64 macOS.
+    if cfg!(target_arch = "aarch64") && cfg!(target_os = "macos") {
+        let mlx_dir = dirs::home_dir().map(|h| h.join(".mlx")).filter(|p| p.exists());
+        let mlx_detected = mlx_dir.is_some();
+        integrations.push(serde_json::json!({
+            "id": "mlx",
+            "name": "MLX (Apple Silicon)",
+            "detected": mlx_detected,
+            "can_reuse_credentials": false,
+            "detail": if mlx_detected {
+                "MLX runtime detected. Local models are available on this Apple Silicon Mac.".to_string()
+            } else {
+                "MLX runtime not detected. Install mlx-lm to run local models.".to_string()
+            },
+            "path": mlx_dir.map(|p| p.display().to_string()).unwrap_or_default(),
+        }));
+    }
+
     Json(serde_json::json!({ "integrations": integrations }))
 }
 
@@ -1105,7 +1257,22 @@ pub async fn upsert_custom_model(
             return (axum::http::StatusCode::BAD_REQUEST, Json(json!({ "error": "invalid model_id" }))).into_response();
         }
     }
-    
+
+    // Validate shape + credential so garbage values can't be persisted. The
+    // Python backend rejected these with a 400; without this, a bad shape
+    // silently produces malformed provider requests later.
+    let valid_shapes = ["anthropic", "openai"];
+    if !valid_shapes.contains(&req.shape.as_str()) {
+        return (axum::http::StatusCode::BAD_REQUEST, Json(json!({
+            "error": format!("invalid shape '{}': must be one of {:?}", req.shape, valid_shapes)
+        }))).into_response();
+    }
+    if !settings::KNOWN_CREDENTIALS.contains(&req.credential.as_str()) {
+        return (axum::http::StatusCode::BAD_REQUEST, Json(json!({
+            "error": format!("invalid credential '{}': must be one of {:?}", req.credential, settings::KNOWN_CREDENTIALS)
+        }))).into_response();
+    }
+
     let mut s = settings::load();
     let m = settings::upsert_custom_model(
         &mut s,
@@ -1160,12 +1327,20 @@ pub struct TelegramSendBody {
 }
 
 pub async fn get_memory() -> impl IntoResponse {
-    let content = std::fs::read_to_string(crate::paths::memory_path()).unwrap_or_default();
+    // The agent reads `memories/MEMORY.md`, so the UI must too — otherwise
+    // edits land in a file the agent never consults. Fall back to the legacy
+    // `memory.md` for users upgrading from the Python backend.
+    let path = crate::paths::memory_md_path();
+    let content = std::fs::read_to_string(&path)
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| std::fs::read_to_string(crate::paths::memory_path()).unwrap_or_default());
     Json(json!({ "content": content }))
 }
 
 pub async fn put_memory(Json(body): Json<ContentBody>) -> impl IntoResponse {
-    let p = crate::paths::memory_path();
+    // Write to `memories/MEMORY.md` — the file the agent actually loads.
+    let p = crate::paths::memory_md_path();
     if let Some(parent) = p.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -1262,17 +1437,11 @@ pub struct AnswerQuestionBody {
 }
 
 pub async fn answer_question(
-    Path(_chat_id): Path<String>,
-    Json(_body): Json<AnswerQuestionBody>,
+    Path(chat_id): Path<String>,
+    Json(body): Json<AnswerQuestionBody>,
 ) -> impl IntoResponse {
-    // The interactive ask_question / ask_user flow is not wired through a
-    // pending-question registry in this build — the tools return a static hint
-    // instead of blocking. Keep the endpoint live so the frontend doesn't 404,
-    // and report that no interactive handler is registered.
-    Json(json!({
-        "success": false,
-        "error": "No interactive question is pending in this build."
-    }))
+    let ok = crate::agent::answer_pending_question(&chat_id, &body.answer);
+    Json(json!({ "success": ok }))
 }
 
 // ─── Chat truncate ───────────────────────────────────────────────────────────
@@ -1593,17 +1762,22 @@ pub async fn refactor_code(Json(body): Json<RefactorRequest>) -> impl IntoRespon
         format!("{}/chat/completions", base_url)
     };
 
-    let system = "You are a code refactoring assistant. Given code and an instruction, return ONLY a JSON object with keys: refactored_code, explanation, steps (array of strings). No markdown fences.";
+    let system = format!(
+        "You are a code refactoring assistant. Given code and an instruction, return ONLY a JSON object with keys: refactored_code, explanation, steps (array of strings). No markdown fences.\n\nMODE: {}\nINSTRUCTION: {}",
+        body.mode, body.instruction
+    );
 
-    let messages = json!([
-        {"role": "system", "content": system},
-        {"role": "user", "content": format!("Instruction: {}\n\nCode:\n{}", body.instruction, body.code)}
+    let user_msg = format!("MODE: {}\nINSTRUCTION: {}\n\nCode:\n{}", body.mode, body.instruction, body.code);
+    let convo = json!([
+        {"role": "user", "content": user_msg}
     ]);
 
     let req_body = if shape == "anthropic" {
-        json!({ "model": real_model, "system": system, "messages": messages["messages"].as_array().unwrap().clone(), "max_tokens": 4096 })
+        json!({ "model": real_model, "system": system, "messages": convo, "max_tokens": 4096 })
     } else {
-        json!({ "model": real_model, "messages": messages["messages"], "max_tokens": 4096 })
+        let mut msgs = vec![json!({"role": "system", "content": system})];
+        if let Some(arr) = convo.as_array() { msgs.extend(arr.clone()); }
+        json!({ "model": real_model, "messages": msgs, "max_tokens": 4096 })
     };
 
     let client = reqwest::Client::new();
@@ -1648,6 +1822,14 @@ pub struct ExportRequest {
 
 fn default_export_title() -> String { "Document".to_string() }
 
+/// Render a Rust string as a Python single-quoted literal (escaping backslash
+/// and quote) so it can be interpolated safely into an inline `python3 -c`
+/// script — used by the export handlers to inject the document title.
+fn python_str_lit(s: &str) -> String {
+    let escaped = s.replace('\\', "\\\\").replace('\'', "\\'");
+    format!("'{}'", escaped)
+}
+
 pub async fn export_docx(Json(body): Json<ExportRequest>) -> impl IntoResponse {
     // Use Python to convert markdown → docx via python-docx
     // Script and command block removed
@@ -1659,17 +1841,46 @@ pub async fn export_docx(Json(body): Json<ExportRequest>) -> impl IntoResponse {
 
     let script = format!(r#"
 from docx import Document
+from docx.shared import Pt
+import re
 doc = Document()
+doc.add_heading({}, level=0)
+in_code = False
+code_buf = []
 with open('{}') as f:
     for line in f:
         line = line.rstrip('\n')
+        stripped = line.strip()
+        if stripped.startswith('```'):
+            if in_code:
+                p = doc.add_paragraph('\n'.join(code_buf))
+                for run in p.runs:
+                    run.font.name = 'Courier New'
+                    run.font.size = Pt(9)
+                code_buf = []
+                in_code = False
+            else:
+                in_code = True
+            continue
+        if in_code:
+            code_buf.append(line)
+            continue
         if line.startswith('# '): doc.add_heading(line[2:], level=1)
         elif line.startswith('## '): doc.add_heading(line[3:], level=2)
         elif line.startswith('### '): doc.add_heading(line[4:], level=3)
+        elif re.match(r'^[-*]\s+\[[ xX]\]\s', line):
+            text = re.sub(r'^[-*]\s+\[[ xX]\]\s+', '', line)
+            doc.add_paragraph(('☑ ' if line.lower().startswith(('- [x]', '* [x]')) else '☐ ') + text)
         elif line.startswith('- ') or line.startswith('* '): doc.add_paragraph(line[2:], style='List Bullet')
+        elif re.match(r'^\d+\.\s', line): doc.add_paragraph(re.sub(r'^\d+\.\s', '', line), style='List Number')
+        elif stripped == '': pass
         else: doc.add_paragraph(line)
+if code_buf:
+    p = doc.add_paragraph('\n'.join(code_buf))
+    for run in p.runs:
+        run.font.name = 'Courier New'
 doc.save('{}')
-"#, tmp_md.display(), tmp_docx.display());
+"#, python_str_lit(&body.title), tmp_md.display(), tmp_docx.display());
 
     let result = tokio::process::Command::new("python3")
         .arg("-c")
@@ -1705,18 +1916,48 @@ pub async fn export_pdf(Json(body): Json<ExportRequest>) -> impl IntoResponse {
 
     let script = format!(r#"
 from fpdf import FPDF
+import re
 pdf = FPDF()
 pdf.add_page()
 pdf.set_auto_page_break(auto=True, margin=15)
+pdf.set_font('Helvetica', 'B', 18)
+pdf.cell(0, 12, {}, ln=True)
+pdf.ln(2)
+in_code = False
+code_buf = []
 with open('{}') as f:
     for line in f:
         line = line.rstrip('\n')
+        stripped = line.strip()
+        if stripped.startswith('```'):
+            if in_code:
+                pdf.set_font('Courier', '', 9)
+                pdf.multi_cell(0, 4, '\n'.join(code_buf))
+                code_buf = []
+                in_code = False
+            else:
+                in_code = True
+            continue
+        if in_code:
+            code_buf.append(line)
+            continue
         if line.startswith('# '): pdf.set_font('Helvetica', 'B', 16); pdf.cell(0, 10, line[2:], ln=True)
         elif line.startswith('## '): pdf.set_font('Helvetica', 'B', 14); pdf.cell(0, 8, line[3:], ln=True)
         elif line.startswith('### '): pdf.set_font('Helvetica', 'B', 12); pdf.cell(0, 7, line[4:], ln=True)
+        elif re.match(r'^[-*]\s+\[[ xX]\]\s', line):
+            mark = 'x' if line.lower().startswith(('- [x]', '* [x]')) else ' '
+            text = re.sub(r'^[-*]\s+\[[ xX]\]\s+', '', line)
+            pdf.set_font('Helvetica', '', 10); pdf.multi_cell(0, 5, '[' + mark + '] ' + text)
+        elif line.startswith('- ') or line.startswith('* '):
+            pdf.set_font('Helvetica', '', 10); pdf.multi_cell(0, 5, '\u2022 ' + line[2:])
+        elif re.match(r'^\d+\.\s', line):
+            pdf.set_font('Helvetica', '', 10); pdf.multi_cell(0, 5, re.sub(r'^(\d+\.)\s', r'\1 ', line))
         else: pdf.set_font('Helvetica', '', 10); pdf.multi_cell(0, 5, line)
+if code_buf:
+    pdf.set_font('Courier', '', 9)
+    pdf.multi_cell(0, 4, '\n'.join(code_buf))
 pdf.output('{}')
-"#, tmp_md.display(), tmp_pdf.display());
+"#, python_str_lit(&body.title), tmp_md.display(), tmp_pdf.display());
 
     let result = tokio::process::Command::new("python3")
         .arg("-c")
@@ -2029,82 +2270,248 @@ pub async fn delete_event_handler(Path(event_id): Path<String>) -> impl IntoResp
     Json(json!({ "success": ok }))
 }
 
-// ─── MCP stubs ────────────────────────────────────────────────────────────────
+// ─── Scheduled Tasks ──────────────────────────────────────────────────────────
+//
+// CRUD + manual "run now" for the scheduled-task dashboard. The agent itself
+// creates tasks via the `manage_schedules` tool (conversational flow); these
+// HTTP endpoints back the dashboard UI (list / edit / toggle / delete / run).
+
+pub async fn list_schedules() -> impl IntoResponse {
+    let tasks = crate::schedulestore::get_all();
+    Json(json!({ "tasks": tasks }))
+}
+
+#[derive(Deserialize)]
+pub struct ScheduleCreate {
+    pub title: String,
+    pub prompt: String,
+    #[serde(default)]
+    pub interval_minutes: Option<u32>,
+    #[serde(default)]
+    pub daily_time: Option<String>,
+    #[serde(default)]
+    pub daily_weekdays: Option<Vec<u32>>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
+pub async fn create_schedule(Json(req): Json<ScheduleCreate>) -> impl IntoResponse {
+    // Mirror the tool's validation so the manual form path is equally safe.
+    match (req.interval_minutes, req.daily_time.as_ref()) {
+        (Some(_), Some(_)) => {
+            return Json(json!({ "error": "Specify either interval_minutes OR daily_time, not both" }))
+        }
+        (None, None) => {
+            return Json(json!({ "error": "A schedule is required: set interval_minutes or daily_time" }))
+        }
+        _ => {}
+    }
+    if let Some(m) = req.interval_minutes {
+        if m < 15 {
+            return Json(json!({ "error": format!("Minimum interval is 15 minutes. Got {}.", m) }));
+        }
+    }
+    if req.title.trim().is_empty() || req.prompt.trim().is_empty() {
+        return Json(json!({ "error": "title and prompt are required" }));
+    }
+    let enabled = req.enabled.unwrap_or(true);
+    if enabled
+        && !crate::tools::tier_lifts_cap_pub()
+        && crate::schedulestore::count_enabled() >= 3
+    {
+        return Json(json!({ "error": "Free tier is limited to 3 enabled scheduled tasks. Disable one or upgrade to Pro." }));
+    }
+    let task = crate::schedulestore::create(crate::schedulestore::CreateParams {
+        title: req.title,
+        prompt: req.prompt,
+        trigger_type: Some("time".to_string()),
+        interval_minutes: req.interval_minutes,
+        daily_time: req.daily_time,
+        daily_weekdays: req.daily_weekdays,
+        enabled: Some(enabled),
+        notify_channel: Some("inbox".to_string()),
+        model: req.model,
+    });
+    Json(json!({ "task": task }))
+}
+
+#[derive(Deserialize)]
+pub struct ScheduleUpdate {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub prompt: Option<String>,
+    #[serde(default)]
+    pub interval_minutes: Option<Option<u32>>,
+    #[serde(default)]
+    pub daily_time: Option<Option<String>>,
+    #[serde(default)]
+    pub daily_weekdays: Option<Option<Vec<u32>>>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    #[serde(default)]
+    pub model: Option<Option<String>>,
+}
+
+pub async fn update_schedule(
+    Path(task_id): Path<String>,
+    Json(req): Json<ScheduleUpdate>,
+) -> impl IntoResponse {
+    // Enforce cap on enable (mirrors tool).
+    if let Some(true) = req.enabled {
+        let currently_enabled =
+            crate::schedulestore::get(&task_id).map(|t| t.enabled).unwrap_or(false);
+        if !currently_enabled
+            && !crate::tools::tier_lifts_cap_pub()
+            && crate::schedulestore::count_enabled() >= 3
+        {
+            return Json(json!({ "error": "Free tier is limited to 3 enabled scheduled tasks." }));
+        }
+    }
+    if let Some(Some(m)) = req.interval_minutes {
+        if m < 15 {
+            return Json(json!({ "error": format!("Minimum interval is 15 minutes. Got {}.", m) }));
+        }
+    }
+    let updated = crate::schedulestore::update(
+        &task_id,
+        crate::schedulestore::UpdateParams {
+            title: req.title,
+            prompt: req.prompt,
+            trigger_type: None,
+            interval_minutes: req.interval_minutes,
+            daily_time: req.daily_time,
+            daily_weekdays: req.daily_weekdays,
+            enabled: req.enabled,
+            notify_channel: None,
+            model: req.model,
+        },
+    );
+    match updated {
+        Some(task) => Json(json!({ "task": task })),
+        None => Json(json!({ "error": "Scheduled task not found" })),
+    }
+}
+
+pub async fn delete_schedule(Path(task_id): Path<String>) -> impl IntoResponse {
+    // Clean up the task's memory file too.
+    let _ = std::fs::remove_file(crate::paths::task_memory_path(&task_id));
+    let ok = crate::schedulestore::delete(&task_id);
+    Json(json!({ "success": ok }))
+}
+
+/// Manually trigger a scheduled task out of band (the "Run now" button). Fires
+/// the run asynchronously and returns immediately.
+pub async fn run_schedule_now(Path(task_id): Path<String>) -> impl IntoResponse {
+    match crate::schedulestore::get(&task_id) {
+        Some(task) => {
+            // Fire-and-forget on the tokio runtime. The scheduler's overlap
+            // guard prevents a collision if the next scheduled tick is imminent.
+            tokio::spawn(crate::scheduler::run_task_now(task));
+            Json(json!({ "success": true, "message": "Task run started" }))
+        }
+        None => Json(json!({ "error": "Scheduled task not found" })),
+    }
+}
+
+// ─── Inbox ────────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct InboxQuery {
+    pub unread: Option<bool>,
+}
+
+pub async fn list_inbox(Query(q): Query<InboxQuery>) -> impl IntoResponse {
+    let items = crate::inboxstore::get_all(q.unread.unwrap_or(false));
+    Json(json!({ "items": items, "unread_count": crate::inboxstore::get_all(true).len() }))
+}
+
+pub async fn mark_inbox_read(Path(item_id): Path<String>) -> impl IntoResponse {
+    let ok = crate::inboxstore::mark_read(&item_id);
+    Json(json!({ "success": ok }))
+}
+
+pub async fn mark_all_inbox_read() -> impl IntoResponse {
+    let changed = crate::inboxstore::mark_all_read();
+    Json(json!({ "success": true, "marked_read": changed }))
+}
+
+pub async fn delete_inbox_item(Path(item_id): Path<String>) -> impl IntoResponse {
+    let ok = crate::inboxstore::delete(&item_id);
+    Json(json!({ "success": ok }))
+}
+
+// ─── MCP ─────────────────────────────────────────────────────────────────────
+// Reads configured stdio servers from ~/.zwork/mcp.json, probes each for
+// readiness + tool count, and lists their tools. See `mcp.rs`.
 
 pub async fn mcp_servers() -> impl IntoResponse {
-    let config_path = dirs::home_dir()
-        .map(|h| h.join(".zwork").join("mcp.json"))
-        .unwrap_or_default();
-    let servers: Vec<Value> = if config_path.exists() {
-        std::fs::read_to_string(&config_path)
-            .ok()
-            .and_then(|s| {
-                let v: Value = serde_json::from_str(&s).ok()?;
-                let obj = v.get("mcpServers")?.as_object()?;
-                Some(obj.iter().map(|(name, spec)| {
-                    json!({
-                        "name": name,
-                        "connected": false,
-                        "spec": spec,
-                    })
-                }).collect())
-            })
-            .unwrap_or_default()
-    } else {
-        vec![]
-    };
+    let config_path = crate::paths::home_dir().join("mcp.json");
+    let servers = crate::mcp::server_status();
     Json(json!({ "servers": servers, "config_path": config_path.to_string_lossy() }))
 }
 
 pub async fn mcp_tools() -> impl IntoResponse {
-    Json(json!({ "tools": [] }))
+    let tools = crate::mcp::all_tool_schemas();
+    Json(json!({ "tools": tools }))
 }
 
-// ─── Composio stubs ──────────────────────────────────────────────────────────
-// These endpoints keep the frontend Connectors page from rendering blank.
-// Full Composio integration is not yet wired into the Rust backend; the
-// status stub advertises "not configured" so the UI can show the grid and
-// invite the user to set up an API key later.
+// ─── Composio ────────────────────────────────────────────────────────────────
+// These proxy through the zWork cloud server (api.tryzwork.app), which owns the
+// real Composio SDK + platform API key. See `composio.rs` and
+// `cloud-src/api/src/main.rs` (composio_* handlers).
 
 pub async fn composio_status() -> impl IntoResponse {
+    Json(crate::composio::status().await)
+}
+
+/// Composio is configured entirely server-side; there's no client API key to
+/// set. We accept the POST for compatibility with the Python-era UI and report
+/// where configuration actually happens.
+pub async fn composio_set_config() -> impl IntoResponse {
     Json(json!({
-        "configured": false,
-        "enabled": false,
-        "available": false,
-        "api_key_set": false,
-        "connected_apps": [],
-        "tool_count": 0,
-        "user_id": "",
+        "ok": true,
+        "configured": crate::composio::is_configured(),
+        "note": "Composio is configured via the zWork Cloud account token (zwork_router).",
     }))
 }
 
-pub async fn composio_set_config() -> impl IntoResponse {
-    (axum::http::StatusCode::NOT_IMPLEMENTED, Json(json!({ "error": "composio not yet supported in this build" })))
-}
-
 pub async fn composio_accounts() -> impl IntoResponse {
-    Json(json!({ "accounts": [] }))
+    Json(crate::composio::accounts().await)
 }
 
-pub async fn composio_connect() -> impl IntoResponse {
-    (axum::http::StatusCode::NOT_IMPLEMENTED, Json(json!({ "error": "composio not yet supported in this build" })))
+#[derive(Deserialize)]
+pub struct ComposioAppRequest {
+    pub app: String,
 }
 
-pub async fn composio_disconnect() -> impl IntoResponse {
-    (axum::http::StatusCode::NOT_IMPLEMENTED, Json(json!({ "error": "composio not yet supported in this build" })))
+pub async fn composio_connect(Json(body): Json<ComposioAppRequest>) -> impl IntoResponse {
+    match crate::composio::connect(body.app.trim()).await {
+        Ok(v) => Json(v).into_response(),
+        Err(msg) => (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({ "error": msg })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn composio_disconnect(Json(body): Json<ComposioAppRequest>) -> impl IntoResponse {
+    match crate::composio::disconnect(body.app.trim()).await {
+        Ok(v) => Json(v).into_response(),
+        Err(msg) => (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({ "error": msg })),
+        )
+            .into_response(),
+    }
 }
 
 /// Returns a curated list of supported apps so the Connectors page grid renders.
 pub async fn composio_apps() -> impl IntoResponse {
-    let apps = vec![
-        json!({ "id": "gmail",          "name": "Gmail",           "color": "#EA4335", "icon": null }),
-        json!({ "id": "googlecalendar", "name": "Google Calendar", "color": "#4285F4", "icon": null }),
-        json!({ "id": "notion",         "name": "Notion",          "color": "#000000", "icon": null }),
-        json!({ "id": "googledrive",    "name": "Google Drive",    "color": "#34A853", "icon": null }),
-        json!({ "id": "github",         "name": "GitHub",          "color": "#24292E", "icon": null }),
-        json!({ "id": "linear",         "name": "Linear",          "color": "#5E6AD2", "icon": null }),
-    ];
-    Json(json!({ "apps": apps }))
+    Json(crate::composio::apps())
 }
 
 // ---- Ollama ----

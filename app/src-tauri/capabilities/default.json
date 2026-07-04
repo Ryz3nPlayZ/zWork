@@ -10,6 +10,7 @@
     "core:window:allow-is-visible",
     "core:window:allow-close",
     "core:window:allow-center",
+    "core:window:allow-set-effects",
     "shell:default",
     "process:default",
     "updater:default",

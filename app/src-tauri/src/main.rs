@@ -2,7 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::io::{Read, Write};
-use std::net::{Shutdown, TcpStream};
+use std::net::TcpStream;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};

@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Pencil, Check, X, AlertCircle, Settings as SettingsIcon, RefreshCcw, Download, ChevronDown, ArrowLeft } from "lucide-react";
 import { useApp } from "../lib/store";
-import { isMacOS } from "../lib/platform";
 import { ChatInput } from "./ChatInput";
 import { Message } from "./Message";
 import { ConcurrentWorkBanner } from "./ConcurrentWorkBanner";
 
 export function ChatView() {
-  const macOS = isMacOS();
   const chat = useApp((s) =>
     s.activeChatId ? s.chats[s.activeChatId] : undefined,
   );
@@ -120,9 +118,6 @@ export function ChatView() {
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col bg-paper relative">
-      {/* Drag-only titlebar */}
-      {macOS && <div className="titlebar-drag absolute inset-x-0 top-0 h-10 shrink-0" />}
-
       <div className="flex flex-1 flex-col overflow-hidden relative">
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-line px-5 py-3 bg-paper-soft select-none">

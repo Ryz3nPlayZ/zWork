@@ -250,6 +250,18 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
                 "required": ["paper_content"]
             }
         }),
+        json!({
+            "name": "check_novelty",
+            "description": "Check the novelty of a research topic and its hypotheses against existing literature. Returns a novelty rating (Low/Medium/High), max similarity score, and the most similar papers found.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": { "type": "string", "description": "The research topic to check" },
+                    "hypotheses": { "type": "string", "description": "The hypotheses to check for novelty (optional)" }
+                },
+                "required": ["topic"]
+            }
+        }),
     ];
 
     if !plan_mode {
@@ -283,25 +295,26 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
         }));
         schemas.push(json!({
             "name": "run_command",
-            "description": "Run a shell command. Set background=true to detach servers.",
+            "description": "Run a shell command. Set background=true to detach servers. Set timeout (seconds, default 180, 0=unbounded) for long-running commands.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "command": { "type": "string", "description": "Shell command to run" },
                     "cwd": { "type": "string", "description": "Directory context" },
-                    "background": { "type": "boolean", "description": "Run in background" }
+                    "background": { "type": "boolean", "description": "Run in background" },
+                    "timeout": { "type": "integer", "description": "Max seconds before the command is killed. Default 180. Use 0 for no timeout (servers, watchers)." }
                 },
                 "required": ["command"]
             }
         }));
         schemas.push(json!({
             "name": "save_memory",
-            "description": "Save a fact to the agent's persistent memory. Use target='user' for facts about the user (preferences, style, goals, habits, job, family, constraints) and target='memory' for everything else (project facts, conventions, deadlines, things learned).",
+            "description": "Save a fact to the agent's persistent memory. Use target='user' for facts about the user (preferences, style, goals, habits, job, family, constraints) and target='memory' for everything else (project facts, conventions, deadlines, things learned). Use target='task' ONLY inside a scheduled-task run to save findings for future runs of that task.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "content": { "type": "string", "description": "The fact to remember" },
-                    "target": { "type": "string", "description": "Which memory file to write to. Use 'memory' (default) or 'user'." }
+                    "target": { "type": "string", "description": "Which memory file to write to. Use 'memory' (default), 'user', or 'task' (scheduled tasks only)." }
                 },
                 "required": ["content"]
             }
@@ -441,6 +454,26 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
             "description": "End the desktop-control session: tear the cua-driver daemon down completely, freeing the process. Call this ONCE, after you have finished ALL desktop work for the task and will not interact with the desktop again. Idempotent. Do NOT call it between steps of an ongoing task — keep the session up for the entire task.",
             "parameters": { "type": "object", "properties": {} }
         }));
+        schemas.push(json!({
+            "name": "desktop_office",
+            "description": "Semantic Word (.docx) and Excel (.xlsx) editing without a GUI. Read paragraphs, append text, replace content, read sheets, write cells/ranges, or locate cells.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "type": { "type": "string", "enum": ["word", "excel", "libreoffice"], "description": "Document backend" },
+                    "action": { "type": "string", "enum": ["read", "inspect", "paragraphs", "append", "set-paragraph", "replace", "sheets", "write-cell", "write-range", "fill-table", "locate-cell", "fill-cell"], "description": "Editing action" },
+                    "path": { "type": "string", "description": "Path to the .docx or .xlsx file" },
+                    "text": { "type": "string", "description": "Text to insert/append" },
+                    "index": { "type": "integer", "description": "Paragraph index (for set-paragraph)" },
+                    "sheet": { "type": "string", "description": "Sheet name (Excel)" },
+                    "cell": { "type": "string", "description": "Cell reference e.g. 'A1'" },
+                    "value": { "type": "string", "description": "Value to write (string for cells, JSON array-of-arrays for write-range/fill-table)" },
+                    "find": { "type": "string", "description": "Search text or row label" },
+                    "replace": { "type": "string", "description": "Replacement text" }
+                },
+                "required": ["type", "action", "path"]
+            }
+        }));
         // ─── Browser control (zbctl → user's Chrome) ───
         schemas.push(json!({
             "name": "browser_navigate",
@@ -564,6 +597,37 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
                 "required": ["action"]
             }
         }));
+        schemas.push(json!({
+            "name": "manage_schedules",
+            "description": "Create, list, update, or delete recurring scheduled tasks. A scheduled task runs the agent automatically on a schedule (every N minutes, or daily at a specific time on specific weekdays) and posts findings to the user's inbox. Use this when the user wants to AUTOMATE something on a recurring basis (e.g. 'every morning check my email for invoices'). Free-tier users are limited to 3 enabled tasks and a 15-minute minimum interval.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "enum": ["create", "list", "update", "delete", "enable", "disable"], "description": "Action to perform" },
+                    "task_id": { "type": "string", "description": "Scheduled task ID (for update/delete/enable/disable)" },
+                    "title": { "type": "string", "description": "Short human-readable name for the task (e.g. 'Email invoice check')" },
+                    "prompt": { "type": "string", "description": "The full objective the agent should complete on each run. Be specific and self-contained — the agent has no memory of this conversation during a scheduled run (e.g. 'Check the Gmail inbox for invoices received since the last run. For each new invoice, extract the vendor, amount, and due date. Flag any amount over $1000. Post a summary of new invoices to the inbox.')" },
+                    "interval_minutes": { "type": "integer", "description": "Run every N minutes. Mutually exclusive with daily_time. Minimum 15." },
+                    "daily_time": { "type": "string", "description": "Run daily at HH:MM (24h, local time). Mutually exclusive with interval_minutes." },
+                    "daily_weekdays": { "type": "array", "items": { "type": "integer" }, "description": "Weekdays to run (0=Sun..6=Sat). Omit for every day." },
+                    "enabled": { "type": "boolean", "description": "Whether the task is active (for update). Defaults to true on create." }
+                },
+                "required": ["action"]
+            }
+        }));
+        schemas.push(json!({
+            "name": "post_to_inbox",
+            "description": "Post a message to the user's inbox. The inbox is how the agent talks to the user UNPROMPTED — the user sees these messages without initiating a chat. Use during a scheduled task to surface a finding, flag, or question (e.g. 'Found an invoice over $1000', 'Your 9am meeting was moved'). Also usable in interactive chat to leave a note the user will see later. Be concise: a clear title and a short body.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string", "description": "Short headline the user sees in the inbox list (e.g. 'Invoice anomaly: Acme $4,200')." },
+                    "body": { "type": "string", "description": "1-3 sentences of detail. Include what was found and any recommended action." },
+                    "kind": { "type": "string", "enum": ["summary", "flag", "question"], "description": "summary = routine result; flag = something looks off / needs attention; question = you need a decision from the user." }
+                },
+                "required": ["title", "body"]
+            }
+        }));
     }
 
     schemas
@@ -623,6 +687,11 @@ pub fn execute_tool(
                 let review_type = params.get("review_type").and_then(|v| v.as_str()).unwrap_or("peer_review");
                 crate::academic::review_paper(paper_content, review_type).await
             }
+            "check_novelty" => {
+                let topic = params.get("topic").and_then(|v| v.as_str()).unwrap_or("");
+                let hypotheses = params.get("hypotheses").and_then(|v| v.as_str()).unwrap_or("");
+                crate::academic::check_novelty(topic, hypotheses).await
+            }
             "read_skill" => {
                 let slug = params.get("slug").and_then(|v| v.as_str()).unwrap_or("");
                 match crate::skills::read_skill(slug) {
@@ -633,10 +702,34 @@ pub fn execute_tool(
             "save_memory" => {
                 let content = params.get("content").and_then(|v| v.as_str()).unwrap_or("");
                 let target_str = params.get("target").and_then(|v| v.as_str()).unwrap_or("memory");
-                let target = target_str.parse::<crate::memory::MemoryTarget>().unwrap_or(crate::memory::MemoryTarget::Memory);
-                match crate::memory::append(target, content) {
-                    Ok(msg) => Ok(msg),
-                    Err(e) => Ok(format!("Could not save memory: {}", e)),
+
+                // Per-task memory: only valid inside a scheduled-task run. We
+                // resolve the owning task by matching this chat against the
+                // scheduled task's last_chat_id (set when the run starts).
+                // Interactive chats have no task context, so "task" is rejected.
+                if target_str.eq_ignore_ascii_case("task") {
+                    let task = crate::schedulestore::get_all()
+                        .into_iter()
+                        .find(|t| t.last_chat_id.as_deref() == Some(chat_id.as_str()));
+                    match task {
+                        Some(t) => match crate::memory::append_task(&t.id, content) {
+                            Ok(msg) => Ok(msg),
+                            Err(e) => Ok(format!("Could not save task memory: {}", e)),
+                        },
+                        None => Ok(
+                            "Task memory is only available inside a scheduled-task run. \
+                             Use `target: \"memory\"` for general memory."
+                                .to_string(),
+                        ),
+                    }
+                } else {
+                    let target = target_str
+                        .parse::<crate::memory::MemoryTarget>()
+                        .unwrap_or(crate::memory::MemoryTarget::Memory);
+                    match crate::memory::append(target, content) {
+                        Ok(msg) => Ok(msg),
+                        Err(e) => Ok(format!("Could not save memory: {}", e)),
+                    }
                 }
             }
             "send_telegram_message" => {
@@ -648,13 +741,18 @@ pub fn execute_tool(
             }
             "extract_document" => doc_extract::execute_extract_document(&params).await,
             "detect_hardware" => {
-                let profile = json!({
-                    "gpu_name": "Apple M-Series GPU",
-                    "cpu_count": num_cpus::get(),
-                });
+                let profile = detect_hardware_profile();
                 Ok(serde_json::to_string_pretty(&profile).unwrap_or_default())
             }
             "get_stock_data" => stock::execute_get_stock_data(&params).await,
+            "deploy_web_app" => {
+                let project_path = params.get("project_path").and_then(|v| v.as_str()).unwrap_or(".");
+                let framework = params.get("framework").and_then(|v| v.as_str()).unwrap_or("");
+                let res = crate::deploy::deploy(project_path, framework).await;
+                let ok = res.get("ok").and_then(|v| v.as_bool()).unwrap_or(false);
+                let message = res.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                if ok { Ok(message) } else { Err(message) }
+            }
             // ─── Desktop control (cua-driver) ───
             "desktop_capture" => {
                 let app = params.get("app").and_then(|v| v.as_str());
@@ -741,6 +839,7 @@ pub fn execute_tool(
                 Ok(()) => Ok("desktop-control session ended; cua-driver torn down.".to_string()),
                 Err(e) => Err(e),
             },
+            "desktop_office" => crate::office::execute(&params).await,
             // ─── Browser control (zbctl) ───
             "browser_navigate" => {
                 let url = params.get("url").and_then(|v| v.as_str()).unwrap_or("");
@@ -776,14 +875,84 @@ pub fn execute_tool(
                 crate::zbctl::tabs().await
             }
             "spawn_agent" => {
-                // Sub-agent spawning is not yet fully implemented in the Rust backend.
-                // Return a placeholder so the model knows the tool was received.
-                let desc = params.get("description").and_then(|v| v.as_str()).unwrap_or("task");
-                Ok(format!("Sub-agent spawned for: {}. (Note: sub-agent execution is not yet available in this build — performing the task inline instead.)", desc))
+                let desc = params.get("description").and_then(|v| v.as_str()).unwrap_or("task").to_string();
+                // Use the model the caller specified, else the configured default.
+                let model_id = params.get("model_id").and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| {
+                        let s = crate::settings::load();
+                        if !s.default_model.is_empty() { s.default_model } else { "deepseek-v4-flash".to_string() }
+                    });
+                match crate::agent::spawn_subagent(&chat_id, &chat_id, &desc, &model_id, &tx).await {
+                    Ok(result) => Ok(format!("Sub-agent completed the task. Result:\n\n{}", result)),
+                    Err(e) => Err(format!("Sub-agent failed: {}", e)),
+                }
             }
             "ask_question" | "ask_user" => {
-                // Return immediate choice instructions if called programmatically
-                Ok("Select from options card in chat UI.".to_string())
+                // Interactive flow: emit an ask_question card to the UI, then
+                // block on a pending-question oneshot until the user answers
+                // via /api/chats/:id/answer-question.
+                let question = params.get("question").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let options: Vec<String> = params.get("options")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| arr.iter().filter_map(|o| o.as_str().map(|s| s.to_string())).collect())
+                    .unwrap_or_default();
+                let (qtx, qrx) = tokio::sync::oneshot::channel::<String>();
+                crate::agent::register_pending_question(&chat_id, qtx);
+                // Surface the question card to the frontend.
+                let _ = tx.send(json!({
+                    "type": "ask_question",
+                    "chat_id": chat_id,
+                    "question": question,
+                    "options": options,
+                })).await;
+                // Block until answered or a 5-minute timeout (so the run can't
+                // hang forever if the user walks away).
+                match tokio::time::timeout(std::time::Duration::from_secs(300), qrx).await {
+                    Ok(Ok(answer)) => Ok(format!("User responded with: {}", answer)),
+                    _ => {
+                        // Timed out or the sender was dropped (run cancelled).
+                        crate::agent::clear_pending_question(&chat_id);
+                        Err("User did not respond to the question.".to_string())
+                    }
+                }
+            }
+            "ask_user_for_permission" => {
+                // Approval card for a (typically destructive) action. On
+                // "Approve", the command is added to the run's approved list
+                // so subsequent identical calls skip the gate.
+                let explanation = params.get("explanation").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let question = format!("Permission Required:\n\n{}\n\nDo you want to proceed?", explanation);
+                let options = vec![
+                    "Approve".to_string(),
+                    "Deny".to_string(),
+                    "Tell me what to do instead".to_string(),
+                ];
+                let (qtx, qrx) = tokio::sync::oneshot::channel::<String>();
+                crate::agent::register_pending_question(&chat_id, qtx);
+                let _ = tx.send(json!({
+                    "type": "ask_question",
+                    "chat_id": chat_id,
+                    "question": question,
+                    "options": options,
+                })).await;
+                let answer = match tokio::time::timeout(std::time::Duration::from_secs(300), qrx).await {
+                    Ok(Ok(a)) => a,
+                    _ => {
+                        crate::agent::clear_pending_question(&chat_id);
+                        "Deny".to_string()
+                    }
+                };
+                match answer.trim().to_lowercase().as_str() {
+                    "approve" => {
+                        // Pre-approve the command for the rest of this run.
+                        if let Some(cmd) = params.get("command").and_then(|v| v.as_str()) {
+                            crate::agent::approve_command(&chat_id, cmd);
+                        }
+                        Ok("Permission granted by user.".to_string())
+                    }
+                    _ => Err(format!("Permission denied by user. They said: {}", answer)),
+                }
             }
             "manage_tasks" => {
                 let action = params.get("action").and_then(|v| v.as_str()).unwrap_or("list");
@@ -867,13 +1036,80 @@ pub fn execute_tool(
                     _ => Err(format!("Unknown manage_events action: {}", action)),
                 }
             }
+            "manage_schedules" => {
+                let action = params.get("action").and_then(|v| v.as_str()).unwrap_or("list");
+                manage_schedules(action, &params)
+            }
+            "post_to_inbox" => {
+                let title = params.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                let body = params.get("body").and_then(|v| v.as_str()).unwrap_or("");
+                if title.is_empty() {
+                    Err("title is required".to_string())
+                } else {
+                    let kind = params
+                        .get("kind")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("summary")
+                        .to_string();
+                    // Link the inbox item to this chat so the UI can deep-link
+                    // into the transcript. If this chat belongs to a scheduled
+                    // task, stamp the task_id too.
+                    let (task_id, linked_chat) = match crate::chatstore::get(chat_id.as_str()) {
+                        Some(c) if c.kind == "automation" => {
+                            let tid = crate::schedulestore::get_all()
+                                .into_iter()
+                                .find(|t| t.last_chat_id.as_deref() == Some(chat_id.as_str()))
+                                .map(|t| t.id);
+                            (tid, Some(chat_id.clone()))
+                        }
+                        _ => (None, Some(chat_id.clone())),
+                    };
+                    let item = crate::inboxstore::create(crate::inboxstore::CreateParams {
+                        task_id,
+                        chat_id: linked_chat,
+                        kind: Some(kind),
+                        title: title.to_string(),
+                        body: Some(body.to_string()),
+                    });
+                    Ok(format!("Posted to inbox: {} (id={})", item.title, item.id))
+                }
+            }
             t if t.starts_with("mcp__") => {
-                // MCP tool execution — not yet implemented
-                Err(format!("MCP tool '{}' is not yet available in this build.", name))
+                // Forward to the configured MCP server's tools/call.
+                let res = crate::mcp::call_tool(&name, params.clone()).await;
+                let is_error = res.get("isError").and_then(|v| v.as_bool()).unwrap_or(false);
+                let text = res.get("content")
+                    .and_then(|c| c.as_array())
+                    .map(|blocks| blocks.iter()
+                        .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                        .collect::<Vec<_>>()
+                        .join("\n"))
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| res.to_string());
+                if is_error { Err(text) } else { Ok(text) }
             }
             t if t.starts_with("composio__") => {
-                // Composio tool execution — not yet implemented
-                Err(format!("Composio tool '{}' is not yet available in this build.", name))
+                // Forward to the zWork cloud Composio proxy (see composio.rs).
+                let res = crate::composio::call_tool(&name, params.clone()).await;
+                let is_error = res.get("isError")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                // Pull the text out of the content[] blocks the proxy returns.
+                let text = res.get("content")
+                    .and_then(|c| c.as_array())
+                    .map(|blocks| {
+                        blocks.iter()
+                            .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| res.to_string());
+                if is_error {
+                    Err(text)
+                } else {
+                    Ok(text)
+                }
             }
             _ => Err(format!("Tool '{}' is not implemented.", name)),
         };
@@ -908,3 +1144,370 @@ mod num_cpus {
         std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4)
     }
 }
+
+/// Detect the local hardware profile for research/local-runtime decisions.
+/// Probes for an NVIDIA GPU via `nvidia-smi`, then falls back to Apple
+/// Silicon MPS, then reports CPU-only. Mirrors the Python
+/// `_detect_hardware_profile`.
+fn detect_hardware_profile() -> serde_json::Value {
+    let mut has_gpu = false;
+    let mut gpu_type = "cpu".to_string();
+    let mut gpu_name = "CPU only".to_string();
+    let mut vram_mb: Option<u32> = None;
+
+    // 1. NVIDIA GPU via nvidia-smi
+    if let Ok(out) = std::process::Command::new("nvidia-smi")
+        .args(["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"])
+        .output()
+    {
+        if out.status.success() {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            if let Some(first_line) = stdout.trim().lines().next() {
+                let parts: Vec<&str> = first_line.split(',').map(|p| p.trim()).collect();
+                if parts.len() >= 2 {
+                    gpu_name = parts[0].to_string();
+                    gpu_type = "cuda".to_string();
+                    has_gpu = true;
+                    vram_mb = parts[1].parse::<f64>().ok().map(|v| v as u32);
+                }
+            }
+        }
+    }
+
+    // 2. Apple Silicon MPS
+    if !has_gpu && cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
+        has_gpu = true;
+        gpu_type = "mps".to_string();
+        gpu_name = "Apple Silicon (MPS)".to_string();
+    }
+
+    serde_json::json!({
+        "has_gpu": has_gpu,
+        "gpu_type": gpu_type,
+        "gpu_name": gpu_name,
+        "vram_mb": vram_mb,
+        "cpu_count": num_cpus::get(),
+        "os": std::env::consts::OS,
+        "architecture": std::env::consts::ARCH,
+    })
+}
+
+// ─── Scheduled-task management ────────────────────────────────────────────────
+
+const SCHED_MIN_INTERVAL_MINUTES: u32 = 15;
+const SCHED_FREE_MAX_ENABLED: usize = 3;
+
+fn tier_lifts_cap() -> bool {
+    let tier = crate::settings::load().account_tier;
+    tier == "pro" || tier == "max"
+}
+
+/// Public wrapper for HTTP handlers that need the same tier check.
+pub fn tier_lifts_cap_pub() -> bool {
+    tier_lifts_cap()
+}
+
+/// Backing logic for the `manage_schedules` tool. Returns a human-readable
+/// result string (shown to the model) on success, or an error string on failure.
+fn manage_schedules(action: &str, params: &Value) -> Result<String, String> {
+    match action {
+        "list" => {
+            let tasks = crate::schedulestore::get_all();
+            if tasks.is_empty() {
+                Ok("No scheduled tasks yet.".to_string())
+            } else {
+                let mut out = String::from("Scheduled tasks:\n");
+                for t in tasks {
+                    let status = if t.enabled { "enabled" } else { "disabled" };
+                    out.push_str(&format!(
+                        "- [{}] {} (id={}): {}\n",
+                        status, t.title, t.id, t.prompt
+                    ));
+                }
+                Ok(out)
+            }
+        }
+        "create" => {
+            let title = params.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            let prompt = params.get("prompt").and_then(|v| v.as_str()).unwrap_or("");
+            if title.is_empty() {
+                return Err("title is required".to_string());
+            }
+            if prompt.is_empty() {
+                return Err("prompt is required — describe what the task should do each run".to_string());
+            }
+
+            let interval = params
+                .get("interval_minutes")
+                .and_then(|v| v.as_u64())
+                .map(|n| n as u32);
+            let daily_time = params
+                .get("daily_time")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+
+            // Exactly one trigger kind.
+            match (interval, daily_time.as_ref()) {
+                (Some(_), Some(_)) => {
+                    return Err(
+                        "Specify either interval_minutes OR daily_time, not both".to_string()
+                    );
+                }
+                (None, None) => {
+                    return Err(
+                        "A schedule is required: set interval_minutes or daily_time".to_string()
+                    );
+                }
+                _ => {}
+            }
+
+            // Enforce min interval floor (all tiers — bounds worst-case cost).
+            if let Some(m) = interval {
+                if m < SCHED_MIN_INTERVAL_MINUTES {
+                    return Err(format!(
+                        "The minimum interval is {} minutes. Got {}.",
+                        SCHED_MIN_INTERVAL_MINUTES, m
+                    ));
+                }
+            }
+
+            // Validate daily_time format.
+            if let Some(t) = daily_time.as_ref() {
+                if !valid_hhmm(t) {
+                    return Err(format!(
+                        "daily_time must be HH:MM (24h). Got '{}'.",
+                        t
+                    ));
+                }
+            }
+
+            // Free-tier task cap.
+            let enabled_new = params.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+            if enabled_new && !tier_lifts_cap() {
+                let current = crate::schedulestore::count_enabled();
+                if current >= SCHED_FREE_MAX_ENABLED {
+                    return Err(format!(
+                        "Free tier is limited to {} enabled scheduled tasks (you have {}). \
+                         Disable an existing task or upgrade to Pro.",
+                        SCHED_FREE_MAX_ENABLED, current
+                    ));
+                }
+            }
+
+            let daily_weekdays = params
+                .get("daily_weekdays")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|x| x.as_u64().map(|n| n as u32))
+                        .collect::<Vec<_>>()
+                });
+
+            let task = crate::schedulestore::create(crate::schedulestore::CreateParams {
+                title: title.to_string(),
+                prompt: prompt.to_string(),
+                trigger_type: Some("time".to_string()),
+                interval_minutes: interval,
+                daily_time,
+                daily_weekdays,
+                enabled: Some(enabled_new),
+                notify_channel: Some("inbox".to_string()),
+                model: None,
+            });
+
+            Ok(format!(
+                "Created scheduled task '{}' (id={}). It will run {}.",
+                task.title,
+                task.id,
+                describe_schedule(&task.interval_minutes, &task.daily_time, &task.daily_weekdays)
+            ))
+        }
+        "update" => {
+            let task_id = params.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
+            if task_id.is_empty() {
+                return Err("task_id is required".to_string());
+            }
+            let existing = crate::schedulestore::get(task_id)
+                .ok_or_else(|| format!("Scheduled task '{}' not found", task_id))?;
+
+            let interval = params
+                .get("interval_minutes")
+                .and_then(|v| v.as_u64())
+                .map(|n| n as u32);
+            if let Some(m) = interval {
+                if m < SCHED_MIN_INTERVAL_MINUTES {
+                    return Err(format!(
+                        "The minimum interval is {} minutes. Got {}.",
+                        SCHED_MIN_INTERVAL_MINUTES, m
+                    ));
+                }
+            }
+
+            // Resolve the post-update trigger so we can re-validate mutual
+            // exclusivity and re-derive next_run_at.
+            let new_interval = interval.or(existing.interval_minutes);
+            let new_daily_time = params
+                .get("daily_time")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .or(existing.daily_time.clone());
+            if new_interval.is_some() && new_daily_time.is_some() {
+                return Err(
+                    "Specify either interval_minutes OR daily_time, not both".to_string()
+                );
+            }
+            if let Some(t) = new_daily_time.as_ref() {
+                if !valid_hhmm(t) {
+                    return Err(format!("daily_time must be HH:MM (24h). Got '{}'.", t));
+                }
+            }
+
+            let daily_weekdays = params
+                .get("daily_weekdays")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|x| x.as_u64().map(|n| n as u32))
+                        .collect::<Vec<_>>()
+                });
+
+            let updated = crate::schedulestore::update(
+                task_id,
+                crate::schedulestore::UpdateParams {
+                    title: params.get("title").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    prompt: params.get("prompt").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    trigger_type: None,
+                    interval_minutes: interval.map(Some),
+                    daily_time: params
+                        .get("daily_time")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                        .map(Some),
+                    daily_weekdays: daily_weekdays.map(Some),
+                    enabled: params.get("enabled").and_then(|v| v.as_bool()),
+                    notify_channel: None,
+                    model: None,
+                },
+            )
+            .ok_or_else(|| format!("Scheduled task '{}' not found", task_id))?;
+
+            // Re-stamp next_run_at since the trigger likely changed. Use 0 as
+            // "from" so the next tick picks it up immediately if due.
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let _ = crate::schedulestore::set_run_state(
+                task_id,
+                updated.last_run_at.unwrap_or(0),
+                now + 1000, // schedule on the next tick
+                &updated.last_chat_id.clone().unwrap_or_default(),
+            );
+
+            Ok(format!(
+                "Updated scheduled task '{}' (id={}). Now runs {}.",
+                updated.title,
+                updated.id,
+                describe_schedule(&new_interval, &new_daily_time, &updated.daily_weekdays)
+            ))
+        }
+        "delete" => {
+            let task_id = params.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
+            if task_id.is_empty() {
+                return Err("task_id is required".to_string());
+            }
+            // Best-effort: clean up the task's memory file too.
+            let mem_path = crate::paths::task_memory_path(task_id);
+            let _ = std::fs::remove_file(mem_path);
+            if crate::schedulestore::delete(task_id) {
+                Ok(format!("Deleted scheduled task {}", task_id))
+            } else {
+                Err(format!("Scheduled task '{}' not found", task_id))
+            }
+        }
+        "enable" | "disable" => {
+            let task_id = params.get("task_id").and_then(|v| v.as_str()).unwrap_or("");
+            if task_id.is_empty() {
+                return Err("task_id is required".to_string());
+            }
+            let enable = action == "enable";
+
+            // Enforce cap on enable.
+            if enable && !tier_lifts_cap() {
+                let current = crate::schedulestore::count_enabled();
+                // count_enabled counts currently-enabled; enabling this one adds 1
+                // only if it's currently disabled.
+                let currently_enabled =
+                    crate::schedulestore::get(task_id).map(|t| t.enabled).unwrap_or(false);
+                if !currently_enabled && current >= SCHED_FREE_MAX_ENABLED {
+                    return Err(format!(
+                        "Free tier is limited to {} enabled scheduled tasks (you have {}). \
+                         Disable an existing task or upgrade to Pro.",
+                        SCHED_FREE_MAX_ENABLED, current
+                    ));
+                }
+            }
+
+            let updated = crate::schedulestore::update(
+                task_id,
+                crate::schedulestore::UpdateParams {
+                    enabled: Some(enable),
+                    ..Default::default()
+                },
+            )
+            .ok_or_else(|| format!("Scheduled task '{}' not found", task_id))?;
+
+            Ok(format!(
+                "Scheduled task '{}' is now {}.",
+                updated.title,
+                if enable { "enabled" } else { "disabled" }
+            ))
+        }
+        _ => Err(format!("Unknown manage_schedules action: {}", action)),
+    }
+}
+
+fn valid_hhmm(s: &str) -> bool {
+    let (h, m) = match s.split_once(':') {
+        Some(pair) => pair,
+        None => return false,
+    };
+    let h: u32 = match h.parse() {
+        Ok(n) => n,
+        Err(_) => return false,
+    };
+    let m: u32 = match m.parse() {
+        Ok(n) => n,
+        Err(_) => return false,
+    };
+    h < 24 && m < 60
+}
+
+fn describe_schedule(
+    interval: &Option<u32>,
+    daily_time: &Option<String>,
+    daily_weekdays: &Option<Vec<u32>>,
+) -> String {
+    if let Some(m) = interval {
+        return format!("every {} minutes", m);
+    }
+    if let Some(t) = daily_time {
+        let days = match daily_weekdays {
+            Some(d) if !d.is_empty() => {
+                let names = d
+                    .iter()
+                    .map(|i| match i {
+                        0 => "Sun", 1 => "Mon", 2 => "Tue", 3 => "Wed",
+                        4 => "Thu", 5 => "Fri", 6 => "Sat", _ => "?",
+                    })
+                    .collect::<Vec<_>>()
+                    .join("/");
+                format!("on {}", names)
+            }
+            _ => "every day".to_string(),
+        };
+        return format!("at {} local ({})", t, days);
+    }
+    "on a schedule".to_string()
+}
+

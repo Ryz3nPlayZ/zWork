@@ -79,6 +79,10 @@ export interface ApiChatSummary {
   message_count: number;
   model: string;
   project_id?: string;
+  /** `"chat"` (interactive, default) or `"automation"` (scheduled-task run).
+   *  Filter `automation` out of the main chat list — they surface inside the
+   *  scheduled task's run history instead. */
+  kind?: string;
 }
 
 export interface Integration {
@@ -217,6 +221,41 @@ export interface MeResponse {
   cwd: string;
 }
 
+// --- Scheduled Tasks & Inbox ---
+
+/** A recurring task the agent runs on a schedule. See sidecar `schedulestore.rs`. */
+export interface ScheduledTask {
+  id: string;
+  title: string;
+  /** The objective sent to the agent on each run. */
+  prompt: string;
+  trigger_type: string; // "time" for v1
+  interval_minutes: number | null;
+  daily_time: string | null; // "HH:MM"
+  daily_weekdays: number[] | null; // 0=Sun..6=Sat
+  enabled: boolean;
+  notify_channel: string; // "inbox"
+  model: string | null; // null = default model
+  created_at: number;
+  updated_at: number;
+  last_run_at: number | null;
+  next_run_at: number | null;
+  /** The most recent run's automation chat id (deep-link target). */
+  last_chat_id: string | null;
+}
+
+/** A message the agent pushes to the user unprompted. */
+export interface InboxItem {
+  id: string;
+  task_id: string | null;
+  chat_id: string | null;
+  kind: "summary" | "flag" | "question" | "error";
+  title: string;
+  body: string;
+  created_at: number;
+  read: boolean;
+}
+
 export interface SkillMeta {
   slug: string;
   name: string;
@@ -298,6 +337,16 @@ export const api = {
       body: JSON.stringify({ answer }),
     }).then((r) => j<{ status: string }>(r)),
 
+  approveGate: (chatId: string, gateId: string) =>
+    localFetch(`/api/chats/${chatId}/gate/${gateId}/approve`, {
+      method: "POST",
+    }).then((r) => j<{ status: string }>(r)),
+
+  rejectGate: (chatId: string, gateId: string) =>
+    localFetch(`/api/chats/${chatId}/gate/${gateId}/reject`, {
+      method: "POST",
+    }).then((r) => j<{ status: string }>(r)),
+
   stopChat: (chatId: string) =>
     localFetch(`/api/chats/${chatId}/stop`, {
       method: "POST",
@@ -349,13 +398,6 @@ export const api = {
   listTasks: () =>
     localFetch("/api/tasks").then((r) => j<{ tasks: any[] }>(r)),
 
-  autoPlanTasks: (projectTitle: string, intervalDays: number = 2) =>
-    localFetch("/api/tasks/auto-plan", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ project_title: projectTitle, interval_days: intervalDays }),
-    }).then((r) => j<{ tasks: any[] }>(r)),
-
   createTask: (body: { title: string; column?: string; due_date?: string | null; description?: string; assignee?: string; priority?: string }) =>
     localFetch("/api/tasks", {
       method: "POST",
@@ -396,6 +438,75 @@ export const api = {
     localFetch(`/api/events/${id}`, {
       method: "DELETE",
     }).then((r) => j<{ ok: boolean }>(r)),
+
+  // --- Scheduled Tasks ---
+  listSchedules: () =>
+    localFetch("/api/schedules").then((r) => j<{ tasks: ScheduledTask[] }>(r)),
+
+  createSchedule: (body: {
+    title: string;
+    prompt: string;
+    interval_minutes?: number;
+    daily_time?: string;
+    daily_weekdays?: number[];
+    enabled?: boolean;
+    model?: string;
+  }) =>
+    localFetch("/api/schedules", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => j<{ task: ScheduledTask; error?: string }>(r)),
+
+  updateSchedule: (
+    id: string,
+    body: {
+      title?: string;
+      prompt?: string;
+      interval_minutes?: number | null;
+      daily_time?: string | null;
+      daily_weekdays?: number[] | null;
+      enabled?: boolean;
+      model?: string | null;
+    },
+  ) =>
+    localFetch(`/api/schedules/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => j<{ task: ScheduledTask; error?: string }>(r)),
+
+  deleteSchedule: (id: string) =>
+    localFetch(`/api/schedules/${id}`, { method: "DELETE" }).then((r) =>
+      j<{ success: boolean }>(r),
+    ),
+
+  /** Manually trigger a scheduled task run ("Run now"). */
+  runScheduleNow: (id: string) =>
+    localFetch(`/api/schedules/${id}/run`, { method: "POST" }).then((r) =>
+      j<{ success: boolean; error?: string }>(r),
+    ),
+
+  // --- Inbox ---
+  listInbox: (unreadOnly = false) =>
+    localFetch(`/api/inbox${unreadOnly ? "?unread=true" : ""}`).then((r) =>
+      j<{ items: InboxItem[]; unread_count: number }>(r),
+    ),
+
+  markInboxRead: (id: string) =>
+    localFetch(`/api/inbox/${id}`, { method: "PATCH" }).then((r) =>
+      j<{ success: boolean }>(r),
+    ),
+
+  markAllInboxRead: () =>
+    localFetch("/api/inbox/all-read", { method: "POST" }).then((r) =>
+      j<{ success: boolean; marked_read: number }>(r),
+    ),
+
+  deleteInboxItem: (id: string) =>
+    localFetch(`/api/inbox/${id}`, { method: "DELETE" }).then((r) =>
+      j<{ success: boolean }>(r),
+    ),
 
   me: () => localFetch("/api/me").then((r) => j<MeResponse>(r)),
 
@@ -722,20 +833,23 @@ export type StreamEvent =
   | { type: "chat"; id: string; title: string }
   | { type: "status"; text: string }
   | { type: "delta"; text: string }
+  | { type: "thinking_delta"; text: string }
+  | { type: "thinking_end" }
   | { type: "meta"; provider: string; resolved_model: string; upstream_provider?: string }
   | { type: "done" }
   | { type: "end" }
   | { type: "heartbeat" }
   | { type: "error"; text: string }
   | { type: "needs_setup" }
-  | { type: "activity"; id: string; label: string; icon?: string; done?: boolean }
-  | { type: "tool_result"; tool: string; ok: boolean; message: string }
+  | { type: "activity"; id: string; label: string; icon?: string; done?: boolean; tool_use_id?: string }
+  | { type: "tool_use"; id: string; name: string; input?: unknown }
+  | { type: "tool_result"; tool: string; ok: boolean; message: string; tool_use_id?: string }
   | { type: "tool_progress"; tool_id: string; label: string }
   | { type: "tool_start"; tool: string; input?: unknown }
   | { type: "tool_complete"; tool: string; ok: boolean; message: string }
   | { type: "usage"; prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
-  | { type: "permission"; tool: string; risk: "safe" | "sensitive" | "destructive"; reason: string; blocked: boolean }
-  | { type: "compaction"; summarized_messages: number; kept_recent: number; summary_chars?: number; status: "summarizing" | "done" | "failed"; error?: string }
+  | { type: "permission"; tool: string; risk: "safe" | "sensitive" | "destructive"; reason: string; blocked: boolean; gate_id?: string; tool_use_id?: string }
+  | { type: "compaction"; status: "complete" | "failed"; before_chars?: number; after_chars?: number; model?: string; error?: string }
   | { type: "subagent_started"; task_id: string; description: string }
   | { type: "subagent_progress"; task_id: string; status: "pending" | "running" | "completed" | "failed" }
   | { type: "subagent_delta"; task_id: string; text: string }

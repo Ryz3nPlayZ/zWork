@@ -65,6 +65,11 @@ todo-app/
 bench/
 intro-page/
 
+# Local agent scratch / workspace dirs (not part of the app)
+_hermes_agent_tmp/
+workspace/
+.hallmark/
+
 # ===== Local ops notes =====
 serverdetails.md
 research/

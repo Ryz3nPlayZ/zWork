@@ -16,15 +16,21 @@ import {
   CreditCard,
   Plug,
   Keyboard,
+  Inbox,
+  Clock,
 } from "lucide-react";
 import { cn } from "../lib/cn";
-import { isMacOS } from "../lib/platform";
+import { nativeVibrancySupported, useTranslucencyPref } from "../lib/translucency";
 import { Logo } from "./Logo";
 import { IconButton } from "./IconButton";
-import { useApp, bucketFor, type ChatBucket } from "../lib/store";
+import { useApp, bucketFor, type ChatBucket, type View } from "../lib/store";
 
 export function Sidebar() {
-  const macOS = isMacOS();
+  const translucency = useTranslucencyPref();
+  const translucentOn = translucency === "on";
+  // Native macOS vibrancy shows real desktop behind a fully transparent aside;
+  // everywhere else, use a translucent tint + blur as a CSS-only fallback.
+  const useNativeGlass = translucentOn && nativeVibrancySupported();
   const open = useApp((s) => s.sidebarOpen);
   const toggle = useApp((s) => s.toggleSidebar);
   const summaries = useApp((s) => s.chatSummaries);
@@ -65,19 +71,19 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        "relative flex h-full shrink-0 flex-col overflow-x-hidden border-r border-line bg-paper-sidebar",
+        "relative flex h-full shrink-0 flex-col overflow-x-hidden border-r border-line",
+        // Translucency: native macOS vibrancy → fully transparent so the
+        // desktop shows through. CSS fallback (Win/Linux/web) → translucent
+        // tint + blur over the page. Off → the standard opaque sidebar fill.
+        useNativeGlass
+          ? "bg-transparent"
+          : translucentOn
+            ? "bg-paper-sidebar/70 backdrop-blur-xl"
+            : "bg-paper-sidebar",
         "transition-[width] duration-200 ease-out",
         open ? "w-[248px]" : "w-[64px]",
       )}
     >
-      {/* Titlebar drag area — reserve space for the macOS traffic lights.
-           On Linux, a smaller spacer keeps the logo from touching the window edge. */}
-      {macOS ? (
-        <div className="titlebar-drag relative h-8 shrink-0" />
-      ) : (
-        <div className="titlebar-drag relative h-3 shrink-0" />
-      )}
-
       {/* Top row: logo (top-left, icon only) + optional "zWork" wordmark + collapse toggle */}
       <div
         className={cn(
@@ -147,7 +153,13 @@ export function Sidebar() {
           collapsed={!open}
           onClick={() => setSearchOpen(true)}
         />
-        {/* Hide Tasks and Inbox for now (deferred to backlog)
+        <SidebarButton
+          icon={<Clock />}
+          label="Scheduled"
+          collapsed={!open}
+          onClick={() => setView("scheduled")}
+          active={view === "scheduled"}
+        />
         <SidebarButton
           icon={<Inbox />}
           label="Inbox"
@@ -155,6 +167,7 @@ export function Sidebar() {
           onClick={() => setView("inbox")}
           active={view === "inbox"}
         />
+        {/* Tasks (kanban) deferred — TasksPage exists but is backlog.
         <SidebarButton
           icon={<LayoutDashboard />}
           label="Tasks"
@@ -256,44 +269,159 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className="border-t border-line/80 p-3">
-        <SidebarButton
-          icon={<BarChart3 />}
-          label="Analytics"
-          collapsed={!open}
-          active={view === "analytics"}
-          onClick={() => setView("analytics")}
-        />
-        <SidebarButton
-          icon={<CreditCard />}
-          label="Plan"
-          collapsed={!open}
-          active={view === "plan"}
-          onClick={() => setView("plan")}
-        />
-        <SidebarButton
-          icon={<Plug />}
-          label="Connectors"
-          collapsed={!open}
-          active={view === "connectors"}
-          onClick={() => setView("connectors")}
-        />
-        <SidebarButton
-          icon={<Keyboard />}
-          label="Shortcuts"
-          shortcut="⌘/"
-          collapsed={!open}
-          onClick={() => setKeybindingsOpen(true)}
-        />
-        <SidebarButton
-          icon={<Settings />}
-          label="Settings"
-          shortcut="⌘,"
-          collapsed={!open}
-          active={view === "settings"}
-          onClick={() => setView("settings")}
-        />
+        {open ? (
+          <div className="flex flex-col gap-0.5">
+            <SidebarButton
+              icon={<Keyboard />}
+              label="Shortcuts"
+              shortcut="⌘/"
+              collapsed={false}
+              onClick={() => setKeybindingsOpen(true)}
+            />
+            <SidebarButton
+              icon={<Settings />}
+              label="Settings"
+              shortcut="⌘,"
+              collapsed={false}
+              active={view === "settings"}
+              onClick={() => setView("settings")}
+            />
+            <MoreMenuButton view={view} setView={setView} />
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <IconButton
+              icon={<Keyboard />}
+              label="Shortcuts"
+              shortcut="⌘/"
+              tooltipSide="right"
+              showTooltip={false}
+              onClick={() => setKeybindingsOpen(true)}
+              size="md"
+            />
+            <IconButton
+              icon={<Settings />}
+              label="Settings"
+              shortcut="⌘,"
+              tooltipSide="right"
+              showTooltip={false}
+              active={view === "settings"}
+              onClick={() => setView("settings")}
+              size="md"
+            />
+            <IconButton
+              icon={<BarChart3 />}
+              label="Analytics"
+              tooltipSide="right"
+              showTooltip={false}
+              active={view === "analytics"}
+              onClick={() => setView("analytics")}
+              size="md"
+            />
+            <IconButton
+              icon={<CreditCard />}
+              label="Plan"
+              tooltipSide="right"
+              showTooltip={false}
+              active={view === "plan"}
+              onClick={() => setView("plan")}
+              size="md"
+            />
+            <IconButton
+              icon={<Plug />}
+              label="Connectors"
+              tooltipSide="right"
+              showTooltip={false}
+              active={view === "connectors"}
+              onClick={() => setView("connectors")}
+              size="md"
+            />
+          </div>
+        )}
       </div>
     </aside>
+  );
+}
+
+function MoreMenuButton({
+  view,
+  setView,
+}: {
+  view: View;
+  setView: (view: View) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      const root = rootRef.current;
+      if (!root) return;
+      if (!root.contains(e.target as Node)) setOpen(false);
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDocMouseDown);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [open]);
+
+  const items: { id: View; label: string; icon: React.ReactNode }[] = [
+    { id: "analytics", label: "Analytics", icon: <BarChart3 className="h-4 w-4" /> },
+    { id: "plan", label: "Plan", icon: <CreditCard className="h-4 w-4" /> },
+    { id: "connectors", label: "Connectors", icon: <Plug className="h-4 w-4" /> },
+  ];
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          "press group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] text-ink-muted",
+          "hover:bg-line/60 hover:text-ink",
+          open && "bg-line/50 text-ink",
+        )}
+      >
+        <span className="flex h-5 w-5 items-center justify-center text-ink-muted group-hover:text-ink">
+          <MoreHorizontal className="h-4 w-4" />
+        </span>
+        <span className="flex-1 text-left">More</span>
+      </button>
+      {open && (
+        <div
+          className="absolute left-full bottom-0 z-[300] ml-2 w-[160px] animate-fade-in rounded-xl hairline bg-paper-raised p-1 shadow-lift"
+          role="menu"
+          aria-label="More navigation"
+        >
+          {items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                setView(item.id);
+              }}
+              className={cn(
+                "press flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12.5px]",
+                view === item.id
+                  ? "bg-line/50 font-semibold text-ink"
+                  : "text-ink-muted hover:bg-line/50 hover:text-ink",
+              )}
+            >
+              {item.icon}
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -413,7 +541,7 @@ function RowMenu({
       />
       {open && (
         <div
-          className="absolute right-0 top-full z-[300] mt-1 w-[150px] animate-fade-in rounded-xl border border-line-strong bg-paper-raised p-1 shadow-pop"
+          className="absolute right-0 top-full z-[300] mt-1 w-[150px] animate-fade-in rounded-xl hairline bg-paper-raised p-1 shadow-lift"
           role="menu"
           aria-label="Chat actions"
           onClick={(e) => e.stopPropagation()}

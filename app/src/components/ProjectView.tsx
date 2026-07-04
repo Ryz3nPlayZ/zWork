@@ -13,7 +13,6 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
-import { isMacOS } from "../lib/platform";
 import { ChatInput } from "./ChatInput";
 import { IconButton } from "./IconButton";
 import { api } from "../lib/api";
@@ -54,40 +53,59 @@ function ProjectListPage() {
   }, [projects]);
 
   return (
-    <div className="flex h-full w-full flex-col overflow-y-auto bg-paper">
-      {projects.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center">
+    <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-paper">
+      {/* Header — consistent with Scheduled and Inbox */}
+      <div className="shrink-0 border-b border-line bg-paper-soft px-6 py-4">
+        <div className="mx-auto flex max-w-[1200px] items-center justify-between">
+          <div>
+            <h1 className="text-[28px] font-semibold tracking-tight text-ink">
+              Projects
+            </h1>
+            <p className="mt-0.5 text-[13px] text-ink-muted">
+              {projects.length} project{projects.length === 1 ? "" : "s"}
+            </p>
+          </div>
           <button
             type="button"
             onClick={() => setModalOpen(true)}
-            className="press flex flex-col items-center justify-center gap-3 rounded-xl border border-line bg-paper-raised px-10 py-8 text-ink hover:bg-paper-sunken hover:border-line-strong transition-colors"
+            className="press ring-focus inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-paper hover:bg-ink/90 transition-colors"
           >
-            <Plus className="h-8 w-8 text-ink-muted" />
-            <span className="text-[14px] font-medium text-ink-muted">Create project</span>
+            <Plus className="h-3.5 w-3.5" />
+            New project
           </button>
         </div>
-      ) : (
-        <div className="mx-auto w-full max-w-[860px] px-6 pt-32 pb-20">
-          <div className="flex items-center justify-between border-b border-line pb-4 mb-6">
-            <h1 className="font-serif text-[32px] font-semibold tracking-tight text-ink">
-              Projects
-            </h1>
-            <button
-              type="button"
-              onClick={() => setModalOpen(true)}
-              className="press inline-flex items-center gap-1.5 rounded-lg border border-line bg-paper-raised px-3.5 py-1.5 text-[12.5px] font-medium text-ink hover:bg-paper-sunken hover:text-ink transition-colors"
-            >
-              <Plus className="h-4 w-4" />
-              New project
-            </button>
-          </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {sorted.map((p) => (
-              <ProjectCard key={p.id} project={p} />
-            ))}
-          </div>
+      </div>
+
+      {/* Body */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-[1200px] px-6 py-6">
+          {projects.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-line p-16 text-center">
+              <FolderOpen className="mx-auto h-8 w-8 text-ink-faint" />
+              <h3 className="mt-3 text-[13.5px] font-semibold text-ink">
+                No projects yet
+              </h3>
+              <p className="mx-auto mt-1 max-w-[320px] text-[12.5px] text-ink-muted">
+                Create a project to organize chats, instructions, and files around a single goal.
+              </p>
+              <button
+                type="button"
+                onClick={() => setModalOpen(true)}
+                className="press ring-focus mt-4 inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-paper hover:bg-ink/90 transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                Create your first project
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {sorted.map((p) => (
+                <ProjectCard key={p.id} project={p} />
+              ))}
+            </div>
+          )}
         </div>
-      )}
+      </div>
 
       {modalOpen && <CreateProjectModal onClose={() => setModalOpen(false)} />}
     </div>
@@ -356,7 +374,6 @@ function ProjectCard({ project }: { project: { id: string; name: string; descrip
 // ---- Project Detail Page ----
 
 function ProjectDetail() {
-  const macOS = isMacOS();
   const activeId = useApp((s) => s.activeProjectId);
   const projects = useApp((s) => s.projects);
   const chatSummaries = useApp((s) => s.chatSummaries);
@@ -495,8 +512,8 @@ function ProjectDetail() {
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-paper">
-      {/* Titlebar: back to all projects */}
-      <div className={cn(macOS && "titlebar-drag", "flex h-12 shrink-0 items-center border-b border-line px-4")}>
+      {/* Header: back to all projects */}
+      <div className="flex h-12 shrink-0 items-center border-b border-line px-4">
         <div data-no-drag>
           <button
             type="button"
@@ -533,12 +550,12 @@ function ProjectDetail() {
                         setEditingField(null);
                       }
                     }}
-                    className="w-full bg-transparent font-serif text-[40px] font-medium leading-tight text-ink focus:outline-none"
+                    className="w-full bg-transparent text-[28px] font-semibold tracking-tight text-ink focus:outline-none"
                   />
                 ) : (
                   <h1
                     onClick={() => setEditingField("name")}
-                    className="cursor-text font-serif text-[40px] font-medium leading-tight tracking-tight text-ink"
+                    className="cursor-text text-[28px] font-semibold tracking-tight text-ink"
                   >
                     {project.icon && <span className="mr-2 text-[36px]">{project.icon}</span>}
                     {project.name}
@@ -687,7 +704,7 @@ function ProjectDetail() {
                 <div className="flex-grow overflow-y-auto max-h-[200px] mt-2">
                   <ul className="flex flex-col gap-1.5">
                     {projectFiles.map((file) => (
-                      <li key={file.name} className="flex items-center justify-between gap-3 rounded-lg border border-line bg-paper px-2.5 py-1.5 text-[11.5px] text-ink transition-all">
+                      <li key={file.name} className="flex items-center justify-between gap-3 rounded-lg border border-line bg-paper px-2.5 py-1.5 text-[11.5px] text-ink transition-colors">
                         <div className="flex items-center gap-2 min-w-0">
                           <FileText className="h-3.5 w-3.5 shrink-0 text-ink-muted" />
                           <span className="truncate font-medium" title={file.name}>{file.name}</span>

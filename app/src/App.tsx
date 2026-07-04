@@ -5,6 +5,8 @@ import { Landing } from "./components/Landing";
 import { useApp } from "./lib/store";
 import { consumeInstalledUpdateNotice, detectUpdate, installUpdate, openReleaseUrl, type UpdateCardState, type UpdateProgress } from "./lib/update";
 import { cn } from "./lib/cn";
+import { isMacOS } from "./lib/platform";
+import { useTranslucencyPref, nativeVibrancySupported } from "./lib/translucency";
 import { recordTelemetry, setTelemetryEnabled, startTelemetrySession, stopTelemetrySession } from "./lib/telemetry";
 import { fallbackAppVersion, resolveAppVersion } from "./lib/appVersion";
 import { fetchCloudSession, onCloudAuthChanged, handleOAuthTokenCallback, type CloudUser } from "./lib/cloud";
@@ -26,6 +28,7 @@ const ConnectorsPage = lazy(() => import("./components/ConnectorsPage").then((m)
 const AdminPage = lazy(() => import("./components/AdminPage").then((m) => ({ default: m.AdminPage })));
 const TasksPage = lazy(() => import("./components/tasks/TasksPage").then((m) => ({ default: m.TasksPage })));
 const InboxPage = lazy(() => import("./components/InboxPage").then((m) => ({ default: m.InboxPage })));
+const ScheduledTasksPage = lazy(() => import("./components/scheduled/ScheduledTasksPage").then((m) => ({ default: m.ScheduledTasksPage })));
 const OverlayChatView = lazy(() => import("./components/OverlayChatView").then((m) => ({ default: m.OverlayChatView })));
 import { KeybindingsModal } from "./components/KeybindingsModal";
 import { PermissionPrompt } from "./components/PermissionPrompt";
@@ -48,20 +51,20 @@ function OfflineBanner() {
   };
 
   return (
-    <div className="shrink-0 border-b border-amber-500/20 bg-amber-500/5 px-4 py-2 flex items-center justify-between text-[11px] text-amber-500 animate-in fade-in duration-200">
+    <div className="shrink-0 border-b border-warning/20 bg-warning/5 px-4 py-2 flex items-center justify-between text-[11px] text-warning animate-in fade-in duration-200">
       <div className="flex items-center gap-2">
         <span className="font-semibold flex items-center gap-1.5">
-          <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+          <AlertTriangle className="h-3.5 w-3.5 text-warning" />
           Running Offline:
         </span>
-        <span className="text-amber-500/90">
+        <span className="text-warning/90">
           The local backend is unreachable. Showing cached chats and local canvas editors.
         </span>
       </div>
       <button
         onClick={handleRetry}
         disabled={reconnecting}
-        className="px-2.5 py-1 text-[10.5px] font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 rounded-lg transition-all border border-amber-500/30 disabled:opacity-50 cursor-pointer"
+        className="px-2.5 py-1 text-[10.5px] font-semibold bg-warning/10 hover:bg-warning/20 text-warning rounded-lg transition-colors border border-warning/30 disabled:opacity-50 cursor-pointer"
       >
         {reconnecting ? "Connecting..." : "Reconnect"}
       </button>
@@ -120,6 +123,11 @@ export default function App() {
   const backendReady = useApp((s) => s.backendReady);
   const keybindingsOpen = useApp((s) => s.keybindingsOpen);
   const setKeybindingsOpen = useApp((s) => s.setKeybindingsOpen);
+
+  const macOS = isMacOS();
+  const tauri = typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
+  const translucency = useTranslucencyPref();
+  const useNativeGlass = translucency === "on" && nativeVibrancySupported();
 
   // Skip onboarding in browser preview mode (non-Tauri environment)
   const skipOnboarding = typeof window !== "undefined" && !((window as any).__TAURI_INTERNALS__);
@@ -384,6 +392,11 @@ export default function App() {
       } else if (mod && e.key === "\\") {
         e.preventDefault();
         toggleSidebar();
+      } else if (mod && e.key.toLowerCase() === "s") {
+        // Cmd/Ctrl+S toggles the sidebar. preventDefault stops the browser's
+        // "Save Page" dialog. Kept alongside Cmd+\ so both bindings work.
+        e.preventDefault();
+        toggleSidebar();
       } else if (mod && e.key === ",") {
         e.preventDefault();
         setView("settings");
@@ -478,10 +491,11 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-paper">
+    <div className={cn("flex h-screen w-screen flex-col overflow-hidden", useNativeGlass ? "bg-transparent" : "bg-paper")}>
+      {tauri && macOS && <div className="titlebar-drag h-8 shrink-0" />}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar />
-        <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+        <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-paper">
           {/* Hide DailyGoalBar progress bar (deferred to backlog)
           <DailyGoalBar />
           */}
@@ -515,6 +529,10 @@ export default function App() {
             <Suspense fallback={panelFallback}>
               <InboxPage />
             </Suspense>
+          ) : view === "scheduled" ? (
+            <Suspense fallback={panelFallback}>
+              <ScheduledTasksPage />
+            </Suspense>
           ) : view === "admin" ? (
             <Suspense fallback={panelFallback}>
               <AdminPage />
@@ -546,8 +564,8 @@ export default function App() {
           )}
           {recentUpdateNotice && (
             <div className="pointer-events-none absolute inset-x-0 bottom-5 z-20 flex justify-center px-6">
-              <div className="pointer-events-auto flex w-full max-w-[640px] items-center gap-3 rounded-2xl border border-line bg-paper-raised px-4 py-3 shadow-pop">
-                <CheckCircle2 className="h-4.5 w-4.5 shrink-0 text-emerald-600" />
+              <div className="pointer-events-auto flex w-full max-w-[640px] items-center gap-3 rounded-2xl hairline bg-paper-raised px-4 py-3 shadow-lift">
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
                 <div className="min-w-0 flex-1 text-[12.5px] text-ink">
                   zWork {recentUpdateNotice.version} installed.{" "}
                   <button

@@ -10,6 +10,7 @@
 //! phantom empty-args call.
 
 use serde_json::Value;
+use std::collections::HashMap;
 
 use super::event::{FinishReason, LlmEvent, Usage};
 use super::tool_stream::{FinishedTool, ToolParseError, ToolStream};
@@ -17,11 +18,22 @@ use super::ProtocolParser;
 
 const ROUTE: &str = "anthropic-messages";
 
+/// Accumulated thinking text + signature for one extended-thinking block,
+/// keyed by its SSE `index`. Both pieces arrive as separate delta events;
+/// they're flushed to a `ThinkingBlock` event at `content_block_stop`.
+#[derive(Default)]
+struct ThinkingAccumulator {
+    thinking: String,
+    signature: String,
+}
+
 pub struct AnthropicParser {
     tools: ToolStream,
     usage: Option<Usage>,
     finish_reason: Option<FinishReason>,
     had_tool_calls: bool,
+    /// Per-index extended-thinking accumulators.
+    thinking: HashMap<usize, ThinkingAccumulator>,
 }
 
 impl AnthropicParser {
@@ -31,6 +43,7 @@ impl AnthropicParser {
             usage: None,
             finish_reason: None,
             had_tool_calls: false,
+            thinking: HashMap::new(),
         }
     }
 }
@@ -99,6 +112,16 @@ impl ProtocolParser for AnthropicParser {
 
     fn finish(&mut self) -> Vec<LlmEvent> {
         let mut out = Vec::new();
+        // If the stream ended mid-thinking (no content_block_stop), flush the
+        // accumulated block so it survives into the next turn.
+        for (_, acc) in std::mem::take(&mut self.thinking) {
+            if !acc.thinking.is_empty() {
+                out.push(LlmEvent::ThinkingBlock {
+                    thinking: acc.thinking,
+                    signature: acc.signature,
+                });
+            }
+        }
         // If the stream ended mid-tool-call (no content_block_stop), flush what
         // we have rather than dropping it.
         if !self.tools.is_empty() {
@@ -151,8 +174,13 @@ fn on_content_block_start(state: &mut AnthropicParser, event: &Value) -> Vec<Llm
             Vec::new()
         }
         "thinking" => {
+            // Seed the accumulator for this block index so deltas can append.
+            state.thinking.entry(idx).or_default();
             if let Some(text) = block.get("thinking").and_then(|v| v.as_str()) {
                 if !text.is_empty() {
+                    if let Some(acc) = state.thinking.get_mut(&idx) {
+                        acc.thinking.push_str(text);
+                    }
                     return vec![LlmEvent::ReasoningDelta {
                         text: text.to_string(),
                     }];
@@ -169,6 +197,7 @@ fn on_content_block_delta(state: &mut AnthropicParser, event: &Value) -> Vec<Llm
         return Vec::new();
     };
     let delta_type = delta.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    let idx = event.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
     match delta_type {
         "text_delta" => {
             let text = delta.get("text").and_then(|v| v.as_str()).unwrap_or("");
@@ -183,34 +212,58 @@ fn on_content_block_delta(state: &mut AnthropicParser, event: &Value) -> Vec<Llm
             if text.is_empty() {
                 Vec::new()
             } else {
+                if let Some(acc) = state.thinking.get_mut(&idx) {
+                    acc.thinking.push_str(text);
+                }
                 vec![LlmEvent::ReasoningDelta {
                     text: text.to_string(),
                 }]
             }
         }
+        "signature_delta" => {
+            // Capture the redactable signature so the assembled thinking block
+            // can be replayed on the next turn. Not surfaced as a delta.
+            if let Some(sig) = delta.get("signature").and_then(|v| v.as_str()) {
+                if let Some(acc) = state.thinking.get_mut(&idx) {
+                    acc.signature.push_str(sig);
+                }
+            }
+            Vec::new()
+        }
         "input_json_delta" => {
-            let idx = event.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
             let partial = delta.get("partial_json").and_then(|v| v.as_str()).unwrap_or("");
             match state.tools.append_existing(ROUTE, idx, partial) {
                 Ok(()) => Vec::new(),
                 Err(e) => vec![parse_error_to_event(e)],
             }
         }
-        // signature_delta, citations_delta, etc. — not model-visible content.
+        // citations_delta, etc. — not model-visible content.
         _ => Vec::new(),
     }
 }
 
 fn on_content_block_stop(state: &mut AnthropicParser, event: &Value) -> Vec<LlmEvent> {
     let idx = event.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    // Flush a completed extended-thinking block, including its signature so
+    // the agent loop can replay it in the next turn's request.
+    let mut out: Vec<LlmEvent> = Vec::new();
+    if let Some(acc) = state.thinking.remove(&idx) {
+        if !acc.thinking.is_empty() {
+            out.push(LlmEvent::ThinkingBlock {
+                thinking: acc.thinking,
+                signature: acc.signature,
+            });
+        }
+    }
     match state.tools.finish(ROUTE, idx) {
         Ok(Some(c)) => {
             state.had_tool_calls = true;
-            vec![finished_to_event(c)]
+            out.push(finished_to_event(c));
         }
-        Ok(None) => Vec::new(), // non-tool block
-        Err(e) => vec![parse_error_to_event(e)],
+        Ok(None) => {}
+        Err(e) => out.push(parse_error_to_event(e)),
     }
+    out
 }
 
 fn map_usage(usage: &Value) -> Option<Usage> {

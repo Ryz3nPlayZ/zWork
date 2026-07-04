@@ -4,6 +4,9 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use crate::paths::home_dir;
 
+/// The OS keychain service name under which zWork stores provider credentials.
+const KEYRING_SERVICE: &str = "zwork";
+
 #[derive(Serialize, Deserialize, Default)]
 struct SecretData {
     #[serde(default)]
@@ -14,7 +17,7 @@ fn secret_file_path() -> PathBuf {
     home_dir().join("secrets.json")
 }
 
-fn read_secrets() -> HashMap<String, String> {
+fn read_secrets_file() -> HashMap<String, String> {
     let path = secret_file_path();
     if !path.exists() {
         return HashMap::new();
@@ -28,9 +31,9 @@ fn read_secrets() -> HashMap<String, String> {
     }
 }
 
-fn write_secrets(keys: HashMap<String, String>) {
+fn write_secrets_file(keys: &HashMap<String, String>) {
     let path = secret_file_path();
-    let data = SecretData { api_keys: keys };
+    let data = SecretData { api_keys: keys.clone() };
     if let Ok(content) = serde_json::to_string_pretty(&data) {
         let _ = fs::write(&path, content);
         #[cfg(unix)]
@@ -41,50 +44,93 @@ fn write_secrets(keys: HashMap<String, String>) {
     }
 }
 
+/// Read one secret from the OS keyring. Returns `None` if the keyring is
+/// unavailable (headless Linux without a Secret Service, sandboxed env, etc.)
+/// or the entry doesn't exist.
+fn keyring_get(credential: &str) -> Option<String> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, credential).ok()?;
+    entry.get_password().ok()
+}
+
+/// Write one secret to the OS keyring. Best-effort: silently no-ops if the
+/// keyring backend is unavailable.
+fn keyring_set(credential: &str, value: &str) {
+    if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, credential) {
+        let _ = entry.set_password(value);
+    }
+}
+
+/// Delete one secret from the OS keyring. Best-effort.
+fn keyring_delete(credential: &str) {
+    if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, credential) {
+        let _ = entry.delete_credential();
+    }
+}
+
 #[allow(dead_code)]
 pub fn get_api_key(credential: &str) -> String {
     if credential.is_empty() {
         return String::new();
     }
-    read_secrets().get(credential).cloned().unwrap_or_default()
+    // Prefer the keyring; fall back to the file store.
+    if let Some(v) = keyring_get(credential) {
+        return v;
+    }
+    read_secrets_file().get(credential).cloned().unwrap_or_default()
 }
 
+/// Persist a credential. Writes to BOTH the keyring (primary) and the file
+/// store (fallback) so a missing keyring backend never loses the secret —
+/// matching the Python backend's `auto` sync behavior.
 pub fn set_api_key(credential: &str, value: &str) {
     if credential.is_empty() {
         return;
     }
-    let mut current = read_secrets();
     if value.is_empty() {
-        current.remove(credential);
-    } else {
-        current.insert(credential.to_string(), value.to_string());
+        delete_api_key(credential);
+        return;
     }
-    write_secrets(current);
+    keyring_set(credential, value);
+    let mut current = read_secrets_file();
+    current.insert(credential.to_string(), value.to_string());
+    write_secrets_file(&current);
 }
 
-#[allow(dead_code)]
 pub fn delete_api_key(credential: &str) {
-    set_api_key(credential, "");
+    keyring_delete(credential);
+    let mut current = read_secrets_file();
+    current.remove(credential);
+    write_secrets_file(&current);
 }
 
 pub fn load_api_keys(credentials: &HashMap<String, String>) -> HashMap<String, String> {
     let mut out = HashMap::new();
-    let secrets = read_secrets();
+    let file_secrets = read_secrets_file();
     for credential in credentials.keys() {
-        if let Some(val) = secrets.get(credential) {
-            if !val.is_empty() {
-                out.insert(credential.clone(), val.clone());
+        // 1. Try the OS keyring first.
+        if let Some(v) = keyring_get(credential) {
+            if !v.is_empty() {
+                out.insert(credential.clone(), v);
                 continue;
             }
         }
-        // Legacy fallback: if key is in the credential map directly
+        // 2. Fall back to the file store.
+        if let Some(v) = file_secrets.get(credential) {
+            if !v.is_empty() {
+                out.insert(credential.clone(), v.clone());
+                // Migrate into the keyring if it's available.
+                keyring_set(credential, v);
+                continue;
+            }
+        }
+        // 3. Legacy fallback: plaintext value in the settings map itself.
         if let Some(legacy) = credentials.get(credential) {
             if !legacy.is_empty() {
                 out.insert(credential.clone(), legacy.clone());
-                // Migrate to secret store
                 set_api_key(credential, legacy);
             }
         }
     }
     out
 }
+
