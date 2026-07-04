@@ -2,6 +2,17 @@
 
 All notable changes to zWork are documented in this file.
 
+## v0.5.0-beta.4
+
+**Fix: macOS keychain prompts — for real this time.**
+
+### Fixes
+- **Secret store now file-first (matching the Python backend).** The sidecar reads credentials from `~/.zwork/secrets.json` before ever touching the OS keychain, eliminating the keychain authorization prompts entirely on the read path. The keychain is now only a fallback for credentials missing from the file, and a best-effort sync target on writes. This restores the Python backend's `"file"` default mode (commit `16cc9a4`), which the Rust rewrite had inadvertently discarded in favor of keychain-first reads.
+
+  The first launch after upgrading transparently migrates any existing keychain credentials into `secrets.json`, so file-first reads have data to find and never fall through to the keychain. After that one-time migration, the keychain is not consulted on reads at all — no prompts, ever.
+
+  (Beta 3's in-process cache was a partial measure that only reduced prompt count; this is the actual fix. The cache has been removed since it's no longer needed.)
+
 ## v0.5.0-beta.3
 
 **Fix: repeated macOS keychain prompts on startup.**
