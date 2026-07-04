@@ -2,6 +2,13 @@
 
 All notable changes to zWork are documented in this file.
 
+## v0.5.0-beta.3
+
+**Fix: repeated macOS keychain prompts on startup.**
+
+### Fixes
+- **Keychain authorization prompts on startup** — the sidecar now caches resolved keychain values for the process lifetime, so the OS keychain is queried at most once per credential per process start. Previously, every `settings::load()` call re-read all 11 known credentials from the keychain, and the frontend bootstrap fired 3 concurrent endpoint calls — producing ~33 `"zwork-backend wants to use your confidential information stored in 'zwork'"` prompts on launch, with ~11 more on every chat turn and scheduler tick. Cache is kept coherent with `keyring_set` / `keyring_delete` so writes/deletes still take effect immediately.
+
 ## v0.5.0-beta.2
 
 **UI polish, navigation fixes, and connector branding fixes.**
