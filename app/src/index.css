@@ -160,6 +160,31 @@ html.sidebar-translucent body {
   background: transparent;
 }
 
+/* Native macOS vibrancy: when active, sidebar child elements must be
+   translucent so the desktop wallpaper shows through the frosted glass.
+   The aside itself is already bg-transparent; these rules handle its
+   opaque children (hover states, active states, raised menus, borders)
+   by giving them semi-transparent backgrounds that let vibrancy bleed
+   through while keeping text readable. */
+html.sidebar-translucent aside.native-glass {
+  border-right-color: rgb(var(--line) / 0.1);
+}
+/* Hover/active backgrounds: translucent instead of opaque */
+html.sidebar-translucent aside.native-glass .bg-line\/40,
+html.sidebar-translucent aside.native-glass .bg-line\/50,
+html.sidebar-translucent aside.native-glass .bg-line\/60 {
+  background-color: rgb(var(--line) / 0.12);
+}
+/* Raised surfaces (dropdown menus, popovers): keep readable but translucent */
+html.sidebar-translucent aside.native-glass .bg-paper-raised {
+  background-color: rgb(var(--paper-raised) / 0.5);
+  backdrop-filter: saturate(1.8) blur(20px);
+}
+/* Drag strip border: soften when glass is on */
+html.sidebar-translucent aside.native-glass .border-b.border-line\/60 {
+  border-bottom-color: rgb(var(--line) / 0.08);
+}
+
 /* --------------------------------------------------------
    Text selection — theme-aware so it matches the palette
    -------------------------------------------------------- */

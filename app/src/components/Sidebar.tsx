@@ -87,7 +87,7 @@ export function Sidebar() {
         // desktop shows through. CSS fallback (Win/Linux/web) → translucent
         // tint + blur over the page. Off → the standard opaque sidebar fill.
         useNativeGlass
-          ? "bg-transparent"
+          ? "bg-transparent native-glass"
           : translucentOn
             ? "bg-paper-sidebar/70 backdrop-blur-xl"
             : "bg-paper-sidebar",
