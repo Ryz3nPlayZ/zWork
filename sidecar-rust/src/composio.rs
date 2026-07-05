@@ -72,12 +72,12 @@ pub async fn status() -> Value {
         }
     };
     match client.get(format!("{}/status", cloud_base())).send().await {
-        Ok(resp) if resp.status().is_success() => {
-            resp.json::<Value>().await.unwrap_or_else(|_| json!({
+        Ok(resp) if resp.status().is_success() => resp.json::<Value>().await.unwrap_or_else(|_| {
+            json!({
                 "enabled": true, "configured": true, "available": true,
                 "connected_apps": [], "tool_count": 0, "user_id": "",
-            }))
-        }
+            })
+        }),
         _ => json!({
             "enabled": true, "configured": true, "available": false,
             "connected_apps": [], "tool_count": 0, "user_id": "",
@@ -95,9 +95,10 @@ pub async fn accounts() -> Value {
         .send()
         .await
     {
-        Ok(resp) if resp.status().is_success() => {
-            resp.json::<Value>().await.unwrap_or_else(|_| json!({ "accounts": [] }))
-        }
+        Ok(resp) if resp.status().is_success() => resp
+            .json::<Value>()
+            .await
+            .unwrap_or_else(|_| json!({ "accounts": [] })),
         _ => json!({ "accounts": [] }),
     }
 }
@@ -107,9 +108,8 @@ pub async fn accounts() -> Value {
 /// Errors are surfaced as a human-readable `String` so the route handler can
 /// turn them into a 4xx with a useful message.
 pub async fn connect(app: &str) -> Result<Value, String> {
-    let client = authed_client().ok_or_else(|| {
-        "Sign in to zWork Cloud to connect integrations.".to_string()
-    })?;
+    let client = authed_client()
+        .ok_or_else(|| "Sign in to zWork Cloud to connect integrations.".to_string())?;
     let resp = client
         .post(format!("{}/connect", cloud_base()))
         .json(&json!({ "app": app }))
@@ -140,9 +140,8 @@ pub async fn connect(app: &str) -> Result<Value, String> {
 
 /// `POST /disconnect` with `{ "app": <name> }` → `{ "ok": true, "connected_apps": [...] }`.
 pub async fn disconnect(app: &str) -> Result<Value, String> {
-    let client = authed_client().ok_or_else(|| {
-        "Sign in to zWork Cloud to manage integrations.".to_string()
-    })?;
+    let client = authed_client()
+        .ok_or_else(|| "Sign in to zWork Cloud to manage integrations.".to_string())?;
     let resp = client
         .post(format!("{}/disconnect", cloud_base()))
         .json(&json!({ "app": app }))
@@ -213,44 +212,59 @@ pub fn build_connected_apps_block(schemas: &[Value], connected_apps: &[String]) 
         })
         .collect::<Vec<_>>()
         .join(", ");
-    let shown: Vec<String> = tool_names.iter().take(20).map(|n| format!("`{}`", n)).collect();
+    let shown: Vec<String> = tool_names
+        .iter()
+        .take(20)
+        .map(|n| format!("`{}`", n))
+        .collect();
     let extra = if tool_names.len() > 20 {
         format!("\n  - ...and {} more", tool_names.len() - 20)
     } else {
         String::new()
     };
 
-    // App-specific intent→tool examples, matching the Python implementation.
+    // App-specific intent→tool examples. NOTE: real Composio tool names carry
+    // a per-install UUID suffix (e.g. `NOTION_SEARCH_PAGES_f0e73709...`), so we
+    // deliberately cite tool FAMILIES by `APP_*` wildcard rather than the bare
+    // action name. The model must pick the exact name from the schema list
+    // above — calling the bare name (`NOTION_SEARCH_PAGES`) yields a 404. This
+    // is the regression that broke Notion in 0.5.0-beta.5.
     let lower: Vec<String> = connected_apps.iter().map(|a| a.to_lowercase()).collect();
     let mut examples: Vec<&str> = Vec::new();
     if lower.iter().any(|a| a == "gmail") {
         examples.extend(&[
-            "  - \"check my email\" / \"any new emails?\" → a `composio__GMAIL_*` tool (read/search)",
-            "  - \"send an email to X about Y\" → `composio__GMAIL_SEND_EMAIL`",
+            "  - \"check my email\" / \"any new emails?\" → a `composio__GMAIL_FETCH_EMAILS` (or `GMAIL_SEARCH_*`) tool; with no args it returns the latest messages",
+            "  - \"send an email to X about Y\" → a `composio__GMAIL_SEND_*` tool",
+            "  - to read one full message body, use `composio__GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID` with the messageId from a FETCH_EMAILS result",
         ]);
     }
     if lower.iter().any(|a| a == "googlecalendar") {
         examples.extend(&[
-            "  - \"what's on my calendar\" / \"any meetings today?\" → `composio__GOOGLECALENDAR_GET_EVENTS`",
-            "  - \"schedule a meeting\" / \"add to calendar\" → `composio__GOOGLECALENDAR_CREATE_EVENT`",
+            "  - \"what's on my calendar\" / \"any meetings today?\" → a `composio__GOOGLECALENDAR_*` events-listing tool",
+            "  - \"schedule a meeting\" / \"add to calendar\" → a `composio__GOOGLECALENDAR_*` create tool",
         ]);
     }
     if lower.iter().any(|a| a == "slack") {
         examples.extend(&[
-            "  - \"send a Slack message\" / \"message X on Slack\" → `composio__SLACK_SEND_MESSAGE`",
-            "  - \"check Slack\" / \"read channel messages\" → `composio__SLACK_GET_MESSAGES`",
+            "  - \"send a Slack message\" / \"message X on Slack\" → a `composio__SLACK_SEND_*` tool",
+            "  - \"check Slack\" / \"read channel messages\" → a `composio__SLACK_*` messages-listing tool",
         ]);
     }
     if lower.iter().any(|a| a == "notion") {
         examples.extend(&[
-            "  - \"search my Notion\" / \"find in Notion\" → `composio__NOTION_SEARCH_PAGES`",
-            "  - \"create a Notion page\" → `composio__NOTION_CREATE_PAGE`",
+            "  - \"search my Notion\" / \"find in Notion\" → a `composio__NOTION_*SEARCH*` tool",
+            "  - \"create a Notion page\" → a `composio__NOTION_*CREATE*` tool (you MUST supply the required params, e.g. title and parent_id)",
         ]);
     }
     if lower.iter().any(|a| a == "github") {
-        examples.push("  - \"create an issue\" / \"open a PR\" → use the matching `composio__GITHUB_*` tool");
+        examples.push(
+            "  - \"create an issue\" / \"open a PR\" → use the matching `composio__GITHUB_*` tool",
+        );
     }
-    if lower.iter().any(|a| matches!(a.as_str(), "jira" | "linear" | "trello" | "asana")) {
+    if lower
+        .iter()
+        .any(|a| matches!(a.as_str(), "jira" | "linear" | "trello" | "asana"))
+    {
         examples.push("  - \"create a ticket\" / \"check my tasks\" → use the matching `composio__` tool for that app");
     }
 
@@ -260,14 +274,34 @@ pub fn build_connected_apps_block(schemas: &[Value], connected_apps: &[String]) 
         format!("\nExamples:\n{}", examples.join("\n"))
     };
 
+    // The catch-all rule: never invent a Composio tool name. Pick from the
+    // catalogue above verbatim. This is the single most important rule for
+    // Composio reliability — the model hallucinating bare names was the
+    // direct cause of the beta.5 404 storm.
+    let naming_rule = "\nIMPORTANT: Composio tool names end with a per-install UUID \
+        (e.g. `NOTION_SEARCH_PAGES_f0e73709830f43f7a2837c90fefffd4a`). You MUST call them by the \
+        EXACT name listed in the tool catalogue above — never by the bare `APP_ACTION` name, which \
+        will 404. When in doubt, copy the literal name from the catalogue.\n\nCalling rules:\n  \
+        - Read/list tools (FETCH_EMAILS, GET_EVENTS, SEARCH_*) accept empty input `{}` as \
+        \"give me the latest reasonable batch\" — never re-call them with the same empty input \
+        twice; if the first result didn't answer the question, narrow the query or read a specific \
+        item by ID instead.\n  \
+        - Write/create tools (SEND_EMAIL, CREATE_PAGE, CREATE_EVENT, CREATE_TASK) REQUIRE real \
+        arguments. Do not call them with `{}`. Infer each required field from the user's request, \
+        and if a required field genuinely isn't knowable, ASK the user instead of calling with \
+        empty input — an empty create call always fails.\n  \
+        - Results from list tools are SUMMARY envelopes (id + headers + snippet). Call the \
+        matching FETCH_*_BY_ID tool to read a full body only when you actually need it.";
+
     format!(
         "\n## Connected Apps (Composio)\n\
          The user has connected these apps: {app_list}. Prefer the matching `composio__*` tool \
-         when the user asks to do something with one of them. Available Composio tools:\n  - {tools}{extra}{examples_block}",
+         when the user asks to do something with one of them. Available Composio tools:\n  - {tools}{extra}{examples_block}{naming_rule}",
         app_list = app_list,
         tools = shown.join("\n  - "),
         extra = extra,
         examples_block = examples_block,
+        naming_rule = naming_rule,
     )
 }
 
@@ -291,11 +325,7 @@ pub async fn all_tool_schemas() -> Vec<Value> {
     let Some(client) = authed_client() else {
         return Vec::new();
     };
-    let resp = match client
-        .get(format!("{}/tools", cloud_base()))
-        .send()
-        .await
-    {
+    let resp = match client.get(format!("{}/tools", cloud_base())).send().await {
         Ok(r) => r,
         Err(_) => return Vec::new(),
     };
@@ -312,9 +342,31 @@ pub async fn all_tool_schemas() -> Vec<Value> {
         .unwrap_or_default()
 }
 
+/// Soft cap on a single shaped Composio result. List payloads are summarized
+/// to lightweight envelopes first (see `shape_email_list` / `shape_json`);
+/// anything still above this after shaping is truncated with a note, so a
+/// runaway list endpoint can never re-feed a 100 KB+ blob to the model in one
+/// turn. The threshold is generous on purpose: most well-shaped responses fit
+/// comfortably and we only ever trim the long tail.
+const SHAPED_RESULT_CAP: usize = 8_000;
+
 /// Execute a `composio__<slug>` tool against the cloud proxy. The result is
 /// shaped like a tool result (`{ "isError": bool, "content": [...] }`) so the
 /// agent loop can forward it directly.
+///
+/// Two things happen here that the raw cloud response does NOT do:
+///   1. Bulky list endpoints are summarized into lightweight envelopes before
+///      they re-enter the agent context — Gmail's `FETCH_EMAILS` returns full
+///      HTML bodies + attachment metadata per message (90–170 KB routinely),
+///      which drowned the model and triggered the duplicate-`{}` doom loop.
+///      We keep the IDs and headers and drop the body, leaving the model free
+///      to call `FETCH_MESSAGE_BY_MESSAGE_ID` for any message it actually
+///      needs the body of.
+///   2. Composio frequently reports failures inside a 200-OK body
+///      (`{ "successful": false, "error": ... }` or `data.status_code >= 400`).
+///      Those were being returned `isError:false`, so the model saw "success"
+///      with an error string and re-tried with the same `input={}`. We lift
+///      those to real `isError:true` so the model treats them as failures.
 pub async fn call_tool(prefixed_name: &str, params: Value) -> Value {
     if !prefixed_name.starts_with(TOOL_PREFIX) {
         return json!({
@@ -331,26 +383,390 @@ pub async fn call_tool(prefixed_name: &str, params: Value) -> Value {
         });
     };
     let endpoint = format!("{}/tools/execute/{}", cloud_base(), slug);
-    match client.post(&endpoint).json(&params).send().await {
-        Ok(resp) if resp.status().is_success() => {
-            resp.json::<Value>().await.unwrap_or_else(|_| json!({
-                "isError": true,
-                "content": [{ "type": "text", "text": "Composio returned an invalid response" }]
-            }))
-        }
+
+    let raw = match client.post(&endpoint).json(&params).send().await {
+        Ok(resp) if resp.status().is_success() => match resp.json::<Value>().await {
+            Ok(v) => v,
+            Err(_) => {
+                return json!({
+                    "isError": true,
+                    "content": [{ "type": "text", "text": "Composio returned an invalid response" }]
+                })
+            }
+        },
         Ok(resp) => {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
-            json!({
+            return json!({
                 "isError": true,
                 "content": [{ "type": "text", "text":
                     format!("Composio {}: {} {}", slug, status.as_u16(),
                             body.chars().take(300).collect::<String>()) }]
+            });
+        }
+        Err(e) => {
+            return json!({
+                "isError": true,
+                "content": [{ "type": "text", "text": format!("Composio {}: {}", slug, e) }]
             })
         }
-        Err(e) => json!({
+    };
+
+    // The cloud wraps every action result in `{ data: {...}, successful: bool,
+    // error: ... }`. A 200 with `successful:false` (or `data.status_code` in
+    // 4xx/5xx) is a body-level failure — surface it as a real error instead
+    // of masquerading as success.
+    let (raw_str, success_flag, err_str) = extract_cloud_envelope(&raw, slug);
+    if !success_flag {
+        return json!({
             "isError": true,
-            "content": [{ "type": "text", "text": format!("Composio {}: {}", slug, e) }]
-        }),
+            "content": [{ "type": "text", "text":
+                format!("Composio {} failed: {}", slug,
+                        err_str.chars().take(400).collect::<String>()) }]
+        });
     }
+
+    // Shape bulky payloads into lightweight envelopes, then cap anything still
+    // oversized. `raw` is consumed and rebuilt as the user-facing payload.
+    let shaped = shape_result(slug, &raw, &raw_str);
+    let capped = cap_result(&shaped);
+
+    let is_error = capped.is_error;
+    let text = capped.text;
+    json!({
+        "isError": is_error,
+        "content": [{ "type": "text", "text": text }]
+    })
+}
+
+/// Pull the `(payload_json_string, success, error_message)` triple out of a
+/// raw Composio cloud response. The envelope is either
+/// `{ "data": {...}, "successful": bool, "error": "..." }` (action success)
+/// or `{ "isError": true, "content": [...] }` (already an error from our
+/// transport layer — pass it through).
+fn extract_cloud_envelope(raw: &Value, slug: &str) -> (String, bool, String) {
+    // Already-shaped error from our transport layer.
+    if raw.get("isError").and_then(|v| v.as_bool()) == Some(true) {
+        let text = raw
+            .get("content")
+            .and_then(|c| c.as_array())
+            .and_then(|a| a.first())
+            .and_then(|b| b.get("text"))
+            .and_then(|t| t.as_str())
+            .unwrap_or("Composio error")
+            .to_string();
+        return (text.clone(), false, text);
+    }
+
+    let successful = raw
+        .get("successful")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true); // legacy payloads without the flag are treated as success
+    let error_str = raw
+        .get("error")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+
+    // data.status_code >= 400 is also a body-level failure even if the cloud
+    // forgot to set successful:false.
+    let data_status = raw
+        .get("data")
+        .and_then(|d| d.get("status_code"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(200);
+    let success = successful && data_status < 400;
+
+    let payload_str = if let Some(data) = raw.get("data") {
+        // Many Composio actions put the real payload under `data.data`; others
+        // under `data.messages` / `data.items`. Stringify whatever's there.
+        data.to_string()
+    } else {
+        raw.to_string()
+    };
+    let _ = slug;
+    (payload_str, success, error_str)
+}
+
+/// One shaped result with metadata the agent loop needs.
+struct Shaped {
+    text: String,
+    is_error: bool,
+}
+
+/// Cap a shaped result string to [`SHAPED_RESULT_CAP`] chars, keeping JSON
+/// valid by truncating a *string field's contents* (not the JSON structure)
+/// wherever possible. If we can't find a clean cut, fall back to a hard
+/// truncation with an explicit note so the model knows the body was trimmed.
+fn cap_result(shaped: &Shaped) -> Shaped {
+    if shaped.text.len() <= SHAPED_RESULT_CAP {
+        return Shaped {
+            text: shaped.text.clone(),
+            is_error: shaped.is_error,
+        };
+    }
+    // Try to truncate inside the JSON: parse, walk for long string values,
+    // trim each long string in place, re-serialize. Preserves structure.
+    if let Ok(mut v) = serde_json::from_str::<Value>(&shaped.text) {
+        trim_long_strings(&mut v, SHAPED_RESULT_CAP);
+        let mut compact = serde_json::to_string(&v).unwrap_or_else(|_| shaped.text.clone());
+        if compact.len() <= SHAPED_RESULT_CAP {
+            return Shaped {
+                text: compact,
+                is_error: shaped.is_error,
+            };
+        }
+        // Still over after trimming strings (deeply nested large arrays) —
+        // hard-cut but mark it so the model isn't fooled into re-fetching.
+        compact.truncate(SHAPED_RESULT_CAP);
+        compact.push_str("…[truncated to fit context — original was larger; refine the query or paginate if you need more]");
+        return Shaped {
+            text: compact,
+            is_error: shaped.is_error,
+        };
+    }
+    // Non-JSON text: hard truncate with a clear marker.
+    let mut t = shaped.text.clone();
+    t.truncate(SHAPED_RESULT_CAP);
+    t.push_str("…[truncated to fit context — original was larger]");
+    Shaped {
+        text: t,
+        is_error: shaped.is_error,
+    }
+}
+
+/// Recursively shorten any string value longer than `cap`, in place.
+fn trim_long_strings(v: &mut Value, cap: usize) {
+    match v {
+        Value::String(s) => {
+            if s.len() > cap / 2 {
+                let keep = cap / 2;
+                let head: String = s.chars().take(keep).collect();
+                let tail_len = s.chars().count().saturating_sub(keep);
+                *s = format!("{head}…[+{tail_len} chars omitted]");
+            }
+        }
+        Value::Array(a) => {
+            for item in a.iter_mut() {
+                trim_long_strings(item, cap);
+            }
+        }
+        Value::Object(o) => {
+            for (_, val) in o.iter_mut() {
+                trim_long_strings(val, cap);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Per-tool shaping. Returns a `Shaped` with the model-facing string. Falls
+/// through to `shape_json` for any tool without a custom shaper — that one
+/// drops known-bulky keys (`messageText`, `body`, `html`, `attachmentList`,
+/// `attachments`, `raw`) and JSON-serializes the remainder.
+fn shape_result(slug: &str, raw: &Value, raw_str: &str) -> Shaped {
+    let upper = slug.to_uppercase();
+    if upper.contains("GMAIL_FETCH_EMAILS") || upper.contains("GMAIL_SEARCH") {
+        return shape_email_list(raw);
+    }
+    if upper.starts_with("GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID")
+        || upper.starts_with("GMAIL_FETCH_MAIL")
+        || upper.starts_with("GMAIL_GET_MESSAGE")
+    {
+        return shape_single_message(raw);
+    }
+    shape_json(raw, raw_str)
+}
+
+/// Gmail list/search → array of `{ messageId, from, to, subject, date,
+/// labelIds, snippet }`. The `messageText` (full HTML body, routinely 5–50 KB
+/// each) and `attachmentList` are dropped — the model can call
+/// `GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID` with the kept `messageId` for any body
+/// it actually needs. Snippets are pre-truncated so a folder of long emails
+/// can't blow the cap on its own.
+fn shape_email_list(raw: &Value) -> Shaped {
+    let messages = raw
+        .get("data")
+        .and_then(|d| d.get("messages"))
+        .and_then(|m| m.as_array());
+
+    let Some(messages) = messages else {
+        // Unexpected shape — fall back to generic JSON shaping so we still
+        // return *something* useful rather than an empty envelope.
+        return shape_json(raw, &raw.to_string());
+    };
+
+    let count = messages.len();
+    let envelopes: Vec<Value> = messages
+        .iter()
+        .take(50) // hard ceiling on listed messages; past 50 the model should refine the query
+        .map(|m| {
+            let snippet = m
+                .get("messageText")
+                .and_then(|t| t.as_str())
+                .map(|s| {
+                    // Strip HTML tags + collapse whitespace for a plain-text
+                    // snippet. Cheaper than a real parser and good enough for
+                    // a 200-char preview.
+                    let plain = strip_html(s);
+                    let plain = collapse_ws(&plain);
+                    plain.chars().take(280).collect::<String>()
+                })
+                .unwrap_or_default();
+            json!({
+                "messageId": m.get("messageId").cloned().unwrap_or(Value::Null),
+                "from": m.get("from").cloned().unwrap_or(Value::Null),
+                "to": m.get("to").cloned().unwrap_or(Value::Null),
+                "subject": m.get("subject").cloned().unwrap_or(Value::Null),
+                "date": m.get("date").cloned().unwrap_or(Value::Null),
+                "labelIds": m.get("labelIds").cloned().unwrap_or(Value::Null),
+                "snippet": snippet,
+            })
+        })
+        .collect();
+
+    let total = envelopes.len();
+    let note = if count > total {
+        format!(
+            "\n\nNote: {count} messages matched; showing first {total}. Refine the query \
+             (date range, sender, subject) to see the rest. Call \
+             `composio__GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID` with a `messageId` above to read \
+             a full message body."
+        )
+    } else if total > 0 {
+        format!(
+            "\n\nNote: bodies were stripped to save context. Call \
+             `composio__GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID` with a `messageId` above to read \
+             the full message body."
+        )
+    } else {
+        String::new()
+    };
+
+    Shaped {
+        text: format!(
+            "{{\"messages\":{},\"count\":{}}}",
+            serde_json::to_string(&envelopes).unwrap_or_else(|_| "[]".into()),
+            total
+        ) + &note,
+        is_error: false,
+    }
+}
+
+/// Single-message fetches keep the body (that's the whole point of asking for
+/// one message by ID) but still strip HTML to plain text and drop the
+/// attachment metadata — a single Gmail HTML email easily runs 30 KB.
+fn shape_single_message(raw: &Value) -> Shaped {
+    let Some(data) = raw.get("data") else {
+        return shape_json(raw, &raw.to_string());
+    };
+    // The single-message endpoint returns the message fields at `data.*` or
+    // nested under `data.data` depending on the Composio version; handle both.
+    let msg = if data.get("messageId").is_some() || data.get("messageText").is_some() {
+        data.clone()
+    } else if let Some(inner) = data.get("data") {
+        inner.clone()
+    } else {
+        data.clone()
+    };
+
+    let body = msg
+        .get("messageText")
+        .and_then(|t| t.as_str())
+        .map(|s| {
+            let plain = strip_html(s);
+            collapse_ws(&plain).chars().take(4_000).collect::<String>()
+        })
+        .unwrap_or_default();
+
+    let envelope = json!({
+        "messageId": msg.get("messageId").cloned().unwrap_or(Value::Null),
+        "from": msg.get("from").cloned().unwrap_or(Value::Null),
+        "to": msg.get("to").cloned().unwrap_or(Value::Null),
+        "subject": msg.get("subject").cloned().unwrap_or(Value::Null),
+        "date": msg.get("date").cloned().unwrap_or(Value::Null),
+        "labelIds": msg.get("labelIds").cloned().unwrap_or(Value::Null),
+        "body": body,
+    });
+    Shaped {
+        text: serde_json::to_string(&envelope).unwrap_or_else(|_| "{}".into()),
+        is_error: false,
+    }
+}
+
+/// Generic JSON shaper for any Composio tool without a custom handler. Drops
+/// the well-known bulky keys (full bodies / raw payloads / attachment blobs)
+/// and serializes what's left. If the result is still large it'll be capped by
+/// [`cap_result`] downstream.
+fn shape_json(raw: &Value, raw_str: &str) -> Shaped {
+    let mut v = raw.clone();
+    let bulky_keys = [
+        "messageText",
+        "body",
+        "html",
+        "htmlBody",
+        "raw",
+        "attachmentList",
+        "attachments",
+        "content_raw",
+    ];
+    strip_keys(&mut v, &bulky_keys);
+    Shaped {
+        text: serde_json::to_string(&v).unwrap_or_else(|_| raw_str.to_string()),
+        is_error: false,
+    }
+}
+
+/// Recursively delete any object key in `keys` from a JSON tree, in place.
+fn strip_keys(v: &mut Value, keys: &[&str]) {
+    match v {
+        Value::Object(o) => {
+            let to_remove: Vec<String> = o
+                .keys()
+                .filter(|k| keys.contains(&k.as_str()))
+                .cloned()
+                .collect();
+            for k in to_remove {
+                o.remove(&k);
+            }
+            for (_, child) in o.iter_mut() {
+                strip_keys(child, keys);
+            }
+        }
+        Value::Array(a) => {
+            for item in a.iter_mut() {
+                strip_keys(item, keys);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Cheap HTML → plain-text: drop tags, decode the few entities that show up in
+/// email preheaders. Not a full parser, but bodies are HTML-stripped again at
+/// display time anyway — this is only for the snippet we put in context.
+fn strip_html(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_tag = false;
+    for ch in s.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            c if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out = out.replace("&nbsp;", " ");
+    out = out.replace("&amp;", "&");
+    out = out.replace("&lt;", "<");
+    out = out.replace("&gt;", ">");
+    out = out.replace("&quot;", "\"");
+    out = out.replace("&#39;", "'");
+    out
+}
+
+/// Collapse runs of whitespace into single spaces — HTML-stripped email text
+/// is full of leftover newlines and indentation that bloats the snippet.
+fn collapse_ws(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
