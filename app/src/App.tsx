@@ -492,9 +492,14 @@ export default function App() {
 
   return (
     <div className={cn("flex h-screen w-screen flex-col overflow-hidden", useNativeGlass ? "bg-transparent" : "bg-paper")}>
-      {tauri && macOS && <div className="titlebar-drag h-8 shrink-0" />}
+      {/* macOS traffic-light area: ~38px tall. data-tauri-drag-region makes
+          the strip draggable; Tauri auto-excludes the traffic-light buttons. */}
+      {tauri && macOS && <div data-tauri-drag-region className="h-[38px] shrink-0 bg-transparent" />}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar />
+        {/* Main content stays opaque — translucency is sidebar-only so the
+            reading pane stays readable. The native Effect.Sidebar material is
+            applied to the whole window but only shows through transparent regions. */}
         <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-paper">
           {/* Hide DailyGoalBar progress bar (deferred to backlog)
           <DailyGoalBar />

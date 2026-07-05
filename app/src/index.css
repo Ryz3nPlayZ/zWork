@@ -207,6 +207,23 @@ html.sidebar-translucent body {
   background: transparent;
 }
 
+/* Tauri v2 draggable region — the invisible top strip that lets users
+   drag the frameless window. With titleBarStyle: Overlay + hiddenTitle,
+   macOS paints traffic lights on top of this strip; Tauri automatically
+   excludes them from the drag hit-test.
+
+   The attribute selector is the canonical Tauri 2 approach. The JS
+   startDragging() fallback in Sidebar handles the sidebar's own strip. */
+[data-tauri-drag-region] {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+[data-tauri-drag-region="no-drag"] {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
 /* Subtle interactive press */
 .press {
   transition:
