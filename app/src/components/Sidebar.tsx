@@ -24,6 +24,7 @@ import { nativeVibrancySupported, useTranslucencyPref } from "../lib/translucenc
 import { Logo } from "./Logo";
 import { IconButton } from "./IconButton";
 import { useApp, bucketFor, type ChatBucket, type View } from "../lib/store";
+import { IS_TAURI, isMacOS } from "../lib/platform";
 
 export function Sidebar() {
   const translucency = useTranslucencyPref();
@@ -44,6 +45,16 @@ export function Sidebar() {
   const setActiveProject = useApp((s) => s.setActiveProject);
   const setKeybindingsOpen = useApp((s) => s.setKeybindingsOpen);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const isMac = isMacOS();
+
+  const onDragMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!IS_TAURI || e.button !== 0) return;
+    const target = e.target as HTMLElement | null;
+    if (target?.closest("button, a, input, textarea, [data-no-drag]")) return;
+    void import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+      getCurrentWindow().startDragging().catch(() => {});
+    });
+  };
 
   // Exclude chats that belong to any project from the sidebar
   const projectChatIds = useMemo(() => {
@@ -84,31 +95,40 @@ export function Sidebar() {
         open ? "w-[248px]" : "w-[64px]",
       )}
     >
-      {/* Top row: logo (top-left, icon only) + optional "zWork" wordmark + collapse toggle */}
+      {/* macOS drag strip. With titleBarStyle: Overlay the traffic lights are
+          painted at the top-left of the window (~80 x 38 px). We reserve that
+          space and use the JS startDragging() API, which is reliable in Tauri v2
+          unlike the CSS -webkit-app-region class. */}
       <div
+        onMouseDown={onDragMouseDown}
         className={cn(
-          "flex shrink-0 items-center px-2 pt-2 pb-1",
-          open ? "justify-between" : "justify-center",
+          "shrink-0 w-full",
+          isMac ? "h-[38px]" : "h-2",
+          isMac && open && "pl-[80px]",
+          isMac && "border-b border-line/60",
         )}
-      >
-        <button
-          type="button"
-          onClick={() => openLanding()}
-          className="logo-hover-trigger press group flex items-center gap-2.5 rounded-lg p-1.5 pl-2 hover:bg-line/40"
-          aria-label="Home"
-          title="Home (new chat)"
-        >
-          <span className="logo-spin-target inline-flex">
-            <Logo size={28} />
-          </span>
-          {open && (
+        aria-hidden="true"
+      />
+
+      {/* Logo + wordmark + collapse toggle — positioned below the drag strip so
+          it can never overlap the macOS traffic lights. */}
+      {open ? (
+        <div className="flex shrink-0 items-center justify-between px-2 pt-2 pb-1">
+          <button
+            type="button"
+            onClick={() => openLanding()}
+            className="logo-hover-trigger press group flex items-center gap-2.5 rounded-lg p-1.5 pl-2 hover:bg-line/40"
+            aria-label="Home"
+            title="Home (new chat)"
+          >
+            <span className="logo-spin-target inline-flex">
+              <Logo size={28} />
+            </span>
             <span className="text-[14px] font-semibold tracking-tight text-ink">
               <span className="lowercase">z</span>
               <span>Work</span>
             </span>
-          )}
-        </button>
-        {open && (
+          </button>
           <IconButton
             icon={<PanelLeft />}
             label="Collapse sidebar"
@@ -118,12 +138,9 @@ export function Sidebar() {
             onClick={toggle}
             size="sm"
           />
-        )}
-      </div>
-
-      {/* Expand toggle in collapsed state */}
-      {!open && (
-        <div className="flex justify-center pb-1">
+        </div>
+      ) : (
+        <div className={cn("flex shrink-0 justify-center", isMac ? "pt-1 pb-1" : "py-1")}>
           <IconButton
             icon={<PanelLeft />}
             label="Expand sidebar"

@@ -42,16 +42,14 @@ export function nativeVibrancySupported(): boolean {
 async function setNativeEffect(on: boolean): Promise<void> {
   if (!nativeVibrancySupported()) return;
   try {
-    const { getCurrentWindow, EffectState } = await import("@tauri-apps/api/window");
+    const { getCurrentWindow, EffectState, Effect } = await import("@tauri-apps/api/window");
     const win = getCurrentWindow();
     if (on) {
-      // "sidebar" maps to NSVisualEffectMaterial.sidebar — the material Finder,
-      // Xcode, etc. use for their side columns. Active state keeps it frosted
-      // regardless of window key status.
+      // Effect.Sidebar maps to NSVisualEffectMaterial.sidebar — the material
+      // Finder, Xcode, etc. use for their side columns. Active state keeps it
+      // frosted regardless of window key status.
       await win.setEffects({
-        // Effect is a platform-spanning string-literal union; "sidebar" is the
-        // macOS-valid value. Cast to satisfy the cross-platform type.
-        effects: ["sidebar" as never],
+        effects: [Effect.Sidebar],
         state: EffectState.Active,
       });
     } else {

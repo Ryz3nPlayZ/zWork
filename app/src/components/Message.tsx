@@ -45,22 +45,6 @@ function formatTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
-/**
- * Hide internal monologue that the model streams as text before/ between tool
- * calls. Only text that follows the last tool call is treated as the actual
- * response body; everything earlier is folded into thinking blocks.
- */
-function filterTimeline(parts: MessagePart[]): MessagePart[] {
-  const lastToolIdx = parts.map((p) => p.kind).lastIndexOf("tool");
-  if (lastToolIdx < 0) return parts;
-  return parts.map((p, i) => {
-    if (p.kind === "text" && i <= lastToolIdx) {
-      return { kind: "thinking", text: p.text };
-    }
-    return p;
-  });
-}
-
 // ---- Code block with copy, preview tabs, and running capabilities ----
 function CodeBlock({
   language,
@@ -472,6 +456,128 @@ function UserBubble({
   );
 }
 
+type ProcessEntry =
+  | { kind: "thinking"; part: Extract<MessagePart, { kind: "thinking" }>; i: number }
+  | { kind: "tool"; part: Extract<MessagePart, { kind: "tool" }>; i: number };
+
+/**
+ * A compact, expandable panel that groups the model's internal process
+ * (thinking blocks and tool calls) and sits above the actual assistant
+ * message. This separates "what the model did" from "the message for the
+ * user" instead of interleaving them inline.
+ */
+function ProcessPanel({
+  parts,
+  streaming,
+  lastPartIdx,
+  chatId,
+  messageId,
+}: {
+  parts: MessagePart[];
+  streaming?: boolean;
+  lastPartIdx: number;
+  chatId?: string;
+  messageId: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const processEntries = useMemo<ProcessEntry[]>(() => {
+    const entries: ProcessEntry[] = [];
+    parts.forEach((part, i) => {
+      if (part.kind === "thinking") entries.push({ kind: "thinking", part, i });
+      else if (part.kind === "tool") entries.push({ kind: "tool", part, i });
+    });
+    return entries;
+  }, [parts]);
+
+  useEffect(() => {
+    if (!streaming || processEntries.length === 0) return;
+    const latest = parts[lastPartIdx];
+    if (latest && (latest.kind === "thinking" || (latest.kind === "tool" && !latest.done))) {
+      setExpanded(true);
+    }
+  }, [streaming, processEntries.length, lastPartIdx, parts]);
+
+  if (processEntries.length === 0) return null;
+
+  const latest = processEntries[processEntries.length - 1];
+  const isActive =
+    streaming &&
+    (latest.kind === "thinking" || (latest.kind === "tool" && !latest.part.done));
+
+  const thoughtCount = processEntries.filter((e) => e.kind === "thinking").length;
+  const toolCount = processEntries.filter((e) => e.kind === "tool").length;
+
+  let summary: string;
+  if (isActive) {
+    summary = latest.kind === "thinking" ? "Thinking…" : `Running ${latest.part.label}…`;
+  } else if (thoughtCount > 0 && toolCount > 0) {
+    summary = `Thought · ${toolCount} tools`;
+  } else if (thoughtCount > 0) {
+    summary = "Thought";
+  } else {
+    summary = `${toolCount} tools`;
+  }
+
+  return (
+    <div className="mb-2">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="press flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11.5px] font-medium text-ink-faint hover:text-ink-muted hover:bg-paper-sunken"
+      >
+        {isActive ? (
+          <Loader2 className="h-3 w-3 animate-spin" />
+        ) : (
+          <ChevronDown
+            className={cn(
+              "h-3 w-3 transition-transform duration-200",
+              expanded && "rotate-180",
+            )}
+          />
+        )}
+        <span>{summary}</span>
+      </button>
+      {expanded && (
+        <div className="mt-1 space-y-1">
+          {processEntries.map((entry) => {
+            if (entry.kind === "thinking") {
+              return <ThinkingBlock key={`thinking-${entry.i}`} text={entry.part.text} />;
+            }
+            return (
+              <ToolCallAccordion
+                key={`tool-${entry.part.id || entry.i}`}
+                part={entry.part}
+                chatId={chatId}
+                messageId={messageId}
+              />
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ThinkingBlock({ text }: { text: string }) {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  return (
+    <div className="rounded-lg border border-line bg-paper-sunken/60 px-3 py-2 text-[12.5px] italic leading-5 text-ink-muted whitespace-pre-wrap">
+      {trimmed}
+    </div>
+  );
+}
+
+/**
+ * Plain-text renderer for the streaming tail. ReactMarkdown + KaTeX re-parse
+ * the whole block on every token, which makes fast streams feel chunky.
+ * Rendering the active text part as plain text while it is still growing keeps
+ * the stream smooth and letter-by-letter.
+ */
+function StreamingText({ text }: { text: string }) {
+  return <span className="whitespace-pre-wrap">{text}</span>;
+}
+
 // ---- Main Message component ----
 export function Message({
   message,
@@ -511,16 +617,20 @@ export function Message({
     return <UserBubble message={message} attachments={attachments} streaming={!!streaming} />;
   }
 
-  // Assistant message — walk the ordered parts[] timeline: text segments,
-  // collapsible thinking blocks, and inline tool-call accordions, each
-  // rendered at the position it actually occurred in the turn. This replaces
-  // the old "all activities above, one markdown blob below" layout — the fix
-  // for narration between tool calls being fused into a single block.
-  const timeline = useMemo(() => filterTimeline(message.parts), [message.parts]);
-  // The trailing part is the one currently streaming.
-  const lastPartIdx = timeline.length - 1;
-  // When streaming text, the cursor renders after the trailing text part.
-  const trailingIsText = timeline.length > 0 && timeline[lastPartIdx].kind === "text";
+  // Assistant message: separate the model's internal process (thinking +
+  // tool calls) from the response text shown to the user. The process panel
+  // renders above the message body; the message body contains only text parts.
+  const parts = message.parts;
+  const lastPartIdx = parts.length - 1;
+  const trailingIsText = parts.length > 0 && parts[lastPartIdx].kind === "text";
+  const textEntries = useMemo(() => {
+    const entries: { part: Extract<MessagePart, { kind: "text" }>; i: number }[] = [];
+    parts.forEach((part, i) => {
+      if (part.kind === "text") entries.push({ part, i });
+    });
+    return entries;
+  }, [parts]);
+  const hasProcess = textEntries.length < parts.length;
 
   const openArtifactFromCode = onOpenArtifact
     ? (code: string, lang: string) => {
@@ -543,31 +653,36 @@ export function Message({
       </div>
       <div className="min-w-0 flex-1 max-w-[92%]">
         <div className="text-[14px] leading-6 text-ink">
+          {!showWorkingPlaceholder && hasProcess && (
+            <ProcessPanel
+              parts={parts}
+              streaming={streaming}
+              lastPartIdx={lastPartIdx}
+              chatId={chatId}
+              messageId={message.id}
+            />
+          )}
           {showWorkingPlaceholder ? (
             <WorkingLabel status={status} />
           ) : (
-            timeline.map((part, i) => {
-              if (part.kind === "thinking") {
-                return (
-                  <ThinkingDropdown
-                    key={`thinking-${i}`}
-                    text={part.text}
-                    isStreaming={streaming && i === lastPartIdx}
-                  />
-                );
-              }
-              if (part.kind === "tool") {
-                return <ToolCallAccordion key={`tool-${part.id || i}`} part={part} chatId={chatId} messageId={message.id} />;
-              }
-              // Text part: still split for inline AskCard segments (the
-              // <<ASK>> mechanism), rendered in order within this text block.
+            textEntries.map(({ part, i }, idx) => {
+              const isStreamingPart = streaming && i === lastPartIdx;
               const subParts = splitAroundAsk(part.text);
               return subParts.map((sp, j) => {
                 if (sp.type === "text") {
                   const trimmed = sp.value.trim();
                   if (!trimmed) return null;
+                  // During streaming, skip the expensive markdown parser so the
+                  // text tail updates smoothly token-by-token.
+                  if (isStreamingPart && subParts.length === 1) {
+                    return (
+                      <div key={`text-${i}-${j}`} className={cn(idx > 0 && j === 0 && "mt-2")}>
+                        <StreamingText text={trimmed} />
+                      </div>
+                    );
+                  }
                   return (
-                    <div key={`text-${i}-${j}`} className={cn(i > 0 && "mt-2")}>
+                    <div key={`text-${i}-${j}`} className={cn(idx > 0 && j === 0 && "mt-2")}>
                       <AssistantMarkdown content={trimmed} onOpenPanel={openArtifactFromCode} />
                     </div>
                   );
@@ -666,72 +781,9 @@ export function Message({
 }
 
 /**
- * Collapsible section showing tool calls / steps taken during generation.
- * - During thinking (streaming, no content yet): fully expanded.
- * - When content arrives: auto-collapses to a toggle row.
- * - After completion: stays collapsed, user can expand.
- */
-/**
- * Collapsible "thinking" segment — one per reasoning block, positioned where
- * the thinking occurred in the turn. Auto-expands while streaming its own
- * segment; auto-collapses once a later segment (text/tool) opens.
- */
-function ThinkingDropdown({
-  text,
-  isStreaming,
-}: {
-  text: string;
-  isStreaming?: boolean;
-}) {
-  const [expanded, setExpanded] = useState(true);
-  // Auto-collapse when streaming ends (i.e. when a later part opened).
-  useEffect(() => {
-    if (!isStreaming && expanded && text.length > 0) {
-      const t = setTimeout(() => setExpanded(false), 400);
-      return () => clearTimeout(t);
-    }
-  }, [isStreaming]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const trimmed = text.trim();
-  if (!trimmed) return null;
-
-  return (
-    <div className="my-1.5">
-      <button
-        type="button"
-        onClick={() => setExpanded(!expanded)}
-        className={cn(
-          "press flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11.5px] font-medium transition-colors",
-          "text-ink-faint hover:text-ink-muted hover:bg-paper-sunken",
-        )}
-      >
-        <ChevronDown
-          className={cn(
-            "h-3 w-3 transition-transform duration-200",
-            expanded && "rotate-180",
-          )}
-        />
-        <span>{isStreaming ? "Thinking…" : "Thought"}</span>
-      </button>
-      <div
-        className={cn(
-          "overflow-hidden transition-[max-height,opacity] duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]",
-          expanded ? "max-h-[1200px] opacity-100" : "max-h-0 opacity-0",
-        )}
-      >
-        <div className="mt-1 rounded-lg border border-line bg-paper-sunken/60 px-3 py-2 text-[12.5px] italic leading-5 text-ink-muted whitespace-pre-wrap">
-          {trimmed}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/**
  * Inline tool-call segment — the model's request and its execution result,
- * shown as a small accordion at the point in the timeline where the call
- * occurred. Collapsed: label + status (running shimmer / ok check / error x).
- * Expanded: input + output.
+ * shown as a small accordion in the process panel. Collapsed: label + status
+ * (running shimmer / ok check / error x). Expanded: input + output.
  */
 function ToolCallAccordion({
   part,

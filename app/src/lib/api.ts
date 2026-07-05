@@ -1006,10 +1006,11 @@ async function streamChatWeb(
             assistantText += chunk.delta.text;
             onEvent({ type: "delta", text: chunk.delta.text });
           }
-          // Emit status for thinking blocks so the UI shows activity
+          // Forward reasoning / chain-of-thought deltas as a distinct segment
+          // kind so the UI can render them in the process panel, not as status
+          // text or blended into the answer.
           if (chunk.type === "content_block_delta" && chunk.delta?.type === "thinking_delta" && chunk.delta?.thinking) {
-            const preview = chunk.delta.thinking.trim().split("\n")[0].slice(0, 80);
-            if (preview) onEvent({ type: "status", text: `Thinking: ${preview}…` });
+            onEvent({ type: "thinking_delta", text: chunk.delta.thinking });
           }
           // message_stop signals end of streaming
           if (chunk.type === "message_stop") {
@@ -1029,6 +1030,9 @@ async function streamChatWeb(
         if (chunk.type === "content_block_delta" && chunk.delta?.type === "text_delta" && chunk.delta?.text) {
           assistantText += chunk.delta.text;
           onEvent({ type: "delta", text: chunk.delta.text });
+        }
+        if (chunk.type === "content_block_delta" && chunk.delta?.type === "thinking_delta" && chunk.delta?.thinking) {
+          onEvent({ type: "thinking_delta", text: chunk.delta.thinking });
         }
       } catch { /* ignore */ }
     }

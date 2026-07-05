@@ -916,11 +916,42 @@ pub fn run_agent_turn(
             }
 
             if is_doomed {
-                let err_msg = "Doom loop detected: consecutive duplicate tool calls. Halting execution.";
+                // A doom loop means the model re-issued the same tool call
+                // (name + input) three turns running — almost always a sign
+                // that the tool result isn't giving it what it needs to make
+                // progress (e.g. a 100 KB blob it can't extract signal from,
+                // or a repeated `{}` against a tool that wants real args).
+                // Killing the turn with only an error toast leaves a dead
+                // empty assistant message in history; on resume the model has
+                // nothing to build on and repeats. Instead: emit a real
+                // assistant text that (a) tells the user what happened in
+                // plain language and (b) replaces the empty assistant turn in
+                // history so the next user message starts from a clean state.
+                let recovery = "I got stuck repeating the same action without making progress, \
+                    so I stopped to avoid burning your quota. This usually means a tool returned \
+                    more than I could usefully read. Try rephrasing — for example, narrow the \
+                    request (a specific sender, date, or subject) — or ask for one specific item \
+                    by name.";
+                let _ = tx.send(json!({
+                    "type": "delta",
+                    "text": recovery
+                })).await;
                 let _ = tx.send(json!({
                     "type": "error",
-                    "text": err_msg
+                    "text": "Stopped a repeated-action loop before it ran away."
                 })).await;
+                // Patch the just-pushed empty assistant turn in place so the
+                // persisted history carries the recovery text instead of an
+                // empty content array. `history_messages` is the running
+                // conversation we persist at end of task.
+                if let Some(last) = history_messages.last_mut() {
+                    if last.get("role").and_then(|v| v.as_str()) == Some("assistant") {
+                        *last = json!({
+                            "role": "assistant",
+                            "content": [{ "type": "text", "text": recovery }]
+                        });
+                    }
+                }
                 break;
             }
 

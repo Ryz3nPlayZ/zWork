@@ -170,7 +170,6 @@ function SecurityPresetPicker({
                   <span className="text-[12.5px] font-medium">{meta.label}</span>
                   <span className="text-[11px] text-ink-muted leading-4">{meta.description}</span>
                 </span>
-                {active && <span className="ml-auto text-[10px] text-success">●</span>}
               </button>
             );
           })}
@@ -894,7 +893,6 @@ export function ChatInput({
               size="md"
               onClick={() => fileInputRef.current?.click()}
             />
-            <SecurityPresetPicker value={securityPreset} onChange={setSecurityPreset} />
             <IconButton
               icon={<FileText className="h-4 w-4" />}
               label={artifactMode ? "Artifact: on" : "Artifact"}
@@ -904,6 +902,7 @@ export function ChatInput({
               active={artifactMode}
               onClick={() => setArtifactMode((v) => !v)}
             />
+            <SecurityPresetPicker value={securityPreset} onChange={setSecurityPreset} />
           </div>
           <div className="flex items-center gap-2">
             <ModelPicker />
