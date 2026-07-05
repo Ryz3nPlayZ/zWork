@@ -4,6 +4,7 @@ import { useApp } from "../lib/store";
 import { attachPositionPersistence, fitOverlayWindow } from "../lib/overlayGeometry";
 import { Message } from "./Message";
 import { ChatInput } from "./ChatInput";
+import { QuestionModal } from "./QuestionModal";
 
 /**
  * OverlayChatView — the floating zWork chat.
@@ -161,32 +162,6 @@ export function OverlayChatView() {
         )}
 
         <div className="w-full max-w-[720px]">
-          {chat?.pendingQuestion && (
-            <div className="mb-2 flex flex-col gap-1 animate-fade-in">
-              <p className="px-3 text-[12.5px] text-ink-muted leading-normal">
-                {chat.pendingQuestion.question}
-              </p>
-              <div className="flex flex-col">
-                {chat.pendingQuestion.options
-                  .filter((opt) => {
-                    const o = opt.toLowerCase();
-                    return !o.includes("other") && !o.includes("tell me what to do") && !o.includes("instead");
-                  })
-                  .map((opt, oIdx) => (
-                    <button
-                      key={oIdx}
-                      onClick={() => {
-                        if (activeChatId) void useApp.getState().answerQuestion(activeChatId, opt);
-                      }}
-                      className="press text-left px-3 py-2 text-[12.5px] text-ink-muted hover:text-ink hover:bg-line/40 transition-colors font-medium cursor-pointer rounded-md"
-                    >
-                      {opt}
-                    </button>
-                  ))}
-              </div>
-              <div className="h-px bg-line mx-3" />
-            </div>
-          )}
           <ChatInput
             variant="overlay"
             autoFocus
@@ -195,6 +170,16 @@ export function OverlayChatView() {
             onHeightChange={setBarHeight}
           />
         </div>
+
+        {/* Agent question modal — blocks interaction until answered */}
+        {chat?.pendingQuestion && activeChatId && (
+          <QuestionModal
+            question={chat.pendingQuestion.question}
+            options={chat.pendingQuestion.options}
+            onSubmit={(answer) => void useApp.getState().answerQuestion(activeChatId, answer)}
+            onDismiss={dismiss}
+          />
+        )}
       </div>
     </div>
   );
