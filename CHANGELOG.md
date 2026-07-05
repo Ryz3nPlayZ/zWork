@@ -2,6 +2,17 @@
 
 All notable changes to zWork are documented in this file.
 
+## v0.5.0-beta.5
+
+**Fix: revert secret store to plaintext file I/O — eliminates keychain prompts.**
+
+### Fixes
+- **Removed the `keyring` crate entirely.** The secret store is back to pure plaintext file I/O (`~/.zwork/secrets.json`, 0o600) — exactly as it was in v0.5.0-alpha.19, before the regression was introduced. The backend no longer touches the macOS Keychain, Windows Credential Manager, or Linux Secret Service, so there are zero OS keychain authorization prompts on startup or anywhere else. This reverts the regression that was inadvertently bundled into the beta.2 release.
+
+  Beta.3's in-process cache and beta.4's file-first-with-keychain-fallback were both over-engineered partial measures. The correct fix was to remove the keychain code altogether and return to what worked: a single plaintext file, no OS integration, no prompts.
+
+  Secrets now live only in `~/.zwork/secrets.json`. If you previously stored keys in the keychain (via a beta.2/beta.3/beta.4 build), they are not migrated — re-enter your API key once in Settings after upgrading.
+
 ## v0.5.0-beta.4
 
 **Fix: macOS keychain prompts — for real this time.**
