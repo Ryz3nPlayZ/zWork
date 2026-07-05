@@ -10,7 +10,6 @@ export function ChatView() {
     s.activeChatId ? s.chats[s.activeChatId] : undefined,
   );
   const rename = useApp((s) => s.renameChat);
-  const send = useApp((s) => s.send);
   const retry = useApp((s) => s.retry);
   const setView = useApp((s) => s.setView);
   const setActiveProject = useApp((s) => s.setActiveProject);
@@ -93,13 +92,6 @@ export function ChatView() {
       openArtifact(artifact);
     },
     [openArtifact],
-  );
-
-  const handleAskSubmit = useCallback(
-    (_msgId: string, choice: string) => {
-      void send(choice);
-    },
-    [send],
   );
 
   if (!chat) return null;
@@ -234,7 +226,6 @@ export function ChatView() {
                 <Message
                   key={m.id}
                   message={m}
-                  onAskSubmit={handleAskSubmit}
                   onOpenArtifact={handleOpenArtifact}
                   artifacts={artifacts}
                   streaming={isStreaming}

@@ -36,7 +36,7 @@ import type { Activity, Artifact, MessagePart } from "../lib/store";
 import { useApp } from "../lib/store";
 import { Logo } from "./Logo";
 import { IconButton } from "./IconButton";
-import { AskCard, splitAroundAsk, parseAskPayload } from "./AskCard";
+// AskCard rendering moved to ChatView's QuestionModal (native ask_question SSE event)
 import type { Message as Msg } from "../lib/store";
 import { api } from "../lib/api";
 
@@ -581,7 +581,6 @@ function StreamingText({ text }: { text: string }) {
 // ---- Main Message component ----
 export function Message({
   message,
-  onAskSubmit,
   onOpenArtifact,
   onRetry,
   onBadResponse,
@@ -591,7 +590,6 @@ export function Message({
   status,
 }: {
   message: Msg;
-  onAskSubmit?: (msgId: string, choice: string) => void;
   onOpenArtifact?: (artifact: Artifact) => void;
   onRetry?: (messageId: string) => void;
   onBadResponse?: (messageId: string) => void;
@@ -601,7 +599,6 @@ export function Message({
   status?: string;
 }) {
   const isUser = message.role === "user";
-  const [askAnswers, setAskAnswers] = useState<Record<string, string>>({});
   const [copied, setCopied] = useState(false);
   // Active chat id is needed so destructive-tool permission gates can resolve
   // against the right chat's gate endpoint.
@@ -667,43 +664,20 @@ export function Message({
           ) : (
             textEntries.map(({ part, i }, idx) => {
               const isStreamingPart = streaming && i === lastPartIdx;
-              const subParts = splitAroundAsk(part.text);
-              return subParts.map((sp, j) => {
-                if (sp.type === "text") {
-                  const trimmed = sp.value.trim();
-                  if (!trimmed) return null;
-                  // During streaming, skip the expensive markdown parser so the
-                  // text tail updates smoothly token-by-token.
-                  if (isStreamingPart && subParts.length === 1) {
-                    return (
-                      <div key={`text-${i}-${j}`} className={cn(idx > 0 && j === 0 && "mt-2")}>
-                        <StreamingText text={trimmed} />
-                      </div>
-                    );
-                  }
-                  return (
-                    <div key={`text-${i}-${j}`} className={cn(idx > 0 && j === 0 && "mt-2")}>
-                      <AssistantMarkdown content={trimmed} onOpenPanel={openArtifactFromCode} />
-                    </div>
-                  );
-                }
-                const payload = parseAskPayload(sp.value);
-                if (!payload) return null;
-                const askKey = `${message.id}-ask-${i}-${j}`;
-                const chosen = askAnswers[askKey];
+              const trimmed = part.text.trim();
+              if (!trimmed) return null;
+              if (isStreamingPart && textEntries.length === 1) {
                 return (
-                  <AskCard
-                    key={askKey}
-                    payload={payload}
-                    submitted={!!chosen}
-                    chosenLabel={chosen}
-                    onSubmit={(choice) => {
-                      setAskAnswers((prev) => ({ ...prev, [askKey]: choice }));
-                      onAskSubmit?.(message.id, choice);
-                    }}
-                  />
+                  <div key={`text-${i}`} className={cn(idx > 0 && "mt-2")}>
+                    <StreamingText text={trimmed} />
+                  </div>
                 );
-              });
+              }
+              return (
+                <div key={`text-${i}`} className={cn(idx > 0 && "mt-2")}>
+                  <AssistantMarkdown content={trimmed} onOpenPanel={openArtifactFromCode} />
+                </div>
+              );
             })
           )}
           {streaming && !showWorkingPlaceholder && trailingIsText && (

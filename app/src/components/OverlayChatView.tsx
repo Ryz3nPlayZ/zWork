@@ -26,7 +26,6 @@ export function OverlayChatView() {
   const [barHeight, setBarHeight] = useState(0);
 
   const bootstrap = useApp((s) => s.bootstrap);
-  const send = useApp((s) => s.send);
   const regenerateMessage = useApp((s) => s.regenerateMessage);
   const flagBadResponse = useApp((s) => s.flagBadResponse);
   const activeChatId = useApp((s) => s.activeChatId);
@@ -145,7 +144,6 @@ export function OverlayChatView() {
                       streaming={isStreaming}
                       activities={activities}
                       status={isStreaming ? chat.status : undefined}
-                      onAskSubmit={(_id, choice) => void send(choice)}
                       onRetry={regenerateMessage}
                       onBadResponse={flagBadResponse}
                     />
@@ -163,6 +161,32 @@ export function OverlayChatView() {
         )}
 
         <div className="w-full max-w-[720px]">
+          {chat?.pendingQuestion && (
+            <div className="mb-2 flex flex-col gap-1 animate-fade-in">
+              <p className="px-3 text-[12.5px] text-ink-muted leading-normal">
+                {chat.pendingQuestion.question}
+              </p>
+              <div className="flex flex-col">
+                {chat.pendingQuestion.options
+                  .filter((opt) => {
+                    const o = opt.toLowerCase();
+                    return !o.includes("other") && !o.includes("tell me what to do") && !o.includes("instead");
+                  })
+                  .map((opt, oIdx) => (
+                    <button
+                      key={oIdx}
+                      onClick={() => {
+                        if (activeChatId) void useApp.getState().answerQuestion(activeChatId, opt);
+                      }}
+                      className="press text-left px-3 py-2 text-[12.5px] text-ink-muted hover:text-ink hover:bg-line/40 transition-colors font-medium cursor-pointer rounded-md"
+                    >
+                      {opt}
+                    </button>
+                  ))}
+              </div>
+              <div className="h-px bg-line mx-3" />
+            </div>
+          )}
           <ChatInput
             variant="overlay"
             autoFocus
