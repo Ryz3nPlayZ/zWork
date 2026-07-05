@@ -770,3 +770,189 @@ fn strip_html(s: &str) -> String {
 fn collapse_ws(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a synthetic but realistic Gmail FETCH_EMAILS payload matching the
+    /// shape that caused the beta.5 doom loop: full HTML body + attachment
+    /// metadata per message, multiple messages, ~30 KB+ each.
+    fn gmail_list_payload(n: usize) -> Value {
+        let big_html = format!(
+            "<html><body><div>{}</div></body></html>",
+            "Nextdoor alert: driver chases cyclist. ".repeat(400)
+        );
+        let messages: Vec<Value> = (0..n)
+            .map(|i| {
+                json!({
+                    "messageId": format!("19f2fd73e55356{:02x}", i),
+                    "from": format!("alerts+{}@example.com", i),
+                    "to": "user@example.com",
+                    "subject": format!("Message {}", i),
+                    "date": "Thu, 4 Jul 2026 18:00:00 +0000",
+                    "labelIds": ["INBOX", "UNREAD"],
+                    "messageText": big_html,
+                    "attachmentList": [
+                        {"filename": "doc.pdf", "size": 123456, "attachmentId": "ANGjdJ8" },
+                        {"filename": "image.png", "size": 98765, "attachmentId": "ANGjdK9" },
+                    ],
+                })
+            })
+            .collect();
+        json!({ "data": { "messages": messages }, "successful": true })
+    }
+
+    #[test]
+    fn email_list_is_summarized_to_envelopes() {
+        let raw = gmail_list_payload(3);
+        let shaped = shape_email_list(&raw);
+        assert!(!shaped.is_error);
+
+        // The envelopes must carry the IDs/headers but NOT the body or the
+        // attachment metadata — those are what blew up the context.
+        assert!(
+            shaped.text.contains("19f2fd73e5535600"),
+            "expected messageId in shaped output"
+        );
+        assert!(
+            shaped.text.contains("alerts+1@example.com"),
+            "expected sender envelope"
+        );
+        assert!(
+            !shaped.text.contains("doc.pdf"),
+            "attachment metadata must be stripped"
+        );
+        assert!(
+            !shaped.text.contains("doc.pdf"),
+            "attachment metadata must be stripped"
+        );
+        // The snippet is a plain-text preview of the body — that's the point
+        // of keeping it. The full raw HTML markup must NOT appear, only its
+        // bounded plain-text snippet.
+        assert!(
+            shaped.text.contains("snippet"),
+            "envelope must carry a snippet field"
+        );
+        assert!(
+            !shaped.text.contains("<html>"),
+            "raw HTML markup must not leak into the envelope"
+        );
+    }
+
+    #[test]
+    fn email_list_envelope_is_small_vs_raw() {
+        // 10 messages each with a ~16 KB HTML body ≈ 160 KB raw, the regime
+        // that killed chat 9579e693 in beta.5. The shaped envelope must be a
+        // small fraction of that.
+        let raw = gmail_list_payload(10);
+        let raw_size = raw.to_string().len();
+        let shaped = shape_email_list(&raw);
+        let shaped_size = shaped.text.len();
+        assert!(
+            raw_size > 100_000,
+            "test fixture should produce a >100KB payload (was {raw_size})"
+        );
+        assert!(
+            shaped_size < raw_size / 10,
+            "shaped ({shaped_size}) should be <10% of raw ({raw_size})"
+        );
+    }
+
+    #[test]
+    fn single_message_keeps_stripped_body() {
+        // FETCH_MESSAGE_BY_MESSAGE_ID is the tool the model calls to read one
+        // body — so the body must survive (HTML-stripped + capped), unlike the
+        // list endpoint which drops it entirely.
+        let raw = json!({
+            "data": {
+                "messageId": "abc123",
+                "from": "boss@work.com",
+                "subject": "Re: that thing",
+                "date": "Thu, 4 Jul 2026 19:00:00 +0000",
+                "messageText": "<html><body><p>Please review the <b>Q3</b> report.</p></body></html>",
+            },
+            "successful": true,
+        });
+        let shaped = shape_single_message(&raw);
+        assert!(shaped.text.contains("abc123"));
+        assert!(
+            shaped.text.contains("Please review the Q3 report."),
+            "stripped body text must be preserved"
+        );
+        assert!(
+            !shaped.text.contains("<html>"),
+            "HTML tags must be stripped"
+        );
+    }
+
+    #[test]
+    fn cap_truncates_oversized_result() {
+        // Force a result over the cap and confirm it gets cut down with a note
+        // the model can act on. The soft-trim path replaces long string fields
+        // with `…[+N chars omitted]`; the hard-cut fallback appends
+        // `…[truncated…]`. Either marker is acceptable as long as it's present.
+        let huge = json!({ "data": { "blob": "x".repeat(SHAPED_RESULT_CAP * 2) } });
+        let shaped = shape_json(&huge, &huge.to_string());
+        let capped = cap_result(&shaped);
+        assert!(
+            capped.text.len() <= SHAPED_RESULT_CAP + 200,
+            "capped text ({}) must be near the cap ({})",
+            capped.text.len(),
+            SHAPED_RESULT_CAP
+        );
+        assert!(
+            capped.text.contains("chars omitted") || capped.text.contains("truncated"),
+            "expected a truncation/omission marker the model can act on; got: {}",
+            &capped.text[..capped.text.len().min(200)]
+        );
+    }
+
+    #[test]
+    fn cloud_envelope_lifts_successful_false_to_error() {
+        // The CREATE_NOTION_PAGE beta.5 failure returned 200-OK with
+        // successful:false + missing-field error in `data`. This MUST surface
+        // as isError, otherwise the model retries with the same empty input.
+        let raw = json!({
+            "data": {
+                "message": "Invalid request data provided\n- Following fields are missing: {'title', 'parent_id'}",
+                "status_code": 400,
+            },
+            "successful": false,
+            "error": "Invalid request data provided",
+        });
+        let (_, success, err) = extract_cloud_envelope(&raw, "NOTION_CREATE_NOTION_PAGE");
+        assert!(!success, "successful:false must be lifted to a real error");
+        assert!(err.contains("Invalid request"));
+    }
+
+    #[test]
+    fn cloud_envelope_passes_through_200_success() {
+        let raw = json!({ "data": { "messages": [] }, "successful": true });
+        let (payload, success, _err) = extract_cloud_envelope(&raw, "GMAIL_FETCH_EMAILS");
+        assert!(success);
+        assert!(payload.contains("messages"));
+    }
+
+    #[test]
+    fn shape_result_routes_gmail_list_to_envelope() {
+        let raw = gmail_list_payload(1);
+        let shaped = shape_result("GMAIL_FETCH_EMAILS", &raw, &raw.to_string());
+        assert!(!shaped.is_error);
+        assert!(shaped.text.contains("messageId") || shaped.text.contains("messages"));
+    }
+
+    #[test]
+    fn shape_result_routes_single_message_to_body_keeper() {
+        let raw = json!({
+            "data": {
+                "messageId": "m1",
+                "messageText": "<p>hello world</p>",
+                "from": "a@b.com",
+            },
+            "successful": true,
+        });
+        let shaped = shape_result("GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID", &raw, &raw.to_string());
+        assert!(shaped.text.contains("hello world"));
+    }
+}
