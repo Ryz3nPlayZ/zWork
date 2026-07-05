@@ -64,6 +64,45 @@ fn max_tokens_for(model_id: &str) -> u64 {
     16384
 }
 
+/// Classify a provider error message as transient (retryable) or permanent.
+///
+/// The `ProviderError` event carries only a string message — no HTTP status
+/// code — so classification is pattern-based. Transient errors (429 rate
+/// limits, 503 service unavailable, connection timeouts) warrant a retry with
+/// exponential backoff. Permanent errors (400 bad request, 401 auth failure)
+/// should be surfaced to the user, not retried blindly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorClass {
+    /// Retryable: 429, 503, connection errors, timeouts, overloaded.
+    Transient,
+    /// Not retryable: 400, 401, 403, content filter, malformed request.
+    Permanent,
+}
+
+pub fn classify_provider_error(message: &str) -> ErrorClass {
+    let lower = message.to_ascii_lowercase();
+    // Transient: rate limits, service unavailable, connection issues.
+    if lower.contains("429")
+        || lower.contains("too many requests")
+        || lower.contains("rate limit")
+        || lower.contains("503")
+        || lower.contains("service unavailable")
+        || lower.contains("overloaded")
+        || lower.contains("connection")
+        || lower.contains("timeout")
+        || lower.contains("timed out")
+        || lower.contains("connect failed")
+        || lower.contains("stream read error")
+        || lower.contains("temporarily unavailable")
+        || lower.contains("try again")
+    {
+        return ErrorClass::Transient;
+    }
+    // Everything else is permanent: 400 bad request, 401 auth, 403 forbidden,
+    // content filter, request_body_too_large, invalid api key, etc.
+    ErrorClass::Permanent
+}
+
 /// Keyword-detect the kind of artifact a message likely wants and return the
 /// steering instruction the Python backend appended to the prompt. Mirrors
 /// `server._artifact_hint`.
@@ -518,6 +557,10 @@ pub fn run_agent_turn(
             Err(_) => DEFAULT_MAX_TURNS,
         };
         let mut hit_turn_cap = false;
+        // Transient-error retry state. A 429 or 503 shouldn't kill the entire
+        // task — retry up to 3 times with exponential backoff (1s, 2s, 4s).
+        let mut transient_retries = 0u32;
+        const MAX_TRANSIENT_RETRIES: u32 = 3;
         
         // Initialize the assistant response message
         let assistant_msg = chatstore::append_message(&chat.id, "assistant", json!(""));
@@ -764,6 +807,12 @@ pub fn run_agent_turn(
             // forward each delta live (so the UI can render a streaming
             // "thinking" dropdown) and flush the buffer when the segment ends.
             let mut reasoning_buffer = String::new();
+            // Snapshot accumulated state for retry safety: if this turn hits a
+            // transient error and we retry, we must undo any partial text that
+            // was streamed to the DB before the error, otherwise the retried
+            // turn's output appends to stale fragments and produces garbled text.
+            let accumulated_text_len_snapshot = accumulated_text.len();
+            let accumulated_activities_len_snapshot = accumulated_activities.len();
 
             while let Some(evt_res) = stream.next().await {
                 let evt = match evt_res {
@@ -875,8 +924,9 @@ pub fn run_agent_turn(
                         // Diagnostic only; already traced inside stream_llm.
                     }
                     LlmEvent::ProviderError { message, .. } => {
-                        turn_error = Some(message.clone());
-                        let _ = tx.send(json!({ "type": "error", "text": message })).await;
+                        // Don't emit yet — the retry logic below decides whether
+                        // to retry (transient) or surface it (permanent).
+                        turn_error = Some(message);
                     }
                     LlmEvent::Done => break,
                 }
@@ -884,7 +934,42 @@ pub fn run_agent_turn(
 
             // A hard stream error ends the turn/task rather than executing any
             // partially-collected tool calls.
-            if turn_error.is_some() {
+            if let Some(ref err_msg) = turn_error {
+                if classify_provider_error(err_msg) == ErrorClass::Transient
+                    && transient_retries < MAX_TRANSIENT_RETRIES
+                {
+                    transient_retries += 1;
+                    let delay_ms = (1u64 << (transient_retries - 1)) * 1000; // 1s, 2s, 4s
+                    let _ = tx.send(json!({
+                        "type": "status",
+                        "text": format!(
+                            "Rate limited — retrying in {}s (attempt {}/{})…",
+                            delay_ms / 1000, transient_retries, MAX_TRANSIENT_RETRIES
+                        )
+                    })).await;
+                    llm_trace(
+                        &chat_id,
+                        turn,
+                        "transient_retry",
+                        json!({
+                            "attempt": transient_retries,
+                            "delay_ms": delay_ms,
+                            "error": err_msg,
+                        }),
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                    // Undo any partial text/activities that were streamed to the
+                    // DB before the transient error, otherwise the retry appends
+                    // to stale fragments and produces garbled output.
+                    accumulated_text.truncate(accumulated_text_len_snapshot);
+                    accumulated_activities.truncate(accumulated_activities_len_snapshot);
+                    if turn > 0 {
+                        turn -= 1; // don't consume a turn slot on a retry
+                    }
+                    continue;
+                }
+                // Permanent error: surface it to the UI and break.
+                let _ = tx.send(json!({ "type": "error", "text": err_msg })).await;
                 break;
             }
 
@@ -1459,6 +1544,49 @@ fn repair_history_alternation(messages: &mut Vec<Value>) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn test_classify_provider_error_transient() {
+        // Rate limiting / overloaded — the most common transient failure.
+        assert_eq!(classify_provider_error("upstream HTTP 429 Too Many Requests"), ErrorClass::Transient);
+        assert_eq!(classify_provider_error("rate limit exceeded"), ErrorClass::Transient);
+        assert_eq!(classify_provider_error("Too many requests"), ErrorClass::Transient);
+        // Service unavailable / 503 — server-side transient.
+        assert_eq!(classify_provider_error("upstream HTTP 503"), ErrorClass::Transient);
+        assert_eq!(classify_provider_error("The service is overloaded"), ErrorClass::Transient);
+        // Connection failures — network-level transient.
+        assert_eq!(classify_provider_error("upstream connect failed: connection refused"), ErrorClass::Transient);
+        assert_eq!(classify_provider_error("stream read error: unexpected EOF"), ErrorClass::Transient);
+        // Timeouts.
+        assert_eq!(classify_provider_error("request timed out after 300s"), ErrorClass::Transient);
+        assert_eq!(classify_provider_error("operation timeout"), ErrorClass::Transient);
+        // Retry hints from provider.
+        assert_eq!(classify_provider_error("API temporarily unavailable, try again later"), ErrorClass::Transient);
+    }
+
+    #[test]
+    fn test_classify_provider_error_permanent() {
+        // 400 Bad Request — request_body_too_large from vision attachments.
+        assert_eq!(classify_provider_error("upstream HTTP 400 Bad Request"), ErrorClass::Permanent);
+        assert_eq!(classify_provider_error("request_body_too_large"), ErrorClass::Permanent);
+        // 401 Auth — invalid API key.
+        assert_eq!(classify_provider_error("upstream HTTP 401 Unauthorized"), ErrorClass::Permanent);
+        assert_eq!(
+            classify_provider_error("invalid x-api-key"),
+            ErrorClass::Permanent
+        );
+        // 403 Forbidden.
+        assert_eq!(classify_provider_error("upstream HTTP 403 Forbidden"), ErrorClass::Permanent);
+        // Content filter / refusal.
+        assert_eq!(classify_provider_error("content_policy_violation"), ErrorClass::Permanent);
+        // Malformed SSE — not transient, retrying the same payload won't help.
+        assert_eq!(classify_provider_error("malformed SSE JSON frame"), ErrorClass::Permanent);
+        // Tool not found — Composio routing error.
+        assert_eq!(
+            classify_provider_error("Tool NOTION_FETCH_ALL_BLOCK_CONTENTS not found"),
+            ErrorClass::Permanent
+        );
+    }
 
     #[test]
     fn test_repair_history_alternation() {
