@@ -125,6 +125,11 @@ export default function App() {
   const keybindingsOpen = useApp((s) => s.keybindingsOpen);
   const setKeybindingsOpen = useApp((s) => s.setKeybindingsOpen);
 
+  // Translucency: the ROOT container must drop its opaque fill when native
+  // macOS vibrancy is on, otherwise bg-paper behind the sidebar blocks the
+  // desktop from showing through the transparent <aside>. The content pane
+  // (main + TopStrip's content segment) carries its own bg-paper, so only the
+  // sidebar region actually goes translucent. See lib/translucency.ts.
   const translucency = useTranslucencyPref();
   const useNativeGlass = translucency === "on" && nativeVibrancySupported();
 
@@ -481,7 +486,9 @@ export default function App() {
   return (
     <div className={cn("flex h-screen w-screen flex-col overflow-hidden", useNativeGlass ? "bg-transparent" : "bg-paper")}>
       {/* TopStrip is the single drag region for the window and houses the
-          sidebar collapse button in a fixed spot next to the traffic lights.
+          sidebar collapse button + search in a fixed spot next to the traffic
+          lights. Its content segment carries bg-paper so the reading pane
+          stays opaque even when the root is transparent for sidebar vibrancy.
           See components/TopStrip.tsx. Requires core:window:allow-start-dragging. */}
       <TopStrip />
       <div className="flex min-h-0 flex-1 overflow-hidden">

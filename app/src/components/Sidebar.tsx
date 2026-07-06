@@ -6,7 +6,6 @@ import {
 } from "react";
 import {
   SquarePen,
-  Search,
   Settings,
   Trash2,
   MoreHorizontal,
@@ -38,7 +37,6 @@ export function Sidebar() {
   const openLanding = useApp((s) => s.openLanding);
   const view = useApp((s) => s.view);
   const setView = useApp((s) => s.setView);
-  const setSearchOpen = useApp((s) => s.setSearchOpen);
   const setActiveProject = useApp((s) => s.setActiveProject);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
@@ -114,13 +112,6 @@ export function Sidebar() {
           collapsed={!open}
           onClick={() => openLanding()}
           active={view === "chat" && active === null}
-        />
-        <SidebarButton
-          icon={<Search />}
-          label="Search"
-          shortcut="⌘K"
-          collapsed={!open}
-          onClick={() => setSearchOpen(true)}
         />
         <SidebarButton
           icon={<Clock />}
