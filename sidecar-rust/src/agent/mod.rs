@@ -387,7 +387,15 @@ pub fn run_agent_turn(
         // (the frontier harnesses Goose, Claude Code, and opencode all bet
         // this way). `plan_mode` remains the only tool gate (read-only subset).
         // Per-tool-group workflow guidance lives in the system prompt instead.
-        let include_desktop = true;
+        //
+        // Desktop control (`desktop_*`) is macOS-only: it drives apps through
+        // the macOS accessibility tree via the CuaDriver daemon, a notarized
+        // .app with no Windows/Linux build. Advertising it elsewhere made the
+        // model call `desktop_launch_app`, hit a driver-not-found error, and
+        // burn turn after turn retrying — the "Chrome takes 20 minutes" bug on
+        // non-macOS. Gating it out forces the model to `run_command` /
+        // `browser_*` instead, which actually work cross-platform.
+        let include_desktop = cfg!(target_os = "macos");
         let include_academic = true;
 
         // Fetch connected-app (Composio) tools once per turn so the model can

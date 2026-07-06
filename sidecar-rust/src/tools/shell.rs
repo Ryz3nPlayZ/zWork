@@ -31,8 +31,22 @@ pub async fn execute_run_command(
         .and_then(|v| v.as_u64())
         .unwrap_or(DEFAULT_COMMAND_TIMEOUT_SECS);
 
-    let mut cmd = Command::new("sh");
-    cmd.arg("-c").arg(command);
+    // Pick the platform shell: `sh -c` on unix, `cmd /C` on Windows. The
+    // command string the model writes is shell syntax for the host shell, so
+    // routing Windows through `cmd` (not a nonexistent `sh`) keeps run_command
+    // working as the cross-platform fallback after desktop_* is gated off.
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut c = Command::new("cmd");
+        c.arg("/C").arg(command);
+        c
+    };
+    #[cfg(not(windows))]
+    let mut cmd = {
+        let mut c = Command::new("sh");
+        c.arg("-c").arg(command);
+        c
+    };
     cmd.current_dir(cwd);
 
     #[cfg(unix)]

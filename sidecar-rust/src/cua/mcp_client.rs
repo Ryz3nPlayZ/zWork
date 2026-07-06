@@ -1,6 +1,7 @@
 // MCP over stdio client for cua-driver.
 // Speaks JSON-RPC 2.0 newline-delimited JSON to the `cua-driver mcp` subprocess.
 use serde_json::{json, Value};
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use std::sync::Arc;
@@ -238,13 +239,26 @@ impl McpClient {
                 .map_err(|e| format!("Flush error: {}", e))?;
         }
 
-        // Read stdout line by line until we find our response.
+        // Read stdout line by line until we find our response. Bounded by a
+        // timeout: a driver binary that spawns but never answers (broken
+        // install, missing macOS TCC grants blocking its event loop, or a hung
+        // daemon) would otherwise block this turn forever.
+        const READ_TIMEOUT: Duration = Duration::from_secs(30);
         loop {
             let mut line = String::new();
             let read = {
                 let mut stdout = self.stdout.lock().await;
-                stdout.read_line(&mut line).await
-                    .map_err(|e| format!("Read error: {}", e))?
+                match tokio::time::timeout(READ_TIMEOUT, stdout.read_line(&mut line)).await {
+                    Ok(r) => r.map_err(|e| format!("Read error: {}", e))?,
+                    Err(_) => {
+                        return Err(
+                            "cua-driver did not respond within 30s — it may be hung, \
+                             missing macOS Accessibility/Screen Recording permissions, \
+                             or an incompatible build."
+                                .to_string(),
+                        )
+                    }
+                }
             };
 
             // read_line returning 0 bytes means EOF: the driver closed stdout,

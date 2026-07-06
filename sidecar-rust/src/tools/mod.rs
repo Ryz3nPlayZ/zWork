@@ -342,118 +342,126 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
                 "required": ["project_path"]
             }
         }));
-        // ─── Desktop control (cua-driver) ───
-        schemas.push(json!({
-            "name": "desktop_capture",
-            "description": "Capture the accessibility tree of an app window as Markdown with [element_index N] tags on every actionable element. MUST be called before desktop_click/desktop_type/desktop_set_value/desktop_scroll — element indices are only valid from the most recent capture. Verify the returned window_title is the app you intended before acting. The tree is capped at ~100 elements; if `truncated` is true, indices beyond the cap are unavailable — scroll or narrow the target to see more.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "app": { "type": "string", "description": "App name to capture, e.g. \"Safari\", \"Google Chrome\", \"Finder\". Required." }
-                },
-                "required": ["app"]
-            }
-        }));
-        schemas.push(json!({
-            "name": "desktop_click",
-            "description": "Click an element by its element_index from the last desktop_capture of the app.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "element": { "type": "integer", "description": "Element index from desktop_capture's [element_index N] tags" },
-                    "app": { "type": "string", "description": "App to click in (optional, defaults to the last captured app)" }
-                },
-                "required": ["element"]
-            }
-        }));
-        schemas.push(json!({
-            "name": "desktop_type",
-            "description": "Type text into the focused field, or a specific field if `element` is given. Preferred for free-form text entry. For <select> dropdowns or sliders use desktop_set_value.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "text": { "type": "string", "description": "Text to type" },
-                    "element": { "type": "integer", "description": "Optional element index to direct the text into a specific field" },
-                    "app": { "type": "string", "description": "App to type in (optional, defaults to last captured app)" }
-                },
-                "required": ["text"]
-            }
-        }));
-        schemas.push(json!({
-            "name": "desktop_set_value",
-            "description": "Set a value on a UI element directly (no keystrokes, no focus reliance). The safe way to pick a <select> dropdown option or set a slider/stepper/date-picker. For free-form web text inputs, use desktop_type instead (WebKit ignores AXValue writes on text fields).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "element": { "type": "integer", "description": "Element index (the dropdown/slider) from desktop_capture" },
-                    "value": { "type": "string", "description": "Value to set. For dropdowns: the option's visible title, matched case-insensitively." },
-                    "app": { "type": "string", "description": "App (optional, defaults to last captured app)" }
-                },
-                "required": ["element", "value"]
-            }
-        }));
-        schemas.push(json!({
-            "name": "desktop_scroll",
-            "description": "Scroll the current window in a direction.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "direction": { "type": "string", "enum": ["up", "down", "left", "right"], "description": "Scroll direction" },
-                    "amount": { "type": "integer", "description": "Number of ticks (1–50, default 3)" },
-                    "app": { "type": "string", "description": "App to scroll in (optional)" }
-                },
-                "required": ["direction"]
-            }
-        }));
-        schemas.push(json!({
-            "name": "desktop_key",
-            "description": "Press a key or keyboard shortcut. Navigation: cmd+l (address bar), cmd+t (new tab), cmd+w (close tab), return, escape, tab, space, arrows. Format combos with + : \"cmd+l\", \"cmd+shift+g\", \"return\". Catastrophic combos are blocked: empty Trash (cmd+shift+backspace), log out (cmd+shift+q), force log out (cmd+option+shift+q), lock screen (cmd+ctrl+q).",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "keys": { "type": "string", "description": "Key combo with + separators: \"cmd+l\", \"cmd+t\", \"return\", \"escape\", \"tab\", \"cmd+shift+g\", \"up\", \"down\"" },
-                    "app": { "type": "string", "description": "App to send keys to (optional)" }
-                },
-                "required": ["keys"]
-            }
-        }));
-        schemas.push(json!({
-            "name": "desktop_launch_app",
-            "description": "Launch an app (backgrounded) by name, e.g. \"Safari\", \"Calculator\", \"Finder\". Use when the app isn't running yet. After launching, call desktop_capture before interacting with it.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "app": { "type": "string", "description": "App name to launch" }
-                },
-                "required": ["app"]
-            }
-        }));
-        schemas.push(json!({
-            "name": "desktop_list_apps",
-            "description": "List running and installed apps with their process IDs and running state.",
-            "parameters": { "type": "object", "properties": {} }
-        }));
-        schemas.push(json!({
-            "name": "desktop_wait",
-            "description": "Wait for a specified duration in seconds. Use after navigation or actions that need loading time.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "seconds": { "type": "number", "description": "Duration in seconds (e.g. 1.5)" }
-                },
-                "required": ["seconds"]
-            }
-        }));
-        schemas.push(json!({
-            "name": "desktop_start_session",
-            "description": "Start a desktop-control session: bring the cua-driver daemon up and connect to it. Call this ONCE, before your first desktop_capture of any task that touches the desktop. Idempotent — safe to call again. The session stays up across all your captures/clicks/types for the whole task.",
-            "parameters": { "type": "object", "properties": {} }
-        }));
-        schemas.push(json!({
-            "name": "desktop_end_session",
-            "description": "End the desktop-control session: tear the cua-driver daemon down completely, freeing the process. Call this ONCE, after you have finished ALL desktop work for the task and will not interact with the desktop again. Idempotent. Do NOT call it between steps of an ongoing task — keep the session up for the entire task.",
-            "parameters": { "type": "object", "properties": {} }
-        }));
+        // ─── Desktop control (cua-driver) — macOS only ───
+        // The cua-driver is a notarized macOS .app that drives apps through the
+        // accessibility tree; it has no Windows/Linux build. Advertising these
+        // tools on other platforms made the model attempt them, fail to find
+        // the driver, and burn turn after turn retrying. Gate the whole toolset
+        // to macOS so the model routes to run_command / browser_* elsewhere.
+        // (`desktop_office`, below, is platform-independent document editing.)
+        if cfg!(target_os = "macos") {
+            schemas.push(json!({
+                "name": "desktop_capture",
+                "description": "Capture the accessibility tree of an app window as Markdown with [element_index N] tags on every actionable element. MUST be called before desktop_click/desktop_type/desktop_set_value/desktop_scroll — element indices are only valid from the most recent capture. Verify the returned window_title is the app you intended before acting. The tree is capped at ~100 elements; if `truncated` is true, indices beyond the cap are unavailable — scroll or narrow the target to see more.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "app": { "type": "string", "description": "App name to capture, e.g. \"Safari\", \"Google Chrome\", \"Finder\". Required." }
+                    },
+                    "required": ["app"]
+                }
+            }));
+            schemas.push(json!({
+                "name": "desktop_click",
+                "description": "Click an element by its element_index from the last desktop_capture of the app.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "element": { "type": "integer", "description": "Element index from desktop_capture's [element_index N] tags" },
+                        "app": { "type": "string", "description": "App to click in (optional, defaults to the last captured app)" }
+                    },
+                    "required": ["element"]
+                }
+            }));
+            schemas.push(json!({
+                "name": "desktop_type",
+                "description": "Type text into the focused field, or a specific field if `element` is given. Preferred for free-form text entry. For <select> dropdowns or sliders use desktop_set_value.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": { "type": "string", "description": "Text to type" },
+                        "element": { "type": "integer", "description": "Optional element index to direct the text into a specific field" },
+                        "app": { "type": "string", "description": "App to type in (optional, defaults to last captured app)" }
+                    },
+                    "required": ["text"]
+                }
+            }));
+            schemas.push(json!({
+                "name": "desktop_set_value",
+                "description": "Set a value on a UI element directly (no keystrokes, no focus reliance). The safe way to pick a <select> dropdown option or set a slider/stepper/date-picker. For free-form web text inputs, use desktop_type instead (WebKit ignores AXValue writes on text fields).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "element": { "type": "integer", "description": "Element index (the dropdown/slider) from desktop_capture" },
+                        "value": { "type": "string", "description": "Value to set. For dropdowns: the option's visible title, matched case-insensitively." },
+                        "app": { "type": "string", "description": "App (optional, defaults to last captured app)" }
+                    },
+                    "required": ["element", "value"]
+                }
+            }));
+            schemas.push(json!({
+                "name": "desktop_scroll",
+                "description": "Scroll the current window in a direction.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "direction": { "type": "string", "enum": ["up", "down", "left", "right"], "description": "Scroll direction" },
+                        "amount": { "type": "integer", "description": "Number of ticks (1–50, default 3)" },
+                        "app": { "type": "string", "description": "App to scroll in (optional)" }
+                    },
+                    "required": ["direction"]
+                }
+            }));
+            schemas.push(json!({
+                "name": "desktop_key",
+                "description": "Press a key or keyboard shortcut. Navigation: cmd+l (address bar), cmd+t (new tab), cmd+w (close tab), return, escape, tab, space, arrows. Format combos with + : \"cmd+l\", \"cmd+shift+g\", \"return\". Catastrophic combos are blocked: empty Trash (cmd+shift+backspace), log out (cmd+shift+q), force log out (cmd+option+shift+q), lock screen (cmd+ctrl+q).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "keys": { "type": "string", "description": "Key combo with + separators: \"cmd+l\", \"cmd+t\", \"return\", \"escape\", \"tab\", \"cmd+shift+g\", \"up\", \"down\"" },
+                        "app": { "type": "string", "description": "App to send keys to (optional)" }
+                    },
+                    "required": ["keys"]
+                }
+            }));
+            schemas.push(json!({
+                "name": "desktop_launch_app",
+                "description": "Launch an app (backgrounded) by name, e.g. \"Safari\", \"Calculator\", \"Finder\". Use when the app isn't running yet. After launching, call desktop_capture before interacting with it.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "app": { "type": "string", "description": "App name to launch" }
+                    },
+                    "required": ["app"]
+                }
+            }));
+            schemas.push(json!({
+                "name": "desktop_list_apps",
+                "description": "List running and installed apps with their process IDs and running state.",
+                "parameters": { "type": "object", "properties": {} }
+            }));
+            schemas.push(json!({
+                "name": "desktop_wait",
+                "description": "Wait for a specified duration in seconds. Use after navigation or actions that need loading time.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "seconds": { "type": "number", "description": "Duration in seconds (e.g. 1.5)" }
+                    },
+                    "required": ["seconds"]
+                }
+            }));
+            schemas.push(json!({
+                "name": "desktop_start_session",
+                "description": "Start a desktop-control session: bring the cua-driver daemon up and connect to it. Call this ONCE, before your first desktop_capture of any task that touches the desktop. Idempotent — safe to call again. The session stays up across all your captures/clicks/types for the whole task.",
+                "parameters": { "type": "object", "properties": {} }
+            }));
+            schemas.push(json!({
+                "name": "desktop_end_session",
+                "description": "End the desktop-control session: tear the cua-driver daemon down completely, freeing the process. Call this ONCE, after you have finished ALL desktop work for the task and will not interact with the desktop again. Idempotent. Do NOT call it between steps of an ongoing task — keep the session up for the entire task.",
+                "parameters": { "type": "object", "properties": {} }
+            }));
+        }
         schemas.push(json!({
             "name": "desktop_office",
             "description": "Semantic Word (.docx) and Excel (.xlsx) editing without a GUI. Read paragraphs, append text, replace content, read sheets, write cells/ranges, or locate cells.",

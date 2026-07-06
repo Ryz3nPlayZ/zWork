@@ -114,6 +114,22 @@ pub async fn browser_bridge_status() -> impl IntoResponse {
 /// doubles as a driver-health check (`driver_ok` is false if the driver can't
 /// be reached). This is what the Settings permission rows should read.
 pub async fn desktop_status() -> impl IntoResponse {
+    // Desktop control is macOS-only (the CuaDriver accessibility daemon is a
+    // notarized .app with no Windows/Linux build). On other platforms return
+    // an honest status instead of trying to reach a driver that can't exist —
+    // the Settings UI surfaces this `error` to the user.
+    if !cfg!(target_os = "macos") {
+        return Json(crate::cua::PermissionStatus {
+            driver_ok: false,
+            accessibility: false,
+            screen_recording: false,
+            source: String::new(),
+            error: "Desktop control is only available on macOS (it requires the \
+                    CuaDriver accessibility daemon). On this platform, use the \
+                    browser_* tools or run_command instead."
+                .to_string(),
+        });
+    }
     Json(crate::cua::check_permissions(false).await.unwrap_or_else(|e| {
         crate::cua::PermissionStatus {
             driver_ok: false,
@@ -130,6 +146,16 @@ pub async fn desktop_status() -> impl IntoResponse {
 /// This is the correct grant path — prompting from zWork's own identity would
 /// leave the driver (the process that actually does AX + CGEvents) blocked.
 pub async fn desktop_grant() -> impl IntoResponse {
+    // No driver to grant permissions for off macOS — see desktop_status.
+    if !cfg!(target_os = "macos") {
+        return Json(crate::cua::PermissionStatus {
+            driver_ok: false,
+            accessibility: false,
+            screen_recording: false,
+            source: String::new(),
+            error: "Desktop control is only available on macOS.".to_string(),
+        });
+    }
     Json(crate::cua::check_permissions(true).await.unwrap_or_else(|e| {
         crate::cua::PermissionStatus {
             driver_ok: false,

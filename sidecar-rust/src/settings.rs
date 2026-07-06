@@ -513,7 +513,7 @@ pub fn build_system_prompt(
             "- `grep_search(query, path?, is_regex?, case_insensitive?)` — search recursively for query or regex in files. Excludes build/dependency dirs.",
             "- `list_dir(path)` — list immediate contents of a directory.",
             "- `write_file(path, content)` — create or overwrite a file with the ENTIRE contents. Parent dirs auto-created.",
-            "- `run_command(command, cwd?, background?)` — run shell. Set `background=true` for servers; foreground has 120s timeout.",
+            "- `run_command(command, cwd?, background?)` — run shell. Set `background=true` for servers; foreground has 180s timeout.",
             "- `web_search(query?)` — search web/news for current information. Use for recent events, facts, general research.",
             "- `save_memory(content, target?)` — persist information across sessions.",
             "- `ask_question(question, options)` — ask user a clarifying question with choices.",
