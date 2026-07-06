@@ -28,8 +28,6 @@ const TOKEN_CSS_VARS: Array<{ token: keyof TokenSet; var: string }> = [
   { token: "lineSoft", var: "--line-soft" },
   { token: "lineStrong", var: "--line-strong" },
   { token: "accent", var: "--accent" },
-  { token: "bubble", var: "--bubble" },
-  { token: "bubbleFg", var: "--bubble-fg" },
   { token: "shadow", var: "--shadow" },
   { token: "success", var: "--success" },
   { token: "successFg", var: "--success-fg" },

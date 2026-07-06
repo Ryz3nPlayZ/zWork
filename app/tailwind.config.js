@@ -27,9 +27,15 @@ export default {
         accent: {
           DEFAULT: "rgb(var(--accent) / <alpha-value>)",
         },
-        bubble: {
-          DEFAULT: "rgb(var(--bubble) / <alpha-value>)",
-          fg: "rgb(var(--bubble-fg) / <alpha-value>)",
+        // Alpha-overlay border colors (OpenCode v2 pattern). The RGB is black
+        // in light mode / white in dark (see --border-overlay in index.css);
+        // alpha is applied per-class. Use via border-edge / border-edge-strong
+        // / border-edge-muted instead of border-line for surfaces that should
+        // feel soft rather than rigid.
+        edge: {
+          DEFAULT: "rgb(var(--border-overlay) / 0.10)",
+          strong: "rgb(var(--border-overlay) / 0.20)",
+          muted: "rgb(var(--border-overlay) / 0.06)",
         },
         success: {
           DEFAULT: "rgb(var(--success) / <alpha-value>)",

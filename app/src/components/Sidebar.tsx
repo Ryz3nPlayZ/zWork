@@ -5,17 +5,16 @@ import {
   useState,
 } from "react";
 import {
-  PanelLeft,
   SquarePen,
   Search,
   Settings,
   Trash2,
   MoreHorizontal,
+  ChevronDown,
   FolderOpen,
   BarChart3,
   CreditCard,
   Plug,
-  Keyboard,
   Inbox,
   Clock,
 } from "lucide-react";
@@ -24,7 +23,6 @@ import { nativeVibrancySupported, useTranslucencyPref } from "../lib/translucenc
 import { Logo } from "./Logo";
 import { IconButton } from "./IconButton";
 import { useApp, bucketFor, type ChatBucket, type View } from "../lib/store";
-import { IS_TAURI, isMacOS } from "../lib/platform";
 
 export function Sidebar() {
   const translucency = useTranslucencyPref();
@@ -33,7 +31,6 @@ export function Sidebar() {
   // everywhere else, use a translucent tint + blur as a CSS-only fallback.
   const useNativeGlass = translucentOn && nativeVibrancySupported();
   const open = useApp((s) => s.sidebarOpen);
-  const toggle = useApp((s) => s.toggleSidebar);
   const summaries = useApp((s) => s.chatSummaries);
   const active = useApp((s) => s.activeChatId);
   const openChat = useApp((s) => s.openChat);
@@ -43,18 +40,7 @@ export function Sidebar() {
   const setView = useApp((s) => s.setView);
   const setSearchOpen = useApp((s) => s.setSearchOpen);
   const setActiveProject = useApp((s) => s.setActiveProject);
-  const setKeybindingsOpen = useApp((s) => s.setKeybindingsOpen);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
-  const isMac = isMacOS();
-
-  const onDragMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!IS_TAURI || e.button !== 0) return;
-    const target = e.target as HTMLElement | null;
-    if (target?.closest("button, a, input, textarea, [data-no-drag]")) return;
-    void import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-      getCurrentWindow().startDragging().catch(() => {});
-    });
-  };
 
   // Exclude chats that belong to any project from the sidebar
   const projectChatIds = useMemo(() => {
@@ -82,42 +68,29 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        "relative flex h-full shrink-0 flex-col overflow-x-hidden border-r border-line",
+        "relative flex h-full shrink-0 flex-col overflow-x-hidden border-r border-edge",
         // Translucency: native macOS vibrancy → fully transparent so the
         // desktop shows through. CSS fallback (Win/Linux/web) → translucent
         // tint + blur over the page. Off → the standard opaque sidebar fill.
         useNativeGlass
           ? "bg-transparent native-glass"
           : translucentOn
-            ? "bg-paper-sidebar/70 backdrop-blur-xl"
+            ? "bg-paper-sidebar/85 backdrop-blur-xl"
             : "bg-paper-sidebar",
         "transition-[width] duration-200 ease-out",
         open ? "w-[248px]" : "w-[64px]",
       )}
     >
-      {/* macOS drag strip. With titleBarStyle: Overlay the traffic lights are
-          painted at the top-left of the window (~80 x 38 px). We reserve that
-          space and use the JS startDragging() API, which is reliable in Tauri v2
-          unlike the CSS -webkit-app-region class. */}
-      <div
-        onMouseDown={onDragMouseDown}
-        className={cn(
-          "shrink-0 w-full",
-          isMac ? "h-[38px]" : "h-2",
-          isMac && open && "pl-[80px]",
-          isMac && "border-b border-line/60",
-        )}
-        aria-hidden="true"
-      />
-
-      {/* Logo + wordmark + collapse toggle — positioned below the drag strip so
-          it can never overlap the macOS traffic lights. */}
-      {open ? (
-        <div className="flex shrink-0 items-center justify-between px-2 pt-2 pb-1">
+      {/* Logo header. Dragging and the collapse toggle live in the TopStrip
+          above the row, so this is purely a brand row — no drag attrs, no
+          traffic-light padding, no collapse button here. The collapsed rail
+          skips it entirely (the TopStrip button is the persistent toggle). */}
+      {open && (
+        <div className="flex shrink-0 items-center px-2 pt-3 pb-1">
           <button
             type="button"
             onClick={() => openLanding()}
-            className="logo-hover-trigger press group flex items-center gap-2.5 rounded-lg p-1.5 pl-2 hover:bg-line/40"
+            className="logo-hover-trigger press group flex items-center gap-2.5 rounded-lg p-1.5 pl-2"
             aria-label="Home"
             title="Home (new chat)"
           >
@@ -129,27 +102,6 @@ export function Sidebar() {
               <span>Work</span>
             </span>
           </button>
-          <IconButton
-            icon={<PanelLeft />}
-            label="Collapse sidebar"
-            shortcut="⌘\\"
-            tooltipSide="bottom"
-            showTooltip={false}
-            onClick={toggle}
-            size="sm"
-          />
-        </div>
-      ) : (
-        <div className={cn("flex shrink-0 justify-center", isMac ? "pt-1 pb-1" : "py-1")}>
-          <IconButton
-            icon={<PanelLeft />}
-            label="Expand sidebar"
-            shortcut="⌘\\"
-            tooltipSide="right"
-            showTooltip={false}
-            onClick={toggle}
-            size="sm"
-          />
         </div>
       )}
 
@@ -285,16 +237,9 @@ export function Sidebar() {
       </div>
 
       {/* Footer */}
-      <div className="border-t border-line/80 p-3">
+      <div className="border-t border-edge-muted px-2 py-3">
         {open ? (
           <div className="flex flex-col gap-0.5">
-            <SidebarButton
-              icon={<Keyboard />}
-              label="Shortcuts"
-              shortcut="⌘/"
-              collapsed={false}
-              onClick={() => setKeybindingsOpen(true)}
-            />
             <SidebarButton
               icon={<Settings />}
               label="Settings"
@@ -306,53 +251,20 @@ export function Sidebar() {
             <MoreMenuButton view={view} setView={setView} />
           </div>
         ) : (
-          <div className="flex flex-col gap-2">
-            <IconButton
-              icon={<Keyboard />}
-              label="Shortcuts"
-              shortcut="⌘/"
-              tooltipSide="right"
-              showTooltip={false}
-              onClick={() => setKeybindingsOpen(true)}
-              size="md"
-            />
-            <IconButton
-              icon={<Settings />}
-              label="Settings"
-              shortcut="⌘,"
-              tooltipSide="right"
-              showTooltip={false}
-              active={view === "settings"}
-              onClick={() => setView("settings")}
-              size="md"
-            />
-            <IconButton
-              icon={<BarChart3 />}
-              label="Analytics"
-              tooltipSide="right"
-              showTooltip={false}
-              active={view === "analytics"}
-              onClick={() => setView("analytics")}
-              size="md"
-            />
-            <IconButton
-              icon={<CreditCard />}
-              label="Plan"
-              tooltipSide="right"
-              showTooltip={false}
-              active={view === "plan"}
-              onClick={() => setView("plan")}
-              size="md"
-            />
-            <IconButton
-              icon={<Plug />}
-              label="Connectors"
-              tooltipSide="right"
-              showTooltip={false}
-              active={view === "connectors"}
-              onClick={() => setView("connectors")}
-              size="md"
-            />
+          <div className="flex flex-col gap-1">
+            <div className="flex justify-center">
+              <IconButton
+                icon={<Settings />}
+                label="Settings"
+                shortcut="⌘,"
+                tooltipSide="right"
+                showTooltip={false}
+                active={view === "settings"}
+                onClick={() => setView("settings")}
+                size="md"
+              />
+            </div>
+            <MoreMenuButtonCollapsed />
           </div>
         )}
       </div>
@@ -360,6 +272,13 @@ export function Sidebar() {
   );
 }
 
+/**
+ * "More" — a persistent toggle that expands Analytics / Plan / Connectors
+ * INLINE within the sidebar footer. Previously this floated out to the right
+ * (clipped by overflow-x-hidden) and auto-collapsed on selection. Now it stays
+ * open after picking an item so the user doesn't have to re-expand it every
+ * time — the chevron indicates state, and clicking the toggle row collapses it.
+ */
 function MoreMenuButton({
   view,
   setView,
@@ -368,25 +287,6 @@ function MoreMenuButton({
   setView: (view: View) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDocMouseDown = (e: MouseEvent) => {
-      const root = rootRef.current;
-      if (!root) return;
-      if (!root.contains(e.target as Node)) setOpen(false);
-    };
-    const onEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDocMouseDown);
-    document.addEventListener("keydown", onEsc);
-    return () => {
-      document.removeEventListener("mousedown", onDocMouseDown);
-      document.removeEventListener("keydown", onEsc);
-    };
-  }, [open]);
 
   const items: { id: View; label: string; icon: React.ReactNode }[] = [
     { id: "analytics", label: "Analytics", icon: <BarChart3 className="h-4 w-4" /> },
@@ -395,10 +295,11 @@ function MoreMenuButton({
   ];
 
   return (
-    <div ref={rootRef} className="relative">
+    <div className="relative">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
         className={cn(
           "press group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] text-ink-muted",
           "hover:bg-line/60 hover:text-ink",
@@ -409,24 +310,26 @@ function MoreMenuButton({
           <MoreHorizontal className="h-4 w-4" />
         </span>
         <span className="flex-1 text-left">More</span>
+        <ChevronDown
+          className={cn(
+            "h-3.5 w-3.5 text-ink-faint transition-transform duration-150",
+            open && "rotate-180",
+          )}
+        />
       </button>
       {open && (
-        <div
-          className="absolute left-full bottom-0 z-[300] ml-2 w-[160px] animate-fade-in rounded-xl hairline bg-paper-raised p-1 shadow-lift"
-          role="menu"
-          aria-label="More navigation"
-        >
+        <div className="mt-0.5 flex flex-col gap-0.5 pl-2" role="group" aria-label="More navigation">
           {items.map((item) => (
             <button
               key={item.id}
               type="button"
-              role="menuitem"
               onClick={() => {
-                setOpen(false);
+                // Intentionally do NOT collapse — keep the panel open so the
+                // user can switch between these views without re-expanding.
                 setView(item.id);
               }}
               className={cn(
-                "press flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12.5px]",
+                "press flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px]",
                 view === item.id
                   ? "bg-line/50 font-semibold text-ink"
                   : "text-ink-muted hover:bg-line/50 hover:text-ink",
@@ -438,6 +341,27 @@ function MoreMenuButton({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Collapsed-sidebar variant of the More menu. Renders just the icon; clicking
+ * it re-expands the sidebar so the inline panel is usable (there's no room for
+ * a flyout in a 64px-wide rail without reintroducing the clipping bug).
+ */
+function MoreMenuButtonCollapsed() {
+  const toggleSidebar = useApp((s) => s.toggleSidebar);
+  return (
+    <div className="flex justify-center">
+      <IconButton
+        icon={<MoreHorizontal />}
+        label="More (expand sidebar)"
+        tooltipSide="right"
+        showTooltip={false}
+        onClick={toggleSidebar}
+        size="md"
+      />
     </div>
   );
 }

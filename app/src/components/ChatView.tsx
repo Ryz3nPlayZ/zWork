@@ -112,8 +112,9 @@ export function ChatView() {
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col bg-paper relative">
       <div className="flex flex-1 flex-col overflow-hidden relative">
-        {/* Header */}
-        <div className="flex shrink-0 items-center justify-between border-b border-line px-5 py-3 bg-paper-soft select-none">
+        {/* Header. Window dragging is owned by the TopStrip above the row, so
+            this is a plain header now — no drag attrs needed. */}
+        <div className="flex shrink-0 items-center justify-between border-b border-edge px-5 py-3 bg-paper-soft select-none">
           <div className="flex min-w-0 items-center gap-2">
             {chat.projectId && (
               <button

@@ -12,7 +12,7 @@
  *  1. A `<html>.sidebar-translucent` class drives the CSS (transparent sidebar
  *     region + a backdrop-blur fallback for non-vibrancy platforms).
  *  2. On macOS + Tauri, the native window effect (NSVisualEffectMaterial
- *     "sidebar") is toggled via Tauri v2's runtime setEffects/clearEffects.
+ *     "hudWindow") is toggled via Tauri v2's runtime setEffects/clearEffects.
  */
 
 import { useEffect, useState } from "react";
@@ -45,9 +45,12 @@ async function setNativeEffect(on: boolean): Promise<void> {
     const { getCurrentWindow, EffectState, Effect } = await import("@tauri-apps/api/window");
     const win = getCurrentWindow();
     if (on) {
-      // Effect.Sidebar maps to NSVisualEffectMaterial.sidebar — the material
-      // Finder, Xcode, etc. use for their side columns. Active state keeps it
-      // frosted regardless of window key status.
+      // Sidebar (NSVisualEffectMaterial.sidebar) is the most-muted material —
+      // it's what macOS itself uses for app sidebars (Finder, Mail, Notes).
+      // Real desktop bleed-through but text stays crisp and readable.
+      // HudWindow was too loud, FullScreenUI was still a bit too translucent;
+      // Sidebar hits the calm-but-readable sweet spot. Active state keeps it
+      // frosted regardless of window key/focus.
       await win.setEffects({
         effects: [Effect.Sidebar],
         state: EffectState.Active,
@@ -55,9 +58,13 @@ async function setNativeEffect(on: boolean): Promise<void> {
     } else {
       await win.clearEffects();
     }
-  } catch {
-    // Non-fatal: if the Tauri call is unavailable or permission is missing,
-    // the CSS fallback still gives a reasonable result.
+  } catch (err) {
+    // Non-fatal for the user, but log so we can tell the difference between
+    // "vibrancy applied but subtle" and "setEffects failed entirely" (e.g.
+    // missing core:window:allow-set-effects permission, or running on a build
+    // without macOSPrivateApi). Previously this was silent, which made the
+    // translucency bug impossible to diagnose remotely.
+    console.warn("[translucency] native setEffects failed — falling back to CSS only:", err);
   }
 }
 

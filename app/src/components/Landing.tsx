@@ -3,7 +3,7 @@ import { Download, ArrowUpRight, Loader2 } from "lucide-react";
 import { ChatInput } from "./ChatInput";
 import { useApp } from "../lib/store";
 import { useResolvedTheme } from "../lib/theme";
-import { isMacOS, needsLightweightRendering } from "../lib/platform";
+import { needsLightweightRendering } from "../lib/platform";
 import { cn } from "../lib/cn";
 import type { UpdateCardState, UpdateProgress } from "../lib/update";
 import LightRays from "./LightRays";
@@ -92,12 +92,11 @@ export function Landing({
   const theme = useResolvedTheme();
   const greeting = useMemo(() => pickGreeting(), []);
   const updateBusy = updateProgress.phase !== "idle" && updateProgress.phase !== "error";
-  const macOS = isMacOS();
 
   return (
     <div className="relative flex h-full min-w-0 flex-1 flex-col bg-paper">
-      {/* Drag-only titlebar */}
-      {macOS && <div className="titlebar-drag absolute inset-x-0 top-0 h-12" />}
+      {/* Window dragging is owned by the TopStrip above the row, so no
+          separate drag strip is needed here. */}
 
       <div
         className={cn(
@@ -144,7 +143,7 @@ export function Landing({
 
           <div
             className={cn(
-              "mt-8 w-full [&>div]:!shadow-none transition-all duration-400 ease-[cubic-bezier(0.22,1,0.36,1)]",
+              "mt-8 w-full transition-all duration-400 ease-[cubic-bezier(0.22,1,0.36,1)]",
               sending && "mt-4 max-w-[520px] rounded-2xl scale-95",
             )}
           >

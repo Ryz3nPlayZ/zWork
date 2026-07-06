@@ -1,11 +1,12 @@
 import { Suspense, lazy, useEffect, useState } from "react";
 import { CheckCircle2, ExternalLink, X, AlertTriangle } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
+import { TopStrip } from "./components/TopStrip";
 import { Landing } from "./components/Landing";
 import { useApp } from "./lib/store";
 import { consumeInstalledUpdateNotice, detectUpdate, installUpdate, openReleaseUrl, type UpdateCardState, type UpdateProgress } from "./lib/update";
 import { cn } from "./lib/cn";
-import { isMacOS } from "./lib/platform";
+import { loadZoom, applyZoom, zoomIn, zoomOut, zoomReset } from "./lib/zoom";
 import { useTranslucencyPref, nativeVibrancySupported } from "./lib/translucency";
 import { recordTelemetry, setTelemetryEnabled, startTelemetrySession, stopTelemetrySession } from "./lib/telemetry";
 import { fallbackAppVersion, resolveAppVersion } from "./lib/appVersion";
@@ -124,8 +125,6 @@ export default function App() {
   const keybindingsOpen = useApp((s) => s.keybindingsOpen);
   const setKeybindingsOpen = useApp((s) => s.setKeybindingsOpen);
 
-  const macOS = isMacOS();
-  const tauri = typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
   const translucency = useTranslucencyPref();
   const useNativeGlass = translucency === "on" && nativeVibrancySupported();
 
@@ -204,15 +203,11 @@ export default function App() {
     };
   }, []);
 
-  // Restore saved zoom level
+  // Restore saved zoom level on boot. Goes through lib/zoom.ts so the native
+  // webview setZoom() (Tauri) or CSS transform fallback (browser) is applied
+  // consistently — never the desync-prone CSS `zoom` property.
   useEffect(() => {
-    const saved = localStorage.getItem("zwork.zoom");
-    if (saved) {
-      const zoom = parseFloat(saved);
-      if (zoom >= 0.8 && zoom <= 1.5) {
-        document.documentElement.style.setProperty("--zoom-level", String(zoom));
-      }
-    }
+    void applyZoom(loadZoom());
   }, []);
 
   useEffect(() => {
@@ -408,20 +403,13 @@ export default function App() {
         triggerFocusChatInput();
       } else if (mod && (e.key === "+" || e.key === "=")) {
         e.preventDefault();
-        const cur = parseFloat(localStorage.getItem("zwork.zoom") || "1");
-        const next = Math.min(1.5, Math.round((cur + 0.1) * 10) / 10);
-        localStorage.setItem("zwork.zoom", String(next));
-        document.documentElement.style.setProperty("--zoom-level", String(next));
+        void zoomIn();
       } else if (mod && e.key === "-") {
         e.preventDefault();
-        const cur = parseFloat(localStorage.getItem("zwork.zoom") || "1");
-        const next = Math.max(0.5, Math.round((cur - 0.1) * 10) / 10);
-        localStorage.setItem("zwork.zoom", String(next));
-        document.documentElement.style.setProperty("--zoom-level", String(next));
+        void zoomOut();
       } else if (mod && e.key === "0") {
         e.preventDefault();
-        localStorage.setItem("zwork.zoom", "1");
-        document.documentElement.style.setProperty("--zoom-level", "1");
+        void zoomReset();
       } else if (mod && e.key.toLowerCase() === "j") {
         e.preventDefault();
         // setView("tasks"); // Disabled for now (deferred to backlog)
@@ -492,9 +480,10 @@ export default function App() {
 
   return (
     <div className={cn("flex h-screen w-screen flex-col overflow-hidden", useNativeGlass ? "bg-transparent" : "bg-paper")}>
-      {/* macOS traffic-light area: ~38px tall. data-tauri-drag-region makes
-          the strip draggable; Tauri auto-excludes the traffic-light buttons. */}
-      {tauri && macOS && <div data-tauri-drag-region className="h-[38px] shrink-0 bg-transparent" />}
+      {/* TopStrip is the single drag region for the window and houses the
+          sidebar collapse button in a fixed spot next to the traffic lights.
+          See components/TopStrip.tsx. Requires core:window:allow-start-dragging. */}
+      <TopStrip />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar />
         {/* Main content stays opaque — translucency is sidebar-only so the

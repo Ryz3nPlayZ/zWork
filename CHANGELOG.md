@@ -2,6 +2,34 @@
 
 All notable changes to zWork are documented in this file.
 
+## v0.5.0-beta.6
+
+**UI overhaul: calmer theme system, redesigned titlebar, and a draggable window that finally feels right.**
+
+### Window & layout
+- **New full-width top strip owns window dragging.** A single 22px transparent strip at the top of the window carries the sidebar collapse button (fixed next to the macOS traffic lights, so it never jumps when the sidebar toggles) and is the one consistent draggable edge across the whole window. Replaces the previous per-view "overlay" drag pattern where each header had its own hit-and-miss drag region.
+- **Sidebar collapse state now persists** across launches (`localStorage["zwork:sidebar-open"]`) instead of always resetting to open.
+- **Collapsed sidebar icon spacing fixed.** Footer icons now center-align with the nav icons above them, and padding/gap no longer mismatch between nav and footer.
+- **Cleaned up the dead `.titlebar-drag` class** across Settings, ArtifactPanel, Onboarding, LoginScreen, and ChatInput — it was an Electron-ism WKWebView ignores. Onboarding and Login (which render as full-screen gates without the top strip) now use the real `startDragging()` handler.
+- **Reduced excessive top padding** (128px → 32px) on Analytics, Plan, and Connectors pages now that the top strip handles traffic-light clearance.
+
+### Theme system (OpenCode-inspired)
+- **Alpha-overlay borders.** Borders are now translucent overlays (black in light mode, white in dark) via the new `--border-overlay` token and `border-edge` / `edge-strong` / `edge-muted` Tailwind colors, plus `.hairline-ring` and `.focus-ring` elevation utilities. A border adapts to whatever surface it sits on instead of reading as a harsh fixed-color line.
+- **Fixed surface contrast across all dark themes.** Tightened `paperRaised` jumps so the chatbox no longer glares — Catppuccin Mocha's raised surface went from +39pt above base to +19pt; same treatment for Atom One, Dracula, Tokyo Night, Gruvbox, Nord, Monokai, and Aura. Split every duplicate `inkMuted === inkFaint` pair so text hierarchy has three distinct steps.
+- **Fixed light-mode flatness.** Parchment light `paper-soft` / `paper-raised` were *lighter* than base (the OpenCode mirror rule says raised surfaces should step *darker* toward the foreground in light mode) — corrected.
+- **Chatbox redesigned.** Now matches the page fill (`bg-paper`) with elevation from a hairline ring and focus from an accent-tinted ring, instead of being a visibly different-colored box.
+- **Deleted dead `bubble` / `bubbleFg` tokens** from the `TokenSet` interface, all 14 presets, the theme mapper, and Tailwind config — they were defined but used nowhere.
+
+### Translucency
+- **Switched native macOS material from `FullScreenUI` to `Sidebar`** (the most-muted NSVisualEffectMaterial — what Finder/Mail use). Real desktop bleed-through but text stays crisp.
+- **Raised the CSS fallback opacity** from `/70` to `/85` for non-vibrancy platforms.
+- **Top strip is no longer translucent** — it's transparent and vanishes into whatever column is below it.
+
+### Other fixes
+- **Stray scrollbars on the landing chatbox** — the textarea's scrollbar gutter no longer lights up on hover. Added `[scrollbar-width:none] [&::-webkit-scrollbar]:hidden` to the chatbox textarea (the global hover-thumb rule remains for actual scroll containers).
+- **Replaced the desync-prone CSS `zoom` with native webview zoom** (`getCurrentWebview().setZoom()` on Tauri, `transform: scale()` browser fallback) — fixes the broken text-selection rectangles. New `lib/zoom.ts` with `zoomIn` / `zoomOut` / `zoomReset`, persisted to `localStorage["zwork.zoom"]`.
+- **Added `core:window:allow-start-dragging` and `core:webview:allow-set-webview-zoom`** to the Tauri capabilities — the missing permissions were silently breaking window drag and native zoom.
+
 ## v0.5.0-beta.5
 
 **Fix: revert secret store to plaintext file I/O — eliminates keychain prompts.**

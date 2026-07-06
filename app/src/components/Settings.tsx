@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
-import { isMacOS, IS_TAURI } from "../lib/platform";
+import { IS_TAURI } from "../lib/platform";
 import {
   setTranslucencyPref,
   useTranslucencyPref,
@@ -139,7 +139,6 @@ const CREDENTIAL_PLACEHOLDERS: Record<string, { keyPlaceholder: string; baseUrlP
 };
 
 export function SettingsPage() {
-  const macOS = isMacOS();
   const settings = useApp((s) => s.settings);
   const providers = useApp((s) => s.providers);
   const integrations = useApp((s) => s.integrations);
@@ -182,8 +181,8 @@ export function SettingsPage() {
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col bg-paper">
-      {/* Header */}
-      <div className={cn(macOS && "titlebar-drag", "flex h-12 shrink-0 items-center justify-between border-b border-line px-5")}>
+      {/* Header. Window dragging is owned by the TopStrip above the row. */}
+      <div className="flex h-12 shrink-0 items-center justify-between border-b border-edge px-5">
         <div className="flex min-w-0 items-center gap-3" data-no-drag>
           <IconButton
             icon={<ArrowLeft />}

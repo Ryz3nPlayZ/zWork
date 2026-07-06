@@ -829,10 +829,26 @@ function pickAvailableModel(providers: ProvidersResponse | null, current = "") {
   );
 }
 
+const SIDEBAR_OPEN_KEY = "zwork:sidebar-open";
+
+function loadSidebarOpen(): boolean {
+  if (typeof window === "undefined") return true;
+  const v = window.localStorage.getItem(SIDEBAR_OPEN_KEY);
+  if (v === null) return true;
+  return v === "true";
+}
+
 export const useApp = create<AppState>((set, get) => ({
-  sidebarOpen: true,
-  toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
-  setSidebarOpen: (v) => set({ sidebarOpen: v }),
+  sidebarOpen: loadSidebarOpen(),
+  toggleSidebar: () => {
+    const next = !get().sidebarOpen;
+    try { window.localStorage.setItem(SIDEBAR_OPEN_KEY, String(next)); } catch {}
+    set({ sidebarOpen: next });
+  },
+  setSidebarOpen: (v) => {
+    try { window.localStorage.setItem(SIDEBAR_OPEN_KEY, String(v)); } catch {}
+    set({ sidebarOpen: v });
+  },
   view: "chat",
   setView: (v) => set({ view: v }),
   settingsSection: null,

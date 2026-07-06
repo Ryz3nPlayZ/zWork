@@ -26,27 +26,26 @@
 :root.light {
   color-scheme: light;
 
-  /* Warm cream palette — gentle on the eyes, less extreme than pure white. */
+  /* Warm cream palette — gentle on the eyes, less extreme than pure white.
+     Surface hierarchy follows the OpenCode mirror rule: in light mode, raised
+     surfaces step DARKER than base (toward the foreground), not lighter. The
+     old values (paper-soft/raised lighter than paper) produced a flat look. */
   --paper: 242 240 232;
-  --paper-soft: 248 246 238;
-  --paper-raised: 252 250 242;
-  --paper-sunken: 234 232 224;
+  --paper-soft: 238 236 228;
+  --paper-raised: 234 232 224;
+  --paper-sunken: 246 244 236;
   --paper-sidebar: 236 234 226;
 
   --ink: 48 46 40;
   --ink-soft: 80 76 68;
-  --ink-muted: 130 126 115;
-  --ink-faint: 175 170 158;
+  --ink-muted: 110 106 96;
+  --ink-faint: 155 150 138;
 
   --line: 218 214 202;
   --line-soft: 228 224 212;
   --line-strong: 200 196 184;
 
   --accent: 48 46 40;
-
-  /* Assistant → user bubble. Calm warm stone, not bright blue. */
-  --bubble: 232 230 222;
-  --bubble-fg: 48 46 40;
 
   --shadow: 30 28 24;
 
@@ -58,6 +57,11 @@
   --error-fg: 255 255 255;
   --info: 59 130 246;
   --info-fg: 255 255 255;
+
+  /* Alpha-overlay border color (OpenCode pattern). Light mode → black overlay;
+     the border adapts to whatever surface it sits on instead of being a fixed
+     harsh line. Alpha is applied at the utility layer (.border-edge etc.). */
+  --border-overlay: 0 0 0;
 }
 
 :root.dark {
@@ -82,10 +86,6 @@
 
   --accent: 236 236 234;
 
-  /* Assistant → user bubble in dark mode: slightly lighter than paper. */
-  --bubble: 60 60 64;
-  --bubble-fg: 242 242 238;
-
   --shadow: 0 0 0;
 
   --success: 52 211 153;
@@ -96,6 +96,9 @@
   --error-fg: 0 0 0;
   --info: 96 165 250;
   --info-fg: 0 0 0;
+
+  /* Dark mode → white-overlay borders. */
+  --border-overlay: 255 255 255;
 }
 
 /* --------------------------------------------------------
@@ -103,6 +106,10 @@
    -------------------------------------------------------- */
 :root {
   --zoom-level: 1;
+  /* CSS fallback zoom scale, applied via transform on #root in browser mode.
+     Native Tauri builds use getCurrentWebview().setZoom() instead and never
+     read this. Kept at 1 by default so non-zoomed layout is unaffected. */
+  --zoom-scale: 1;
 
   /* Monospace stack — used by code blocks via var(--font-mono). System fonts
      only; no bundling. Ordered for macOS → Windows → Linux parity. */
@@ -131,12 +138,46 @@ body {
   font-feature-settings: "ss01", "cv11";
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
-  zoom: var(--zoom-level, 1);
+  /* NOTE: do NOT re-add `zoom: var(--zoom-level)` here. CSS `zoom` is
+     non-standard and desyncs paint vs. hit-testing in WebKit, which breaks
+     text-selection rectangles (the "weird sectioning when selecting" bug).
+     Zoom is now driven by lib/zoom.ts — native webview setZoom() on Tauri,
+     or `transform: scale()` on #root as a browser fallback. */
 }
 
 #root {
   height: 100%;
   width: 100%;
+  /* Browser-mode zoom fallback. On Tauri this stays at scale(1) and the native
+     webview zoom does the real work. transform-origin is top-left so zoomed
+     layout pins to the window corner instead of recentering. */
+  transform: scale(var(--zoom-scale, 1));
+  transform-origin: top left;
+}
+
+/* --------------------------------------------------------
+   Alpha-overlay borders + elevation (OpenCode v2 pattern)
+   --------------------------------------------------------
+   Borders are translucent overlays (black in light mode, white in dark) so
+   they adapt to whatever surface they sit on instead of reading as harsh
+   fixed-color lines. Three strengths mirror the old line/line-soft/line-strong
+   scale. Use the .border-edge / .border-edge-strong / .border-edge-muted
+   utilities (defined in tailwind.config.js borderColor) for the color, and
+   .hairline-ring for the elevation ring+shadow combo. */
+.hairline-ring {
+  box-shadow:
+    0 0 0 0.5px rgb(var(--border-overlay) / 0.10),
+    0 1px 2px rgb(0 0 0 / 0.04);
+}
+.hairline-ring-strong {
+  box-shadow:
+    0 0 0 0.5px rgb(var(--border-overlay) / 0.20),
+    0 1px 3px rgb(0 0 0 / 0.08);
+}
+/* Focus ring for inputs — accent-tinted, replaces the old border-line-strong
+   + shadow-lift combo on the chatbox. */
+.focus-ring {
+  box-shadow: 0 0 0 1.5px rgb(var(--accent) / 0.45);
 }
 
 /* Overlay window: force a fully transparent chrome so only the chat UI is

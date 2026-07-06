@@ -731,15 +731,20 @@ export function ChatInput({
         ref={isOverlay ? toolsRef : undefined}
         onMouseDown={isOverlay ? onBarMouseDown : undefined}
         className={cn(
-          "group relative w-full border border-line bg-paper-raised transition-[border-color,box-shadow]",
+          // OpenCode-style input: fill matches the page (bg-paper, not raised),
+          // elevation faked via a hairline ring + soft shadow. On focus the
+          // ring shifts to an accent-tinted outline. This avoids the chatbox
+          // reading as a different-colored box — the "too light" complaint in
+          // Catppuccin Mocha / Atom One came from bg-paper-raised glaring.
+          "group relative w-full bg-paper transition-[box-shadow] hairline-ring",
           isOverlay
             ? cn(
-                "titlebar-drag flex items-center gap-1 px-2 py-2 shadow-float",
+                "flex items-center gap-1 px-2 py-2",
                 (multiline || attachments.length > 0) ? "rounded-2xl" : "rounded-full",
-                focused && "border-line-strong",
+                focused && "focus-ring",
               )
-            : cn("rounded-2xl", focused ? "border-line-strong shadow-lift" : "shadow-chat"),
-          dragOver && "border-ink/30 border-dashed",
+            : cn("rounded-2xl", focused ? "focus-ring" : ""),
+          dragOver && "ring-2 ring-ink/30 border-dashed",
           className,
         )}
         onDragEnter={(e) => {
@@ -852,7 +857,7 @@ export function ChatInput({
               const el = e.currentTarget;
               refreshSlashState(el.value, el.selectionStart ?? el.value.length);
             }}
-            className="block w-full resize-none bg-transparent px-5 pt-4 pb-2 text-[14.5px] leading-6 text-ink placeholder:text-ink-faint focus:outline-none"
+            className="block w-full resize-none bg-transparent px-5 pt-4 pb-2 text-[14.5px] leading-6 text-ink placeholder:text-ink-faint focus:outline-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           />
         </>
       )}
