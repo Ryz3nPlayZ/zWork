@@ -5,7 +5,7 @@ This directory contains the Tauri desktop shell and React frontend for zWork.
 ## What lives here
 
 - `src/` — React UI
-- `src-tauri/` — Rust shell that launches the Python backend
+- `src-tauri/` — Rust shell that spawns the Rust backend (`rwork-backend`) and manages cua-driver
 - `vite.config.ts` — frontend dev/build config
 
 The frontend talks to the backend over `/api/*`.
@@ -20,15 +20,6 @@ From the repo root, the simplest path is:
 
 If you want to run the pieces separately:
 
-Backend from repo root:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-python3 -m sidecar.server
-```
-
 Frontend:
 
 ```bash
@@ -37,19 +28,19 @@ npm install
 npm run dev
 ```
 
-Tauri desktop shell:
+Tauri desktop shell (builds frontend, opens the native window, spawns the Rust backend):
 
 ```bash
 cd app
 npm run tauri dev
 ```
 
+The Rust backend lives in `../sidecar-rust/` — build/run it directly with `cargo run --release` from that directory if you need to iterate on it standalone.
+
 ## Runtime behavior
 
-- In development, the frontend runs on Vite and proxies API requests to the
-  backend.
-- In desktop mode, the Tauri shell starts a packaged backend binary when one is
-  available and falls back to the local Python backend in development.
+- In development, the frontend runs on Vite and proxies API requests to the backend.
+- In desktop mode, the Tauri shell spawns the packaged Rust backend binary.
 - User-specific runtime state lives outside the repo under `~/.zwork/`.
 
 For release packaging and GitHub Release install flows, see

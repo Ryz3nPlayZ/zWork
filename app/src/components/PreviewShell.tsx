@@ -1,18 +1,19 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense, lazy } from "react";
 import { Settings2, LogIn } from "lucide-react";
 import { Sidebar } from "./Sidebar";
 import { Landing } from "./Landing";
-import { ChatView } from "./ChatView";
-import { SettingsPage } from "./Settings";
-import { ProjectView } from "./ProjectView";
-import { ArtifactPanel } from "./ArtifactPanel";
-import { SearchModal } from "./SearchModal";
-import { AnalyticsPage } from "./AnalyticsPage";
-import { PlanPage } from "./PlanPage";
-import { LoginScreen } from "./LoginScreen";
-import { Onboarding } from "./Onboarding";
 import { useApp } from "../lib/store";
 import { cn } from "../lib/cn";
+
+const ChatView = lazy(() => import("./ChatView").then((m) => ({ default: m.ChatView })));
+const SettingsPage = lazy(() => import("./Settings").then((m) => ({ default: m.SettingsPage })));
+const ProjectView = lazy(() => import("./ProjectView").then((m) => ({ default: m.ProjectView })));
+const ArtifactPanel = lazy(() => import("./ArtifactPanel").then((m) => ({ default: m.ArtifactPanel })));
+const SearchModal = lazy(() => import("./SearchModal").then((m) => ({ default: m.SearchModal })));
+const AnalyticsPage = lazy(() => import("./AnalyticsPage").then((m) => ({ default: m.AnalyticsPage })));
+const PlanPage = lazy(() => import("./PlanPage").then((m) => ({ default: m.PlanPage })));
+const LoginScreen = lazy(() => import("./LoginScreen").then((m) => ({ default: m.LoginScreen })));
+const Onboarding = lazy(() => import("./Onboarding").then((m) => ({ default: m.Onboarding })));
 
 const PREVIEW_USER = {
   id: "preview-user",
@@ -61,7 +62,9 @@ export function PreviewAuthShell() {
         </button>
       </div>
 
-      {screen === "login" ? <LoginScreen /> : <Onboarding />}
+      <Suspense fallback={null}>
+        {screen === "login" ? <LoginScreen /> : <Onboarding />}
+      </Suspense>
     </div>
   );
 }
@@ -113,22 +116,24 @@ export function PreviewAppShell() {
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar />
         <main className="relative flex min-w-0 flex-1 overflow-hidden">
-          {view === "settings" ? (
-            <SettingsPage />
-          ) : view === "analytics" ? (
-            <AnalyticsPage />
-          ) : view === "plan" ? (
-            <PlanPage cloudUser={PREVIEW_CLOUD_USER} />
-          ) : view === "projects" ? (
-            <ProjectView />
-          ) : (
-            <>
-              {!showLanding && <ChatView />}
-              {showLanding && <Landing />}
-            </>
-          )}
-          {artifactPanelOpen && <ArtifactPanel />}
-          <SearchModal />
+          <Suspense fallback={null}>
+            {view === "settings" ? (
+              <SettingsPage />
+            ) : view === "analytics" ? (
+              <AnalyticsPage />
+            ) : view === "plan" ? (
+              <PlanPage cloudUser={PREVIEW_CLOUD_USER} />
+            ) : view === "projects" ? (
+              <ProjectView />
+            ) : (
+              <>
+                {!showLanding && <ChatView />}
+                {showLanding && <Landing />}
+              </>
+            )}
+            {artifactPanelOpen && <ArtifactPanel />}
+            <SearchModal />
+          </Suspense>
         </main>
       </div>
     </div>

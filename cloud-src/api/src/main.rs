@@ -20,6 +20,7 @@ use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::key_extractor::SmartIpKeyExtractor;
 use tower_governor::GovernorLayer;
 use tower_http::cors::CorsLayer;
+use tower_http::trace::TraceLayer;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -171,7 +172,7 @@ const ALLOWED_MODELS: &[&str] = &[
     "zwork-flash",
     "zwork-pro",
     "zwork-vision",
-    "gemma4:31b-cloud",
+    "gemma4:31b",
     "llama-3.2-90b-vision",
     "meta-llama/llama-4-scout-17b-16e-instruct",
 ];
@@ -180,7 +181,7 @@ const PRO_ONLY_MODELS: &[&str] = &[
     "deepseek-v4-pro",
     "zwork-pro",
     "zwork-vision",
-    "gemma4:31b-cloud",
+    "gemma4:31b",
     "meta-llama/llama-4-scout-17b-16e-instruct",
 ];
 
@@ -189,7 +190,7 @@ fn resolve_upstream_model(model: &str) -> &str {
     match model {
         "zwork-flash" => "deepseek-v4-flash",
         "zwork-pro" => "deepseek-v4-pro",
-        "zwork-vision" => "gemma4:31b-cloud",
+        "zwork-vision" => "gemma4:31b",
         other => other,
     }
 }
@@ -238,7 +239,7 @@ fn load_gateway_providers() -> Vec<GatewayProvider> {
 
         let key = std::env::var(&key_env).unwrap_or_default();
         let base_url = std::env::var(&base_env).unwrap_or_default();
-        let model = std::env::var(&model_env).unwrap_or_else(|_| "gemma4:31b-cloud".to_string());
+        let model = std::env::var(&model_env).unwrap_or_else(|_| "gemma4:31b".to_string());
 
         if !base_url.trim().is_empty() {
             providers.push(GatewayProvider {
@@ -836,6 +837,223 @@ async fn bootstrap_schema(db: &PgPool) -> Result<(), sqlx::Error> {
         r#"
         ALTER TABLE gateway_requests
         ADD COLUMN IF NOT EXISTS total_tokens BIGINT;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE gateway_requests
+        ADD COLUMN IF NOT EXISTS chat_id TEXT;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE gateway_requests
+        ADD COLUMN IF NOT EXISTS project_id TEXT;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE gateway_requests
+        ADD COLUMN IF NOT EXISTS app_version TEXT;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE gateway_requests
+        ADD COLUMN IF NOT EXISTS os TEXT;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE gateway_requests
+        ADD COLUMN IF NOT EXISTS request_body_size_bytes BIGINT;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE gateway_requests
+        ADD COLUMN IF NOT EXISTS response_body_size_bytes BIGINT;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE gateway_requests
+        ADD COLUMN IF NOT EXISTS request_payload JSONB;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE gateway_requests
+        ADD COLUMN IF NOT EXISTS response_payload JSONB;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE gateway_requests
+        ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE gateway_requests
+        ADD COLUMN IF NOT EXISTS first_token_at TIMESTAMPTZ;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE gateway_requests
+        ADD COLUMN IF NOT EXISTS upstream_duration_ms BIGINT;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE gateway_requests
+        ADD COLUMN IF NOT EXISTS total_duration_ms BIGINT;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE gateway_requests
+        ADD COLUMN IF NOT EXISTS estimated_cost_usd NUMERIC(12,6);
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE gateway_requests
+        ADD COLUMN IF NOT EXISTS routing_decision JSONB;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE gateway_requests
+        ADD COLUMN IF NOT EXISTS failure_history JSONB;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE gateway_requests
+        ADD COLUMN IF NOT EXISTS stream BOOLEAN;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE gateway_requests
+        ADD COLUMN IF NOT EXISTS max_tokens BIGINT;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE gateway_requests
+        ADD COLUMN IF NOT EXISTS tool_count INT;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_gateway_requests_chat_id ON gateway_requests(chat_id, created_at);
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_gateway_requests_provider_created ON gateway_requests(provider_name, created_at);
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_gateway_requests_finished_null ON gateway_requests(finished_at) WHERE finished_at IS NULL;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS gateway_attempts (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            request_id UUID NOT NULL REFERENCES gateway_requests(id) ON DELETE CASCADE,
+            provider_name TEXT NOT NULL,
+            model_id TEXT NOT NULL,
+            attempt_number INT NOT NULL,
+            started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            finished_at TIMESTAMPTZ,
+            upstream_status INT,
+            error_message TEXT,
+            error_detail TEXT,
+            prompt_tokens BIGINT,
+            completion_tokens BIGINT,
+            total_tokens BIGINT,
+            duration_ms BIGINT
+        );
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_gateway_attempts_request ON gateway_attempts(request_id, attempt_number);
         "#,
     )
     .execute(db)
@@ -1452,6 +1670,11 @@ async fn mark_gateway_request_upstream(
     prompt_tokens: Option<i64>,
     completion_tokens: Option<i64>,
     total_tokens: Option<i64>,
+    first_token_at: Option<chrono::DateTime<chrono::Utc>>,
+    upstream_duration_ms: Option<i64>,
+    estimated_cost_usd: Option<f64>,
+    routing_decision: Option<Value>,
+    failure_history: Option<Value>,
 ) {
     let _ = sqlx::query(
         r#"
@@ -1460,7 +1683,12 @@ async fn mark_gateway_request_upstream(
             model_id = $3,
             prompt_tokens = $4,
             completion_tokens = $5,
-            total_tokens = $6
+            total_tokens = $6,
+            first_token_at = COALESCE($7, first_token_at),
+            upstream_duration_ms = COALESCE($8, upstream_duration_ms),
+            estimated_cost_usd = $9,
+            routing_decision = $10,
+            failure_history = $11
         WHERE id = $1
         "#,
     )
@@ -1470,6 +1698,11 @@ async fn mark_gateway_request_upstream(
     .bind(prompt_tokens)
     .bind(completion_tokens)
     .bind(total_tokens)
+    .bind(first_token_at)
+    .bind(upstream_duration_ms)
+    .bind(estimated_cost_usd)
+    .bind(routing_decision)
+    .bind(failure_history)
     .execute(&state.db)
     .await;
 }
@@ -1479,6 +1712,51 @@ fn parse_i64_header(headers: &HeaderMap, name: &str) -> Option<i64> {
         .get(name)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.trim().parse::<i64>().ok())
+}
+
+fn header_str(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+/// Replace base64 image data URLs with a placeholder so request/response payloads
+/// can be stored without bloating the database.
+fn redact_image_data(value: &Value) -> Value {
+    match value {
+        Value::String(s) => {
+            if s.starts_with("data:image/") && s.contains(";base64,") {
+                Value::String("[image data redacted]".to_string())
+            } else {
+                Value::String(s.clone())
+            }
+        }
+        Value::Array(arr) => Value::Array(arr.iter().map(redact_image_data).collect()),
+        Value::Object(obj) => Value::Object(
+            obj.iter()
+                .map(|(k, v)| (k.clone(), redact_image_data(v)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// Very rough cost estimation from provider/model token counts. Returns None when
+/// pricing is unknown. Prices are per 1M tokens (input / output).
+fn estimate_cost(provider: &str, model: &str, input: Option<i64>, output: Option<i64>) -> Option<f64> {
+    let (input_price_1m, output_price_1m): (f64, f64) = match (provider, model) {
+        ("DeepSeek", "deepseek-v4-pro") => (1.74, 3.48),
+        ("DeepSeek", "deepseek-v4-flash") => (0.14, 0.28),
+        ("Groq", _) => (0.15, 0.30),
+        ("OllamaCloud_1", _) => (0.0, 0.0),
+        _ => return None,
+    };
+    match (input, output) {
+        (Some(i), Some(o)) => Some((i as f64 * input_price_1m + o as f64 * output_price_1m) / 1_000_000.0),
+        _ => None,
+    }
 }
 
 fn parse_usage_counts(body_json: &Value) -> (Option<i64>, Option<i64>, Option<i64>) {
@@ -1523,23 +1801,28 @@ fn extract_sse_usage(line: &str) -> Option<(Option<i64>, Option<i64>, Option<i64
 }
 
 /// Wraps an SSE byte stream to extract token usage from Anthropic events.
-/// Returns the stream for passthrough and a oneshot receiver with the captured usage.
+/// Returns the stream for passthrough and a oneshot receiver with the captured
+/// usage plus the timestamp of the first received chunk.
 fn sse_stream_with_usage(
     stream: impl futures::Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
 ) -> (
     axum::body::Body,
-    tokio::sync::oneshot::Receiver<(Option<i64>, Option<i64>, Option<i64>)>,
+    tokio::sync::oneshot::Receiver<(Option<DateTime<Utc>>, Option<i64>, Option<i64>, Option<i64>)>,
 ) {
     let (tx, rx) = tokio::sync::oneshot::channel();
     let (body_tx, body_rx) = tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(32);
 
     tokio::spawn(async move {
         use futures::StreamExt;
+        let mut first_byte_at: Option<DateTime<Utc>> = None;
         let mut final_input: Option<i64> = None;
         let mut final_output: Option<i64> = None;
         let mut stream = Box::pin(stream);
         while let Some(chunk) = stream.next().await {
             if let Ok(ref bytes) = chunk {
+                if first_byte_at.is_none() {
+                    first_byte_at = Some(Utc::now());
+                }
                 let text = String::from_utf8_lossy(bytes);
                 for line in text.lines() {
                     if let Some((i, o, _)) = extract_sse_usage(line) {
@@ -1553,11 +1836,70 @@ fn sse_stream_with_usage(
                 break;
             }
         }
-        let _ = tx.send((final_input, final_output, None));
+        let total = match (final_input, final_output) {
+            (Some(i), Some(o)) => Some(i + o),
+            _ => None,
+        };
+        let _ = tx.send((first_byte_at, final_input, final_output, total));
     });
 
     let body_stream = tokio_stream::wrappers::ReceiverStream::new(body_rx);
     (axum::body::Body::from_stream(body_stream), rx)
+}
+
+/// Wraps an upstream byte stream to capture:
+///   - the timestamp of the first received chunk (`first_byte_at`)
+///   - the full accumulated response bytes
+///   - usage extracted from OpenAI-format SSE chunks
+/// Returns a oneshot receiver with (bytes, first_byte_at, prompt_tokens, completion_tokens, total_tokens).
+fn capture_stream_metadata(
+    stream: impl futures::Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
+) -> tokio::sync::oneshot::Receiver<(Vec<u8>, Option<DateTime<Utc>>, Option<i64>, Option<i64>, Option<i64>)>
+{
+    let (tx, rx) = tokio::sync::oneshot::channel();
+
+    tokio::spawn(async move {
+        use futures::StreamExt;
+        let mut buf = Vec::new();
+        let mut first_byte_at: Option<DateTime<Utc>> = None;
+        let mut final_input: Option<i64> = None;
+        let mut final_output: Option<i64> = None;
+        let mut stream = Box::pin(stream);
+        while let Some(chunk) = stream.next().await {
+            if let Ok(ref bytes) = chunk {
+                if first_byte_at.is_none() {
+                    first_byte_at = Some(Utc::now());
+                }
+                buf.extend_from_slice(bytes);
+                // Extract usage from SSE chunks if present.
+                let text = String::from_utf8_lossy(bytes);
+                for line in text.lines() {
+                    if let Some(data) = line.strip_prefix("data: ") {
+                        if data == "[DONE]" {
+                            continue;
+                        }
+                        if let Ok(json) = serde_json::from_str::<Value>(data) {
+                            if let Some(usage) = json.get("usage").and_then(|u| u.as_object()) {
+                                if let Some(v) = usage.get("prompt_tokens").and_then(|v| v.as_i64()) {
+                                    final_input = Some(v);
+                                }
+                                if let Some(v) = usage.get("completion_tokens").and_then(|v| v.as_i64()) {
+                                    final_output = Some(v);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let total = match (final_input, final_output) {
+            (Some(i), Some(o)) => Some(i + o),
+            _ => None,
+        };
+        let _ = tx.send((buf, first_byte_at, final_input, final_output, total));
+    });
+
+    rx
 }
 
 fn wrap_json_completion_as_sse(body_json: &Value) -> Option<Vec<u8>> {
@@ -1652,11 +1994,25 @@ async fn upsert_provider_snapshot(
     .await;
 }
 
+#[derive(Debug, Default)]
+struct GatewayRequestMeta {
+    chat_id: Option<String>,
+    project_id: Option<String>,
+    app_version: Option<String>,
+    os: Option<String>,
+    request_payload: Option<Value>,
+    request_body_size_bytes: Option<i64>,
+    stream: Option<bool>,
+    max_tokens: Option<i64>,
+    tool_count: Option<i32>,
+}
+
 async fn insert_gateway_request(
     state: &AppState,
     user_id: &str,
     run_id: &str,
     request_kind: RequestKind,
+    meta: &GatewayRequestMeta,
 ) -> Result<Uuid, StatusCode> {
     let kind = match request_kind {
         RequestKind::Root => "root",
@@ -1665,30 +2021,117 @@ async fn insert_gateway_request(
 
     sqlx::query_scalar(
         r#"
-        INSERT INTO gateway_requests (user_id, run_id, request_kind)
-        VALUES ($1, $2, $3)
+        INSERT INTO gateway_requests (
+            user_id, run_id, request_kind,
+            chat_id, project_id, app_version, os,
+            request_payload, request_body_size_bytes,
+            stream, max_tokens, tool_count,
+            started_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
         RETURNING id
         "#,
     )
     .bind(user_id)
     .bind(run_id)
     .bind(kind)
+    .bind(&meta.chat_id)
+    .bind(&meta.project_id)
+    .bind(&meta.app_version)
+    .bind(&meta.os)
+    .bind(&meta.request_payload)
+    .bind(meta.request_body_size_bytes)
+    .bind(meta.stream)
+    .bind(meta.max_tokens)
+    .bind(meta.tool_count)
     .fetch_one(&state.db)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
-async fn finish_gateway_request(state: &AppState, request_id: Uuid, status: Option<i32>) {
+async fn finish_gateway_request(
+    state: &AppState,
+    request_id: Uuid,
+    status: Option<i32>,
+    response_payload: Option<Value>,
+    response_body_size_bytes: Option<i64>,
+    total_duration_ms: Option<i64>,
+) {
     let _ = sqlx::query(
         r#"
         UPDATE gateway_requests
         SET upstream_status = $2,
-            finished_at = NOW()
+            finished_at = NOW(),
+            response_payload = COALESCE($3, response_payload),
+            response_body_size_bytes = COALESCE($4, response_body_size_bytes),
+            total_duration_ms = COALESCE($5, total_duration_ms)
         WHERE id = $1
         "#,
     )
     .bind(request_id)
     .bind(status)
+    .bind(response_payload)
+    .bind(response_body_size_bytes)
+    .bind(total_duration_ms)
+    .execute(&state.db)
+    .await;
+}
+
+async fn insert_gateway_attempt(
+    state: &AppState,
+    request_id: Uuid,
+    attempt_number: i32,
+    provider_name: &str,
+    model_id: &str,
+) -> Result<Uuid, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"
+        INSERT INTO gateway_attempts (request_id, attempt_number, provider_name, model_id, started_at)
+        VALUES ($1, $2, $3, $4, NOW())
+        RETURNING id
+        "#,
+    )
+    .bind(request_id)
+    .bind(attempt_number)
+    .bind(provider_name)
+    .bind(model_id)
+    .fetch_one(&state.db)
+    .await
+}
+
+async fn finish_gateway_attempt(
+    state: &AppState,
+    attempt_id: Uuid,
+    status: Option<i32>,
+    error_message: Option<&str>,
+    error_detail: Option<&str>,
+    prompt_tokens: Option<i64>,
+    completion_tokens: Option<i64>,
+    total_tokens: Option<i64>,
+    duration_ms: Option<i64>,
+) {
+    let _ = sqlx::query(
+        r#"
+        UPDATE gateway_attempts
+        SET finished_at = NOW(),
+            upstream_status = $2,
+            error_message = $3,
+            error_detail = $4,
+            prompt_tokens = $5,
+            completion_tokens = $6,
+            total_tokens = $7,
+            duration_ms = $8
+        WHERE id = $1
+        "#,
+    )
+    .bind(attempt_id)
+    .bind(status)
+    .bind(error_message)
+    .bind(error_detail)
+    .bind(prompt_tokens)
+    .bind(completion_tokens)
+    .bind(total_tokens)
+    .bind(duration_ms)
     .execute(&state.db)
     .await;
 }
@@ -1742,6 +2185,7 @@ async fn ai_proxy(
         return Err((StatusCode::NOT_FOUND, "hosted_gateway_disabled".to_string()));
     }
 
+    let started_at = Utc::now();
     let headers = req.headers().clone();
     let access = ensure_gateway_access(&state, &headers)
         .await
@@ -1789,9 +2233,26 @@ async fn ai_proxy(
             })?;
     }
 
+    // Build request metadata from client headers and payload.
+    let request_payload = redact_image_data(&body_json);
+    let meta = GatewayRequestMeta {
+        chat_id: header_str(&headers, "x-zwork-chat-id"),
+        project_id: header_str(&headers, "x-zwork-project-id"),
+        app_version: header_str(&headers, "x-zwork-app-version"),
+        os: header_str(&headers, "x-zwork-os"),
+        request_payload: Some(request_payload),
+        request_body_size_bytes: Some(body_bytes.len() as i64),
+        stream: body_json.get("stream").and_then(|v| v.as_bool()),
+        max_tokens: body_json.get("max_tokens").and_then(|v| v.as_i64()),
+        tool_count: body_json
+            .get("tools")
+            .and_then(|v| v.as_array())
+            .map(|a| a.len() as i32),
+    };
+
     let request_id = if let Some(user) = &app_user {
         Some(
-            insert_gateway_request(&state, &user.user_id, &run_id, request_kind)
+            insert_gateway_request(&state, &user.user_id, &run_id, request_kind, &meta)
                 .await
                 .map_err(|_| {
                     (
@@ -1805,6 +2266,7 @@ async fn ai_proxy(
     };
 
     let mut failures: Vec<String> = Vec::new();
+    let mut attempt_number: i32 = 0;
 
     let resolved_model = resolve_upstream_model(&openai_model);
     let mut providers_to_try: Vec<&GatewayProvider> = Vec::new();
@@ -1819,19 +2281,42 @@ async fn ai_proxy(
         }
     }
 
+    // Build routing decision record.
+    let routing_decision = serde_json::json!({
+        "requested_model": openai_model,
+        "resolved_model": resolved_model,
+        "provider_order": providers_to_try.iter().map(|p| serde_json::json!({
+            "name": p.name,
+            "primary_model": p.primary_model,
+            "fallback_model": p.fallback_model,
+        })).collect::<Vec<_>>(),
+    });
+
     for provider in providers_to_try {
-        let models = if provider.fallback_model.trim().is_empty()
-            || provider.fallback_model.trim() == provider.primary_model.trim()
+        // Build the list of models to try for this provider. If the provider
+        // claims to support the requested model (primary or fallback matches),
+        // prefer the requested model so users actually get what they selected.
+        // Otherwise fall back to the provider's configured models.
+        let supports_requested = provider.primary_model == resolved_model
+            || provider.fallback_model == resolved_model;
+
+        let mut models: Vec<String> = Vec::new();
+        if supports_requested {
+            models.push(resolved_model.to_string());
+        }
+        if !supports_requested || provider.primary_model != resolved_model {
+            models.push(provider.primary_model.clone());
+        }
+        if !provider.fallback_model.trim().is_empty()
+            && provider.fallback_model != provider.primary_model
+            && provider.fallback_model != resolved_model
         {
-            vec![provider.primary_model.clone()]
-        } else {
-            vec![
-                provider.primary_model.clone(),
-                provider.fallback_model.clone(),
-            ]
-        };
+            models.push(provider.fallback_model.clone());
+        }
 
         for model_name in models {
+            attempt_number += 1;
+            let attempt_started = Utc::now();
             let mut attempt_body = body_json.clone();
             if let Some(obj) = attempt_body.as_object_mut() {
                 obj.insert("model".to_string(), Value::String(model_name.clone()));
@@ -1850,8 +2335,19 @@ async fn ai_proxy(
 
             let resp = match builder.send().await {
                 Ok(resp) => resp,
-                Err(_) => {
-                    failures.push(format!("{}:{} unreachable", provider.name, model_name));
+                Err(e) => {
+                    let msg = format!("{}:{} unreachable: {}", provider.name, model_name, e);
+                    failures.push(msg.clone());
+                    if let Some(req_id) = request_id {
+                        let attempt_id = insert_gateway_attempt(&state, req_id, attempt_number, &provider.name, &model_name).await.ok();
+                        if let Some(aid) = attempt_id {
+                            finish_gateway_attempt(
+                                &state, aid, None, Some("unreachable"), Some(&msg),
+                                None, None, None,
+                                Some((Utc::now() - attempt_started).num_milliseconds()),
+                            ).await;
+                        }
+                    }
                     continue;
                 }
             };
@@ -1864,46 +2360,92 @@ async fn ai_proxy(
                     .await
                     .unwrap_or_default()
                     .chars()
-                    .take(180)
+                    .take(500)
                     .collect::<String>();
-                failures.push(format!(
+                let msg = format!(
                     "{}:{} {} {}",
                     provider.name,
                     model_name,
                     status.as_u16(),
                     detail
-                ));
+                );
+                failures.push(msg.clone());
+                if let Some(req_id) = request_id {
+                    let attempt_id = insert_gateway_attempt(&state, req_id, attempt_number, &provider.name, &model_name).await.ok();
+                    if let Some(aid) = attempt_id {
+                        finish_gateway_attempt(
+                            &state, aid, Some(status.as_u16() as i32), Some("upstream_error"), Some(&detail),
+                            None, None, None,
+                            Some((Utc::now() - attempt_started).num_milliseconds()),
+                        ).await;
+                    }
+                }
                 continue;
             }
 
-            let body_bytes = match resp.bytes().await {
-                Ok(bytes) => bytes,
-                Err(_) => {
-                    failures.push(format!(
-                        "{}:{} response_read_failed",
-                        provider.name, model_name
-                    ));
-                    continue;
-                }
+            // Success path: capture the full response stream, timing, and usage.
+            let attempt_id = if let Some(req_id) = request_id {
+                insert_gateway_attempt(&state, req_id, attempt_number, &provider.name, &model_name).await.ok()
+            } else {
+                None
             };
-            let body_json: Option<Value> = serde_json::from_slice(&body_bytes).ok();
-            let (prompt_tokens, completion_tokens, total_tokens) = body_json
-                .as_ref()
-                .map(parse_usage_counts)
-                .unwrap_or((None, None, None));
-            if let Some(request_id) = request_id {
+
+            let stream = resp.bytes_stream();
+            let rx = capture_stream_metadata(stream);
+            let (response_bytes, first_byte_at, stream_input, stream_output, stream_total) = rx.await.unwrap_or_else(|_| (Vec::new(), None, None, None, None));
+            let attempt_finished = Utc::now();
+            let attempt_duration_ms = (attempt_finished - attempt_started).num_milliseconds();
+            let upstream_duration_ms = first_byte_at.map(|ft| (attempt_finished - ft).num_milliseconds());
+
+            let body_json: Option<Value> = serde_json::from_slice(&response_bytes).ok();
+            let (mut prompt_tokens, mut completion_tokens, mut total_tokens) = (stream_input, stream_output, stream_total);
+            if let Some(ref json) = body_json {
+                if prompt_tokens.is_none() || completion_tokens.is_none() {
+                    let (p, c, t) = parse_usage_counts(json);
+                    prompt_tokens = prompt_tokens.or(p);
+                    completion_tokens = completion_tokens.or(c);
+                    total_tokens = total_tokens.or(t);
+                }
+            }
+
+            let response_payload = body_json.as_ref().map(redact_image_data);
+            let response_body_size_bytes = Some(response_bytes.len() as i64);
+            let status_i32 = Some(status.as_u16() as i32);
+            let cost = estimate_cost(&provider.name, &model_name, prompt_tokens, completion_tokens);
+
+            if let Some(req_id) = request_id {
                 mark_gateway_request_upstream(
                     &state,
-                    request_id,
+                    req_id,
                     &provider.name,
                     &model_name,
                     prompt_tokens,
                     completion_tokens,
                     total_tokens,
-                )
-                .await;
-                finish_gateway_request(&state, request_id, Some(status.as_u16() as i32)).await;
+                    first_byte_at,
+                    upstream_duration_ms,
+                    cost,
+                    Some(routing_decision.clone()),
+                    Some(serde_json::Value::Array(failures.iter().map(|f| serde_json::Value::String(f.clone())).collect())),
+                ).await;
+                finish_gateway_request(
+                    &state,
+                    req_id,
+                    status_i32,
+                    response_payload,
+                    response_body_size_bytes,
+                    Some((Utc::now() - started_at).num_milliseconds()),
+                ).await;
             }
+
+            if let Some(aid) = attempt_id {
+                finish_gateway_attempt(
+                    &state, aid, status_i32, None, None,
+                    prompt_tokens, completion_tokens, total_tokens,
+                    Some(attempt_duration_ms),
+                ).await;
+            }
+
             upsert_provider_snapshot(
                 &state,
                 &provider.name,
@@ -1916,7 +2458,7 @@ async fn ai_proxy(
             let response_bytes = body_json
                 .as_ref()
                 .and_then(wrap_json_completion_as_sse)
-                .unwrap_or_else(|| body_bytes.to_vec());
+                .unwrap_or_else(|| response_bytes);
             let body = axum::body::Body::from(response_bytes);
             let mut response = Response::new(body);
             *response.status_mut() = status;
@@ -1948,8 +2490,25 @@ async fn ai_proxy(
             &state,
             request_id,
             Some(StatusCode::BAD_GATEWAY.as_u16() as i32),
+            Some(serde_json::json!({ "failures": failures })),
+            None,
+            Some((Utc::now() - started_at).num_milliseconds()),
         )
         .await;
+        mark_gateway_request_upstream(
+            &state,
+            request_id,
+            "",
+            "",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(routing_decision),
+            Some(serde_json::Value::Array(failures.iter().map(|f| serde_json::Value::String(f.clone())).collect())),
+        ).await;
     }
 
     Err((
@@ -1966,6 +2525,7 @@ async fn ai_proxy_anthropic(
         return Err((StatusCode::NOT_FOUND, "hosted_gateway_disabled".to_string()));
     }
 
+    let started_at = Utc::now();
     let headers = req.headers().clone();
     let access = ensure_gateway_access(&state, &headers)
         .await
@@ -2038,9 +2598,25 @@ async fn ai_proxy_anthropic(
             })?;
     }
 
+    let request_payload = redact_image_data(&body_json);
+    let meta = GatewayRequestMeta {
+        chat_id: header_str(&headers, "x-zwork-chat-id"),
+        project_id: header_str(&headers, "x-zwork-project-id"),
+        app_version: header_str(&headers, "x-zwork-app-version"),
+        os: header_str(&headers, "x-zwork-os"),
+        request_payload: Some(request_payload),
+        request_body_size_bytes: Some(body_bytes.len() as i64),
+        stream: Some(true),
+        max_tokens: body_json.get("max_tokens").and_then(|v| v.as_i64()),
+        tool_count: body_json
+            .get("tools")
+            .and_then(|v| v.as_array())
+            .map(|a| a.len() as i32),
+    };
+
     let request_id = if let Some(user) = &app_user {
         Some(
-            insert_gateway_request(&state, &user.user_id, &run_id, request_kind)
+            insert_gateway_request(&state, &user.user_id, &run_id, request_kind, &meta)
                 .await
                 .map_err(|_| {
                     (
@@ -2057,17 +2633,35 @@ async fn ai_proxy_anthropic(
     ensure_thinking_blocks(&mut body_json);
 
     let mut failures: Vec<String> = Vec::new();
+    let mut attempt_number: i32 = 0;
+    let resolved_model = resolve_upstream_model(&requested_model);
+    let routing_decision = serde_json::json!({
+        "requested_model": requested_model,
+        "resolved_model": resolved_model,
+        "provider_order": state.gateway.providers.iter()
+            .filter(|p| p.protocol == GatewayProtocol::Anthropic)
+            .map(|p| serde_json::json!({
+                "name": p.name,
+                "primary_model": p.primary_model,
+                "fallback_model": p.fallback_model,
+            }))
+            .collect::<Vec<_>>(),
+    });
 
     for provider in &state.gateway.providers {
         if provider.protocol != GatewayProtocol::Anthropic {
             continue;
         }
 
+        attempt_number += 1;
+        let attempt_started = Utc::now();
+        let upstream_model = resolved_model.to_string();
+
         if let Some(obj) = body_json.as_object_mut() {
             // Resolve app aliases (zwork-flash → deepseek-v4-flash) before sending upstream
             obj.insert(
                 "model".to_string(),
-                Value::String(resolve_upstream_model(&requested_model).to_string()),
+                Value::String(upstream_model.clone()),
             );
             obj.insert("stream".to_string(), Value::Bool(true));
         }
@@ -2084,11 +2678,19 @@ async fn ai_proxy_anthropic(
             .await
         {
             Ok(resp) => resp,
-            Err(_) => {
-                failures.push(format!(
-                    "{}:{} unreachable",
-                    provider.name, provider.primary_model
-                ));
+            Err(e) => {
+                let msg = format!("{}:{} unreachable: {}", provider.name, upstream_model, e);
+                failures.push(msg.clone());
+                if let Some(req_id) = request_id {
+                    let attempt_id = insert_gateway_attempt(&state, req_id, attempt_number, &provider.name, &upstream_model).await.ok();
+                    if let Some(aid) = attempt_id {
+                        finish_gateway_attempt(
+                            &state, aid, None, Some("unreachable"), Some(&msg),
+                            None, None, None,
+                            Some((Utc::now() - attempt_started).num_milliseconds()),
+                        ).await;
+                    }
+                }
                 continue;
             }
         };
@@ -2101,7 +2703,7 @@ async fn ai_proxy_anthropic(
                 .await
                 .unwrap_or_default()
                 .chars()
-                .take(180)
+                .take(500)
                 .collect::<String>();
             // Log tool names to help debug duplicate-tool-name errors
             if let Some(tools) = body_json.get("tools").and_then(|t| t.as_array()) {
@@ -2125,56 +2727,84 @@ async fn ai_proxy_anthropic(
                     &detail,
                 );
             }
-            failures.push(format!(
+            let msg = format!(
                 "{}:{} {} {}",
                 provider.name,
-                provider.primary_model,
+                upstream_model,
                 status.as_u16(),
                 detail
-            ));
+            );
+            failures.push(msg.clone());
+            if let Some(req_id) = request_id {
+                let attempt_id = insert_gateway_attempt(&state, req_id, attempt_number, &provider.name, &upstream_model).await.ok();
+                if let Some(aid) = attempt_id {
+                    finish_gateway_attempt(
+                        &state, aid, Some(status.as_u16() as i32), Some("upstream_error"), Some(&detail),
+                        None, None, None,
+                        Some((Utc::now() - attempt_started).num_milliseconds()),
+                    ).await;
+                }
+            }
             continue;
         }
 
         // Stream the response, intercepting SSE events to extract token usage
+        let attempt_id = if let Some(req_id) = request_id {
+            insert_gateway_attempt(&state, req_id, attempt_number, &provider.name, &upstream_model).await.ok()
+        } else {
+            None
+        };
         let upstream_body = resp.bytes_stream();
         let (body, usage_rx) = sse_stream_with_usage(upstream_body);
 
-        if let Some(request_id) = request_id {
-            let upstream_status = status.as_u16() as i32;
-            mark_gateway_request_upstream(
-                &state,
-                request_id,
-                &provider.name,
-                &provider.primary_model,
-                None,
-                None,
-                None,
-            )
-            .await;
-            finish_gateway_request(&state, request_id, Some(upstream_status)).await;
-
-            // Update tokens once the stream finishes
+        if let Some(req_id) = request_id {
             let state_clone = state.clone();
+            let provider_name = provider.name.clone();
+            let upstream_model_clone = upstream_model.clone();
+            let started = started_at;
+            let routing = routing_decision.clone();
+            let failure_json = serde_json::Value::Array(failures.iter().map(|f| serde_json::Value::String(f.clone())).collect());
             tokio::spawn(async move {
-                if let Ok((prompt_tokens, completion_tokens, _)) = usage_rx.await {
-                    if prompt_tokens.is_some() || completion_tokens.is_some() {
-                        sqlx::query(
-                            "UPDATE gateway_requests SET prompt_tokens = COALESCE($2, prompt_tokens), completion_tokens = COALESCE($3, completion_tokens) WHERE id = $1"
-                        )
-                        .bind(request_id)
-                        .bind(prompt_tokens)
-                        .bind(completion_tokens)
-                        .execute(&state_clone.db)
-                        .await
-                        .ok();
-                    }
+                let Ok((first_byte_at, prompt_tokens, completion_tokens, total_tokens)) = usage_rx.await else { return; };
+                let finished_at = Utc::now();
+                let upstream_duration_ms = first_byte_at.map(|ft| (finished_at - ft).num_milliseconds());
+                let total_duration_ms = (finished_at - started).num_milliseconds();
+                let cost = estimate_cost(&provider_name, &upstream_model_clone, prompt_tokens, completion_tokens);
+                mark_gateway_request_upstream(
+                    &state_clone,
+                    req_id,
+                    &provider_name,
+                    &upstream_model_clone,
+                    prompt_tokens,
+                    completion_tokens,
+                    total_tokens,
+                    first_byte_at,
+                    upstream_duration_ms,
+                    cost,
+                    Some(routing),
+                    Some(failure_json),
+                ).await;
+                finish_gateway_request(
+                    &state_clone,
+                    req_id,
+                    Some(status.as_u16() as i32),
+                    None,
+                    None,
+                    Some(total_duration_ms),
+                ).await;
+                if let Some(aid) = attempt_id {
+                    finish_gateway_attempt(
+                        &state_clone, aid, Some(status.as_u16() as i32), None, None,
+                        prompt_tokens, completion_tokens, total_tokens,
+                        Some((finished_at - attempt_started).num_milliseconds()),
+                    ).await;
                 }
             });
         }
         upsert_provider_snapshot(
             &state,
             &provider.name,
-            &provider.primary_model,
+            &upstream_model,
             status.as_u16() as i32,
             &upstream_headers,
         )
@@ -2208,8 +2838,25 @@ async fn ai_proxy_anthropic(
             &state,
             request_id,
             Some(StatusCode::BAD_GATEWAY.as_u16() as i32),
+            Some(serde_json::json!({ "failures": failures })),
+            None,
+            Some((Utc::now() - started_at).num_milliseconds()),
         )
         .await;
+        mark_gateway_request_upstream(
+            &state,
+            request_id,
+            "",
+            "",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(routing_decision),
+            Some(serde_json::Value::Array(failures.iter().map(|f| serde_json::Value::String(f.clone())).collect())),
+        ).await;
     }
 
     Err((
@@ -4809,6 +5456,10 @@ async fn main() {
             HeaderName::from_static("x-request-id"),
             HeaderName::from_static("x-zwork-run-id"),
             HeaderName::from_static("x-zwork-request-kind"),
+            HeaderName::from_static("x-zwork-chat-id"),
+            HeaderName::from_static("x-zwork-project-id"),
+            HeaderName::from_static("x-zwork-app-version"),
+            HeaderName::from_static("x-zwork-os"),
         ]);
 
     // Per-IP rate limit applied only to the credential-handling auth endpoints.
@@ -4903,6 +5554,11 @@ async fn main() {
         )
         .merge(auth_routes)
         .layer(cors)
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(tower_http::trace::DefaultMakeSpan::new().level(tracing::Level::INFO))
+                .on_response(tower_http::trace::DefaultOnResponse::new().level(tracing::Level::INFO)),
+        )
         .with_state(state);
 
     let listener = TcpListener::bind("0.0.0.0:8080").await.unwrap();

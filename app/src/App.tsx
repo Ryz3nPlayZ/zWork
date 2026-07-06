@@ -1,10 +1,13 @@
 import { Suspense, lazy, useEffect, useState } from "react";
 import { CheckCircle2, ExternalLink, X, AlertTriangle } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
+import { TopStrip } from "./components/TopStrip";
 import { Landing } from "./components/Landing";
 import { useApp } from "./lib/store";
 import { consumeInstalledUpdateNotice, detectUpdate, installUpdate, openReleaseUrl, type UpdateCardState, type UpdateProgress } from "./lib/update";
 import { cn } from "./lib/cn";
+import { loadZoom, applyZoom, zoomIn, zoomOut, zoomReset } from "./lib/zoom";
+import { useTranslucencyPref, nativeVibrancySupported } from "./lib/translucency";
 import { recordTelemetry, setTelemetryEnabled, startTelemetrySession, stopTelemetrySession } from "./lib/telemetry";
 import { fallbackAppVersion, resolveAppVersion } from "./lib/appVersion";
 import { fetchCloudSession, onCloudAuthChanged, handleOAuthTokenCallback, type CloudUser } from "./lib/cloud";
@@ -26,9 +29,11 @@ const ConnectorsPage = lazy(() => import("./components/ConnectorsPage").then((m)
 const AdminPage = lazy(() => import("./components/AdminPage").then((m) => ({ default: m.AdminPage })));
 const TasksPage = lazy(() => import("./components/tasks/TasksPage").then((m) => ({ default: m.TasksPage })));
 const InboxPage = lazy(() => import("./components/InboxPage").then((m) => ({ default: m.InboxPage })));
+const ScheduledTasksPage = lazy(() => import("./components/scheduled/ScheduledTasksPage").then((m) => ({ default: m.ScheduledTasksPage })));
 const OverlayChatView = lazy(() => import("./components/OverlayChatView").then((m) => ({ default: m.OverlayChatView })));
-import { Logo } from "./components/Logo";
 import { KeybindingsModal } from "./components/KeybindingsModal";
+import { PermissionPrompt } from "./components/PermissionPrompt";
+import { BootProgress } from "./components/BootProgress";
 
 
 function OfflineBanner() {
@@ -47,20 +52,20 @@ function OfflineBanner() {
   };
 
   return (
-    <div className="shrink-0 border-b border-amber-500/20 bg-amber-500/5 px-4 py-2 flex items-center justify-between text-[11px] text-amber-500 animate-in fade-in duration-200">
+    <div className="shrink-0 border-b border-warning/20 bg-warning/5 px-4 py-2 flex items-center justify-between text-[11px] text-warning animate-in fade-in duration-200">
       <div className="flex items-center gap-2">
         <span className="font-semibold flex items-center gap-1.5">
-          <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+          <AlertTriangle className="h-3.5 w-3.5 text-warning" />
           Running Offline:
         </span>
-        <span className="text-amber-500/90">
+        <span className="text-warning/90">
           The local backend is unreachable. Showing cached chats and local canvas editors.
         </span>
       </div>
       <button
         onClick={handleRetry}
         disabled={reconnecting}
-        className="px-2.5 py-1 text-[10.5px] font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 rounded-lg transition-all border border-amber-500/30 disabled:opacity-50 cursor-pointer"
+        className="px-2.5 py-1 text-[10.5px] font-semibold bg-warning/10 hover:bg-warning/20 text-warning rounded-lg transition-colors border border-warning/30 disabled:opacity-50 cursor-pointer"
       >
         {reconnecting ? "Connecting..." : "Reconnect"}
       </button>
@@ -68,7 +73,31 @@ function OfflineBanner() {
   );
 }
 
+/**
+ * Detect whether this webview is the overlay window, synchronously.
+ * Tauri injects the window label into `__TAURI_INTERNALS__.metadata` before
+ * any app JS runs, so this is safe to call at the top of the component.
+ */
+function isOverlayWindow(): boolean {
+  if (typeof window === "undefined") return false;
+  const internals = (window as any).__TAURI_INTERNALS__;
+  return internals?.metadata?.currentWindow?.label === "overlay";
+}
+
 export default function App() {
+  // Detect the overlay window SYNCHRONOUSLY — this must happen before any
+  // hooks are called. The window label is constant for the process lifetime,
+  // so returning early here keeps the hook count stable across renders
+  // (violating this causes React error #300). Previously this was an async
+  // state that flipped false→true mid-lifecycle, skipping later hooks.
+  if (isOverlayWindow()) {
+    return (
+      <Suspense fallback={<div className="h-screen w-screen bg-paper/10 backdrop-blur-xl" />}>
+        <OverlayChatView />
+      </Suspense>
+    );
+  }
+
   const previewMode = getPreviewMode();
   // Handle OAuth token callback from web sign-in (must run before any auth logic)
   handleOAuthTokenCallback();
@@ -96,29 +125,8 @@ export default function App() {
   const keybindingsOpen = useApp((s) => s.keybindingsOpen);
   const setKeybindingsOpen = useApp((s) => s.setKeybindingsOpen);
 
-  const [isOverlay, setIsOverlay] = useState(false);
-  useEffect(() => {
-    if (typeof window !== "undefined" && (window as any).__TAURI_INTERNALS__) {
-      import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-        try {
-          const win = getCurrentWindow();
-          if (win.label === "overlay") {
-            setIsOverlay(true);
-          }
-        } catch (err) {
-          console.error(err);
-        }
-      });
-    }
-  }, []);
-
-  if (isOverlay) {
-    return (
-      <Suspense fallback={<div className="h-screen w-screen bg-paper/10 backdrop-blur-xl" />}>
-        <OverlayChatView />
-      </Suspense>
-    );
-  }
+  const translucency = useTranslucencyPref();
+  const useNativeGlass = translucency === "on" && nativeVibrancySupported();
 
   // Skip onboarding in browser preview mode (non-Tauri environment)
   const skipOnboarding = typeof window !== "undefined" && !((window as any).__TAURI_INTERNALS__);
@@ -195,15 +203,11 @@ export default function App() {
     };
   }, []);
 
-  // Restore saved zoom level
+  // Restore saved zoom level on boot. Goes through lib/zoom.ts so the native
+  // webview setZoom() (Tauri) or CSS transform fallback (browser) is applied
+  // consistently — never the desync-prone CSS `zoom` property.
   useEffect(() => {
-    const saved = localStorage.getItem("zwork.zoom");
-    if (saved) {
-      const zoom = parseFloat(saved);
-      if (zoom >= 0.8 && zoom <= 1.5) {
-        document.documentElement.style.setProperty("--zoom-level", String(zoom));
-      }
-    }
+    void applyZoom(loadZoom());
   }, []);
 
   useEffect(() => {
@@ -383,6 +387,11 @@ export default function App() {
       } else if (mod && e.key === "\\") {
         e.preventDefault();
         toggleSidebar();
+      } else if (mod && e.key.toLowerCase() === "s") {
+        // Cmd/Ctrl+S toggles the sidebar. preventDefault stops the browser's
+        // "Save Page" dialog. Kept alongside Cmd+\ so both bindings work.
+        e.preventDefault();
+        toggleSidebar();
       } else if (mod && e.key === ",") {
         e.preventDefault();
         setView("settings");
@@ -394,20 +403,13 @@ export default function App() {
         triggerFocusChatInput();
       } else if (mod && (e.key === "+" || e.key === "=")) {
         e.preventDefault();
-        const cur = parseFloat(localStorage.getItem("zwork.zoom") || "1");
-        const next = Math.min(1.5, Math.round((cur + 0.1) * 10) / 10);
-        localStorage.setItem("zwork.zoom", String(next));
-        document.documentElement.style.setProperty("--zoom-level", String(next));
+        void zoomIn();
       } else if (mod && e.key === "-") {
         e.preventDefault();
-        const cur = parseFloat(localStorage.getItem("zwork.zoom") || "1");
-        const next = Math.max(0.5, Math.round((cur - 0.1) * 10) / 10);
-        localStorage.setItem("zwork.zoom", String(next));
-        document.documentElement.style.setProperty("--zoom-level", String(next));
+        void zoomOut();
       } else if (mod && e.key === "0") {
         e.preventDefault();
-        localStorage.setItem("zwork.zoom", "1");
-        document.documentElement.style.setProperty("--zoom-level", "1");
+        void zoomReset();
       } else if (mod && e.key.toLowerCase() === "j") {
         e.preventDefault();
         // setView("tasks"); // Disabled for now (deferred to backlog)
@@ -473,23 +475,21 @@ export default function App() {
   // Without this, providers/settings/connectors all load as empty.
   const isTauri = typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
   if (isTauri && !backendReady) {
-    return (
-      <div className="flex h-screen w-screen items-center justify-center bg-paper">
-        <div className="flex flex-col items-center gap-4">
-          <div className="animate-[pulse_2s_ease-in-out_infinite]">
-            <Logo size={48} className="text-ink" />
-          </div>
-          <span className="text-[12px] text-ink-faint">Warming up…</span>
-        </div>
-      </div>
-    );
+    return <BootProgress />;
   }
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-paper">
+    <div className={cn("flex h-screen w-screen flex-col overflow-hidden", useNativeGlass ? "bg-transparent" : "bg-paper")}>
+      {/* TopStrip is the single drag region for the window and houses the
+          sidebar collapse button in a fixed spot next to the traffic lights.
+          See components/TopStrip.tsx. Requires core:window:allow-start-dragging. */}
+      <TopStrip />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar />
-        <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+        {/* Main content stays opaque — translucency is sidebar-only so the
+            reading pane stays readable. The native Effect.Sidebar material is
+            applied to the whole window but only shows through transparent regions. */}
+        <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-paper">
           {/* Hide DailyGoalBar progress bar (deferred to backlog)
           <DailyGoalBar />
           */}
@@ -523,6 +523,10 @@ export default function App() {
             <Suspense fallback={panelFallback}>
               <InboxPage />
             </Suspense>
+          ) : view === "scheduled" ? (
+            <Suspense fallback={panelFallback}>
+              <ScheduledTasksPage />
+            </Suspense>
           ) : view === "admin" ? (
             <Suspense fallback={panelFallback}>
               <AdminPage />
@@ -554,8 +558,8 @@ export default function App() {
           )}
           {recentUpdateNotice && (
             <div className="pointer-events-none absolute inset-x-0 bottom-5 z-20 flex justify-center px-6">
-              <div className="pointer-events-auto flex w-full max-w-[640px] items-center gap-3 rounded-2xl border border-line bg-paper-raised px-4 py-3 shadow-pop">
-                <CheckCircle2 className="h-4.5 w-4.5 shrink-0 text-emerald-600" />
+              <div className="pointer-events-auto flex w-full max-w-[640px] items-center gap-3 rounded-2xl hairline bg-paper-raised px-4 py-3 shadow-lift">
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
                 <div className="min-w-0 flex-1 text-[12.5px] text-ink">
                   zWork {recentUpdateNotice.version} installed.{" "}
                   <button
@@ -590,6 +594,7 @@ export default function App() {
           <SearchModal />
         </Suspense>
         <KeybindingsModal />
+        <PermissionPrompt />
       </div>
     </div>
   );

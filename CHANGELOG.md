@@ -1,6 +1,126 @@
 # Changelog
 
-All notable changes to zWork are documented here.
+All notable changes to zWork are documented in this file.
+
+## v0.5.0-beta.6
+
+**UI overhaul: calmer theme system, redesigned titlebar, and a draggable window that finally feels right.**
+
+### Window & layout
+- **New full-width top strip owns window dragging.** A single 22px transparent strip at the top of the window carries the sidebar collapse button (fixed next to the macOS traffic lights, so it never jumps when the sidebar toggles) and is the one consistent draggable edge across the whole window. Replaces the previous per-view "overlay" drag pattern where each header had its own hit-and-miss drag region.
+- **Sidebar collapse state now persists** across launches (`localStorage["zwork:sidebar-open"]`) instead of always resetting to open.
+- **Collapsed sidebar icon spacing fixed.** Footer icons now center-align with the nav icons above them, and padding/gap no longer mismatch between nav and footer.
+- **Cleaned up the dead `.titlebar-drag` class** across Settings, ArtifactPanel, Onboarding, LoginScreen, and ChatInput — it was an Electron-ism WKWebView ignores. Onboarding and Login (which render as full-screen gates without the top strip) now use the real `startDragging()` handler.
+- **Reduced excessive top padding** (128px → 32px) on Analytics, Plan, and Connectors pages now that the top strip handles traffic-light clearance.
+
+### Theme system (OpenCode-inspired)
+- **Alpha-overlay borders.** Borders are now translucent overlays (black in light mode, white in dark) via the new `--border-overlay` token and `border-edge` / `edge-strong` / `edge-muted` Tailwind colors, plus `.hairline-ring` and `.focus-ring` elevation utilities. A border adapts to whatever surface it sits on instead of reading as a harsh fixed-color line.
+- **Fixed surface contrast across all dark themes.** Tightened `paperRaised` jumps so the chatbox no longer glares — Catppuccin Mocha's raised surface went from +39pt above base to +19pt; same treatment for Atom One, Dracula, Tokyo Night, Gruvbox, Nord, Monokai, and Aura. Split every duplicate `inkMuted === inkFaint` pair so text hierarchy has three distinct steps.
+- **Fixed light-mode flatness.** Parchment light `paper-soft` / `paper-raised` were *lighter* than base (the OpenCode mirror rule says raised surfaces should step *darker* toward the foreground in light mode) — corrected.
+- **Chatbox redesigned.** Now matches the page fill (`bg-paper`) with elevation from a hairline ring and focus from an accent-tinted ring, instead of being a visibly different-colored box.
+- **Deleted dead `bubble` / `bubbleFg` tokens** from the `TokenSet` interface, all 14 presets, the theme mapper, and Tailwind config — they were defined but used nowhere.
+
+### Translucency
+- **Switched native macOS material from `FullScreenUI` to `Sidebar`** (the most-muted NSVisualEffectMaterial — what Finder/Mail use). Real desktop bleed-through but text stays crisp.
+- **Raised the CSS fallback opacity** from `/70` to `/85` for non-vibrancy platforms.
+- **Top strip is no longer translucent** — it's transparent and vanishes into whatever column is below it.
+
+### Other fixes
+- **Stray scrollbars on the landing chatbox** — the textarea's scrollbar gutter no longer lights up on hover. Added `[scrollbar-width:none] [&::-webkit-scrollbar]:hidden` to the chatbox textarea (the global hover-thumb rule remains for actual scroll containers).
+- **Replaced the desync-prone CSS `zoom` with native webview zoom** (`getCurrentWebview().setZoom()` on Tauri, `transform: scale()` browser fallback) — fixes the broken text-selection rectangles. New `lib/zoom.ts` with `zoomIn` / `zoomOut` / `zoomReset`, persisted to `localStorage["zwork.zoom"]`.
+- **Added `core:window:allow-start-dragging` and `core:webview:allow-set-webview-zoom`** to the Tauri capabilities — the missing permissions were silently breaking window drag and native zoom.
+
+## v0.5.0-beta.5
+
+**Fix: revert secret store to plaintext file I/O — eliminates keychain prompts.**
+
+### Fixes
+- **Removed the `keyring` crate entirely.** The secret store is back to pure plaintext file I/O (`~/.zwork/secrets.json`, 0o600) — exactly as it was in v0.5.0-alpha.19, before the regression was introduced. The backend no longer touches the macOS Keychain, Windows Credential Manager, or Linux Secret Service, so there are zero OS keychain authorization prompts on startup or anywhere else. This reverts the regression that was inadvertently bundled into the beta.2 release.
+
+  Beta.3's in-process cache and beta.4's file-first-with-keychain-fallback were both over-engineered partial measures. The correct fix was to remove the keychain code altogether and return to what worked: a single plaintext file, no OS integration, no prompts.
+
+  Secrets now live only in `~/.zwork/secrets.json`. If you previously stored keys in the keychain (via a beta.2/beta.3/beta.4 build), they are not migrated — re-enter your API key once in Settings after upgrading.
+
+## v0.5.0-beta.4
+
+**Fix: macOS keychain prompts — for real this time.**
+
+### Fixes
+- **Secret store now file-first (matching the Python backend).** The sidecar reads credentials from `~/.zwork/secrets.json` before ever touching the OS keychain, eliminating the keychain authorization prompts entirely on the read path. The keychain is now only a fallback for credentials missing from the file, and a best-effort sync target on writes. This restores the Python backend's `"file"` default mode (commit `16cc9a4`), which the Rust rewrite had inadvertently discarded in favor of keychain-first reads.
+
+  The first launch after upgrading transparently migrates any existing keychain credentials into `secrets.json`, so file-first reads have data to find and never fall through to the keychain. After that one-time migration, the keychain is not consulted on reads at all — no prompts, ever.
+
+  (Beta 3's in-process cache was a partial measure that only reduced prompt count; this is the actual fix. The cache has been removed since it's no longer needed.)
+
+## v0.5.0-beta.3
+
+**Fix: repeated macOS keychain prompts on startup.**
+
+### Fixes
+- **Keychain authorization prompts on startup** — the sidecar now caches resolved keychain values for the process lifetime, so the OS keychain is queried at most once per credential per process start. Previously, every `settings::load()` call re-read all 11 known credentials from the keychain, and the frontend bootstrap fired 3 concurrent endpoint calls — producing ~33 `"zwork-backend wants to use your confidential information stored in 'zwork'"` prompts on launch, with ~11 more on every chat turn and scheduler tick. Cache is kept coherent with `keyring_set` / `keyring_delete` so writes/deletes still take effect immediately.
+
+## v0.5.0-beta.2
+
+**UI polish, navigation fixes, and connector branding fixes.**
+
+### Fixes
+- **Back arrow on project chats** — the "back to project" arrow in the chat header now appears immediately when a chat is started from a project (previously it only showed after reloading the chat, because the project context wasn't carried onto the optimistically-created chat object).
+- **Connector logos render correctly** — brand marks on the Connectors page were showing as solid colored squares because the CDN-hosted SVG `mask-image` was blocked by the Tauri CSP on macOS/Windows webviews. Logos are now inlined as SVG paths, eliminating the network fetch and CSP interaction entirely. Also refreshed the GitHub brand color to the current `#181717`.
+- **`Cmd/Ctrl+S` toggles the sidebar** — new keyboard shortcut (alongside the existing `Cmd/Ctrl+\`) with `preventDefault` so the browser's "Save Page" dialog no longer fires. Documented in the keyboard shortcuts cheatsheet.
+
+### Documentation
+- New `docs/INTEGRATIONS.md` covering the Composio connector architecture, the full data flow, and a step-by-step checklist for enabling new toolkits (e.g. Linear). Documents that the "linear is not yet configured" error is a Composio dashboard auth-config task, not a code gap — the integration plumbing is complete and identical to the working apps.
+
+## v0.5.0-beta.1
+
+**Scheduled agents, app integrations, and a Rust-native backend rewrite.**
+
+This release turns zWork from a chat assistant into a persistent agent: it can run jobs on a schedule, reach into your real apps, and control the desktop — all on a rewritten Rust backend.
+
+### Backend rewrite
+- **Local engine is now Rust (Axum).** The Python/FastAPI sidecar has been replaced by a native Rust sidecar (`sidecar-rust/`) — faster startup, lower memory, no Python runtime to ship. Same HTTP surface and chat UX.
+- Structured agent logging preserved: run-scoped lifecycle events alongside per-turn `request`/`tool_call`/`finish` trace in `agent.jsonl`.
+
+### New capabilities
+- **Scheduled agents** — define recurring tasks (every N minutes, or daily at HH:MM on selected weekdays); a background scheduler fires them on their own and posts results to the inbox. Includes a "Run now" button and free-tier task cap.
+- **Inbox** — a dedicated surface for scheduled-task output (summaries, flags, errors), with read/unread and delete.
+- **Composio integrations** — connect Gmail, Calendar, Slack, and hundreds more; their actions are exposed to the agent as `composio__*` tools. The platform API key is proxied through zWork Cloud and never touches the client.
+- **MCP runtime** — any stdio MCP server from `~/.zwork/mcp.json` (Claude-Desktop shape) is loaded and exposed as `mcp__<server>__<tool>` tools.
+- **`desktop_office` tool** — semantic `.docx`/`.xlsx` editing without a GUI.
+- **`deploy_web_app` tool** — serves a local web app (npm dev or static) and returns a live URL.
+
+### Desktop & browser control (carried forward from alpha.13)
+- cua-driver for native macOS automation (capture AX tree, click, type, scroll, keys).
+- Embedded Chrome bridge for element-level browser automation.
+
+### Docs
+- README and architecture docs updated to reflect the Rust backend and the new feature surface.
+- Roadmap refreshed to v0.5.x.
+
+## v0.5.0-alpha.19
+
+**Critical fix: the app no longer silently terminates on every message.**
+
+- Fixes a regression introduced in v0.5.0-alpha.18 where every message terminated instantly — no response, no error, no loading state. The agent harness had been switched to a `goose` subprocess that exited with code 1 on launch for all models (zWork Pro / Flash / Vision).
+- Restored the proven native `stream_llm` agent loop (unified `LlmEvent` layer, per-protocol Anthropic/OpenAI parsers, loud tool-JSON failure). DeepSeek v4 Pro responds and streams again.
+- Removed the goose subprocess scaffolding (stdio MCP bridge and `mcp` subcommand). Live tool activity, permission gating for destructive tools, and single-source chat history are restored.
+- Preserved structured agent logging: run-scoped `turn_start` / `provider_resolved` lifecycle events alongside the per-turn `request` / `tool_call` / `finish` trace in `agent.jsonl`.
+- Updated version to 0.5.0-alpha.19.
+
+> ⚠️ If you installed v0.5.0-alpha.18, update to this build — alpha.18 cannot respond to any message.
+
+## v0.5.0-alpha.13
+
+**Desktop control via cua-driver, embedded browser bridge, redesigned overlay.**
+
+- Integrated cua-driver for background macOS desktop control: capture AX tree, click by element index, type, scroll, keyboard shortcuts
+- Replaced dctl CLI wrapper with 17 structured tool schemas: `desktop_capture`, `desktop_click`, `desktop_type`, `desktop_scroll`, `desktop_key`, `desktop_focus`, `desktop_list_apps`, `desktop_wait`, `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_eval`, `browser_scroll`, `browser_screenshot`, `browser_tabs`
+- Embedded zbctl WebSocket bridge directly into zWork Rust backend — no Python daemon required. Chrome extension connects to ws://127.0.0.1:8787/ws
+- Bundled cua-driver as Tauri sidecar binary, extension as app resource
+- Redesigned global overlay (Cmd+Ctrl+Space) with clean command bar, scale+fade animation, theme-aware design tokens
+- Updated system prompt with capture→act workflow guidance, desktop vs browser tool selection
+- Removed dctl dependency from CI pipeline
+- Updated version to 0.5.0-alpha.13
 
 ## v0.4.0-beta.2
 

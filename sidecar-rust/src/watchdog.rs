@@ -1,14 +1,17 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
-use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 
 fn active_processes() -> &'static Mutex<HashMap<String, HashSet<u32>>> {
     static INSTANCE: OnceLock<Mutex<HashMap<String, HashSet<u32>>>> = OnceLock::new();
     INSTANCE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn active_cancellers() -> &'static Mutex<HashMap<String, oneshot::Sender<()>>> {
-    static INSTANCE: OnceLock<Mutex<HashMap<String, oneshot::Sender<()>>>> = OnceLock::new();
+/// Per-chat agent-turn handles. Storing the JoinHandle lets `cancel_run`
+/// `.abort()` the in-flight turn — without this, hitting Stop only killed
+/// child subprocesses while the LLM loop kept running to completion.
+fn active_runs() -> &'static Mutex<HashMap<String, JoinHandle<()>>> {
+    static INSTANCE: OnceLock<Mutex<HashMap<String, JoinHandle<()>>>> = OnceLock::new();
     INSTANCE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -24,39 +27,42 @@ pub fn unregister_process(chat_id: &str, pid: u32) {
     }
 }
 
-pub fn register_canceller(chat_id: &str, tx: oneshot::Sender<()>) {
-    let mut map = active_cancellers().lock().unwrap();
-    map.insert(chat_id.to_string(), tx);
+/// Register the agent-turn task so it can be aborted when the user stops a
+/// chat. The handle is removed automatically when the turn finishes (the
+/// caller drops it via `unregister_run`).
+pub fn register_run(chat_id: &str, handle: JoinHandle<()>) {
+    let mut map = active_runs().lock().unwrap();
+    map.insert(chat_id.to_string(), handle);
 }
 
-pub fn unregister_canceller(chat_id: &str) {
-    let mut map = active_cancellers().lock().unwrap();
+pub fn unregister_run(chat_id: &str) {
+    let mut map = active_runs().lock().unwrap();
     map.remove(chat_id);
 }
 
 pub fn cancel_run(chat_id: &str) -> bool {
     let mut cancelled_any = false;
-    
-    // 1. Trigger the oneshot canceller for the token loop
+
+    // 1. Abort the agent turn itself so it stops spawning further tool/LLM calls.
     {
-        let mut map = active_cancellers().lock().unwrap();
-        if let Some(tx) = map.remove(chat_id) {
-            let _ = tx.send(());
+        let mut map = active_runs().lock().unwrap();
+        if let Some(handle) = map.remove(chat_id) {
+            handle.abort();
             cancelled_any = true;
         }
     }
-    
-    // 2. Terminate any registered subprocess trees
+
+    // 2. Terminate any registered subprocess trees spawned by the turn.
     let pids = {
         let mut map = active_processes().lock().unwrap();
         map.remove(chat_id).unwrap_or_default()
     };
-    
+
     for pid in pids {
         terminate_process_tree(pid);
         cancelled_any = true;
     }
-    
+
     cancelled_any
 }
 

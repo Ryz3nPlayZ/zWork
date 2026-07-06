@@ -63,7 +63,7 @@ if [[ "$PLATFORM" == "linux" ]]; then
     exit 1
   fi
 
-  ln -sf zWork.png "$APPDIR/sidecar-app.png"
+  ln -sf zWork.png "$APPDIR/zwork.png"
 
   # Bundled WebKitGTK/EGL libs are removed at build time by
   # patch-linux-appimage.sh (called from build-linux-release.sh).

@@ -4,7 +4,7 @@
 
 # zWork
 
-**A desktop AI assistant that does jobs, not just answers questions.**
+**A desktop AI agent that runs on your schedule and works across your apps — not just another chat box.**
 
 [![Release](https://img.shields.io/github/v/release/Ryz3nPlayZ/zWork?style=flat-square&color=171716&labelColor=2a2a2a)](https://github.com/Ryz3nPlayZ/zWork/releases)
 [![Platforms](https://img.shields.io/badge/runs%20on-macOS%20%7C%20Windows%20%7C%20Linux-171716?style=flat-square&labelColor=2a2a2a)](#install)
@@ -87,48 +87,48 @@ Open it, sign in, ask for something.
 <tr>
 <td width="50%" valign="top">
 
-**Chat that streams**
+**Scheduled agents**
 
-Watch answers and activity appear live, as the agent works.
-
-</td>
-<td width="50%" valign="top">
-
-**Files and folders**
-
-zWork can read, write, and reorganise things on your computer.
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-**Local commands**
-
-Runs shell tasks on your machine when a job needs them.
+Set a recurring job — daily digest, inbox sweep, monitor a site — and zWork runs it on its own schedule, posting results to your inbox. No one watching, no chat window open.
 
 </td>
 <td width="50%" valign="top">
 
-**Web research**
+**App integrations (Composio + MCP)**
 
-Pulls in current sources from the open web.
+Connect Gmail, Calendar, Slack, and hundreds more via Composio, or plug in any MCP server. The agent can read and act on your actual apps, not just files.
 
 </td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 
-**Skills library**
+**Desktop & browser control**
 
-Save what works once, reuse it any time.
+Drive macOS apps (capture, click, type) via cua-driver and automate the browser through an embedded Chrome bridge — element-level, not screenshots-and-pray.
 
 </td>
 <td width="50%" valign="top">
 
-**Auto-updates**
+**Real deliverables**
 
-The app updates itself between releases.
+Generate and export `.docx`/`.xlsx`/`.pdf`, deploy a local web app to a live URL, and produce structured documents — not just text in a chat.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+**Files, shell, web research**
+
+Read/write/reorganise files, run local commands, and pull live sources from the web.
+
+</td>
+<td width="50%" valign="top">
+
+**Skills library + auto-updates**
+
+Save what works once, reuse it any time. The app updates itself between releases.
 
 </td>
 </tr>
@@ -138,7 +138,7 @@ The app updates itself between releases.
 
 ## What's next
 
-The next version turns chat into a workspace. The output of a job — a document, a spreadsheet, a chart, a small to-do list — sits next to the conversation that produced it, where you can edit and keep it.
+zWork already runs jobs on demand and on a schedule. The next version turns the output of those jobs into a persistent workspace — a document, a spreadsheet, a chart, a to-do list — that sits next to the conversation that produced it, where you can edit and keep it.
 
 See the [roadmap](docs/ROADMAP.md) for the order of work.
 
@@ -149,7 +149,7 @@ See the [roadmap](docs/ROADMAP.md) for the order of work.
 | Layer | Stack | What it does |
 |---|---|---|
 | **Desktop** | Tauri + React | The window you look at |
-| **Local engine** | Python + FastAPI sidecar | Runs the agent on your machine |
+| **Local engine** | Rust (Axum) sidecar | Runs the agent on your machine |
 | **Cloud** | Rust (Axum) + Better Auth + Postgres | Sign-in, usage, managed model routing |
 
 [Architecture](docs/ARCHITECTURE.md) &nbsp;·&nbsp; [Auth](docs/AUTH.md) &nbsp;·&nbsp; [Cloud](docs/CLOUD.md) &nbsp;·&nbsp; [Releases](docs/RELEASES.md) &nbsp;·&nbsp; [Contributing](CONTRIBUTING.md)
@@ -160,14 +160,14 @@ See the [roadmap](docs/ROADMAP.md) for the order of work.
 ./run.sh
 ```
 
-That bootstraps the Python sidecar, installs frontend deps, and opens the desktop app in dev mode.
+That builds the Rust sidecar, installs frontend deps, and opens the desktop app in dev mode.
 
 ---
 
 <div align="center">
 <sub>
 
-**v0.3.x** &nbsp;·&nbsp; the bar before anything new ships:<br>
+**v0.5.x** &nbsp;·&nbsp; the bar before anything new ships:<br>
 install · sign in · finish a real job · update
 
 [Releases](https://github.com/Ryz3nPlayZ/zWork/releases) &nbsp;·&nbsp; [Issues](https://github.com/Ryz3nPlayZ/zWork/issues) &nbsp;·&nbsp; [Discussions](https://github.com/Ryz3nPlayZ/zWork/discussions)

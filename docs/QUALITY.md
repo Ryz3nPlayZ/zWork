@@ -83,8 +83,8 @@ Before calling a build user-test-ready:
 1. `npm run build` passes in `app/`
 2. `cargo check` passes in `app/src-tauri`
 3. `cargo check` passes in `cloud-src/api`
-4. Python unit tests pass: `.venv/bin/pytest`
-5. Security regression tests pass: `.venv/bin/pytest tests/test_security.py`
+4. `cargo check` passes in `sidecar-rust/`
+5. `cargo test` passes in `sidecar-rust/`
 6. live auth start endpoint returns `200`
 7. unauthenticated session endpoint returns `401`
 8. public db host returns `403`

@@ -1,18 +1,16 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Pencil, Check, X, AlertCircle, Settings as SettingsIcon, RefreshCcw, Download, ChevronDown, ArrowLeft } from "lucide-react";
 import { useApp } from "../lib/store";
-import { isMacOS } from "../lib/platform";
 import { ChatInput } from "./ChatInput";
 import { Message } from "./Message";
 import { ConcurrentWorkBanner } from "./ConcurrentWorkBanner";
+import { QuestionModal } from "./QuestionModal";
 
 export function ChatView() {
-  const macOS = isMacOS();
   const chat = useApp((s) =>
     s.activeChatId ? s.chats[s.activeChatId] : undefined,
   );
   const rename = useApp((s) => s.renameChat);
-  const send = useApp((s) => s.send);
   const retry = useApp((s) => s.retry);
   const setView = useApp((s) => s.setView);
   const setActiveProject = useApp((s) => s.setActiveProject);
@@ -97,13 +95,6 @@ export function ChatView() {
     [openArtifact],
   );
 
-  const handleAskSubmit = useCallback(
-    (_msgId: string, choice: string) => {
-      void send(choice);
-    },
-    [send],
-  );
-
   if (!chat) return null;
 
   const commitRename = () => {
@@ -120,12 +111,10 @@ export function ChatView() {
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col bg-paper relative">
-      {/* Drag-only titlebar */}
-      {macOS && <div className="titlebar-drag absolute inset-x-0 top-0 h-10 shrink-0" />}
-
       <div className="flex flex-1 flex-col overflow-hidden relative">
-        {/* Header */}
-        <div className="flex shrink-0 items-center justify-between border-b border-line px-5 py-3 bg-paper-soft select-none">
+        {/* Header. Window dragging is owned by the TopStrip above the row, so
+            this is a plain header now — no drag attrs needed. */}
+        <div className="flex shrink-0 items-center justify-between border-b border-edge px-5 py-3 bg-paper-soft select-none">
           <div className="flex min-w-0 items-center gap-2">
             {chat.projectId && (
               <button
@@ -239,7 +228,6 @@ export function ChatView() {
                 <Message
                   key={m.id}
                   message={m}
-                  onAskSubmit={handleAskSubmit}
                   onOpenArtifact={handleOpenArtifact}
                   artifacts={artifacts}
                   streaming={isStreaming}
@@ -281,36 +269,18 @@ export function ChatView() {
         {/* Composer — floating directly over the chat text */}
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-paper via-paper/95 to-transparent px-6 pb-5 pt-10 pointer-events-none z-10">
           <div className="mx-auto max-w-[960px] pointer-events-auto">
-            {chat.pendingQuestion && (
-              <div className="mb-2 flex flex-col gap-1 animate-fade-in">
-                <p className="px-3 text-[12.5px] text-ink-muted leading-normal">
-                  {chat.pendingQuestion.question}
-                </p>
-                <div className="flex flex-col">
-                  {chat.pendingQuestion.options
-                    .filter((opt) => {
-                      const o = opt.toLowerCase();
-                      return !o.includes("other") && !o.includes("tell me what to do") && !o.includes("instead");
-                    })
-                    .map((opt, oIdx) => (
-                      <button
-                        key={oIdx}
-                        onClick={() => {
-                          void useApp.getState().answerQuestion(chat.id, opt);
-                        }}
-                        className="press text-left px-3 py-2 text-[12.5px] text-ink-muted hover:text-ink hover:bg-line/40 transition-colors font-medium cursor-pointer rounded-md"
-                      >
-                        {opt}
-                      </button>
-                    ))}
-                </div>
-                <div className="h-px bg-line mx-3" />
-              </div>
-            )}
-
             <ChatInput autoFocus placeholder="Reply to zWork" />
           </div>
         </div>
+
+        {/* Agent question modal — blocks interaction until answered */}
+        {chat.pendingQuestion && (
+          <QuestionModal
+            question={chat.pendingQuestion.question}
+            options={chat.pendingQuestion.options}
+            onSubmit={(answer) => void useApp.getState().answerQuestion(chat.id, answer)}
+          />
+        )}
       </div>
     </div>
   );

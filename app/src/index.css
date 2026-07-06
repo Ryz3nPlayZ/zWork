@@ -26,17 +26,20 @@
 :root.light {
   color-scheme: light;
 
-  /* Warm cream palette — gentle on the eyes, less extreme than pure white. */
+  /* Warm cream palette — gentle on the eyes, less extreme than pure white.
+     Surface hierarchy follows the OpenCode mirror rule: in light mode, raised
+     surfaces step DARKER than base (toward the foreground), not lighter. The
+     old values (paper-soft/raised lighter than paper) produced a flat look. */
   --paper: 242 240 232;
-  --paper-soft: 248 246 238;
-  --paper-raised: 252 250 242;
-  --paper-sunken: 234 232 224;
+  --paper-soft: 238 236 228;
+  --paper-raised: 234 232 224;
+  --paper-sunken: 246 244 236;
   --paper-sidebar: 236 234 226;
 
   --ink: 48 46 40;
   --ink-soft: 80 76 68;
-  --ink-muted: 130 126 115;
-  --ink-faint: 175 170 158;
+  --ink-muted: 110 106 96;
+  --ink-faint: 155 150 138;
 
   --line: 218 214 202;
   --line-soft: 228 224 212;
@@ -44,11 +47,21 @@
 
   --accent: 48 46 40;
 
-  /* Assistant → user bubble. Calm warm stone, not bright blue. */
-  --bubble: 232 230 222;
-  --bubble-fg: 48 46 40;
-
   --shadow: 30 28 24;
+
+  --success: 16 185 129;
+  --success-fg: 255 255 255;
+  --warning: 245 158 11;
+  --warning-fg: 48 46 40;
+  --error: 239 68 68;
+  --error-fg: 255 255 255;
+  --info: 59 130 246;
+  --info-fg: 255 255 255;
+
+  /* Alpha-overlay border color (OpenCode pattern). Light mode → black overlay;
+     the border adapts to whatever surface it sits on instead of being a fixed
+     harsh line. Alpha is applied at the utility layer (.border-edge etc.). */
+  --border-overlay: 0 0 0;
 }
 
 :root.dark {
@@ -73,11 +86,19 @@
 
   --accent: 236 236 234;
 
-  /* Assistant → user bubble in dark mode: slightly lighter than paper. */
-  --bubble: 60 60 64;
-  --bubble-fg: 242 242 238;
-
   --shadow: 0 0 0;
+
+  --success: 52 211 153;
+  --success-fg: 0 0 0;
+  --warning: 251 191 36;
+  --warning-fg: 0 0 0;
+  --error: 248 113 113;
+  --error-fg: 0 0 0;
+  --info: 96 165 250;
+  --info-fg: 0 0 0;
+
+  /* Dark mode → white-overlay borders. */
+  --border-overlay: 255 255 255;
 }
 
 /* --------------------------------------------------------
@@ -85,6 +106,24 @@
    -------------------------------------------------------- */
 :root {
   --zoom-level: 1;
+  /* CSS fallback zoom scale, applied via transform on #root in browser mode.
+     Native Tauri builds use getCurrentWebview().setZoom() instead and never
+     read this. Kept at 1 by default so non-zoomed layout is unaffected. */
+  --zoom-scale: 1;
+
+  /* Monospace stack — used by code blocks via var(--font-mono). System fonts
+     only; no bundling. Ordered for macOS → Windows → Linux parity. */
+  --font-mono: "SF Mono", ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+
+  /* Soft floating elevation — downward-weighted, layered (contact → ambient)
+     so the shadow pools below a panel instead of bleeding out every side.
+     Pairs with the .hairline border on borderless overlays/modals. Named
+     --shadow-lift to avoid clashing with the existing .shadow-float class. */
+  --shadow-lift:
+    0 0.125rem 0.25rem -0.125rem rgb(var(--shadow) / 0.07),
+    0 0.5rem 0.75rem -0.375rem rgb(var(--shadow) / 0.06),
+    0 1.25rem 1.75rem -0.875rem rgb(var(--shadow) / 0.06),
+    0 2.25rem 3rem -1.75rem rgb(var(--shadow) / 0.04);
 }
 
 html {
@@ -99,12 +138,92 @@ body {
   font-feature-settings: "ss01", "cv11";
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
-  zoom: var(--zoom-level, 1);
+  /* NOTE: do NOT re-add `zoom: var(--zoom-level)` here. CSS `zoom` is
+     non-standard and desyncs paint vs. hit-testing in WebKit, which breaks
+     text-selection rectangles (the "weird sectioning when selecting" bug).
+     Zoom is now driven by lib/zoom.ts — native webview setZoom() on Tauri,
+     or `transform: scale()` on #root as a browser fallback. */
 }
 
 #root {
   height: 100%;
   width: 100%;
+  /* Browser-mode zoom fallback. On Tauri this stays at scale(1) and the native
+     webview zoom does the real work. transform-origin is top-left so zoomed
+     layout pins to the window corner instead of recentering. */
+  transform: scale(var(--zoom-scale, 1));
+  transform-origin: top left;
+}
+
+/* --------------------------------------------------------
+   Alpha-overlay borders + elevation (OpenCode v2 pattern)
+   --------------------------------------------------------
+   Borders are translucent overlays (black in light mode, white in dark) so
+   they adapt to whatever surface they sit on instead of reading as harsh
+   fixed-color lines. Three strengths mirror the old line/line-soft/line-strong
+   scale. Use the .border-edge / .border-edge-strong / .border-edge-muted
+   utilities (defined in tailwind.config.js borderColor) for the color, and
+   .hairline-ring for the elevation ring+shadow combo. */
+.hairline-ring {
+  box-shadow:
+    0 0 0 0.5px rgb(var(--border-overlay) / 0.10),
+    0 1px 2px rgb(0 0 0 / 0.04);
+}
+.hairline-ring-strong {
+  box-shadow:
+    0 0 0 0.5px rgb(var(--border-overlay) / 0.20),
+    0 1px 3px rgb(0 0 0 / 0.08);
+}
+/* Focus ring for inputs — accent-tinted, replaces the old border-line-strong
+   + shadow-lift combo on the chatbox. */
+.focus-ring {
+  box-shadow: 0 0 0 1.5px rgb(var(--accent) / 0.45);
+}
+
+/* Overlay window: force a fully transparent chrome so only the chat UI is
+   visible. The global `body { @apply bg-paper }` would otherwise paint an
+   opaque rectangle behind the transparent Tauri window (the "dark rectangle").
+   `OverlayChatView` adds `overlay-window` to <html>. */
+html.overlay-window,
+html.overlay-window body,
+html.overlay-window #root {
+  background: transparent !important;
+}
+
+/* Sidebar translucency: when toggled on, the sidebar column drops its opaque
+   fill so the native macOS vibrancy behind the transparent window shows
+   through. On Windows/Linux/web (no vibrancy), the aside instead carries a
+   translucent tint + backdrop-blur as a tasteful fallback — see Sidebar.tsx.
+
+   Only the sidebar column goes transparent; the main region keeps bg-paper so
+   content stays readable. The <html> class is toggled by lib/translucency.ts. */
+html.sidebar-translucent body {
+  background: transparent;
+}
+
+/* Native macOS vibrancy: when active, sidebar child elements must be
+   translucent so the desktop wallpaper shows through the frosted glass.
+   The aside itself is already bg-transparent; these rules handle its
+   opaque children (hover states, active states, raised menus, borders)
+   by giving them semi-transparent backgrounds that let vibrancy bleed
+   through while keeping text readable. */
+html.sidebar-translucent aside.native-glass {
+  border-right-color: rgb(var(--line) / 0.1);
+}
+/* Hover/active backgrounds: translucent instead of opaque */
+html.sidebar-translucent aside.native-glass .bg-line\/40,
+html.sidebar-translucent aside.native-glass .bg-line\/50,
+html.sidebar-translucent aside.native-glass .bg-line\/60 {
+  background-color: rgb(var(--line) / 0.12);
+}
+/* Raised surfaces (dropdown menus, popovers): keep readable but translucent */
+html.sidebar-translucent aside.native-glass .bg-paper-raised {
+  background-color: rgb(var(--paper-raised) / 0.5);
+  backdrop-filter: saturate(1.8) blur(20px);
+}
+/* Drag strip border: soften when glass is on */
+html.sidebar-translucent aside.native-glass .border-b.border-line\/60 {
+  border-bottom-color: rgb(var(--line) / 0.08);
 }
 
 /* --------------------------------------------------------
@@ -154,16 +273,19 @@ body {
   background: transparent;
 }
 
-/* macOS-style draggable titlebar area */
-.titlebar-drag {
+/* Tauri v2 draggable region — the invisible top strip that lets users
+   drag the frameless window. With titleBarStyle: Overlay + hiddenTitle,
+   macOS paints traffic lights on top of this strip; Tauri automatically
+   excludes them from the drag hit-test.
+
+   The attribute selector is the canonical Tauri 2 approach. The JS
+   startDragging() fallback in Sidebar handles the sidebar's own strip. */
+[data-tauri-drag-region] {
   -webkit-app-region: drag;
   app-region: drag;
 }
 
-.titlebar-drag button,
-.titlebar-drag a,
-.titlebar-drag input,
-.titlebar-drag [data-no-drag] {
+[data-tauri-drag-region="no-drag"] {
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
@@ -187,6 +309,24 @@ body {
 .ring-focus:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px rgb(var(--paper)), 0 0 0 4px rgb(var(--accent));
+}
+
+/* Floating overlay card — the overlay window has decorations disabled, so it
+   carries no native window shadow. This layered, theme-aware shadow lets the
+   chat panel genuinely "float" over the desktop (warm in light, black in dark). */
+.shadow-float {
+  box-shadow:
+    0 0 0 1px rgb(var(--shadow) / 0.05),
+    0 2px 6px -2px rgb(var(--shadow) / 0.12),
+    0 10px 22px -8px rgb(var(--shadow) / 0.22),
+    0 24px 48px -16px rgb(var(--shadow) / 0.26);
+}
+
+/* Hairline border for floating surfaces — currentColor-based so it adapts to
+   the surrounding text color and theme. Use together with shadow-lift on
+   menus, popovers, and the composer instead of a hard border-line. */
+.hairline {
+  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
 }
 
 textarea {

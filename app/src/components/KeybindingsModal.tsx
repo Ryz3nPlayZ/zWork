@@ -30,9 +30,10 @@ export function KeybindingsModal() {
     {
       title: "Global Navigation",
       shortcuts: [
-        { keys: [`${cmdKey}`, "Shift", "Space"], desc: "Toggle chatbox overlay", note: "Opens AI overlay over any app" },
+        { keys: [isMac ? "⌃" : "Ctrl", isMac ? "⌥" : "Alt", "Space"], desc: "Toggle chatbox overlay", note: "Opens AI overlay over any app" },
         { keys: [`${cmdKey}`, "K"], desc: "Open command bar" },
-        { keys: [`${cmdKey}`, "\\"], desc: "Toggle sidebar" },
+        { keys: [`${cmdKey}`, "S"], desc: "Toggle sidebar" },
+        { keys: [`${cmdKey}`, "\\"], desc: "Toggle sidebar (alt)" },
         { keys: [`${cmdKey}`, ","], desc: "Open settings" },
         { keys: [`${cmdKey}`, "N"], desc: "New chat" },
       ],

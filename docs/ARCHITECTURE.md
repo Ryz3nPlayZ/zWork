@@ -11,7 +11,7 @@ zWork is a desktop-first product with two runtime layers:
 flowchart LR
     User[User]
     App[Tauri desktop app<br/>React + TypeScript]
-    Sidecar[Local sidecar<br/>FastAPI + Python]
+    Sidecar[Local sidecar<br/>Axum + Rust]
     LocalTools[Local tools<br/>files / commands / browser / research]
     CloudAPI[Cloud API<br/>Axum + Rust]
     BetterAuth[Better Auth<br/>Google OAuth + sessions]

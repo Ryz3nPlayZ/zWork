@@ -13,6 +13,8 @@ import {
   type CustomModel,
   type MeResponse,
   type Project,
+  type ScheduledTask,
+  type InboxItem,
 } from "./api";
 import { fetchCloudSession, getCloudToken, logoutCloudSession, startDesktopGoogleSignIn } from "./cloud";
 import { invoke } from "@tauri-apps/api/core";
@@ -26,6 +28,26 @@ const LEGACY_MANAGED_MODEL_IDS = new Set([
 ]);
 const ROUTER_BASE_URL = "https://api.tryzwork.app/api";
 const ONBOARDING_DONE_KEY = "zwork:onboarding-completed";
+const SECURITY_PRESET_KEY = "zwork:security-preset";
+export type SecurityPreset = "ask" | "edit" | "plan" | "full";
+
+const SECURITY_PRESET_META: Record<
+  SecurityPreset,
+  { autoApproveDestructive: boolean; planMode: boolean; webSearchEnabled: boolean }
+> = {
+  ask: { autoApproveDestructive: false, planMode: false, webSearchEnabled: false },
+  edit: { autoApproveDestructive: true, planMode: false, webSearchEnabled: false },
+  plan: { autoApproveDestructive: false, planMode: true, webSearchEnabled: false },
+  full: { autoApproveDestructive: true, planMode: false, webSearchEnabled: true },
+};
+
+function loadSecurityPreset(): SecurityPreset {
+  try {
+    const v = localStorage.getItem(SECURITY_PRESET_KEY);
+    if (v && v in SECURITY_PRESET_META) return v as SecurityPreset;
+  } catch {}
+  return "ask";
+}
 
 function hasCompletedOnboardingLocally(): boolean {
   if (typeof window === "undefined") return false;
@@ -71,19 +93,180 @@ export interface MessageAttachment {
   previewUrl?: string;
 }
 
+/**
+ * An ordered timeline segment of an assistant message. Replaces the old flat
+ * `content: string` + side-channel `activities: Activity[]` model: the model
+ * streams text, thinking, and tool calls interleaved, and we render each in
+ * the order it actually occurred.
+ *
+ * Mirrors the structure every frontier harness (Goose, Claude Code, opencode)
+ * uses for streamed turns — see `assistant_content_blocks` in the Rust agent
+ * loop (`sidecar-rust/src/agent/mod.rs`).
+ */
+export type MessagePart =
+  | { kind: "text"; text: string }
+  | { kind: "thinking"; text: string }
+  | {
+      kind: "tool";
+      id: string;
+      tool: string;
+      label: string;
+      icon?: string;
+      input?: unknown;
+      result?: string;
+      ok?: boolean;
+      done: boolean;
+      /** Set while a destructive-tool permission gate is awaiting the user's
+       *  Allow/Deny decision. Carries the gate_id the backend is waiting on. */
+      pendingGate?: { gateId: string; reason: string };
+    };
+
 export interface Message {
   id: string;
   role: Role;
+  /**
+   * Ordered timeline segments. This is the source of truth for assistant
+   * turns; user messages carry a single text part.
+   */
+  parts: MessagePart[];
+  /**
+   * Derived concatenation of all `text` parts, kept in sync so legacy
+   * artifact-extraction / persistence / PATCH paths keep working. Prefer
+   * `parts` for all new code and rendering.
+   */
   content: string;
   createdAt: number;
   providerLabel?: string;
   resolvedModel?: string;
   upstreamProvider?: string;
-  /** Tool calls / steps performed during this assistant turn. */
+  /** @deprecated use parts[] — kept only for legacy migration / API shape. */
   activities?: Activity[];
   /** Files the user attached when sending this message. */
   attachments?: MessageAttachment[];
   feedback?: "bad" | "good";
+}
+
+/**
+ * Coerce a backend message `content` value into a plain display string.
+ *
+ * New chats store content as a string, but chats written before the
+ * content-shape fix stored Anthropic content blocks — a single `{type,text}`
+ * object or an array of them. Rendering either as a React child throws
+ * ("Minified React error #31: object with keys {text,type}"). This normalizes
+ * every shape so those older chats still open instead of crashing the view.
+ */
+export function contentToText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!content) return "";
+  const blocks = Array.isArray(content) ? content : [content];
+  return blocks
+    .map((b: any) => (b && b.type === "text" && typeof b.text === "string" ? b.text : ""))
+    .filter(Boolean)
+    .join("\n");
+}
+
+/**
+ * Build an ordered `parts[]` timeline from any legacy message shape.
+ *
+ * - If `parts` already exists, it's returned as-is (new code path).
+ * - Otherwise we fold the flat `content` string + side-channel `activities[]`
+ *   into one text part followed by N tool parts. Old chats render correctly
+ *   with no backend migration — tool calls lose their chronological position
+ *   (they all appear after the text), but nothing crashes.
+ */
+export function normalizeToParts(msg: {
+  parts?: MessagePart[];
+  content?: unknown;
+  activities?: Activity[];
+}): MessagePart[] {
+  if (Array.isArray(msg.parts) && msg.parts.length > 0) return msg.parts;
+  const text = contentToText(msg.content);
+  const parts: MessagePart[] = [];
+  if (text.trim()) parts.push({ kind: "text", text });
+  for (const a of msg.activities || []) {
+    parts.push({
+      kind: "tool",
+      id: a.id,
+      tool: a.label,
+      label: a.label,
+      icon: a.icon,
+      done: a.done,
+    });
+  }
+  return parts;
+}
+
+/**
+ * Concatenate the `text` parts of a timeline — the derived `content` value.
+ */
+export function partsToText(parts: MessagePart[]): string {
+  return parts
+    .filter((p): p is Extract<MessagePart, { kind: "text" }> => p.kind === "text")
+    .map((p) => p.text)
+    .join("");
+}
+
+/**
+ * Immutable update: set `parts` on a message and re-derive `content`.
+ */
+export function withParts(m: Message, parts: MessagePart[]): Message {
+  return { ...m, parts, content: partsToText(parts) };
+}
+
+/**
+ * Append-or-merge helpers for the streaming reducer. Segments are bounded by
+ * the events that interrupt them: a `delta` extends the trailing text part
+ * (opening one if the last part isn't text); a `thinking_delta` extends a
+ * thinking part; `tool_use`/`activity`/`tool_result` operate on tool parts.
+ * This is what lets the renderer show interleaved text/thinking/tool calls in
+ * the order they actually occurred — the core fix for the "one big blob" bug.
+ */
+export function appendTextPart(parts: MessagePart[], text: string): MessagePart[] {
+  if (!text) return parts;
+  const last = parts[parts.length - 1];
+  if (last && last.kind === "text") {
+    return [...parts.slice(0, -1), { kind: "text", text: last.text + text }];
+  }
+  return [...parts, { kind: "text", text }];
+}
+
+export function appendThinkingPart(parts: MessagePart[], text: string): MessagePart[] {
+  if (!text) return parts;
+  const last = parts[parts.length - 1];
+  if (last && last.kind === "thinking") {
+    return [...parts.slice(0, -1), { kind: "thinking", text: last.text + text }];
+  }
+  return [...parts, { kind: "thinking", text }];
+}
+
+/**
+ * Replace all `text` parts with a single text part containing `newText`,
+ * inserted at the position of the first text part. Used by artifact
+ * extraction, which post-processes the concatenated answer text and writes
+ * back the cleaned version. Non-text parts keep their relative order.
+ */
+export function replaceTextParts(parts: MessagePart[], newText: string): MessagePart[] {
+  const firstTextIdx = parts.findIndex((p) => p.kind === "text");
+  if (firstTextIdx < 0) {
+    return newText.trim() ? [...parts, { kind: "text", text: newText }] : parts;
+  }
+  // Non-text parts before the first text part stay in place; the (single)
+  // cleaned text part slots in at the first-text position; any non-text parts
+  // that followed remain after it.
+  const head: MessagePart[] = [];
+  for (const p of parts.slice(0, firstTextIdx)) {
+    if (p.kind !== "text") head.push(p);
+  }
+  const tail: MessagePart[] = [];
+  let seenText = false;
+  for (const p of parts.slice(firstTextIdx)) {
+    if (p.kind === "text") { seenText = true; continue; }
+    if (seenText) tail.push(p);
+  }
+  const result = [...head];
+  if (newText.trim()) result.push({ kind: "text", text: newText });
+  result.push(...tail);
+  return result;
 }
 
 export interface Activity {
@@ -91,6 +274,41 @@ export interface Activity {
   label: string;
   icon?: string;
   done: boolean;
+}
+
+/**
+ * Offline-cache schema version. Bump whenever the persisted Message shape
+ * changes; readers compare against `localStorage["zwork:cache-version"]` and
+ * drop stale caches rather than hydrating messages that would crash the view.
+ * `v2` = the content→parts migration.
+ */
+export const CHAT_CACHE_VERSION = "v2";
+
+/**
+ * Read cached chats from localStorage, but only if the stored schema version
+ * matches the current one. Returns null on mismatch (caller falls back to a
+ * backend fetch).
+ */
+export function readCachedChats(): Record<string, Chat> | null {
+  try {
+    const version = localStorage.getItem("zwork:cache-version");
+    if (version !== CHAT_CACHE_VERSION) return null;
+    const raw = localStorage.getItem("zwork:cached-chats");
+    if (!raw) return null;
+    const allChats = JSON.parse(raw) as Record<string, Chat>;
+    // Defensive: ensure every message has parts (normalize legacy entries).
+    for (const chat of Object.values(allChats)) {
+      if (!chat?.messages) continue;
+      chat.messages = chat.messages.map((m) =>
+        Array.isArray(m.parts) && m.parts.length > 0
+          ? m
+          : { ...m, parts: normalizeToParts({ content: m.content, activities: m.activities }) },
+      );
+    }
+    return allChats;
+  } catch {
+    return null;
+  }
 }
 
 export interface SubagentTask {
@@ -127,7 +345,7 @@ export interface Chat {
   projectId?: string | null;
 }
 
-export type View = "chat" | "settings" | "projects" | "analytics" | "plan" | "connectors" | "admin" | "tasks" | "inbox";
+export type View = "chat" | "settings" | "projects" | "analytics" | "plan" | "connectors" | "admin" | "tasks" | "inbox" | "scheduled";
 
 export type SettingsSection =
   | "account"
@@ -255,10 +473,11 @@ function needsManagedRouterMigration(settings: SettingsPublic): boolean {
   const customModels = settings.custom_models || [];
   const flash = customModels.find((m) => m.id === "zwork-flash");
   const pro = customModels.find((m) => m.id === "zwork-pro");
+  const vision = customModels.find((m) => m.id === "zwork-vision");
   const hasOldRouter = customModels.some((model) => model.id === "zwork-router");
   const hasLegacyCustomModel = customModels.some((model) => LEGACY_MANAGED_MODEL_IDS.has(model.id) || LEGACY_MANAGED_MODEL_IDS.has(model.model_id));
 
-  // Check that flash/pro exist AND have correct names/model_ids
+  // Check that flash/pro/vision exist AND have correct names/model_ids
   const flashCorrupted = !flash
     || flash.name !== "zWork Flash"
     || flash.model_id !== "deepseek-v4-flash"
@@ -267,6 +486,10 @@ function needsManagedRouterMigration(settings: SettingsPublic): boolean {
     || pro.name !== "zWork Pro"
     || pro.model_id !== "deepseek-v4-pro"
     || pro.credential !== "zwork_router";
+  const visionMissing = !vision
+    || vision.name !== "zWork Vision"
+    || vision.model_id !== "zwork-vision"
+    || vision.credential !== "zwork_router";
 
   return (
     LEGACY_MANAGED_BASE_URLS.has(settings.provider_config?.openai?.base_url || "") ||
@@ -275,7 +498,8 @@ function needsManagedRouterMigration(settings: SettingsPublic): boolean {
     hasLegacyCustomModel ||
     hasOldRouter ||
     flashCorrupted ||
-    proCorrupted
+    proCorrupted ||
+    visionMissing
   );
 }
 
@@ -317,6 +541,15 @@ async function migrateManagedRouterSettings(settings: SettingsPublic): Promise<S
     base_url_override: ROUTER_BASE_URL,
   });
 
+  await api.upsertCustomModel({
+    id: "zwork-vision",
+    name: "zWork Vision",
+    shape: "openai",
+    credential: "zwork_router",
+    model_id: "zwork-vision",
+    base_url_override: ROUTER_BASE_URL,
+  });
+
   return await api.getSettings();
 }
 
@@ -345,6 +578,15 @@ async function syncManagedRouterToken() {
     shape: "anthropic",
     credential: "zwork_router",
     model_id: "deepseek-v4-pro",
+    base_url_override: ROUTER_BASE_URL,
+  });
+
+  await api.upsertCustomModel({
+    id: "zwork-vision",
+    name: "zWork Vision",
+    shape: "openai",
+    credential: "zwork_router",
+    model_id: "zwork-vision",
     base_url_override: ROUTER_BASE_URL,
   });
 }
@@ -451,11 +693,24 @@ interface AppState {
   setAutoApproveDestructive: (v: boolean) => void;
   accessibilityPermissionGranted: boolean | null;
   screenRecordingPermissionGranted: boolean | null;
+  /**
+   * Whether the cua-driver daemon is reachable. The driver (CuaDriver.app,
+   * identity com.trycua.driver) is what actually performs desktop control and
+   * holds the TCC grants — so the two booleans above reflect ITS grants, and
+   * driverOk distinguishes "permissions missing" from "driver not installed".
+   */
+  driverOk: boolean | null;
   checkMacOSPermissions: () => Promise<void>;
   requestAccessibility: () => Promise<void>;
   requestScreenRecording: () => Promise<void>;
+  /** Whether the zbctl Chrome extension WebSocket is connected to the backend. */
+  extensionConnected: boolean | null;
+  checkBrowserBridge: () => Promise<void>;
   webSearchEnabled: boolean;
   setWebSearchEnabled: (v: boolean) => void;
+  /** Security preset bundles auto-approve, plan-mode, and web-search toggles. */
+  securityPreset: "ask" | "edit" | "plan" | "full";
+  setSecurityPreset: (preset: "ask" | "edit" | "plan" | "full") => void;
 
   // Subagent state
   subagents: SubagentTask[];
@@ -479,6 +734,8 @@ interface AppState {
   deleteChat: (id: string) => Promise<void>;
   renameChat: (id: string, title: string) => Promise<void>;
   answerQuestion: (chatId: string, answer: string) => Promise<void>;
+  /** Resolve a pending destructive-tool permission gate (Allow / Deny). */
+  resolveGate: (chatId: string, messageId: string, gateId: string, allow: boolean) => Promise<void>;
 
   send: (
     text: string,
@@ -490,6 +747,7 @@ interface AppState {
         client_id?: string | null;
         name: string;
         path: string;
+        data_url?: string;
         mime: string;
         kind: string;
         size?: number;
@@ -512,7 +770,6 @@ interface AppState {
   tasks: Task[];
   events: CalendarEvent[];
   fetchTasks: () => Promise<void>;
-  autoPlanTasks: (projectTitle: string, intervalDays?: number) => Promise<void>;
   addTask: (title: string, column: Task["column"], due_date?: string | null, description?: string, assignee?: string, priority?: string) => Promise<void>;
   updateTask: (id: string, title: string, column: Task["column"], due_date?: string | null, description?: string, assignee?: string, priority?: string) => Promise<void>;
   updateTaskColumn: (id: string, column: Task["column"]) => Promise<void>;
@@ -520,6 +777,37 @@ interface AppState {
   fetchEvents: () => Promise<void>;
   addEvent: (title: string, date: string, start_time?: string | null, end_time?: string | null) => Promise<void>;
   deleteEvent: (id: string) => Promise<void>;
+
+  // Scheduled Tasks + Inbox
+  scheduledTasks: ScheduledTask[];
+  inboxItems: InboxItem[];
+  inboxUnreadCount: number;
+  fetchSchedules: () => Promise<void>;
+  createSchedule: (body: {
+    title: string;
+    prompt: string;
+    interval_minutes?: number;
+    daily_time?: string;
+    daily_weekdays?: number[];
+    enabled?: boolean;
+  }) => Promise<{ error?: string } | undefined>;
+  updateSchedule: (
+    id: string,
+    body: Partial<{
+      title: string;
+      prompt: string;
+      interval_minutes: number | null;
+      daily_time: string | null;
+      daily_weekdays: number[] | null;
+      enabled: boolean;
+    }>,
+  ) => Promise<void>;
+  deleteSchedule: (id: string) => Promise<void>;
+  runScheduleNow: (id: string) => Promise<void>;
+  fetchInbox: (unreadOnly?: boolean) => Promise<void>;
+  markInboxRead: (id: string) => Promise<void>;
+  markAllInboxRead: () => Promise<void>;
+  deleteInboxItem: (id: string) => Promise<void>;
 }
 
 const uid = () =>
@@ -541,10 +829,26 @@ function pickAvailableModel(providers: ProvidersResponse | null, current = "") {
   );
 }
 
+const SIDEBAR_OPEN_KEY = "zwork:sidebar-open";
+
+function loadSidebarOpen(): boolean {
+  if (typeof window === "undefined") return true;
+  const v = window.localStorage.getItem(SIDEBAR_OPEN_KEY);
+  if (v === null) return true;
+  return v === "true";
+}
+
 export const useApp = create<AppState>((set, get) => ({
-  sidebarOpen: true,
-  toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
-  setSidebarOpen: (v) => set({ sidebarOpen: v }),
+  sidebarOpen: loadSidebarOpen(),
+  toggleSidebar: () => {
+    const next = !get().sidebarOpen;
+    try { window.localStorage.setItem(SIDEBAR_OPEN_KEY, String(next)); } catch {}
+    set({ sidebarOpen: next });
+  },
+  setSidebarOpen: (v) => {
+    try { window.localStorage.setItem(SIDEBAR_OPEN_KEY, String(v)); } catch {}
+    set({ sidebarOpen: v });
+  },
   view: "chat",
   setView: (v) => set({ view: v }),
   settingsSection: null,
@@ -600,6 +904,11 @@ export const useApp = create<AppState>((set, get) => ({
   // Tasks
   tasks: [],
   events: [],
+
+  // Scheduled Tasks + Inbox
+  scheduledTasks: [],
+  inboxItems: [],
+  inboxUnreadCount: 0,
 
   onboardingDone: hasCompletedOnboardingLocally() ? true : null,
   setOnboardingDone: (v) => {
@@ -686,8 +995,23 @@ export const useApp = create<AppState>((set, get) => ({
   setAutoApproveDestructive: (v) => set({ autoApproveDestructive: v }),
   accessibilityPermissionGranted: null,
   screenRecordingPermissionGranted: null,
+  driverOk: null,
+  extensionConnected: null,
   webSearchEnabled: false,
   setWebSearchEnabled: (v) => set({ webSearchEnabled: v }),
+  securityPreset: loadSecurityPreset(),
+  setSecurityPreset: (preset) => {
+    try {
+      localStorage.setItem(SECURITY_PRESET_KEY, preset);
+    } catch {}
+    const meta = SECURITY_PRESET_META[preset];
+    set({
+      securityPreset: preset,
+      autoApproveDestructive: meta.autoApproveDestructive,
+      planMode: meta.planMode,
+      webSearchEnabled: meta.webSearchEnabled,
+    });
+  },
 
   // Subagent state
   subagents: [],
@@ -704,30 +1028,61 @@ export const useApp = create<AppState>((set, get) => ({
   checkMacOSPermissions: async () => {
     if (IS_WEB) return;
     try {
-      const access = await invoke<boolean>("check_accessibility_permission");
-      const screen = await invoke<boolean>("check_screen_recording_permission");
+      // Source of truth = the cua-driver daemon's identity (com.trycua.driver),
+      // not zWork's own — the driver is what actually performs the AX work.
+      const st = await api.desktopStatus();
       set({
-        accessibilityPermissionGranted: access,
-        screenRecordingPermissionGranted: screen,
+        driverOk: st.driver_ok,
+        accessibilityPermissionGranted: st.accessibility,
+        screenRecordingPermissionGranted: st.screen_recording,
       });
     } catch (e) {
-      console.error("Failed to check macOS permissions:", e);
+      // Backend itself unreachable — distinct from driver-not-installed.
+      console.error("Failed to check driver permissions:", e);
+      set({ driverOk: false });
     }
   },
   requestAccessibility: async () => {
     if (IS_WEB) return;
     try {
-      await invoke("request_accessibility_permission");
+      // One endpoint raises prompts for ALL missing grants attributed to the
+      // driver identity — the correct grant path. Both buttons hit it; polling
+      // picks up the granted state.
+      const st = await api.desktopGrant();
+      set({
+        driverOk: st.driver_ok,
+        accessibilityPermissionGranted: st.accessibility,
+        screenRecordingPermissionGranted: st.screen_recording,
+      });
     } catch (e) {
-      console.error("Failed to request Accessibility permission:", e);
+      console.error("Failed to grant driver permissions:", e);
     }
   },
   requestScreenRecording: async () => {
     if (IS_WEB) return;
+    // Screen Recording can't be reliably raised by the driver's grant flow
+    // (it tends to surface the Accessibility prompt), and current desktop
+    // capture is AX-only so it isn't even required. Deep-link the user to the
+    // Screen Recording pane to toggle CuaDriver on, then re-poll.
     try {
-      await invoke("request_screen_recording_permission");
+      const { invoke } = await import("@tauri-apps/api/core");
+      await invoke("open_macos_privacy_pane", { pane: "screen_recording" });
+      setTimeout(() => {
+        get().checkMacOSPermissions().catch(() => {});
+      }, 1500);
     } catch (e) {
-      console.error("Failed to request Screen Recording permission:", e);
+      console.error("Failed to open Screen Recording settings:", e);
+    }
+  },
+
+  checkBrowserBridge: async () => {
+    if (IS_WEB) return;
+    try {
+      const st = await api.browserBridgeStatus();
+      set({ extensionConnected: st.connected });
+    } catch (e) {
+      console.error("Failed to check browser bridge:", e);
+      set({ extensionConnected: false });
     }
   },
 
@@ -784,13 +1139,6 @@ export const useApp = create<AppState>((set, get) => ({
       const { tasks } = await api.listTasks();
       set({ tasks });
     } catch (e) { console.warn("fetchTasks failed:", e); }
-  },
-
-  autoPlanTasks: async (projectTitle, intervalDays = 2) => {
-    try {
-      const { tasks } = await api.autoPlanTasks(projectTitle, intervalDays);
-      set((s) => ({ tasks: [...s.tasks, ...tasks] }));
-    } catch (e) { console.warn("autoPlanTasks failed:", e); }
   },
 
   addTask: async (title, column, due_date, description, assignee, priority) => {
@@ -850,6 +1198,80 @@ export const useApp = create<AppState>((set, get) => ({
     } catch (e) { console.warn("deleteEvent failed:", e); }
   },
 
+  // ─── Scheduled Tasks + Inbox ──────────────────────────────────────────────
+
+  fetchSchedules: async () => {
+    try {
+      const { tasks } = await api.listSchedules();
+      set({ scheduledTasks: tasks });
+    } catch (e) { console.warn("fetchSchedules failed:", e); }
+  },
+
+  createSchedule: async (body) => {
+    try {
+      const res = await api.createSchedule(body);
+      if (res.error) return { error: res.error };
+      await get().fetchSchedules();
+    } catch (e) {
+      console.warn("createSchedule failed:", e);
+      return { error: e instanceof Error ? e.message : "Failed to create task" };
+    }
+  },
+
+  updateSchedule: async (id, body) => {
+    try {
+      await api.updateSchedule(id, body);
+      await get().fetchSchedules();
+    } catch (e) { console.warn("updateSchedule failed:", e); }
+  },
+
+  deleteSchedule: async (id) => {
+    try {
+      await api.deleteSchedule(id);
+      set((s) => ({ scheduledTasks: s.scheduledTasks.filter((t) => t.id !== id) }));
+    } catch (e) { console.warn("deleteSchedule failed:", e); }
+  },
+
+  runScheduleNow: async (id) => {
+    try {
+      await api.runScheduleNow(id);
+    } catch (e) { console.warn("runScheduleNow failed:", e); }
+  },
+
+  fetchInbox: async (unreadOnly) => {
+    try {
+      const { items, unread_count } = await api.listInbox(unreadOnly);
+      set({ inboxItems: items, inboxUnreadCount: unread_count });
+    } catch (e) { console.warn("fetchInbox failed:", e); }
+  },
+
+  markInboxRead: async (id) => {
+    try {
+      await api.markInboxRead(id);
+      set((s) => ({
+        inboxItems: s.inboxItems.map((i) => (i.id === id ? { ...i, read: true } : i)),
+        inboxUnreadCount: Math.max(0, s.inboxUnreadCount - 1),
+      }));
+    } catch (e) { console.warn("markInboxRead failed:", e); }
+  },
+
+  markAllInboxRead: async () => {
+    try {
+      await api.markAllInboxRead();
+      set((s) => ({
+        inboxItems: s.inboxItems.map((i) => ({ ...i, read: true })),
+        inboxUnreadCount: 0,
+      }));
+    } catch (e) { console.warn("markAllInboxRead failed:", e); }
+  },
+
+  deleteInboxItem: async (id) => {
+    try {
+      await api.deleteInboxItem(id);
+      set((s) => ({ inboxItems: s.inboxItems.filter((i) => i.id !== id) }));
+    } catch (e) { console.warn("deleteInboxItem failed:", e); }
+  },
+
   bootstrap: async () => {
     // Web mode: skip local sidecar entirely
     if (IS_WEB) {
@@ -896,6 +1318,16 @@ export const useApp = create<AppState>((set, get) => ({
             configured: true,
             synthesized: false,
           },
+          {
+            id: "zwork-vision",
+            name: "zWork Vision",
+            subtitle: "Vision and images",
+            shape: "openai",
+            credential: "managed",
+            model_id: "zwork-vision",
+            configured: true,
+            synthesized: false,
+          },
         ],
       };
 
@@ -920,9 +1352,9 @@ export const useApp = create<AppState>((set, get) => ({
         if (cachedSummaries) {
           set({ chatSummaries: JSON.parse(cachedSummaries) });
         }
-        const cachedChats = localStorage.getItem("zwork:cached-chats");
+        const cachedChats = readCachedChats();
         if (cachedChats) {
-          set({ chats: JSON.parse(cachedChats) });
+          set({ chats: cachedChats });
         }
       } catch (err) {
         console.warn("Failed to load cached offline data:", err);
@@ -984,7 +1416,10 @@ export const useApp = create<AppState>((set, get) => ({
     }
     try {
       const { chats } = await api.listChats();
-      set({ chatSummaries: chats, backendOffline: false });
+      // Filter out automation chats (scheduled-task runs) — they surface inside
+      // the scheduled task's run history, not in the main chat list.
+      const visible = chats.filter((c) => c.kind !== "automation");
+      set({ chatSummaries: visible, backendOffline: false });
     } catch (e) {
       console.warn("refreshChats failed:", e);
       set({ backendOffline: true });
@@ -1025,7 +1460,7 @@ export const useApp = create<AppState>((set, get) => ({
       { id: "googlecalendar", name: "Google Calendar", color: "#4285F4", icon: null },
       { id: "notion",         name: "Notion",          color: "#000000", icon: null },
       { id: "googledrive",    name: "Google Drive",    color: "#34A853", icon: null },
-      { id: "github",         name: "GitHub",          color: "#24292E", icon: null },
+      { id: "github",         name: "GitHub",          color: "#181717", icon: null },
       { id: "linear",         name: "Linear",          color: "#5E6AD2", icon: null },
     ];
     // Seed immediately so grid doesn't flash empty
@@ -1098,21 +1533,16 @@ export const useApp = create<AppState>((set, get) => ({
       activeProjectId: projectId,
     });
     if (get().backendOffline) {
-      const cachedChats = localStorage.getItem("zwork:cached-chats");
-      if (cachedChats) {
-        try {
-          const allChats = JSON.parse(cachedChats);
-          if (allChats[id]) {
-            set((s) => ({
-              activeProjectId: allChats[id].projectId || null,
-              chats: {
-                ...s.chats,
-                [id]: allChats[id],
-              }
-            }));
-            return;
+      const allChats = readCachedChats();
+      if (allChats && allChats[id]) {
+        set((s) => ({
+          activeProjectId: allChats[id].projectId || null,
+          chats: {
+            ...s.chats,
+            [id]: allChats[id],
           }
-        } catch {}
+        }));
+        return;
       }
     }
     // Fetch full chat lazily
@@ -1121,13 +1551,21 @@ export const useApp = create<AppState>((set, get) => ({
         const full = await api.getChat(id);
         const messages: Message[] = full.messages
           .filter((m) => m.role !== "system")
-          .map((m) => ({
-            id: m.id,
-            role: m.role as Role,
-            content: m.content,
-            createdAt: m.created_at,
-            activities: m.activities || [],
-          }));
+          .map((m) => {
+            const activities = m.activities || [];
+            const parts = normalizeToParts({
+              content: m.content,
+              activities,
+            });
+            return {
+              id: m.id,
+              role: m.role as Role,
+              content: contentToText(m.content),
+              parts,
+              createdAt: m.created_at,
+              activities,
+            } as Message;
+          });
         const latestActivities = [...messages].reverse().find((m) => m.role === "assistant" && (m.activities || []).length > 0)?.activities || [];
         // Extract artifacts from loaded messages so they appear in the
         // artifact panel after app restart — otherwise raw [[ARTIFACT...]]
@@ -1164,21 +1602,16 @@ export const useApp = create<AppState>((set, get) => ({
         }));
       } catch (e) {
         // Fallback to cache if available
-        const cachedChats = localStorage.getItem("zwork:cached-chats");
-        if (cachedChats) {
-          try {
-            const allChats = JSON.parse(cachedChats);
-            if (allChats[id]) {
-              set((s) => ({
-                activeProjectId: allChats[id].projectId || null,
-                chats: {
-                  ...s.chats,
-                  [id]: allChats[id],
-                }
-              }));
-              return;
+        const allChats = readCachedChats();
+        if (allChats && allChats[id]) {
+          set((s) => ({
+            activeProjectId: allChats[id].projectId || null,
+            chats: {
+              ...s.chats,
+              [id]: allChats[id],
             }
-          } catch {}
+          }));
+          return;
         }
         set((s) => ({
           chats: {
@@ -1241,6 +1674,33 @@ export const useApp = create<AppState>((set, get) => ({
       await api.answerQuestion(chatId, answer);
     } catch (e) {
       console.warn("answerQuestion failed:", e);
+    }
+  },
+
+  resolveGate: async (chatId, messageId, gateId, allow) => {
+    // Optimistically clear the gate on the tool part so the UI flips out of
+    // the "awaiting decision" state immediately; the backend resolves the
+    // gate's oneshot and either runs or aborts the tool, which drives the
+    // subsequent tool_result event that sets ok/done.
+    set((s) => {
+      const c = s.chats[chatId];
+      if (!c) return s;
+      const msgs = c.messages.map((m) => {
+        if (m.id !== messageId) return m;
+        const parts = m.parts.map((p) =>
+          p.kind === "tool" && p.pendingGate?.gateId === gateId
+            ? { ...p, pendingGate: undefined }
+            : p,
+        );
+        return { ...m, parts };
+      });
+      return { chats: { ...s.chats, [chatId]: { ...c, messages: msgs } } };
+    });
+    try {
+      if (allow) await api.approveGate(chatId, gateId);
+      else await api.rejectGate(chatId, gateId);
+    } catch (e) {
+      console.warn("resolveGate failed:", e);
     }
   },
 
@@ -1413,9 +1873,11 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   send: async (text, options) => {
+    const attachments = options?.attachments ?? [];
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed && attachments.length === 0) return;
 
+    const runId = uid();
     const currentId = get().view === "projects" ? null : get().activeChatId;
     if (currentId) {
       const activeChat = get().chats[currentId];
@@ -1433,7 +1895,6 @@ export const useApp = create<AppState>((set, get) => ({
     const artifactMode = (options?.artifactMode ?? get().artifactMode) || !!inferredArtifactKind;
     const planMode = options?.planMode ?? get().planMode;
     const autoApproveDestructive = options?.autoApproveDestructive ?? get().autoApproveDestructive;
-    const attachments = options?.attachments ?? [];
     const activeProjectId = get().activeProjectId;
 
     // Optimistically place the user message into a local chat.
@@ -1441,10 +1902,19 @@ export const useApp = create<AppState>((set, get) => ({
     // server will assign the real id via the "chat" SSE event and we reconcile.
     let localId = currentId ?? `tmp_${uid()}`;
     const userMsgText = trimmed;
+    const hasImageAttachment = attachments.some((a) => a.kind === "image");
+    const chatTitle = userMsgText
+      ? userMsgText.slice(0, 56) + (userMsgText.length > 56 ? "…" : "")
+      : hasImageAttachment
+        ? "Image"
+        : "New chat";
     const userMsg: Message = {
       id: uid(),
       role: "user",
       content: userMsgText,
+      parts: userMsgText.trim()
+        ? [{ kind: "text", text: userMsgText }]
+        : [],
       createdAt: Date.now(),
       attachments: attachments.length
         ? attachments.map((a) => ({
@@ -1467,22 +1937,26 @@ export const useApp = create<AppState>((set, get) => ({
           status: "Thinking",
           error: undefined,
           needsSetup: false,
-          lastUserMessage: userMsgText,
+          lastUserMessage: userMsgText || chatTitle,
           activities: [],
           updatedAt: Date.now(),
         }
         : {
           id: localId,
-          title:
-            userMsgText.slice(0, 56) + (userMsgText.length > 56 ? "…" : ""),
+          title: chatTitle,
           updatedAt: Date.now(),
           messages: [userMsg],
           working: true,
           status: "Thinking",
-          lastUserMessage: userMsgText,
+          lastUserMessage: userMsgText || chatTitle,
           activities: [],
           artifactPanelOpen: false,
           activeArtifactId: null,
+          // Preserve the project context so the "back to project" arrow in
+          // ChatView renders immediately — without this it only appears after
+          // a reload via openChat, since the server-assigned id reconciliation
+          // below spreads `...c` but never sets projectId itself.
+          projectId: activeProjectId ?? null,
         };
       return {
         chats: { ...s.chats, [localId]: chat },
@@ -1506,6 +1980,7 @@ export const useApp = create<AppState>((set, get) => ({
                 id: asstId,
                 role: "assistant",
                 content: "",
+                parts: [],
                 createdAt: Date.now(),
               },
             ],
@@ -1517,28 +1992,40 @@ export const useApp = create<AppState>((set, get) => ({
     const controller = new AbortController();
     set({ _abort: controller });
 
-    // Safety timeout: if the stream hasn't resolved in 5 minutes, abort it
-    // so the working spinner can't get stuck forever.
-    const safetyTimer = setTimeout(() => {
-      if (get().chats[localId]?.working) {
-        controller.abort();
-        set((s) => {
-          const c = s.chats[localId];
-          if (!c) return s;
-          return {
-            chats: {
-              ...s.chats,
-              [localId]: { ...c, working: false, status: undefined, error: "Stream timed out. Please try again." },
-            },
-          };
-        });
-      }
-    }, 5 * 60 * 1000);
+    // Silence watchdog: multi-step agent work (capture → act → re-capture …)
+    // streams events continuously and legitimately runs well past a few
+    // minutes. A fixed wall-clock cap aborts those tasks mid-flight (the
+    // "random termination" on long browser/desktop jobs), so instead we
+    // re-arm this timer on every received event. It only fires if the stream
+    // goes truly silent (dead connection / stuck spinner) for this long.
+    // Cleared in the finally block below.
+    const SILENCE_MS = 5 * 60 * 1000;
+    let safetyTimer: ReturnType<typeof setTimeout> | undefined;
+    const armWatchdog = () => {
+      clearTimeout(safetyTimer);
+      safetyTimer = setTimeout(() => {
+        if (get().chats[localId]?.working) {
+          controller.abort();
+          set((s) => {
+            const c = s.chats[localId];
+            if (!c) return s;
+            return {
+              chats: {
+                ...s.chats,
+                [localId]: { ...c, working: false, status: undefined, error: "The stream went quiet for too long and was disconnected. Try again, or press Stop to cancel." },
+              },
+            };
+          });
+        }
+      }, SILENCE_MS);
+    };
+    armWatchdog();
 
     try {
       await streamChat(
         {
           chat_id: currentId && !currentId.startsWith("tmp_") ? currentId : undefined,
+          run_id: runId,
           message: trimmed,
           model,
           artifact_mode: artifactMode,
@@ -1549,6 +2036,9 @@ export const useApp = create<AppState>((set, get) => ({
           web_search_enabled: get().webSearchEnabled,
         },
         (evt) => {
+          // Any event means the stream is alive — push the silence watchdog
+          // out so long multi-step tasks aren't aborted on a wall-clock cap.
+          armWatchdog();
           if (evt.type === "chat") {
             // Server assigned an id — reconcile if we were provisional.
             const prevId = localId;
@@ -1558,7 +2048,14 @@ export const useApp = create<AppState>((set, get) => ({
                 if (!c) return s;
                 const { [prevId]: _, ...rest } = s.chats;
                 void _;
-                const updated: Chat = { ...c, id: evt.id, title: evt.title };
+                // Trust the server's title, but never let a stale placeholder
+                // ("New chat") overwrite a meaningful local title we already
+                // derived from the user's first message.
+                const serverTitle =
+                  evt.title && evt.title !== "New chat" && evt.title !== "New Chat"
+                    ? evt.title
+                    : c.title;
+                const updated: Chat = { ...c, id: evt.id, title: serverTitle };
                 return {
                   chats: { ...rest, [evt.id]: updated },
                   activeChatId: evt.id,
@@ -1582,8 +2079,65 @@ export const useApp = create<AppState>((set, get) => ({
               const c = s.chats[localId];
               if (!c) return s;
               const msgs = c.messages.map((m) =>
-                m.id === asstId ? { ...m, content: m.content + evt.text } : m,
+                m.id === asstId
+                  ? withParts(m, appendTextPart(m.parts, evt.text))
+                  : m,
               );
+              return {
+                chats: {
+                  ...s.chats,
+                  [localId]: { ...c, messages: msgs },
+                },
+              };
+            });
+          } else if (evt.type === "thinking_delta") {
+            // Reasoning / chain-of-thought: a distinct segment kind, rendered
+            // as a collapsible "thinking" dropdown — never blended into the
+            // answer text. A `thinking_delta` implicitly closes any open text
+            // segment (appendThinkingPart opens a new part if the trailing
+            // one isn't thinking).
+            set((s) => {
+              const c = s.chats[localId];
+              if (!c) return s;
+              const msgs = c.messages.map((m) =>
+                m.id === asstId
+                  ? withParts(m, appendThinkingPart(m.parts, evt.text))
+                  : m,
+              );
+              return {
+                chats: {
+                  ...s.chats,
+                  [localId]: { ...c, messages: msgs },
+                },
+              };
+            });
+          } else if (evt.type === "thinking_end") {
+            // No-op on parts: the next event (text/tool_use) naturally opens a
+            // new segment. Kept as a distinct event so future UI work can mark
+            // a thinking segment "finalized" (e.g. auto-collapse) if desired.
+          } else if (evt.type === "tool_use") {
+            // The model requested a tool call. Open a `tool` part at this
+            // position in the timeline — before the activity/tool_result
+            // frames arrive from the execution task. This is what places the
+            // tool-call accordion at the right spot between text segments.
+            set((s) => {
+              const c = s.chats[localId];
+              if (!c) return s;
+              const msgs = c.messages.map((m) => {
+                if (m.id !== asstId) return m;
+                // If a tool part with this id already exists (e.g. a replayed
+                // event), don't duplicate.
+                if (m.parts.some((p) => p.kind === "tool" && p.id === evt.id)) return m;
+                const toolPart: MessagePart = {
+                  kind: "tool",
+                  id: evt.id,
+                  tool: evt.name,
+                  label: `Running ${evt.name}`,
+                  input: evt.input,
+                  done: false,
+                };
+                return withParts(m, [...m.parts, toolPart]);
+              });
               return {
                 chats: {
                   ...s.chats,
@@ -1656,6 +2210,7 @@ export const useApp = create<AppState>((set, get) => ({
             set((s) => {
               const c = s.chats[localId];
               if (!c) return s;
+              // Legacy side-channel list (kept for persistence back-compat).
               const existing = c.activities.find((a) => a.id === evt.id);
               let activities = c.activities;
               if (existing) {
@@ -1667,10 +2222,41 @@ export const useApp = create<AppState>((set, get) => ({
               } else {
                 activities = [...activities, { id: evt.id, label: evt.label, icon: evt.icon, done: evt.done ?? false }];
               }
-              // Sync activities to the assistant message for persistence
-              const msgs = c.messages.map((m) =>
-                m.id === asstId ? { ...m, activities } : m,
-              );
+              // Update the matching `tool` part in the timeline, correlated by
+              // the model's tool_use_id (preferred) or the activity id. If no
+              // tool part exists yet (activity arrived before tool_use, or a
+              // legacy tool without a tool_use event), open a synthetic one so
+              // the activity still renders in the timeline.
+              const toolKey = evt.tool_use_id || evt.id;
+              const msgs = c.messages.map((m) => {
+                if (m.id !== asstId) return m;
+                const idx = m.parts.findIndex(
+                  (p) => p.kind === "tool" && p.id === toolKey,
+                );
+                if (idx >= 0) {
+                  const part = m.parts[idx];
+                  if (part.kind !== "tool") return m;
+                  const updated: MessagePart = {
+                    ...part,
+                    label: evt.label || part.label,
+                    icon: evt.icon ?? part.icon,
+                    done: evt.done ?? part.done,
+                  };
+                  const parts = [...m.parts];
+                  parts[idx] = updated;
+                  return withParts(m, parts);
+                }
+                // No tool part yet — open a synthetic one at the end.
+                const toolPart: MessagePart = {
+                  kind: "tool",
+                  id: toolKey,
+                  tool: evt.label,
+                  label: evt.label,
+                  icon: evt.icon,
+                  done: evt.done ?? false,
+                };
+                return withParts(m, [...m.parts, toolPart]);
+              });
               return {
                 chats: {
                   ...s.chats,
@@ -1679,37 +2265,137 @@ export const useApp = create<AppState>((set, get) => ({
               };
             });
           } else if (evt.type === "permission") {
-            // Permission gate event - could be used to show a warning in UI
+            // Permission gate event. When `blocked && gate_id` are present the
+            // backend has paused the tool and is waiting for the user's Allow /
+            // Deny decision on the gate — surface an inline prompt on the tool
+            // part (pendingGate) rather than a final verdict. Otherwise it's a
+            // post-decision verdict (e.g. auto-approved or auto-deny) that we
+            // record as done.
             set((s) => {
               const c = s.chats[localId];
               if (!c) return s;
-              const permissionActivity: Activity = {
-                id: `perm_${evt.tool}_${Date.now()}`,
-                label: `${evt.blocked ? "Blocked" : "Allowed"} ${evt.tool} (${evt.risk})`,
-                icon: evt.risk === "destructive" ? "shield-alert" : evt.risk === "sensitive" ? "shield" : "check",
-                done: true,
-              };
+              const awaiting = evt.blocked && !!evt.gate_id;
+              const toolKey = evt.tool_use_id || evt.gate_id;
+              const baseLabel = `${evt.tool} (${evt.risk})`;
+              const permIcon = evt.risk === "destructive" ? "shield-alert" : evt.risk === "sensitive" ? "shield" : "check";
+              const msgs = toolKey
+                ? c.messages.map((m) => {
+                    if (m.id !== asstId) return m;
+                    const idx = m.parts.findIndex(
+                      (p) => p.kind === "tool" && p.id === toolKey,
+                    );
+                    if (idx < 0) {
+                      const toolPart: MessagePart = {
+                        kind: "tool",
+                        id: toolKey,
+                        tool: evt.tool,
+                        label: awaiting ? `Needs permission: ${baseLabel}` : `${evt.blocked ? "Blocked" : "Allowed"} ${baseLabel}`,
+                        icon: permIcon,
+                        ...(awaiting
+                          ? { ok: undefined, done: false, pendingGate: { gateId: evt.gate_id!, reason: evt.reason } }
+                          : { ok: !evt.blocked, done: true }),
+                      };
+                      return withParts(m, [...m.parts, toolPart]);
+                    }
+                    const part = m.parts[idx];
+                    if (part.kind !== "tool") return m;
+                    const updated: MessagePart = awaiting
+                      ? {
+                          ...part,
+                          label: `Needs permission: ${baseLabel}`,
+                          icon: permIcon,
+                          ok: undefined,
+                          done: false,
+                          pendingGate: { gateId: evt.gate_id!, reason: evt.reason },
+                        }
+                      : {
+                          ...part,
+                          label: `${evt.blocked ? "Blocked" : "Allowed"} ${baseLabel}`,
+                          icon: permIcon,
+                          ok: !evt.blocked,
+                          done: true,
+                          pendingGate: undefined,
+                        };
+                    const parts = [...m.parts];
+                    parts[idx] = updated;
+                    return withParts(m, parts);
+                  })
+                : c.messages;
+              // Only mirror a final (non-awaiting) verdict to the legacy
+              // activities list; an open gate is not a completed activity.
+              const activities = !awaiting
+                ? [
+                    ...c.activities,
+                    {
+                      id: toolKey || `perm_${evt.tool}_${Date.now()}`,
+                      label: `${evt.blocked ? "Blocked" : "Allowed"} ${baseLabel}`,
+                      icon: permIcon,
+                      done: true,
+                    } as Activity,
+                  ]
+                : c.activities;
               return {
                 chats: {
                   ...s.chats,
-                  [localId]: { ...c, activities: [...c.activities, permissionActivity] },
+                  [localId]: { ...c, activities, messages: msgs },
+                },
+              };
+            });
+          } else if (evt.type === "tool_result") {
+            // Attach the final result/ok to the matching tool part. Closes
+            // the accordion's "running" shimmer and shows the output when
+            // expanded. (tool_complete, if emitted, is handled the same way.)
+            set((s) => {
+              const c = s.chats[localId];
+              if (!c) return s;
+              const toolKey = evt.tool_use_id;
+              if (!toolKey) return s;
+              const msgs = c.messages.map((m) => {
+                if (m.id !== asstId) return m;
+                const idx = m.parts.findIndex(
+                  (p) => p.kind === "tool" && p.id === toolKey,
+                );
+                if (idx < 0) return m;
+                const part = m.parts[idx];
+                if (part.kind !== "tool") return m;
+                const updated: MessagePart = {
+                  ...part,
+                  result: evt.message,
+                  ok: evt.ok,
+                  done: true,
+                };
+                const parts = [...m.parts];
+                parts[idx] = updated;
+                return withParts(m, parts);
+              });
+              return {
+                chats: {
+                  ...s.chats,
+                  [localId]: { ...c, messages: msgs },
                 },
               };
             });
           } else if (evt.type === "compaction") {
-            // Compaction event - summarization happening
-            if (evt.status === "summarizing") {
-              set((s) => {
-                const c = s.chats[localId];
-                if (!c) return s;
-                return {
-                  chats: {
-                    ...s.chats,
-                    [localId]: { ...c, status: "Compacting conversation..." },
-                  },
-                };
-              });
-            }
+            // Compaction result. The backend emits `complete` (history was
+            // summarized to fit the context window) or `failed`. There's no
+            // pre-"summarizing" frame, so surface a transient status here and
+            // let the next delta/done event clear it.
+            const statusText =
+              evt.status === "complete"
+                ? `Compacted conversation${evt.before_chars && evt.after_chars ? ` (${Math.round((1 - evt.after_chars / evt.before_chars) * 100)}% smaller)` : ""}`
+                : evt.status === "failed"
+                  ? "Compaction failed"
+                  : "Compacting conversation…";
+            set((s) => {
+              const c = s.chats[localId];
+              if (!c) return s;
+              return {
+                chats: {
+                  ...s.chats,
+                  [localId]: { ...c, status: statusText },
+                },
+              };
+            });
           } else if (evt.type === "subagent_started") {
             // A new subagent has been spawned
             set((s) => {
@@ -1835,13 +2521,9 @@ export const useApp = create<AppState>((set, get) => ({
         set((s) => {
           const c = s.chats[localId];
           if (!c) return s;
+          const replacement = cleaned || (artifacts.length === 1 ? "Here's the artifact:" : "Here are the artifacts:");
           const msgs = c.messages.map((m) =>
-            m.id === asstId
-              ? {
-                  ...m,
-                  content: cleaned || (artifacts.length === 1 ? "Here's the artifact:" : "Here are the artifacts:"),
-                }
-              : m,
+            m.id === asstId ? withParts(m, replaceTextParts(m.parts, replacement)) : m,
           );
           return {
             chats: {
@@ -1887,13 +2569,9 @@ export const useApp = create<AppState>((set, get) => ({
           set((s) => {
             const c = s.chats[localId];
             if (!c) return s;
+            const replacement = cleaned || "Here's the artifact:";
             const msgs = c.messages.map((m) =>
-              m.id === asstId
-                ? {
-                    ...m,
-                    content: cleaned || "Here's the artifact:",
-                  }
-                : m,
+              m.id === asstId ? withParts(m, replaceTextParts(m.parts, replacement)) : m,
             );
             return {
               chats: {
@@ -1997,6 +2675,10 @@ export const useApp = create<AppState>((set, get) => ({
 if (typeof window !== "undefined") {
   useApp.subscribe((state) => {
     try {
+      // Version the cache shape so a message-model change (e.g. the
+      // content→parts migration) doesn't hydrate stale messages that crash
+      // the renderer. Bump this whenever the persisted Message shape changes.
+      localStorage.setItem("zwork:cache-version", CHAT_CACHE_VERSION);
       localStorage.setItem("zwork:cached-chats", JSON.stringify(state.chats));
       localStorage.setItem("zwork:cached-summaries", JSON.stringify(state.chatSummaries));
     } catch (e) {

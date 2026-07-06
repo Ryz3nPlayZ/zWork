@@ -10,7 +10,7 @@ import { cn } from "../lib/cn";
  *   recording  → modifier held, waiting for the final key
  *   success    → keybind registered (flashes green)
  *
- * The shortcut string is in Tauri format: e.g. "Super+Shift+Space"
+ * The shortcut string is in Tauri format: e.g. "Super+Alt+Space"
  */
 
 const MODIFIERS = new Set(["Meta", "Alt", "Control", "Shift"]);

@@ -2,9 +2,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::io::{Read, Write};
-use std::net::{Shutdown, TcpStream};
+use std::net::TcpStream;
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{Manager, RunEvent, WindowEvent};
@@ -14,41 +14,31 @@ use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri_plugin_process::init as process_init;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 
-/// Currently registered overlay shortcut string.
-fn overlay_shortcut() -> &'static Mutex<String> {
-    static INSTANCE: OnceLock<Mutex<String>> = OnceLock::new();
-    INSTANCE.get_or_init(|| Mutex::new("Super+Shift+Space".to_string()))
+/// Currently registered overlay shortcut.
+fn overlay_shortcut() -> &'static Mutex<Option<Shortcut>> {
+    static INSTANCE: OnceLock<Mutex<Option<Shortcut>>> = OnceLock::new();
+    INSTANCE.get_or_init(|| Mutex::new(None))
 }
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_updater::Builder as UpdaterBuilder;
 
 enum BackendChild {
     Packaged(CommandChild),
-    Dev(Child),
 }
 
 impl BackendChild {
     fn pid(&self) -> u32 {
-        match self {
-            BackendChild::Packaged(child) => child.pid(),
-            BackendChild::Dev(child) => child.id(),
-        }
+        let BackendChild::Packaged(child) = self;
+        child.pid()
     }
 
     fn shutdown(self) {
-        match self {
-            BackendChild::Packaged(child) => {
-                let _ = child.kill();
-                // Clean the Python backend's PID lock so the next spawn
-                // doesn't refuse to start ("already running").
-                let pid_path = zwork_sidecar_home().join("state").join("backend.pid");
-                let _ = std::fs::remove_file(&pid_path);
-            }
-            BackendChild::Dev(mut child) => {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-        }
+        let BackendChild::Packaged(child) = self;
+        let _ = child.kill();
+        // Clean the backend's PID lock so the next spawn doesn't refuse to
+        // start ("already running").
+        let pid_path = zwork_sidecar_home().join("state").join("backend.pid");
+        let _ = std::fs::remove_file(&pid_path);
     }
 }
 
@@ -192,67 +182,6 @@ fn configure_linux_webview_env() {
 #[cfg(not(target_os = "linux"))]
 fn configure_linux_webview_env() {}
 
-fn find_dev_repo_root() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("ZWORK_ROOT") {
-        let p = PathBuf::from(p);
-        if p.join("sidecar").is_dir() && p.join(".venv").is_dir() {
-            return Some(p);
-        }
-    }
-
-    if let Ok(exe) = std::env::current_exe() {
-        let mut cur = exe.parent().map(|p| p.to_path_buf());
-        while let Some(dir) = cur {
-            if dir.join("sidecar").is_dir() && dir.join(".venv").is_dir() {
-                return Some(dir);
-            }
-            cur = dir.parent().map(|p| p.to_path_buf());
-        }
-    }
-
-    if let Ok(cwd) = std::env::current_dir() {
-        let mut cur: Option<PathBuf> = Some(cwd);
-        while let Some(dir) = cur {
-            if dir.join("sidecar").is_dir() && dir.join(".venv").is_dir() {
-                return Some(dir);
-            }
-            cur = dir.parent().map(|p| p.to_path_buf());
-        }
-    }
-
-    if let Some(home) = dirs::home_dir() {
-        let p = home.join("zwork");
-        if p.join("sidecar").is_dir() && p.join(".venv").is_dir() {
-            return Some(p);
-        }
-    }
-
-    None
-}
-
-fn python_executable(root: &PathBuf) -> PathBuf {
-    if let Ok(value) = std::env::var("ZWORK_PYTHON") {
-        return PathBuf::from(value);
-    }
-
-    let python = root.join(".venv").join("bin").join("python3");
-    if python.exists() {
-        return python;
-    }
-
-    let python = root.join(".venv").join("bin").join("python");
-    if python.exists() {
-        return python;
-    }
-
-    let python = root.join(".venv").join("Scripts").join("python.exe");
-    if python.exists() {
-        return python;
-    }
-
-    PathBuf::from("python3")
-}
-
 fn start_packaged_backend(app: &tauri::AppHandle) -> Option<BackendChild> {
     let mut sidecar = match app.shell().sidecar("zwork-backend") {
         Ok(cmd) => cmd,
@@ -261,6 +190,12 @@ fn start_packaged_backend(app: &tauri::AppHandle) -> Option<BackendChild> {
             return None;
         }
     };
+
+    // Point the backend at its bundled resources dir so it can locate the
+    // bundled zWork-Skills (and other resources) inside the packaged app.
+    if let Ok(res) = app.path().resource_dir() {
+        sidecar = sidecar.env("ZWORK_RESOURCES", res.display().to_string());
+    }
 
     sidecar = sidecar
         .env("PYTHONUNBUFFERED", "1")
@@ -309,69 +244,6 @@ fn start_packaged_backend(app: &tauri::AppHandle) -> Option<BackendChild> {
     }
 }
 
-fn start_dev_backend() -> Option<BackendChild> {
-    let root = find_dev_repo_root()?;
-    let python_exe = python_executable(&root);
-    let sidecar_home = zwork_sidecar_home();
-
-    let log = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open({
-            let mut path = zwork_data_dir();
-            let _ = std::fs::create_dir_all(&path);
-            path.push("backend.log");
-            path
-        })
-        .ok();
-
-    let mut cmd = Command::new(&python_exe);
-    cmd.current_dir(&root)
-        .arg("-m")
-        .arg("sidecar.server")
-        .env("PYTHONUNBUFFERED", "1")
-        .env("PYTHONUTF8", "1")
-        .env("PYTHONIOENCODING", "utf-8")
-        .env("ZWORK_HOME", sidecar_home.as_os_str());
-
-    if let Some(f) = log {
-        if let Ok(f2) = f.try_clone() {
-            cmd.stdout(Stdio::from(f));
-            cmd.stderr(Stdio::from(f2));
-        }
-    } else {
-        cmd.stdout(Stdio::null()).stderr(Stdio::null());
-    }
-
-    append_log(&format!(
-        "Spawning dev backend: python={} root={} zwork_home={}",
-        python_exe.display(),
-        root.display(),
-        sidecar_home.display(),
-    ));
-
-    match cmd.spawn() {
-        Ok(mut child) => {
-            append_log(&format!("Dev backend spawned pid={}", child.id()));
-            match child.try_wait() {
-                Ok(Some(status)) => {
-                    append_log(&format!("Dev backend exited immediately: {status}"));
-                    None
-                }
-                Ok(None) => Some(BackendChild::Dev(child)),
-                Err(err) => {
-                    append_log(&format!("Dev backend liveness check failed: {err}"));
-                    Some(BackendChild::Dev(child))
-                }
-            }
-        }
-        Err(err) => {
-            append_log(&format!("Dev backend spawn failed: {err}"));
-            None
-        }
-    }
-}
-
 fn kill_stale_on_port(port: u16) {
     let port_str = port.to_string();
     // Kill any process already bound to the backend port. This handles stale
@@ -401,10 +273,7 @@ fn spawn_backend(app: &tauri::AppHandle) -> Option<BackendChild> {
     // crash, relaunch) without cleaning up its PID file.
     let pid_path = zwork_sidecar_home().join("state").join("backend.pid");
     let _ = std::fs::remove_file(&pid_path);
-    if let Some(child) = start_packaged_backend(app) {
-        return Some(child);
-    }
-    start_dev_backend()
+    start_packaged_backend(app)
 }
 
 /// Initial spawn at app startup: clean up any leftover backend from a
@@ -431,24 +300,17 @@ fn ensure_backend_running(app: &tauri::AppHandle, backend: &Backend) -> Result<b
     }
 
     // Don't kill a freshly spawned backend before it has time to bind.
-    // PyInstaller cold-start on slow machines can take 20+ seconds.
-    // However, if the process has already terminated/crashed, bypass this check.
+    // A cold start on a slow machine can take 20+ seconds. However, if the
+    // process has already terminated/crashed, bypass this check.
     let is_fresh = if let Some(spawned_at) = guard.spawned_at {
         spawned_at.elapsed() < Duration::from_secs(45)
     } else {
         false
     };
 
-    let mut is_dead = false;
-    if let Some(ref mut child) = guard.child {
-        if let BackendChild::Dev(c) = child {
-            if let Ok(Some(_)) = c.try_wait() {
-                is_dead = true;
-            }
-        }
-    } else {
-        is_dead = true;
-    }
+    // The packaged backend's child handle is cleared by its output-stream task
+    // when the process exits, so an absent child means the backend died.
+    let is_dead = guard.child.is_none();
 
     if is_fresh && !is_dead {
         return Ok(false);
@@ -499,64 +361,34 @@ fn is_http_url(url: &str) -> bool {
     }
 }
 
-#[cfg(target_os = "macos")]
-#[link(name = "ApplicationServices", kind = "framework")]
-extern "C" {
-    fn AXIsProcessTrusted() -> bool;
-}
-
-#[cfg(target_os = "macos")]
-#[link(name = "CoreGraphics", kind = "framework")]
-extern "C" {
-    fn CGPreflightScreenCaptureAccess() -> bool;
-    fn CGRequestScreenCaptureAccess() -> bool;
-}
-
+/// Open a macOS Privacy & Security pane in System Settings. The Settings
+/// permission UI uses this to deep-link the user to the right pane to grant
+/// CuaDriver a permission the driver's own grant flow can't reliably raise
+/// (Screen Recording). The pane name is validated; macOS opens it via `open`,
+/// other platforms resolve the name but do nothing.
 #[tauri::command]
-fn check_accessibility_permission() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        unsafe { AXIsProcessTrusted() }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        true
-    }
-}
-
-#[tauri::command]
-fn check_screen_recording_permission() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        unsafe { CGPreflightScreenCaptureAccess() }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        true
-    }
-}
-
-#[tauri::command]
-fn request_accessibility_permission() {
-    #[cfg(target_os = "macos")]
-    {
-        let _ = std::process::Command::new("open")
-            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
-            .spawn();
-    }
-}
-
-#[tauri::command]
-fn request_screen_recording_permission() {
-    #[cfg(target_os = "macos")]
-    {
-        unsafe {
-            CGRequestScreenCaptureAccess();
+fn open_macos_privacy_pane(pane: String) -> Result<(), String> {
+    let url = match pane.as_str() {
+        "accessibility" => {
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
         }
-        let _ = std::process::Command::new("open")
-            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
-            .spawn();
+        "screen_recording" => {
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+        }
+        other => return Err(format!("unknown privacy pane: {other}")),
+    };
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(url)
+            .status()
+            .map_err(|e| format!("failed to open System Settings: {e}"))?;
     }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = url;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -669,36 +501,39 @@ async fn begin_desktop_auth(app: tauri::AppHandle, start_url: String) -> Result<
 }
 
 /// Re-register the global overlay shortcut.
-/// `shortcut_str` should be a Tauri-compatible shortcut like "Super+Shift+Space".
+/// `shortcut_str` should be a Tauri-compatible shortcut like "Super+Alt+Space".
 /// Pass empty string to unregister.
 #[tauri::command]
 async fn register_overlay_shortcut(app: tauri::AppHandle, shortcut_str: String) -> Result<String, String> {
     // Unregister the old shortcut
     {
         let old = overlay_shortcut().lock().unwrap().clone();
-        if !old.is_empty() {
-            if let Ok(old_shortcut) = old.parse::<Shortcut>() {
-                let _ = app.global_shortcut().unregister(old_shortcut);
-            }
+        if let Some(old_shortcut) = old {
+            let _ = app.global_shortcut().unregister(old_shortcut);
         }
     }
 
     if shortcut_str.is_empty() {
-        *overlay_shortcut().lock().unwrap() = String::new();
+        *overlay_shortcut().lock().unwrap() = None;
         return Ok("unregistered".to_string());
     }
 
     let shortcut: Shortcut = shortcut_str.parse().map_err(|e| format!("Invalid shortcut: {e}"))?;
     app.global_shortcut().register(shortcut)
         .map_err(|e| format!("Failed to register shortcut: {e}"))?;
-    *overlay_shortcut().lock().unwrap() = shortcut_str.clone();
+    *overlay_shortcut().lock().unwrap() = Some(shortcut);
     Ok(shortcut_str)
 }
 
 /// Get the currently registered overlay shortcut string.
 #[tauri::command]
 async fn get_overlay_shortcut() -> String {
-    overlay_shortcut().lock().unwrap().clone()
+    overlay_shortcut()
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|s| s.to_string())
+        .unwrap_or_default()
 }
 
 fn hex_digit(b: u8) -> Option<u8> {
@@ -826,6 +661,135 @@ mod percent_decode_tests {
     }
 }
 
+/// Ensure the CuaDriver.app is installed somewhere LaunchServices can find it
+/// (so the cua-driver MCP proxy's `open -a CuaDriver` resolves). If the user
+/// already has it in /Applications or ~/Applications, leave it untouched (they
+/// may have a newer version than the bundled one — version skew is a parked
+/// issue). Otherwise copy the bundled copy (zWork.app/Contents/Resources/
+/// CuaDriver.app) to ~/Applications/CuaDriver.app using `ditto` (preserves the
+/// .app bundle structure, code signature, and extended attributes — cp -R can
+/// drop metadata that invalidates the signature), then register it with
+/// LaunchServices so `open -a CuaDriver` resolves on the first proxy launch.
+///
+/// Preserves trycua's signature and the `com.trycua.driver` TCC identity — see
+/// the cua-driver-dependency-model memory. Best-effort and non-fatal: any
+/// failure logs and falls back to the manual-install path. macOS-only. Called
+/// before the backend starts so the daemon is discoverable when the MCP client
+/// spins up.
+#[cfg(target_os = "macos")]
+fn ensure_cuadriver_installed(app: &tauri::AppHandle) {
+    use std::path::PathBuf;
+
+    let home = match std::env::var_os("HOME") {
+        Some(h) => PathBuf::from(h),
+        None => {
+            eprintln!("[cuadriver] no HOME set; skipping auto-install");
+            return;
+        }
+    };
+    let user_apps = home.join("Applications");
+    let dest = user_apps.join("CuaDriver.app");
+
+    // Already present in a standard location? Nothing to do. Never overwrite an
+    // existing install.
+    let std_loc = PathBuf::from("/Applications/CuaDriver.app");
+    if std_loc.exists() || dest.exists() {
+        return;
+    }
+
+    // Locate the bundled copy and confirm it's a real .app, not a placeholder
+    // dir (prepare-bundle.cjs leaves a placeholder when CuaDriver.app wasn't
+    // available at build time).
+    let bundled = match app.path().resource_dir() {
+        Ok(d) => d.join("CuaDriver.app"),
+        Err(e) => {
+            eprintln!("[cuadriver] no resource_dir: {e}");
+            return;
+        }
+    };
+    if !bundled.join("Contents/Info.plist").exists() {
+        eprintln!(
+            "[cuadriver] no usable bundled CuaDriver.app; user must install it manually"
+        );
+        return;
+    }
+
+    // ~/Applications is user-writable and a LaunchServices-indexed location.
+    if let Err(e) = std::fs::create_dir_all(&user_apps) {
+        eprintln!("[cuadriver] cannot create {}: {e}", user_apps.display());
+        return;
+    }
+
+    // ditto preserves bundle metadata + signature; cp -R does not reliably.
+    match Command::new("ditto")
+        .arg(&bundled)
+        .arg(&dest)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+    {
+        Ok(o) if o.status.success() => {
+            eprintln!("[cuadriver] installed CuaDriver.app -> {}", dest.display());
+        }
+        Ok(o) => {
+            eprintln!(
+                "[cuadriver] ditto failed ({}): {}",
+                o.status,
+                String::from_utf8_lossy(&o.stderr).trim()
+            );
+            // Remove a partial copy so a later retry isn't confused by it.
+            let _ = std::fs::remove_dir_all(&dest);
+            return;
+        }
+        Err(e) => {
+            eprintln!("[cuadriver] ditto exec failed: {e}");
+            return;
+        }
+    }
+
+    // Register with LaunchServices so `open -a CuaDriver` resolves immediately,
+    // without waiting for the background indexer. Non-fatal.
+    let lsregister = "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister";
+    let _ = Command::new(lsregister)
+        .arg("-f")
+        .arg(&dest)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+#[cfg(not(target_os = "macos"))]
+fn ensure_cuadriver_installed(_app: &tauri::AppHandle) {}
+
+/// Stop the persistent CuaDriver daemon when zWork quits. The daemon is a
+/// separate LaunchServices process that survives zWork exiting; without this it
+/// keeps burning ~45% CPU (cursor-overlay render loop, can't be disabled in
+/// 0.5.5) until reboot. Best-effort — the backend's own idle teardown handles
+/// the in-app-idle case; this covers "user closed zWork".
+#[cfg(target_os = "macos")]
+fn stop_cua_driver_on_quit() {
+    for bin in [
+        "/Applications/CuaDriver.app/Contents/MacOS/cua-driver",
+        "cua-driver",
+    ] {
+        let ok = Command::new(bin)
+            .arg("stop")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok();
+        if ok {
+            break;
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn stop_cua_driver_on_quit() {}
+
 fn main() {
     configure_linux_webview_env();
 
@@ -835,8 +799,8 @@ fn main() {
         .plugin(UpdaterBuilder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &tauri::AppHandle, shortcut, event| {
             use tauri_plugin_global_shortcut::ShortcutState;
-            let current = overlay_shortcut().lock().unwrap().to_lowercase();
-            if event.state() == ShortcutState::Pressed && shortcut.to_string().to_lowercase() == current {
+            let current = overlay_shortcut().lock().unwrap().clone();
+            if event.state() == ShortcutState::Pressed && current.as_ref() == Some(&shortcut) {
                 if let Some(window) = app.get_webview_window("overlay") {
                     let is_visible = window.is_visible().unwrap_or(false);
                     if is_visible {
@@ -853,18 +817,22 @@ fn main() {
             ensure_backend,
             restart_backend,
             begin_desktop_auth,
-            check_accessibility_permission,
-            check_screen_recording_permission,
-            request_accessibility_permission,
-            request_screen_recording_permission,
+            open_macos_privacy_pane,
             register_overlay_shortcut,
             get_overlay_shortcut
         ])
         .setup(|app| {
             use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
-            let shortcut: Shortcut = "Super+Shift+Space".parse().unwrap();
-            if let Err(e) = app.global_shortcut().register(shortcut) {
-                eprintln!("zWork: failed to register global shortcut Super+Shift+Space: {e}");
+
+            // Check for user-configured shortcut in localStorage first
+            let default_shortcut_str = "Control+Alt+Space".to_string();
+            let shortcut: Shortcut = default_shortcut_str.parse().unwrap();
+            match app.global_shortcut().register(shortcut) {
+                Ok(_) => {
+                    *overlay_shortcut().lock().unwrap() = Some(shortcut);
+                    println!("zWork: registered global overlay shortcut: {}", default_shortcut_str);
+                }
+                Err(e) => eprintln!("zWork: failed to register global shortcut {}: {e}", default_shortcut_str),
             }
 
             // System tray
@@ -927,6 +895,9 @@ fn main() {
         .expect("error while building zWork");
 
     let app_handle = app.handle().clone();
+    // Make CuaDriver.app discoverable before the backend's MCP client tries to
+    // launch the daemon. No-op if already installed; best-effort otherwise.
+    ensure_cuadriver_installed(&app_handle);
     if let Some(backend) = app_handle.try_state::<Backend>() {
         if let Ok(mut guard) = backend.0.lock() {
             guard.child = spawn_backend_initial(&app_handle);
@@ -947,6 +918,8 @@ fn main() {
                     }
                 }
             }
+            // Stop the CuaDriver daemon so it doesn't keep burning CPU after quit.
+            stop_cua_driver_on_quit();
         }
     });
 }

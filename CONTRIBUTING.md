@@ -20,7 +20,7 @@ cd zWork
 | Desktop Shell | [Tauri v2](https://tauri.app) | Native window management |
 | Frontend | React + TypeScript | Chat UI, settings, artifact views |
 | 3D Rendering | Three.js | Visualization features |
-| Local Backend | FastAPI (Python 3.12+) | Agent orchestration, tool execution |
+| Local Backend | Rust (Axum) | Agent orchestration, tool execution, desktop/browser control |
 | Cloud API | Rust (Axum) | Auth, telemetry, hosted inference |
 | Database | Postgres | User data, sessions, artifacts |
 | Auth | Better Auth | OAuth integration, session management |
@@ -30,8 +30,7 @@ cd zWork
 ### Prerequisites
 
 - **Node.js** 20+ for frontend builds
-- **Rust** stable for Tauri and cloud API
-- **Python** 3.12+ for the local sidecar
+- **Rust** stable for the Tauri shell and the local + cloud backends
 - **Docker** for local cloud infrastructure testing
 
 ### Running Locally
@@ -41,10 +40,8 @@ cd zWork
 ```
 
 This script:
-1. Creates a Python virtual environment for the sidecar
-2. Installs frontend dependencies
-3. Starts the Tauri development window
-4. Launches the local FastAPI server
+1. Installs frontend dependencies
+2. Starts the Tauri development window (which spawns the Rust backend)
 
 ### Development Workflow
 
@@ -52,11 +49,8 @@ This script:
 # Frontend dev server (separate terminal)
 cd app && npm run dev
 
-# Sidecar dev server with hot reload
-cd sidecar && source .venv/bin/activate && uvicorn sidecar.server:app --reload
-
-# Full desktop build
-npm run tauri build
+# Full desktop build (frontend + Rust backend + native shell)
+cd app && npm run tauri build
 ```
 
 ## Project Structure
@@ -65,18 +59,14 @@ npm run tauri build
 zWork/
 ├── app/                    # Tauri frontend application
 │   ├── src/               # React components and logic
-│   ├── src-tauri/         # Rust desktop shell
+│   ├── src-tauri/         # Rust desktop shell (spawns the backend, manages cua-driver)
 │   └── package.json       # Frontend dependencies
-├── sidecar/               # Python FastAPI local backend
-│   ├── main.py           # API entry point
-│   ├── agents/           # Agent orchestration
-│   └── tools/            # Local tool implementations
+├── sidecar-rust/          # Rust local backend (axum HTTP+WS server, agent, tools)
 ├── cloud-src/            # Cloud infrastructure source
 │   ├── auth/             # Better Auth integration
 │   ├── api/              # Rust Axum HTTP handlers
 │   └── deploy/           # Docker and deployment configs
-├── docs/                 # Project documentation
-└── tests/                # Test suites
+└── docs/                 # Project documentation
 ```
 
 ## Contribution Guidelines
@@ -87,33 +77,29 @@ When reporting bugs, please include:
 - Your operating system and version
 - Steps to reproduce the issue
 - Expected vs actual behavior
-- Relevant logs from the sidecar or Tauri console
+- Relevant logs from the backend or Tauri console
 
 ### Submitting Changes
 
 1. Fork the repository
 2. Create a branch for your feature (`git checkout -b feature/amazing-feature`)
 3. Write tests for new functionality
-4. Ensure all tests pass (`npm test` && `pytest tests/`)
+4. Ensure `cargo test` passes in `sidecar-rust/` and `npm run build` passes in `app/`
 5. Submit a pull request with a clear description
 
 ### Code Style
 
 - **TypeScript**: Follow the existing patterns, use strict mode
-- **Python**: PEP 8 compliant, type hints where appropriate
 - **Rust**: `cargo fmt` and `cargo clippy` should pass
 
 ### Testing
 
 ```bash
-# Frontend tests
-cd app && npm test
+# Backend (Rust)
+cd sidecar-rust && cargo test
 
-# Python backend tests
-pytest tests/
-
-# End-to-end tests
-cd tests && pytest e2e/
+# Frontend type-check + build
+cd app && npm run build
 ```
 
 ## Building Releases

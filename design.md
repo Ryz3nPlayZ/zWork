@@ -25,6 +25,14 @@ Light mode:
 - `--bubble`  232 230 222
 - `--bubble-fg` 48 46 40
 - `--shadow`  30 28 24
+- `--success` 16 185 129
+- `--success-fg` 255 255 255
+- `--warning` 245 158 11
+- `--warning-fg` 48 46 40
+- `--error` 239 68 68
+- `--error-fg` 255 255 255
+- `--info` 59 130 246
+- `--info-fg` 255 255 255
 
 Dark mode:
 - `--paper`   42 42 46
@@ -42,6 +50,19 @@ Dark mode:
 - `--accent`  220 218 210
 - `--bubble`  72 72 76
 - `--bubble-fg` 232 230 222
+- `--success` 52 211 153
+- `--success-fg` 0 0 0
+- `--warning` 251 191 36
+- `--warning-fg` 0 0 0
+- `--error` 248 113 113
+- `--error-fg` 0 0 0
+- `--info` 96 165 250
+- `--info-fg` 0 0 0
+
+### Color schemes
+Parchment remains the default and locked system palette. The Settings color-scheme
+picker is an allowed user preference; every scheme must still define the full token
+set above so app UI stays coherent when a non-default scheme is active.
 
 ## Typography
 

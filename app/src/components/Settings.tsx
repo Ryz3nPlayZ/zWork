@@ -1,3 +1,5 @@
+/* Hallmark · genre: modern-minimal · macrostructure: Workbench · design-system: design.md · designed-as-app */
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
@@ -20,10 +22,25 @@ import {
   User,
   LogOut,
   ShieldAlert,
+  ChevronDown,
+  Palette,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
-import { isMacOS, IS_TAURI } from "../lib/platform";
+import { IS_TAURI } from "../lib/platform";
+import {
+  setTranslucencyPref,
+  useTranslucencyPref,
+  nativeVibrancySupported,
+} from "../lib/translucency";
+import {
+  loadSchemePref,
+  setSchemePref,
+  loadThemePref,
+  setThemePref,
+  resolvedSchemeModes,
+} from "../lib/theme";
+import { COLOR_SCHEMES, DEFAULT_SCHEME_ID } from "../lib/themes";
 import { fallbackAppVersion, resolveAppVersion } from "../lib/appVersion";
 import {
   loadTemplates,
@@ -36,7 +53,7 @@ import { IconButton } from "./IconButton";
 import { api, IS_WEB, type Integration } from "../lib/api";
 import { KeybindRecorder } from "./KeybindRecorder";
 
-type Section = "account" | "general" | "memory" | "models" | "integrations";
+type Section = "account" | "appearance" | "general" | "memory" | "models" | "integrations";
 
 const SECTION_META: Record<Section, { title: string; description: string; icon: React.ReactNode }> = {
   account: {
@@ -44,9 +61,14 @@ const SECTION_META: Record<Section, { title: string; description: string; icon: 
     description: "Sign in with Google to sync your data.",
     icon: <User className="h-4 w-4" />,
   },
+  appearance: {
+    title: "Appearance",
+    description: "Theme, color scheme, and sidebar glass.",
+    icon: <Palette className="h-4 w-4" />,
+  },
   general: {
     title: "General",
-    description: "Theme, defaults, preferences.",
+    description: "Defaults, permissions, and preferences.",
     icon: <Sliders className="h-4 w-4" />,
   },
   memory: {
@@ -117,7 +139,6 @@ const CREDENTIAL_PLACEHOLDERS: Record<string, { keyPlaceholder: string; baseUrlP
 };
 
 export function SettingsPage() {
-  const macOS = isMacOS();
   const settings = useApp((s) => s.settings);
   const providers = useApp((s) => s.providers);
   const integrations = useApp((s) => s.integrations);
@@ -160,8 +181,8 @@ export function SettingsPage() {
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col bg-paper">
-      {/* Header */}
-      <div className={cn(macOS && "titlebar-drag", "flex h-12 shrink-0 items-center justify-between border-b border-line px-5")}>
+      {/* Header. Window dragging is owned by the TopStrip above the row. */}
+      <div className="flex h-12 shrink-0 items-center justify-between border-b border-edge px-5">
         <div className="flex min-w-0 items-center gap-3" data-no-drag>
           <IconButton
             icon={<ArrowLeft />}
@@ -218,6 +239,7 @@ export function SettingsPage() {
             {section === "integrations" && (
               <IntegrationsPanel integrations={integrations} onRefresh={refreshSettingsPage} />
             )}
+            {section === "appearance" && <AppearancePanel />}
             {section === "general" && (
               <GeneralPanel settings={settings} onSave={saveSettings} />
             )}
@@ -347,11 +369,11 @@ function ModelsPanel({
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-[13.5px] font-semibold text-ink">{m.name}</span>
-                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">Auto-detected</span>
+                <span className="rounded-full border border-success/20 bg-success/10 px-1.5 py-0.5 text-[10px] font-medium text-success">Auto-detected</span>
               </div>
               <p className="mt-0.5 text-[12px] text-ink-muted">{m.subtitle}</p>
             </div>
-            <CircleCheck className="mt-0.5 h-4 w-4 text-emerald-600" />
+            <CircleCheck className="mt-0.5 h-4 w-4 text-success" />
           </div>
         </div>
       ))}
@@ -366,7 +388,7 @@ function ModelsPanel({
                 <div className="flex items-center gap-2">
                   <span className="text-[13.5px] font-semibold text-ink">{m.name}</span>
                   {live?.configured ? (
-                    <CircleCheck className="h-3.5 w-3.5 text-emerald-600" />
+                    <CircleCheck className="h-3.5 w-3.5 text-success" />
                   ) : (
                     <CircleDashed className="h-3.5 w-3.5 text-ink-faint" />
                   )}
@@ -423,30 +445,33 @@ function ModelsPanel({
               />
             </Field>
             <Field label="Credential source">
-              <select
-                value={form.credential}
-                onChange={(e) => {
-                  const cred = e.target.value;
-                  const shape = cred === "anthropic" || cred === "claude_code" || cred === "zwork_router" ? "anthropic" : "openai";
-                  setForm((f) => ({ ...f, credential: cred, shape }));
-                }}
-                className="w-full bg-paper border border-line text-[13px] px-3.5 py-2 rounded-xl focus:outline-none focus:ring-1 focus:ring-ink focus:border-line-strong text-ink shadow-xs appearance-none pr-10 bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2020%2020%22%20fill%3D%22none%22%3E%3Cpath%20d%3D%22M7%209l3%203%203-3%22%20stroke%3D%22%23888888%22%20stroke-width%3D%221.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E')] bg-[length:18px_18px] bg-[right_10px_center] bg-no-repeat cursor-pointer transition-all duration-150"
-                >
-                  {deprecatedCredentialLabel && (
-                    <option value={form.credential} className="bg-paper text-ink">
-                      {form.credential === "zwork_router" ? `${deprecatedCredentialLabel} (Managed)` : `${deprecatedCredentialLabel} (Deprecated)`}
-                    </option>
-                  )}
-                  <option value="anthropic" className="bg-paper text-ink">Anthropic (BYOK)</option>
-                  <option value="openai" className="bg-paper text-ink">OpenAI-compatible (BYOK)</option>
-                  <option value="deepseek" className="bg-paper text-ink">DeepSeek (BYOK)</option>
-                  <option value="zai" className="bg-paper text-ink">z.ai (BYOK)</option>
-                  <option value="ollama" className="bg-paper text-ink">Ollama (local / cloud)</option>
-                  <option value="claude_code" className="bg-paper text-ink">Local config (reuse credentials)</option>
-                </select>
+              <div className="relative">
+                <select
+                  value={form.credential}
+                  onChange={(e) => {
+                    const cred = e.target.value;
+                    const shape = cred === "anthropic" || cred === "claude_code" || cred === "zwork_router" ? "anthropic" : "openai";
+                    setForm((f) => ({ ...f, credential: cred, shape }));
+                  }}
+                  className="ring-focus w-full appearance-none rounded-xl border border-line bg-paper px-3.5 py-2 pr-10 text-[13px] text-ink hover:border-line-strong focus:border-line-strong focus:outline-none cursor-pointer transition-colors"
+                  >
+                    {deprecatedCredentialLabel && (
+                      <option value={form.credential} className="bg-paper text-ink">
+                        {form.credential === "zwork_router" ? `${deprecatedCredentialLabel} (Managed)` : `${deprecatedCredentialLabel} (Deprecated)`}
+                      </option>
+                    )}
+                    <option value="anthropic" className="bg-paper text-ink">Anthropic (BYOK)</option>
+                    <option value="openai" className="bg-paper text-ink">OpenAI-compatible (BYOK)</option>
+                    <option value="deepseek" className="bg-paper text-ink">DeepSeek (BYOK)</option>
+                    <option value="zai" className="bg-paper text-ink">z.ai (BYOK)</option>
+                    <option value="ollama" className="bg-paper text-ink">Ollama (local / cloud)</option>
+                    <option value="claude_code" className="bg-paper text-ink">Local config (reuse credentials)</option>
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" />
+              </div>
             </Field>
             {deprecatedCredentialLabel && (
-              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] leading-5 text-amber-800">
+              <p className="rounded-lg border border-warning/20 bg-warning/5 px-3 py-2 text-[12px] leading-5 text-warning">
                 {form.credential === "zwork_router"
                   ? `${deprecatedCredentialLabel} is managed by zWork and pinned to DeepSeek V4 Flash.`
                   : `${deprecatedCredentialLabel} is deprecated and hidden for new setups. Migrate this model to a stronger provider.`}
@@ -458,7 +483,7 @@ function ModelsPanel({
               <div className="rounded-lg border border-line bg-paper px-3 py-2 text-[12px] text-ink-muted">
                 <span className="inline-flex items-center gap-1.5">
                   {credStatus?.configured ? (
-                    <CircleCheck className="h-3.5 w-3.5 text-emerald-600" />
+                    <CircleCheck className="h-3.5 w-3.5 text-success" />
                   ) : (
                     <CircleDashed className="h-3.5 w-3.5 text-ink-faint" />
                   )}
@@ -514,11 +539,11 @@ function ModelsPanel({
                 onChange={(e) => setForm((f) => ({ ...f, base_url_override: e.target.value }))}
               />
               {presetHint && (
-                <p className="mt-1 text-[12px] leading-5 text-amber-700">
+                <p className="mt-1 text-[12px] leading-5 text-warning">
                   This URL looks like {presetHint.label}.{" "}
                   <button
                     type="button"
-                    className="underline underline-offset-2 hover:text-amber-900"
+                    className="underline underline-offset-2 hover:text-ink"
                     onClick={() =>
                       setForm((f) => ({ ...f, credential: presetHint.id, base_url_override: "" }))
                     }
@@ -589,9 +614,9 @@ function IntegrationsPanel({
                   className={cn(
                     "inline-flex h-1.5 w-1.5 rounded-full",
                     i.can_reuse_credentials
-                      ? "bg-emerald-500"
+                      ? "bg-success"
                       : i.detected
-                        ? "bg-amber-400"
+                        ? "bg-warning"
                         : "bg-ink/20",
                   )}
                 />
@@ -633,63 +658,28 @@ function IntegrationsPanel({
   );
 }
 
-// ---------------- General ----------------
+// ---------------- Appearance ----------------
 
-function GeneralPanel({
-  settings,
-  onSave,
-}: {
-  settings: ReturnType<typeof useApp.getState>["settings"];
-  onSave: (patch: { default_model?: string; use_claude_code_config?: boolean; telemetry_enabled?: boolean }) => Promise<void>;
-}) {
-  const [appVersion, setAppVersion] = useState(fallbackAppVersion());
-  const providers = useApp((s) => s.providers);
-
-  const accessibilityPermissionGranted = useApp((s) => s.accessibilityPermissionGranted);
-  const screenRecordingPermissionGranted = useApp((s) => s.screenRecordingPermissionGranted);
-  const checkMacOSPermissions = useApp((s) => s.checkMacOSPermissions);
-  const requestAccessibility = useApp((s) => s.requestAccessibility);
-  const requestScreenRecording = useApp((s) => s.requestScreenRecording);
-  const autoApproveDestructive = useApp((s) => s.autoApproveDestructive);
-  const setAutoApproveDestructive = useApp((s) => s.setAutoApproveDestructive);
-
-  useEffect(() => {
-    if (IS_WEB) return;
-    checkMacOSPermissions();
-    const interval = setInterval(() => {
-      checkMacOSPermissions();
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [checkMacOSPermissions]);
-
-  const models = providers?.models ?? [];
-  const [defaultModel, setDefaultModel] = useState(settings?.default_model ?? "");
-  const [useClaude, setUseClaude] = useState(!!settings?.use_claude_code_config);
-  const [telemetryEnabled, setTelemetryEnabled] = useState(!!settings?.telemetry_enabled);
-  const [themePref, setThemePref] = useState<"system" | "light" | "dark">(() => {
-    const v = localStorage.getItem("zwork.theme");
-    if (v === "light" || v === "dark") return v;
-    return "system";
-  });
-  useEffect(() => {
-    setDefaultModel(settings?.default_model ?? "");
-    setUseClaude(!!settings?.use_claude_code_config);
-    setTelemetryEnabled(!!settings?.telemetry_enabled);
-  }, [settings]);
-
-  useEffect(() => {
-    let cancelled = false;
-    void resolveAppVersion().then((version) => {
-      if (!cancelled) setAppVersion(version);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+function AppearancePanel() {
+  const [themePref, setThemePrefState] = useState<"system" | "light" | "dark">(() =>
+    loadThemePref(),
+  );
+  const [schemePref, setSchemePrefState] = useState<string>(() => loadSchemePref());
+  const translucencyPref = useTranslucencyPref();
+  const translucencyNative = nativeVibrancySupported();
+  const schemeModes = resolvedSchemeModes();
+  const modeLocked = schemeModes.length === 1;
 
   const applyTheme = (v: "system" | "light" | "dark") => {
+    setThemePrefState(v);
     setThemePref(v);
-    import("../lib/theme").then((m) => m.setThemePref(v));
+  };
+
+  const applyScheme = (id: string) => {
+    setSchemePrefState(id);
+    setSchemePref(id);
+    const pref = loadThemePref();
+    setThemePrefState(pref);
   };
 
   const themeOptions: { value: "system" | "light" | "dark"; icon: React.ReactNode; label: string }[] = [
@@ -701,37 +691,202 @@ function GeneralPanel({
   return (
     <div className="flex flex-col gap-5">
       <div>
-        <h2 className="text-[17px] font-semibold tracking-tight text-ink">General</h2>
-        <p className="mt-1 text-[13px] leading-5 text-ink-muted">Preferences for zWork.</p>
+        <h2 className="text-[17px] font-semibold tracking-tight text-ink">Appearance</h2>
+        <p className="mt-1 text-[13px] leading-5 text-ink-muted">Theme, color scheme, and sidebar glass.</p>
       </div>
 
-      {/* Theme picker */}
-      <section className="rounded-xl border border-line bg-paper-raised p-4">
-        <Field label="Appearance" description="Follows your system by default.">
+      <section className="rounded-xl border border-line bg-paper-raised p-4 space-y-4">
+        <Field
+          label="Theme"
+          description={
+            modeLocked
+              ? `This color scheme is ${schemeModes[0]} only.`
+              : "Follows your system by default."
+          }
+        >
           <div className="flex gap-2 mt-1">
-            {themeOptions.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => applyTheme(opt.value)}
-                className={cn(
-                  "press flex flex-col items-center gap-1.5 rounded-xl border px-4 py-3 transition-colors min-w-[64px]",
-                  themePref === opt.value
-                    ? "border-line-strong bg-paper-sunken text-ink shadow-[0_0_0_1px_rgb(var(--line-strong))]"
-                    : "border-line bg-paper text-ink-muted hover:border-line-strong hover:bg-paper-sunken hover:text-ink",
-                )}
+            {themeOptions.map((opt) => {
+              const disabled =
+                modeLocked ||
+                (opt.value !== "system" && !schemeModes.includes(opt.value));
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => applyTheme(opt.value)}
+                  className={cn(
+                    "press flex flex-col items-center gap-1.5 rounded-xl border px-4 py-3 transition-colors min-w-[64px]",
+                    disabled && "opacity-40 cursor-not-allowed",
+                    !disabled && themePref === opt.value
+                      ? "border-line-strong bg-paper-sunken text-ink shadow-[0_0_0_1px_rgb(var(--line-strong))]"
+                      : "border-line bg-paper text-ink-muted hover:border-line-strong hover:bg-paper-sunken hover:text-ink",
+                  )}
+                >
+                  {opt.icon}
+                  <span className="text-[11px] font-medium">{opt.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </Field>
+
+        <Field
+          label="Color scheme"
+          description="The palette family. Parchment is the zWork default."
+        >
+          <div className="mt-1.5 flex items-center gap-2">
+            <div className="relative">
+              <select
+                value={schemePref}
+                onChange={(e) => applyScheme(e.target.value)}
+                className="press ring-focus appearance-none rounded-lg border border-line bg-paper px-3 py-2 pr-8 text-[12.5px] text-ink hover:border-line-strong focus:border-line-strong focus:outline-none cursor-pointer min-w-[180px]"
               >
-                {opt.icon}
-                <span className="text-[11px] font-medium">{opt.label}</span>
-              </button>
-            ))}
+                {Object.entries(
+                  COLOR_SCHEMES.reduce<Record<string, typeof COLOR_SCHEMES>>((acc, s) => {
+                    const g = s.group ?? "Other";
+                    (acc[g] ??= []).push(s);
+                    return acc;
+                  }, {}),
+                ).map(([group, schemes]) => (
+                  <optgroup key={group} label={group}>
+                    {schemes.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.label}
+                        {s.id === DEFAULT_SCHEME_ID ? " (default)" : ""}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-muted" />
+            </div>
+            <span
+              className="h-6 w-6 rounded-full border border-line"
+              style={{ backgroundColor: "rgb(var(--accent))" }}
+              aria-hidden
+            />
           </div>
         </Field>
       </section>
 
+      <section className="rounded-xl border border-line bg-paper-raised p-4">
+        <Field
+          label="Sidebar translucency"
+          description={
+            translucencyNative
+              ? "Frosted-glass sidebar that blurs the desktop behind the window."
+              : "A lighter, glassy sidebar. Best on macOS, where it shows real desktop blur."
+          }
+        >
+          <button
+            type="button"
+            role="switch"
+            aria-checked={translucencyPref === "on"}
+            onClick={() =>
+              setTranslucencyPref(translucencyPref === "on" ? "off" : "on")
+            }
+            className={cn(
+              "press ring-focus relative mt-2 inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors",
+              translucencyPref === "on"
+                ? "border-transparent bg-accent"
+                : "border-line bg-paper-sunken",
+            )}
+          >
+            <span
+              className={cn(
+                "pointer-events-none h-[1.125rem] w-[1.125rem] rounded-full bg-paper-raised shadow-sm transition-transform",
+                translucencyPref === "on" ? "translate-x-5" : "translate-x-0.5",
+              )}
+            />
+          </button>
+        </Field>
+      </section>
+    </div>
+  );
+}
+
+// ---------------- General ----------------
+
+function GeneralPanel({
+  settings,
+  onSave,
+}: {
+  settings: ReturnType<typeof useApp.getState>["settings"];
+  onSave: (patch: { default_model?: string; use_claude_code_config?: boolean; telemetry_enabled?: boolean }) => Promise<void>;
+}) {
+  const [appVersion, setAppVersion] = useState(fallbackAppVersion());
+  const [backendVersion, setBackendVersion] = useState<string | null>(null);
+  const providers = useApp((s) => s.providers);
+
+  const accessibilityPermissionGranted = useApp((s) => s.accessibilityPermissionGranted);
+  const screenRecordingPermissionGranted = useApp((s) => s.screenRecordingPermissionGranted);
+  const driverOk = useApp((s) => s.driverOk);
+  const checkMacOSPermissions = useApp((s) => s.checkMacOSPermissions);
+  const requestAccessibility = useApp((s) => s.requestAccessibility);
+  const requestScreenRecording = useApp((s) => s.requestScreenRecording);
+  const extensionConnected = useApp((s) => s.extensionConnected);
+  const checkBrowserBridge = useApp((s) => s.checkBrowserBridge);
+  const autoApproveDestructive = useApp((s) => s.autoApproveDestructive);
+  const setAutoApproveDestructive = useApp((s) => s.setAutoApproveDestructive);
+
+  useEffect(() => {
+    if (IS_WEB) return;
+    checkMacOSPermissions();
+    checkBrowserBridge();
+    const interval = setInterval(() => {
+      checkMacOSPermissions();
+      checkBrowserBridge();
+    }, 2000);
+    // Re-check the instant the window regains focus — e.g. the user just
+    // returned from System Settings after toggling CuaDriver on.
+    const onFocus = () => {
+      checkMacOSPermissions();
+      checkBrowserBridge();
+    };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [checkMacOSPermissions, checkBrowserBridge]);
+
+  const models = providers?.models ?? [];
+  const [defaultModel, setDefaultModel] = useState(settings?.default_model ?? "");
+  const [useClaude, setUseClaude] = useState(!!settings?.use_claude_code_config);
+  const [telemetryEnabled, setTelemetryEnabled] = useState(!!settings?.telemetry_enabled);
+  useEffect(() => {
+    setDefaultModel(settings?.default_model ?? "");
+    setUseClaude(!!settings?.use_claude_code_config);
+    setTelemetryEnabled(!!settings?.telemetry_enabled);
+  }, [settings]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void resolveAppVersion().then((version) => {
+      if (!cancelled) setAppVersion(version);
+    });
+    void api
+      .health()
+      .then((h) => {
+        if (!cancelled && h?.version) setBackendVersion(h.version);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <div className="flex flex-col gap-5">
+      <div>
+        <h2 className="text-[17px] font-semibold tracking-tight text-ink">General</h2>
+        <p className="mt-1 text-[13px] leading-5 text-ink-muted">Preferences for zWork.</p>
+      </div>
+
       {/* System Permissions Section */}
       {!IS_WEB && (
-        <section className="rounded-xl border border-line bg-paper-raised p-5 space-y-4 shadow-sm select-none">
+        <section className="rounded-xl border border-line bg-paper-raised p-5 space-y-4 select-none">
           <div>
             <h3 className="text-[14px] font-semibold text-ink flex items-center gap-1.5">
               <ShieldAlert className="h-4 w-4 text-accent" />
@@ -741,6 +896,24 @@ function GeneralPanel({
               Enable zWork to interact with your desktop and automate tasks. These are one-time OS permission requests.
             </p>
           </div>
+
+          {/* Driver not reachable — the prerequisite to everything below.
+              Permissions rows are pointless if CuaDriver.app isn't installed,
+              so surface that distinctly instead of silently showing "Required". */}
+          {driverOk === false && (
+            <div className="flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2.5">
+              <ShieldAlert className="h-4 w-4 shrink-0 text-warning mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <div className="text-[12px] font-medium text-ink">
+                  CuaDriver isn&rsquo;t reachable
+                </div>
+                <p className="text-[11px] text-ink-muted leading-relaxed mt-0.5">
+                  Desktop control runs through CuaDriver.app. Install it from
+                  &ldquo;trycua/cua&rdquo; on GitHub, then relaunch zWork.
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="border-t border-line my-3" />
 
@@ -752,8 +925,8 @@ function GeneralPanel({
                 <span className={cn(
                   "px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase",
                   accessibilityPermissionGranted
-                    ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
-                    : "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                    ? "bg-success/10 text-success border border-success/20"
+                    : "bg-warning/10 text-warning border border-warning/20"
                 )}>
                   {accessibilityPermissionGranted ? "Granted" : "Required"}
                 </span>
@@ -765,7 +938,7 @@ function GeneralPanel({
             {!accessibilityPermissionGranted && (
               <button
                 onClick={requestAccessibility}
-                className="press px-3 py-1.5 text-[11px] font-medium border border-line bg-paper-raised hover:bg-paper-sunken text-ink rounded-lg transition-all cursor-pointer shrink-0"
+                className="press px-3 py-1.5 text-[11px] font-medium border border-line bg-paper-raised hover:bg-paper-sunken text-ink rounded-lg transition-colors cursor-pointer shrink-0"
               >
                 Grant
               </button>
@@ -782,24 +955,44 @@ function GeneralPanel({
                 <span className={cn(
                   "px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase",
                   screenRecordingPermissionGranted
-                    ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
-                    : "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                    ? "bg-success/10 text-success border border-success/20"
+                    : "bg-ink-faint/10 text-ink-muted border border-line"
                 )}>
-                  {screenRecordingPermissionGranted ? "Granted" : "Required"}
+                  {screenRecordingPermissionGranted ? "Granted" : "Optional"}
                 </span>
               </div>
               <p className="text-[11.5px] text-ink-muted">
-                Allows capturing screenshots to understand visual content on demand. Screenshots stay local.
+                Optional — only needed for future screenshot/vision mode. Current desktop control uses the accessibility tree and does not require this.
               </p>
             </div>
-            {!screenRecordingPermissionGranted && (
-              <button
-                onClick={requestScreenRecording}
-                className="press px-3 py-1.5 text-[11px] font-medium border border-line bg-paper-raised hover:bg-paper-sunken text-ink rounded-lg transition-all cursor-pointer shrink-0"
-              >
-                Grant
-              </button>
-            )}
+            <button
+              onClick={requestScreenRecording}
+              className="press px-3 py-1.5 text-[11px] font-medium border border-line bg-paper-raised hover:bg-paper-sunken text-ink rounded-lg transition-colors cursor-pointer shrink-0"
+            >
+              Open Settings
+            </button>
+          </div>
+
+          <div className="border-t border-line-soft" />
+
+          {/* Perm 3: Browser Bridge (zbctl Chrome extension) */}
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-0.5">
+              <div className="text-[13px] font-medium text-ink flex items-center gap-2">
+                <span>Browser Bridge</span>
+                <span className={cn(
+                  "px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase",
+                  extensionConnected
+                    ? "bg-success/10 text-success border border-success/20"
+                    : "bg-warning/10 text-warning border border-warning/20"
+                )}>
+                  {extensionConnected === null ? "…" : extensionConnected ? "Connected" : "Disconnected"}
+                </span>
+              </div>
+              <p className="text-[11.5px] text-ink-muted">
+                The zbctl Chrome extension for direct browser control. Load it unpacked from the zWork app&rsquo;s extension folder; it connects to the backend on port 8787.
+              </p>
+            </div>
           </div>
 
           <div className="border-t border-line" />
@@ -812,7 +1005,7 @@ function GeneralPanel({
                 <span className={cn(
                   "px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase",
                   autoApproveDestructive
-                    ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
+                    ? "bg-success/10 text-success border border-success/20"
                     : "bg-paper-sunken text-ink-faint border border-line"
                 )}>
                   {autoApproveDestructive ? "Enabled" : "Disabled"}
@@ -826,13 +1019,13 @@ function GeneralPanel({
             <button
               onClick={() => setAutoApproveDestructive(!autoApproveDestructive)}
               className={cn(
-                "press relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none mt-1",
+                "press ring-focus relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors mt-1",
                 autoApproveDestructive ? "bg-accent" : "bg-paper-sunken border-line"
               )}
             >
               <span
                 className={cn(
-                  "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                  "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-paper-raised shadow ring-0 transition-transform",
                   autoApproveDestructive ? "translate-x-4" : "translate-x-0"
                 )}
               />
@@ -843,16 +1036,19 @@ function GeneralPanel({
 
       {/* Version check */}
       <section className="rounded-xl border border-line bg-paper-raised p-4">
-        <Field label="Version" description="The currently installed desktop build.">
-          <div className="inline-flex items-center gap-2 rounded-lg border border-line bg-paper px-3 py-2 text-[12.5px] text-ink">
+        <Field label="Version" description="The installed app and running backend build. If these don't match after an update, fully quit (Cmd+Q) and relaunch zWork.">
+          <div className="inline-flex flex-wrap items-center gap-2 rounded-lg border border-line bg-paper px-3 py-2 text-[12.5px] text-ink">
             <span className="font-medium">zWork</span>
             <span className="font-mono text-ink-muted">{appVersion}</span>
+            <span className="text-ink-faint">·</span>
+            <span className="text-ink-muted">backend</span>
+            <span className="font-mono text-ink-muted">{backendVersion ?? "…"}</span>
           </div>
         </Field>
       </section>
 
       {/* Privacy & Telemetry Dashboard */}
-      <section className="rounded-xl border border-line bg-paper-raised p-5 space-y-4 shadow-sm select-none">
+      <section className="rounded-xl border border-line bg-paper-raised p-5 space-y-4 select-none">
         <div>
           <h3 className="text-[14px] font-semibold text-ink flex items-center gap-1.5">
             <ShieldAlert className="h-4 w-4 text-accent animate-[pulse_3s_infinite]" />
@@ -874,7 +1070,7 @@ function GeneralPanel({
                 <span className={cn(
                   "px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase",
                   telemetryEnabled
-                    ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"
+                    ? "bg-success/10 text-success border border-success/20"
                     : "bg-paper-sunken text-ink-faint border border-line"
                 )}>
                   {telemetryEnabled ? "Active" : "Disabled"}
@@ -894,13 +1090,13 @@ function GeneralPanel({
                 await onSave({ telemetry_enabled: next });
               }}
               className={cn(
-                "press relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none mt-1",
+                "press ring-focus relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors mt-1",
                 telemetryEnabled ? "bg-accent" : "bg-paper-sunken border-line"
               )}
             >
               <span
                 className={cn(
-                  "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                  "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-paper-raised shadow ring-0 transition-transform",
                   telemetryEnabled ? "translate-x-4" : "translate-x-0"
                 )}
               />
@@ -914,7 +1110,7 @@ function GeneralPanel({
             <div className="space-y-1 flex-1">
               <div className="text-[13px] font-medium text-ink flex items-center gap-2">
                 <span>Zero Prompt & Content Leak Policy</span>
-                <span className="bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase">
+                <span className="bg-success/10 text-success border border-success/20 px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase">
                   Locked
                 </span>
               </div>
@@ -942,7 +1138,7 @@ function GeneralPanel({
                   alert("Failed to clear cache.");
                 }
               }}
-              className="press px-3 py-1.5 text-[11px] font-medium border border-red-500/20 bg-red-500/5 hover:bg-red-500/10 text-red-500 rounded-lg transition-all cursor-pointer"
+              className="press ring-focus px-3 py-1.5 text-[11px] font-medium border border-error/20 bg-error/5 hover:bg-error/10 text-error rounded-lg transition-colors cursor-pointer"
             >
               Clear Cache
             </button>
@@ -953,20 +1149,23 @@ function GeneralPanel({
       {/* Default model */}
       <section className="rounded-xl border border-line bg-paper-raised p-4">
         <Field label="Default model" description="Used when starting a new chat.">
-          <select
-            value={defaultModel}
-            onChange={async (e) => {
-              setDefaultModel(e.target.value);
-              await onSave({ default_model: e.target.value });
-            }}
-            className="w-full bg-paper border border-line text-[13px] px-3.5 py-2 rounded-xl focus:outline-none focus:ring-1 focus:ring-ink focus:border-line-strong text-ink shadow-xs appearance-none pr-10 bg-[url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2020%2020%22%20fill%3D%22none%22%3E%3Cpath%20d%3D%22M7%209l3%203%203-3%22%20stroke%3D%22%23888888%22%20stroke-width%3D%221.5%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3C%2Fsvg%3E')] bg-[length:18px_18px] bg-[right_10px_center] bg-no-repeat cursor-pointer transition-all duration-150"
-          >
-            {models.map((m) => (
-              <option key={m.id} value={m.id} className="bg-paper text-ink">
-                {m.name}
-              </option>
-            ))}
-          </select>
+          <div className="relative">
+            <select
+              value={defaultModel}
+              onChange={async (e) => {
+                setDefaultModel(e.target.value);
+                await onSave({ default_model: e.target.value });
+              }}
+              className="ring-focus w-full appearance-none rounded-xl border border-line bg-paper px-3.5 py-2 pr-10 text-[13px] text-ink hover:border-line-strong focus:border-line-strong focus:outline-none cursor-pointer transition-colors"
+            >
+              {models.map((m) => (
+                <option key={m.id} value={m.id} className="bg-paper text-ink">
+                  {m.name}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" />
+          </div>
         </Field>
       </section>
 
@@ -1011,7 +1210,7 @@ const OVERLAY_SHORTCUT_KEY = "zwork:overlay-shortcut";
 
 function GlobalShortcutSection() {
   const [shortcut, setShortcut] = useState<string>(() => {
-    return localStorage.getItem(OVERLAY_SHORTCUT_KEY) || "Super+Shift+Space";
+    return localStorage.getItem(OVERLAY_SHORTCUT_KEY) || "Control+Alt+Space";
   });
 
   // On mount, sync the stored shortcut with the Tauri backend
@@ -1046,7 +1245,7 @@ function GlobalShortcutSection() {
   };
 
   return (
-    <section className="rounded-xl border border-line bg-paper-raised p-5 space-y-3 shadow-sm">
+    <section className="rounded-xl border border-line bg-paper-raised p-5 space-y-3">
       <div>
         <h3 className="text-[14px] font-semibold text-ink">Keyboard Shortcuts</h3>
         <p className="text-[12px] text-ink-muted mt-1 leading-relaxed">

@@ -9,6 +9,7 @@
  * In web mode (app.tryzwork.app), Caddy proxies `/api/*` to the Axum cloud API.
  */
 import { invoke } from "@tauri-apps/api/core";
+import packageJson from "../../package.json";
 
 const IS_TAURI =
   typeof window !== "undefined" &&
@@ -23,6 +24,23 @@ export const IS_WEB =
   !IS_TAURI &&
   window.location.origin !== "http://localhost:1420" &&
   window.location.origin !== "http://127.0.0.1:1420";
+
+const APP_VERSION = packageJson.version ?? "unknown";
+
+function clientPlatform(): string {
+  if (typeof window === "undefined") return "server";
+  if (IS_TAURI) return "desktop";
+  const nav = window.navigator as any;
+  if (nav?.userAgentData?.platform) return nav.userAgentData.platform;
+  return nav?.platform ?? "web";
+}
+
+function clientHeaders(): Record<string, string> {
+  return {
+    "x-zwork-app-version": APP_VERSION,
+    "x-zwork-os": clientPlatform(),
+  };
+}
 
 const API_BASE = IS_TAURI ? "http://127.0.0.1:8787" : "";
 
@@ -61,6 +79,10 @@ export interface ApiChatSummary {
   message_count: number;
   model: string;
   project_id?: string;
+  /** `"chat"` (interactive, default) or `"automation"` (scheduled-task run).
+   *  Filter `automation` out of the main chat list — they surface inside the
+   *  scheduled task's run history instead. */
+  kind?: string;
 }
 
 export interface Integration {
@@ -166,7 +188,7 @@ async function healthFetch() {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5_000);
   return fetch(u("/api/health"), { signal: controller.signal })
-    .then((r) => j<{ ok: boolean }>(r))
+    .then((r) => j<{ ok: boolean; version: string }>(r))
     .finally(() => clearTimeout(timeout));
 }
 
@@ -199,6 +221,41 @@ export interface MeResponse {
   cwd: string;
 }
 
+// --- Scheduled Tasks & Inbox ---
+
+/** A recurring task the agent runs on a schedule. See sidecar `schedulestore.rs`. */
+export interface ScheduledTask {
+  id: string;
+  title: string;
+  /** The objective sent to the agent on each run. */
+  prompt: string;
+  trigger_type: string; // "time" for v1
+  interval_minutes: number | null;
+  daily_time: string | null; // "HH:MM"
+  daily_weekdays: number[] | null; // 0=Sun..6=Sat
+  enabled: boolean;
+  notify_channel: string; // "inbox"
+  model: string | null; // null = default model
+  created_at: number;
+  updated_at: number;
+  last_run_at: number | null;
+  next_run_at: number | null;
+  /** The most recent run's automation chat id (deep-link target). */
+  last_chat_id: string | null;
+}
+
+/** A message the agent pushes to the user unprompted. */
+export interface InboxItem {
+  id: string;
+  task_id: string | null;
+  chat_id: string | null;
+  kind: "summary" | "flag" | "question" | "error";
+  title: string;
+  body: string;
+  created_at: number;
+  read: boolean;
+}
+
 export interface SkillMeta {
   slug: string;
   name: string;
@@ -211,6 +268,21 @@ export interface OnboardingStatus {
   skipped?: boolean;
   zwork_md_path?: string;
   zwork_md_exists?: boolean;
+}
+
+/**
+ * cua-driver TCC permission status. This is the DRIVER's identity
+ * (`com.trycua.driver`), not zWork's own — the driver is the process that
+ * actually performs Accessibility + CGEvent work, so its grants are the source
+ * of truth for whether desktop control will work. `driver_ok` is false when
+ * CuaDriver.app isn't installed or the daemon can't be reached.
+ */
+export interface DesktopStatus {
+  driver_ok: boolean;
+  accessibility: boolean;
+  screen_recording: boolean;
+  source?: string;
+  error?: string;
 }
 
 export interface OnboardingAnswer {
@@ -265,6 +337,16 @@ export const api = {
       body: JSON.stringify({ answer }),
     }).then((r) => j<{ status: string }>(r)),
 
+  approveGate: (chatId: string, gateId: string) =>
+    localFetch(`/api/chats/${chatId}/gate/${gateId}/approve`, {
+      method: "POST",
+    }).then((r) => j<{ status: string }>(r)),
+
+  rejectGate: (chatId: string, gateId: string) =>
+    localFetch(`/api/chats/${chatId}/gate/${gateId}/reject`, {
+      method: "POST",
+    }).then((r) => j<{ status: string }>(r)),
+
   stopChat: (chatId: string) =>
     localFetch(`/api/chats/${chatId}/stop`, {
       method: "POST",
@@ -316,13 +398,6 @@ export const api = {
   listTasks: () =>
     localFetch("/api/tasks").then((r) => j<{ tasks: any[] }>(r)),
 
-  autoPlanTasks: (projectTitle: string, intervalDays: number = 2) =>
-    localFetch("/api/tasks/auto-plan", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ project_title: projectTitle, interval_days: intervalDays }),
-    }).then((r) => j<{ tasks: any[] }>(r)),
-
   createTask: (body: { title: string; column?: string; due_date?: string | null; description?: string; assignee?: string; priority?: string }) =>
     localFetch("/api/tasks", {
       method: "POST",
@@ -363,6 +438,75 @@ export const api = {
     localFetch(`/api/events/${id}`, {
       method: "DELETE",
     }).then((r) => j<{ ok: boolean }>(r)),
+
+  // --- Scheduled Tasks ---
+  listSchedules: () =>
+    localFetch("/api/schedules").then((r) => j<{ tasks: ScheduledTask[] }>(r)),
+
+  createSchedule: (body: {
+    title: string;
+    prompt: string;
+    interval_minutes?: number;
+    daily_time?: string;
+    daily_weekdays?: number[];
+    enabled?: boolean;
+    model?: string;
+  }) =>
+    localFetch("/api/schedules", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => j<{ task: ScheduledTask; error?: string }>(r)),
+
+  updateSchedule: (
+    id: string,
+    body: {
+      title?: string;
+      prompt?: string;
+      interval_minutes?: number | null;
+      daily_time?: string | null;
+      daily_weekdays?: number[] | null;
+      enabled?: boolean;
+      model?: string | null;
+    },
+  ) =>
+    localFetch(`/api/schedules/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => j<{ task: ScheduledTask; error?: string }>(r)),
+
+  deleteSchedule: (id: string) =>
+    localFetch(`/api/schedules/${id}`, { method: "DELETE" }).then((r) =>
+      j<{ success: boolean }>(r),
+    ),
+
+  /** Manually trigger a scheduled task run ("Run now"). */
+  runScheduleNow: (id: string) =>
+    localFetch(`/api/schedules/${id}/run`, { method: "POST" }).then((r) =>
+      j<{ success: boolean; error?: string }>(r),
+    ),
+
+  // --- Inbox ---
+  listInbox: (unreadOnly = false) =>
+    localFetch(`/api/inbox${unreadOnly ? "?unread=true" : ""}`).then((r) =>
+      j<{ items: InboxItem[]; unread_count: number }>(r),
+    ),
+
+  markInboxRead: (id: string) =>
+    localFetch(`/api/inbox/${id}`, { method: "PATCH" }).then((r) =>
+      j<{ success: boolean }>(r),
+    ),
+
+  markAllInboxRead: () =>
+    localFetch("/api/inbox/all-read", { method: "POST" }).then((r) =>
+      j<{ success: boolean; marked_read: number }>(r),
+    ),
+
+  deleteInboxItem: (id: string) =>
+    localFetch(`/api/inbox/${id}`, { method: "DELETE" }).then((r) =>
+      j<{ success: boolean }>(r),
+    ),
 
   me: () => localFetch("/api/me").then((r) => j<MeResponse>(r)),
 
@@ -508,10 +652,23 @@ export const api = {
       body: JSON.stringify({ role, content }),
     }).then((r) => j<{ id: string; chat_id: string; role: string; content: string; created_at: string }>(r)),
 
+  // ---- Desktop control / driver permissions ----
+  desktopStatus: () =>
+    localFetch("/api/desktop/status").then((r) => j<DesktopStatus>(r)),
+
+  desktopGrant: () =>
+    localFetch("/api/desktop/permissions/grant", { method: "POST" }).then((r) =>
+      j<DesktopStatus>(r),
+    ),
+
+  browserBridgeStatus: () =>
+    localFetch("/api/browser-bridge/status").then((r) =>
+      j<{ connected: boolean }>(r),
+    ),
+
   // ---- Skills + onboarding ----
   skills: () =>
     localFetch("/api/skills").then((r) => j<{ skills: SkillMeta[] }>(r)),
-
   onboardStatus: () =>
     localFetch("/api/onboard/status").then((r) => j<OnboardingStatus>(r)),
 
@@ -676,17 +833,23 @@ export type StreamEvent =
   | { type: "chat"; id: string; title: string }
   | { type: "status"; text: string }
   | { type: "delta"; text: string }
+  | { type: "thinking_delta"; text: string }
+  | { type: "thinking_end" }
   | { type: "meta"; provider: string; resolved_model: string; upstream_provider?: string }
   | { type: "done" }
   | { type: "end" }
   | { type: "heartbeat" }
   | { type: "error"; text: string }
   | { type: "needs_setup" }
-  | { type: "activity"; id: string; label: string; icon?: string; done?: boolean }
-  | { type: "tool_result"; tool: string; ok: boolean; message: string }
+  | { type: "activity"; id: string; label: string; icon?: string; done?: boolean; tool_use_id?: string }
+  | { type: "tool_use"; id: string; name: string; input?: unknown }
+  | { type: "tool_result"; tool: string; ok: boolean; message: string; tool_use_id?: string }
   | { type: "tool_progress"; tool_id: string; label: string }
-  | { type: "permission"; tool: string; risk: "safe" | "sensitive" | "destructive"; reason: string; blocked: boolean }
-  | { type: "compaction"; summarized_messages: number; kept_recent: number; summary_chars?: number; status: "summarizing" | "done" | "failed"; error?: string }
+  | { type: "tool_start"; tool: string; input?: unknown }
+  | { type: "tool_complete"; tool: string; ok: boolean; message: string }
+  | { type: "usage"; prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }
+  | { type: "permission"; tool: string; risk: "safe" | "sensitive" | "destructive"; reason: string; blocked: boolean; gate_id?: string; tool_use_id?: string }
+  | { type: "compaction"; status: "complete" | "failed"; before_chars?: number; after_chars?: number; model?: string; error?: string }
   | { type: "subagent_started"; task_id: string; description: string }
   | { type: "subagent_progress"; task_id: string; status: "pending" | "running" | "completed" | "failed" }
   | { type: "subagent_delta"; task_id: string; text: string }
@@ -699,6 +862,7 @@ export type StreamEvent =
 async function streamChatWeb(
   body: {
     chat_id?: string;
+    run_id?: string;
     message: string;
     model?: string;
     artifact_mode?: boolean;
@@ -709,6 +873,7 @@ async function streamChatWeb(
       client_id?: string | null;
       name: string;
       path: string;
+      data_url?: string;
       mime: string;
       kind: string;
     }>;
@@ -722,17 +887,51 @@ async function streamChatWeb(
     : "";
 
   const isPro = body.model === "zwork-pro";
-  const resolvedModel = isPro ? "deepseek-v4-pro" : "deepseek-v4-flash";
-  const anthropicBody = {
-    model: resolvedModel,
-    system: `You are zWork, an action-oriented AI work assistant created by Zemu Liu. Respond in the same language the user writes in. Be concise, direct, and helpful. If the user writes in English, respond in English. Under the hood you are ${resolvedModel} from DeepSeek.`,
-    messages: [{ role: "user" as const, content: body.message }],
-    stream: true,
-    max_tokens: 16384,
-  };
+  const isVision = body.model === "zwork-vision";
+  const resolvedModel = isPro ? "deepseek-v4-pro" : isVision ? "zwork-vision" : "deepseek-v4-flash";
+  const useOpenAi = isVision;
 
-  const headers: Record<string, string> = { "content-type": "application/json" };
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    ...clientHeaders(),
+    ...(body.run_id ? { "x-zwork-run-id": body.run_id } : {}),
+    ...(body.chat_id ? { "x-zwork-chat-id": body.chat_id } : {}),
+    ...(body.project_id ? { "x-zwork-project-id": body.project_id } : {}),
+  };
   if (cloudToken) headers["authorization"] = `Bearer ${cloudToken}`;
+
+  const userContent = isVision && body.attachments?.length
+    ? [
+        ...(body.message ? [{ type: "text" as const, text: body.message }] : []),
+        ...body.attachments
+          .filter((a) => a.mime.startsWith("image/") && a.data_url)
+          .map((a) => ({
+            type: "image_url" as const,
+            image_url: { url: a.data_url },
+          })),
+      ]
+    : body.message;
+
+  const upstreamBody = useOpenAi
+    ? {
+        model: resolvedModel,
+        messages: [{ role: "user" as const, content: userContent }],
+        stream: true,
+        max_tokens: 16384,
+      }
+    : {
+        model: resolvedModel,
+        system: `You are zWork, an action-oriented AI work assistant created by Zemu Liu. Respond in the same language the user writes in. Be concise, direct, and helpful. If the user writes in English, respond in English. Under the hood you are ${resolvedModel} from DeepSeek.`,
+        messages: [{ role: "user" as const, content: body.message }],
+        stream: true,
+        max_tokens: 16384,
+      };
+
+  const webChatTitle = body.message
+    ? body.message.slice(0, 56)
+    : body.attachments?.some((a) => a.kind === "image")
+      ? "Image"
+      : "New chat";
 
   // Create or reuse a server-side web chat for persistence
   let serverChatId = body.chat_id;
@@ -741,7 +940,7 @@ async function streamChatWeb(
       const chat = await fetch(u("/api/web/chats"), {
         method: "POST",
         headers,
-        body: JSON.stringify({ title: body.message.slice(0, 56) }),
+        body: JSON.stringify({ title: webChatTitle }),
       }).then((r) => r.json() as Promise<{ id: string }>);
       serverChatId = chat.id;
     } catch { /* persistence failure is non-fatal */ }
@@ -753,18 +952,19 @@ async function streamChatWeb(
       await fetch(u(`/api/web/chats/${serverChatId}/messages`), {
         method: "POST",
         headers,
-        body: JSON.stringify({ role: "user", content: body.message }),
+        body: JSON.stringify({ role: "user", content: body.message || webChatTitle }),
       });
     } catch { /* non-fatal */ }
   }
 
-  onEvent({ type: "chat", id: serverChatId || `web_${Date.now()}`, title: body.message.slice(0, 56) });
+  onEvent({ type: "chat", id: serverChatId || `web_${Date.now()}`, title: webChatTitle });
   onEvent({ type: "status", text: "Thinking" });
 
-  const resp = await fetch(u("/api/v1/messages"), {
+  const endpoint = useOpenAi ? "/api/v1/chat/completions" : "/api/v1/messages";
+  const resp = await fetch(u(endpoint), {
     method: "POST",
     headers,
-    body: JSON.stringify(anthropicBody),
+    body: JSON.stringify(upstreamBody),
     signal,
   });
 
@@ -806,10 +1006,11 @@ async function streamChatWeb(
             assistantText += chunk.delta.text;
             onEvent({ type: "delta", text: chunk.delta.text });
           }
-          // Emit status for thinking blocks so the UI shows activity
+          // Forward reasoning / chain-of-thought deltas as a distinct segment
+          // kind so the UI can render them in the process panel, not as status
+          // text or blended into the answer.
           if (chunk.type === "content_block_delta" && chunk.delta?.type === "thinking_delta" && chunk.delta?.thinking) {
-            const preview = chunk.delta.thinking.trim().split("\n")[0].slice(0, 80);
-            if (preview) onEvent({ type: "status", text: `Thinking: ${preview}…` });
+            onEvent({ type: "thinking_delta", text: chunk.delta.thinking });
           }
           // message_stop signals end of streaming
           if (chunk.type === "message_stop") {
@@ -829,6 +1030,9 @@ async function streamChatWeb(
         if (chunk.type === "content_block_delta" && chunk.delta?.type === "text_delta" && chunk.delta?.text) {
           assistantText += chunk.delta.text;
           onEvent({ type: "delta", text: chunk.delta.text });
+        }
+        if (chunk.type === "content_block_delta" && chunk.delta?.type === "thinking_delta" && chunk.delta?.thinking) {
+          onEvent({ type: "thinking_delta", text: chunk.delta.thinking });
         }
       } catch { /* ignore */ }
     }
@@ -852,6 +1056,7 @@ async function streamChatWeb(
 export async function streamChat(
   body: {
     chat_id?: string;
+    run_id?: string;
     message: string;
     model?: string;
     artifact_mode?: boolean;
@@ -862,6 +1067,7 @@ export async function streamChat(
       client_id?: string | null;
       name: string;
       path: string;
+      data_url?: string;
       mime: string;
       kind: string;
     }>;
@@ -903,7 +1109,13 @@ export async function streamChat(
   const readStream = async () => {
     const resp = await fetch(u("/api/chat/stream"), {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...clientHeaders(),
+        ...(body.run_id ? { "x-zwork-run-id": body.run_id } : {}),
+        ...(body.chat_id ? { "x-zwork-chat-id": body.chat_id } : {}),
+        ...(body.project_id ? { "x-zwork-project-id": body.project_id } : {}),
+      },
       body: JSON.stringify(body),
       signal,
     });

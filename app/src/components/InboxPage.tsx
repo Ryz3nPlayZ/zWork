@@ -1,62 +1,58 @@
-import { useState } from "react";
+/* Hallmark · genre: modern-minimal · macrostructure: Workbench · design-system: design.md · designed-as-app */
+
+import { useState, useEffect } from "react";
 import {
   Inbox,
   CheckCircle2,
   AlertTriangle,
   HelpCircle,
   Eye,
-  ShieldCheck,
-  MessageCircle,
   X,
   Clock,
   Bot,
+  ArrowRight,
 } from "lucide-react";
+import { useApp } from "../lib/store";
+import type { InboxItem } from "../lib/api";
 import { cn } from "../lib/cn";
 
-// ---- Mock data until backend wires up notifications ----
-
-type NotificationKind = "brief" | "approval" | "clarification";
-
-interface Notification {
-  id: string;
-  kind: NotificationKind;
-  title: string;
-  body: string;
-  timestamp: string;
-  meta?: Record<string, string>;
-  choices?: string[];
-  resolved?: boolean;
+/** Visual treatment per inbox item kind. */
+function kindMeta(kind: InboxItem["kind"]) {
+  switch (kind) {
+    case "flag":
+      return {
+        icon: AlertTriangle,
+        dot: "bg-warning",
+        iconWrap: "border-warning/20 bg-warning/10 text-warning",
+        label: "Needs attention",
+      };
+    case "question":
+      return {
+        icon: HelpCircle,
+        dot: "bg-info",
+        iconWrap: "border-info/20 bg-info/10 text-info",
+        label: "Question",
+      };
+    case "error":
+      return {
+        icon: AlertTriangle,
+        dot: "bg-error",
+        iconWrap: "border-error/20 bg-error/10 text-error",
+        label: "Error",
+      };
+    case "summary":
+    default:
+      return {
+        icon: Bot,
+        dot: "bg-ink-faint",
+        iconWrap: "border-line bg-paper text-ink-muted",
+        label: "Summary",
+      };
+  }
 }
 
-const MOCK_NOTIFICATIONS: Notification[] = [
-  {
-    id: "n-1",
-    kind: "brief",
-    title: "Morning Brief",
-    body: "Hey Zemu, while you were away, I reviewed your 15 real estate comps. I generated a side-by-side Sheet artifact and flagged 2 properties under market value.",
-    timestamp: "2026-05-25T08:30:00",
-    meta: { artifact: "Real Estate Comps Sheet" },
-  },
-  {
-    id: "n-2",
-    kind: "approval",
-    title: "Approval Required",
-    body: "Send 5 Drafts to Clients in Apple Mail",
-    timestamp: "2026-05-25T09:15:00",
-    meta: { count: "5", app: "Apple Mail" },
-  },
-  {
-    id: "n-3",
-    kind: "clarification",
-    title: "Clarification Needed",
-    body: "I am attempting to categorize your download receipts, but I found an image I can't read. Is this an electric bill or a restaurant receipt?",
-    timestamp: "2026-05-25T10:05:00",
-    choices: ["Electric bill", "Restaurant receipt", "Other"],
-  },
-];
-
-function timeAgo(ts: string): string {
-  const diff = Date.now() - new Date(ts).getTime();
+function timeAgo(ms: number): string {
+  const diff = Date.now() - ms;
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return "Just now";
   if (mins < 60) return `${mins}m ago`;
@@ -67,214 +63,210 @@ function timeAgo(ts: string): string {
 }
 
 export function InboxPage() {
-  const [items, setItems] = useState<Notification[]>(MOCK_NOTIFICATIONS);
+  const inboxItems = useApp((s) => s.inboxItems);
+  const fetchInbox = useApp((s) => s.fetchInbox);
+  const markRead = useApp((s) => s.markInboxRead);
+  const markAllRead = useApp((s) => s.markAllInboxRead);
+  const deleteItem = useApp((s) => s.deleteInboxItem);
+  const openChat = useApp((s) => s.openChat);
   const [revealedId, setRevealedId] = useState<string | null>(null);
-  const [dismissingId, setDismissingId] = useState<string | null>(null);
 
-  const dismiss = (id: string) => {
-    setDismissingId(id);
-    setTimeout(() => {
-      setItems((prev) => prev.filter((n) => n.id !== id));
-      setDismissingId(null);
-    }, 250);
-  };
+  useEffect(() => {
+    void fetchInbox();
+    // Refresh inbox every 30s so items posted by background runs appear.
+    const id = setInterval(() => void fetchInbox(), 30_000);
+    return () => clearInterval(id);
+  }, [fetchInbox]);
 
-  const resolve = (id: string) => {
-    setItems((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, resolved: true } : n))
-    );
-  };
-
-  const pending = items.filter((n) => !n.resolved);
-  const resolved = items.filter((n) => n.resolved);
+  const unread = inboxItems.filter((i) => !i.read);
+  const read = inboxItems.filter((i) => i.read);
 
   return (
-    <div className="flex h-full min-w-0 flex-1 flex-col overflow-y-auto bg-paper">
-      <div className="mx-auto w-full max-w-[720px] px-6 py-14">
-        {/* Header */}
-        <div className="mb-10 flex items-start gap-4">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-line bg-paper-raised text-accent">
-            <Inbox className="h-6 w-6" />
-          </div>
+    <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-paper">
+      {/* Header — consistent with Scheduled and Projects */}
+      <div className="shrink-0 border-b border-line bg-paper-soft px-6 py-4">
+        <div className="mx-auto flex max-w-[1200px] items-center justify-between">
           <div>
-            <h1 className="font-serif text-[32px] tracking-tight leading-none text-ink">
+            <h1 className="text-[28px] font-semibold tracking-tight text-ink">
               Inbox
             </h1>
-            <p className="mt-2.5 text-[13.5px] leading-relaxed text-ink-muted max-w-[500px]">
-              The Human-in-the-Loop Gateway. Review agent updates, approve sensitive actions, and clear blockers.
+            <p className="mt-0.5 text-[13px] text-ink-muted">
+              {unread.length} unread · updates from scheduled runs and the agent
             </p>
           </div>
-        </div>
-
-        {/* Pending */}
-        <div className="flex flex-col gap-4">
-          {pending.length === 0 && resolved.length === 0 && (
-            <div className="rounded-2xl border border-dashed border-line p-12 text-center">
-              <Inbox className="mx-auto h-8 w-8 text-ink-faint" />
-              <h3 className="mt-3 text-[13.5px] font-semibold text-ink">
-                All clear
-              </h3>
-              <p className="mt-1 text-[12.5px] text-ink-muted max-w-[280px] mx-auto">
-                No notifications, approvals, or clarifications waiting for you.
-              </p>
-            </div>
-          )}
-
-          {pending.map((n) => (
-            <div
-              key={n.id}
-              className={cn(
-                "relative rounded-2xl border bg-paper-raised p-5 shadow-sm transition-all duration-200",
-                n.kind === "approval" && "border-amber-500/20",
-                n.kind === "clarification" && "border-accent/20",
-                n.kind === "brief" && "border-line",
-                dismissingId === n.id && "opacity-0 translate-x-2"
-              )}
+          {unread.length > 0 && (
+            <button
+              type="button"
+              onClick={() => void markAllRead()}
+              className="press ring-focus inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-line bg-paper px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-paper-sunken transition-colors"
             >
-              {/* Top row: icon + title + time + dismiss */}
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div
-                    className={cn(
-                      "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border",
-                      n.kind === "brief" && "border-line bg-paper text-accent",
-                      n.kind === "approval" && "border-amber-500/20 bg-amber-500/10 text-amber-600",
-                      n.kind === "clarification" && "border-accent/20 bg-accent/10 text-accent"
-                    )}
-                  >
-                    {n.kind === "brief" && <Bot className="h-4 w-4" />}
-                    {n.kind === "approval" && <ShieldCheck className="h-4 w-4" />}
-                    {n.kind === "clarification" && <HelpCircle className="h-4 w-4" />}
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[13px] font-semibold text-ink">
-                        {n.title}
-                      </span>
-                      <span className="flex items-center gap-1 text-[10.5px] text-ink-faint">
-                        <Clock className="h-3 w-3" />
-                        {timeAgo(n.timestamp)}
-                      </span>
-                    </div>
-                    <p className="mt-0.5 text-[12.5px] text-ink-muted leading-relaxed max-w-[520px]">
-                      {n.body}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => dismiss(n.id)}
-                  className="press rounded-lg p-1 text-ink-faint hover:bg-paper-sunken hover:text-ink"
-                  title="Dismiss"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Mark all read
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Body */}
+      <div className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-[860px] px-6 py-6">
+          {/* Unread items */}
+          <div className="flex flex-col gap-4">
+            {inboxItems.length === 0 && (
+              <div className="rounded-2xl border border-dashed border-line p-12 text-center">
+                <Inbox className="mx-auto h-8 w-8 text-ink-faint" />
+                <h3 className="mt-3 text-[13.5px] font-semibold text-ink">
+                  All clear
+                </h3>
+                <p className="mx-auto mt-1 max-w-[280px] text-[12.5px] text-ink-muted">
+                  Nothing waiting for you. Scheduled-task results and agent
+                  flags will appear here.
+                </p>
               </div>
+            )}
 
-              {/* Action area */}
-              <div className="mt-4">
-                {n.kind === "brief" && (
-                  <div>
-                    {revealedId === n.id ? (
-                      <div className="rounded-xl border border-line bg-paper p-3 text-[12.5px] text-ink leading-relaxed animate-fade-in">
-                        <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
-                          Summary
-                        </div>
-                        {n.body}
-                        {n.meta?.artifact && (
-                          <button
-                            type="button"
-                            className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 py-1 text-[11.5px] font-medium text-ink hover:bg-paper-sunken"
-                          >
-                            <Eye className="h-3 w-3" />
-                            Open {n.meta.artifact}
-                          </button>
+            {unread.map((item) => {
+              const meta = kindMeta(item.kind);
+              const Icon = meta.icon;
+              const revealed = revealedId === item.id || item.kind === "flag" || item.kind === "error";
+              return (
+                <div
+                  key={item.id}
+                  className="relative rounded-2xl border border-line bg-paper-raised p-5"
+                >
+                  {/* Top row: icon + title + time + dismiss */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className={cn(
+                          "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border",
+                          meta.iconWrap,
                         )}
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setRevealedId(n.id)}
-                        className="press inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-paper hover:bg-ink-soft"
                       >
-                        <Eye className="h-3.5 w-3.5" />
-                        Click to reveal
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                {n.kind === "approval" && (
-                  <div className="flex items-center gap-2">
+                        <Icon className="h-4 w-4" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[13px] font-semibold text-ink">
+                            {item.title}
+                          </span>
+                          <span className={cn("h-1.5 w-1.5 rounded-full", meta.dot)} aria-hidden />
+                          <span className="inline-flex items-center gap-1 text-[10.5px] text-ink-faint">
+                            <Clock className="h-3 w-3" />
+                            {timeAgo(item.created_at)}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 max-w-[520px] text-[12.5px] leading-relaxed text-ink-muted">
+                          {item.body}
+                        </p>
+                      </div>
+                    </div>
                     <button
                       type="button"
-                      onClick={() => resolve(n.id)}
-                      className="press inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-paper hover:bg-ink-soft"
-                    >
-                      <ShieldCheck className="h-3.5 w-3.5" />
-                      Approve & Execute
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => dismiss(n.id)}
-                      className="press inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-paper-sunken"
+                      onClick={() => {
+                        if (confirm("Dismiss this inbox item?")) {
+                          void deleteItem(item.id);
+                        }
+                      }}
+                      title="Dismiss"
+                      aria-label="Dismiss"
+                      className="press ring-focus rounded-lg p-1 text-ink-faint hover:bg-paper-sunken hover:text-ink"
                     >
                       <X className="h-3.5 w-3.5" />
-                      Deny
                     </button>
                   </div>
-                )}
 
-                {n.kind === "clarification" && n.choices && (
-                  <div className="flex flex-wrap gap-2">
-                    {n.choices.map((choice) => (
+                  {/* Action area */}
+                  <div className="mt-4 flex items-center gap-2">
+                    {item.kind === "summary" && !revealed && (
                       <button
-                        key={choice}
                         type="button"
-                        onClick={() => resolve(n.id)}
-                        className="press inline-flex items-center gap-1.5 rounded-lg border border-line bg-paper px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-paper-sunken hover:border-line-strong"
+                        onClick={() => setRevealedId(item.id)}
+                        className="press ring-focus inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-paper hover:bg-ink/90 transition-colors"
                       >
-                        <MessageCircle className="h-3.5 w-3.5" />
-                        {choice}
+                        <Eye className="h-3.5 w-3.5" />
+                        Reveal summary
                       </button>
-                    ))}
+                    )}
+
+                    {item.chat_id && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void markRead(item.id);
+                          void openChat(item.chat_id!);
+                        }}
+                        className="press ring-focus inline-flex items-center gap-1.5 rounded-lg border border-line bg-paper px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-paper-sunken transition-colors"
+                      >
+                        <ArrowRight className="h-3.5 w-3.5" />
+                        Open run
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => void markRead(item.id)}
+                      className="press ring-focus inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:bg-paper-sunken transition-colors"
+                    >
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      Mark read
+                    </button>
                   </div>
-                )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Read items */}
+          {read.length > 0 && (
+            <div className="mt-8">
+              <div className="mb-3 flex items-center gap-2 border-b border-line pb-2">
+                <CheckCircle2 className="h-3.5 w-3.5 text-ink-faint" />
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
+                  Read ({read.length})
+                </span>
+              </div>
+              <div className="flex flex-col gap-3">
+                {read.map((item) => {
+                  const meta = kindMeta(item.kind);
+                  const Icon = meta.icon;
+                  return (
+                    <div
+                      key={item.id}
+                      className="group flex items-center justify-between rounded-xl border border-line bg-paper-soft px-4 py-3"
+                    >
+                      <div className="flex min-w-0 items-center gap-3">
+                        <Icon className="h-4 w-4 shrink-0 text-ink-faint" />
+                        <span className="truncate text-[12.5px] text-ink-muted">
+                          {item.title}: {item.body.slice(0, 60)}
+                          {item.body.length > 60 ? "…" : ""}
+                        </span>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className="text-[10.5px] text-ink-faint">
+                          {timeAgo(item.created_at)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (confirm("Delete this read item?")) {
+                              void deleteItem(item.id);
+                            }
+                          }}
+                          title="Delete"
+                          aria-label="Delete"
+                          className="press ring-focus rounded p-1 text-ink-faint hover:bg-paper-sunken hover:text-ink"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
-          ))}
+          )}
         </div>
-
-        {/* Resolved section */}
-        {resolved.length > 0 && (
-          <div className="mt-8">
-            <div className="mb-3 flex items-center gap-2 border-b border-line pb-2">
-              <CheckCircle2 className="h-3.5 w-3.5 text-ink-faint" />
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
-                Resolved ({resolved.length})
-              </span>
-            </div>
-            <div className="flex flex-col gap-3">
-              {resolved.map((n) => (
-                <div
-                  key={n.id}
-                  className="flex items-center justify-between rounded-xl border border-line bg-paper-soft px-4 py-3 opacity-70"
-                >
-                  <div className="flex items-center gap-3">
-                    {n.kind === "brief" && <Bot className="h-4 w-4 text-ink-faint" />}
-                    {n.kind === "approval" && <AlertTriangle className="h-4 w-4 text-ink-faint" />}
-                    {n.kind === "clarification" && <HelpCircle className="h-4 w-4 text-ink-faint" />}
-                    <span className="text-[12.5px] text-ink-muted line-through">
-                      {n.title}: {n.body.slice(0, 60)}
-                      {n.body.length > 60 ? "..." : ""}
-                    </span>
-                  </div>
-                  <span className="text-[10.5px] text-ink-faint">{timeAgo(n.timestamp)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

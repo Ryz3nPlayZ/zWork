@@ -37,7 +37,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   tool: Wrench,
 };
 
-function getIcon(name?: string) {
+export function getIcon(name?: string) {
   if (!name) return Wrench;
   const lower = name.toLowerCase();
   for (const [key, Icon] of Object.entries(ICON_MAP)) {
@@ -77,7 +77,7 @@ export function ActivityBlocks({ items }: { items: ActivityItem[] }) {
   );
 }
 
-function ShimmerBar() {
+export function ShimmerBar() {
   return (
     <div className="h-1 w-16 overflow-hidden rounded-full bg-line">
       <div className="h-full w-full animate-shimmer rounded-full bg-gradient-to-r from-transparent via-ink/20 to-transparent bg-[length:200%_100%]" />

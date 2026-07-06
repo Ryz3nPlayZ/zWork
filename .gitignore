@@ -25,6 +25,13 @@ app/src-tauri/gen/
 app/src-tauri/binaries/*
 !app/src-tauri/binaries/zwork-backend-x86_64-unknown-linux-gnu
 !app/src-tauri/binaries/zwork-backend-x86_64-pc-windows-msvc.exe
+# Staged by scripts/prepare-bundle.cjs from the repo-root zWork-Skills tree,
+# then bundled as a Tauri resource. Generated artifact — do not commit.
+app/src-tauri/zWork-Skills/
+# Staged by scripts/prepare-bundle.cjs (ditto'd from /Applications/CuaDriver.app
+# on a macOS build machine, or a placeholder on other platforms). Generated
+# artifact — do not commit.
+app/src-tauri/CuaDriver.app/
 .release/
 dist/
 
@@ -57,6 +64,11 @@ portfolio-demo/
 todo-app/
 bench/
 intro-page/
+
+# Local agent scratch / workspace dirs (not part of the app)
+_hermes_agent_tmp/
+workspace/
+.hallmark/
 
 # ===== Local ops notes =====
 serverdetails.md

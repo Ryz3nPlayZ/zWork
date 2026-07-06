@@ -30,44 +30,6 @@ jobs:
         working-directory: ./app
         run: npm run build
 
-  backend-lint:
-    name: Backend Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install ruff || pip install flake8
-      - name: Run ruff
-        run: ruff check sidecar/
-      - name: Run ruff format check
-        run: ruff format --check sidecar/
-
-  backend-test:
-    name: Backend Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pytest pytest-asyncio pytest-cov
-          pip install -e .
-      - name: Run tests with coverage
-        run: pytest --cov=sidecar --cov-report=xml
-      - name: Upload coverage
-        uses: codecov/codecov-action@v4
-        with:
-          files: ./coverage.xml
-          fail_ci_if_error: false
-
   docs-check:
     name: Documentation Check
     runs-on: ubuntu-latest

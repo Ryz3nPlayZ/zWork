@@ -7,6 +7,7 @@ import { useApp } from "../lib/store";
 import { recordTelemetry } from "../lib/telemetry";
 import { useResolvedTheme } from "../lib/theme";
 import { isMacOS, needsLightweightRendering } from "../lib/platform";
+import { dragRegionAttrs, onDragMouseDown } from "../lib/drag";
 import { api, type OnboardingAnswer, type OnboardingCredential } from "../lib/api";
 import LightRays from "./LightRays";
 
@@ -265,6 +266,12 @@ export const MODEL_CATALOG: Record<CredentialPreset["id"], ModelChoice[]> = {
       description: "Hosted through the zWork router and pinned to DeepSeek V4 Pro (advanced reasoning).",
       cost: "Managed by zWork",
     },
+    {
+      id: "zwork-vision",
+      label: "zWork Vision",
+      description: "Hosted through the zWork router and pinned to Gemma 4 31B Cloud for vision and images.",
+      cost: "Managed by zWork",
+    },
   ],
   openai: [
     {
@@ -469,8 +476,16 @@ export function Onboarding() {
         }}
       />
 
-      {/* titlebar drag */}
-      {macOS && <div className="titlebar-drag absolute inset-x-0 top-0 z-10 h-10" />}
+      {/* Window drag region — these full-screen gates render without the
+          TopStrip, so they need their own drag strip at the top. */}
+      {macOS && (
+        <div
+          {...dragRegionAttrs()}
+          onMouseDown={onDragMouseDown}
+          className="absolute inset-x-0 top-0 z-10 h-10"
+          aria-hidden="true"
+        />
+      )}
 
       {/* Content area — card spans full viewport height, pinned right. */}
       <div className="relative z-20 flex h-full flex-1 items-center p-5 md:p-6">
