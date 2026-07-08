@@ -5,6 +5,7 @@ import { ChatInput } from "./ChatInput";
 import { Message } from "./Message";
 import { ConcurrentWorkBanner } from "./ConcurrentWorkBanner";
 import { QuestionModal } from "./QuestionModal";
+import { dragRegionAttrs, onDragMouseDown } from "../lib/drag";
 
 export function ChatView() {
   const chat = useApp((s) =>
@@ -112,9 +113,21 @@ export function ChatView() {
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col bg-paper relative">
       <div className="flex flex-1 flex-col overflow-hidden relative">
-        {/* Header. Window dragging is owned by the TopStrip above the row, so
-            this is a plain header now — no drag attrs needed. */}
-        <div className="flex shrink-0 items-center justify-between border-b border-edge px-5 py-3 bg-paper-soft select-none">
+        {/*
+          Floating chat header — title + export live on their own layer at the
+          true top of the chat (the pane drops its own drag band for the
+          active-chat view so this can sit there instead — no empty gap above
+          it). THIS LAYER IS THE DRAG REGION: empty header background
+          initiates a window drag (pane-side dragging stops here for chats),
+          while interactive children (title, export, back) are excluded by
+          onDragMouseDown's closest() walk. A paper→transparent gradient lets
+          messages scroll under the title gracefully.
+        */}
+        <div
+          {...dragRegionAttrs()}
+          onMouseDown={onDragMouseDown}
+          className="absolute inset-x-0 top-0 z-20 flex items-center justify-between px-5 py-2.5 bg-gradient-to-b from-paper via-paper/95 to-transparent"
+        >
           <div className="flex min-w-0 items-center gap-2">
             {chat.projectId && (
               <button
@@ -216,7 +229,7 @@ export function ChatView() {
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto pb-44">
-          <div className="mx-auto flex max-w-[960px] flex-col gap-5 px-6 py-8">
+          <div className="mx-auto flex max-w-[960px] flex-col gap-5 px-6 pt-14 pb-8">
             <ConcurrentWorkBanner />
             {chat.messages.map((m, idx) => {
               const isLast = idx === chat.messages.length - 1;

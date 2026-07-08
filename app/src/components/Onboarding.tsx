@@ -476,8 +476,8 @@ export function Onboarding() {
         }}
       />
 
-      {/* Window drag region — these full-screen gates render without the
-          TopStrip, so they need their own drag strip at the top. */}
+      {/* Window drag region — these full-screen gates render without the main
+          layout's base layer, so they need their own drag strip at the top. */}
       {macOS && (
         <div
           {...dragRegionAttrs()}

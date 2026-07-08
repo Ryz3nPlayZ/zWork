@@ -95,8 +95,8 @@ export function Landing({
 
   return (
     <div className="relative flex h-full min-w-0 flex-1 flex-col bg-paper">
-      {/* Window dragging is owned by the TopStrip above the row, so no
-          separate drag strip is needed here. */}
+      {/* Window dragging is owned by the drag strip at the top of the main
+          pane (see App.tsx), so no separate drag strip is needed here. */}
 
       <div
         className={cn(

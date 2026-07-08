@@ -28,6 +28,7 @@ import {
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
 import { IS_TAURI } from "../lib/platform";
+import { dragRegionAttrs, onDragMouseDown } from "../lib/drag";
 import {
   setTranslucencyPref,
   useTranslucencyPref,
@@ -181,8 +182,13 @@ export function SettingsPage() {
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col bg-paper">
-      {/* Header. Window dragging is owned by the TopStrip above the row. */}
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-edge px-5">
+      {/* Header — also a window drag region so the pane is movable
+          from its own content, not a separate "chin" bar. */}
+      <div
+        {...dragRegionAttrs()}
+        onMouseDown={onDragMouseDown}
+        className="flex h-12 shrink-0 items-center justify-between border-b border-edge px-5"
+      >
         <div className="flex min-w-0 items-center gap-3" data-no-drag>
           <IconButton
             icon={<ArrowLeft />}

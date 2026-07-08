@@ -18,12 +18,14 @@ import {
   Clock,
 } from "lucide-react";
 import { cn } from "../lib/cn";
+import { isMacOS } from "../lib/platform";
 import { nativeVibrancySupported, useTranslucencyPref } from "../lib/translucency";
 import { Logo } from "./Logo";
 import { IconButton } from "./IconButton";
 import { useApp, bucketFor, type ChatBucket, type View } from "../lib/store";
 
 export function Sidebar() {
+  const isMac = isMacOS();
   const translucency = useTranslucencyPref();
   const translucentOn = translucency === "on";
   // Native macOS vibrancy shows real desktop behind a fully transparent aside;
@@ -64,9 +66,14 @@ export function Sidebar() {
   }, [sidebarSummaries]);
 
   return (
+    // Collapse is now purely visual: the outer <aside> animates its width from
+    // 248px → 0 and clips. Content always renders in a fixed-width inner div so
+    // nothing reflows during the animation. The toggle lives in App.tsx's
+    // floating controls, not here. No border-r — the 5px gap to the floating
+    // main pane (and its rounded edge + shadow) provide the visual separation.
     <aside
       className={cn(
-        "relative flex h-full shrink-0 flex-col overflow-x-hidden border-r border-edge",
+        "relative h-full shrink-0 overflow-hidden",
         // Translucency: native macOS vibrancy → fully transparent so the
         // desktop shows through. CSS fallback (Win/Linux/web) → translucent
         // tint + blur over the page. Off → the standard opaque sidebar fill.
@@ -76,18 +83,24 @@ export function Sidebar() {
             ? "bg-paper-sidebar/85 backdrop-blur-xl"
             : "bg-paper-sidebar",
         "transition-[width] duration-200 ease-out",
-        open ? "w-[248px]" : "w-[64px]",
+        open ? "w-[248px]" : "w-0",
       )}
     >
-      {/* Logo header. Dragging and the collapse toggle live in the TopStrip
-          above the row, so this is purely a brand row — no drag attrs, no
-          traffic-light padding, no collapse button here. The collapsed rail
-          skips it entirely (the TopStrip button is the persistent toggle). */}
-      {open && (
-        <div className="flex shrink-0 items-center px-2 pt-3 pb-1">
+      {/* Fixed-width inner wrapper: holds the actual sidebar content at its
+          natural 248px while the outer aside collapses. Prevents reflow. */}
+      <div className="flex h-full w-[248px] flex-col">
+        {/*
+          Logo header — brand row only. Search + sidebar toggle are
+          window-level controls (see App.tsx) pinned at the top-left so
+          they don't slide with the pane. On macOS this row is pushed
+          below the traffic lights (≈28px) and the floating control row
+          (≈35px) so the logo clears both.
+        */}
+        <div className={cn("flex shrink-0 items-center px-2 pb-1", isMac ? "pt-[40px]" : "pt-3")}>
           <button
             type="button"
             onClick={() => openLanding()}
+            data-no-drag
             className="logo-hover-trigger press group flex items-center gap-2.5 rounded-lg p-1.5 pl-2"
             aria-label="Home"
             title="Home (new chat)"
@@ -101,56 +114,49 @@ export function Sidebar() {
             </span>
           </button>
         </div>
-      )}
 
-      {/* Primary actions */}
-      <nav className="flex flex-col gap-0.5 px-2 pt-4 pb-2">
-        <SidebarButton
-          icon={<SquarePen />}
-          label="New chat"
-          shortcut="⌘N"
-          collapsed={!open}
-          onClick={() => openLanding()}
-          active={view === "chat" && active === null}
-        />
-        <SidebarButton
-          icon={<Clock />}
-          label="Scheduled"
-          collapsed={!open}
-          onClick={() => setView("scheduled")}
-          active={view === "scheduled"}
-        />
-        <SidebarButton
-          icon={<Inbox />}
-          label="Inbox"
-          collapsed={!open}
-          onClick={() => setView("inbox")}
-          active={view === "inbox"}
-        />
-        {/* Tasks (kanban) deferred — TasksPage exists but is backlog.
-        <SidebarButton
-          icon={<LayoutDashboard />}
-          label="Tasks"
-          collapsed={!open}
-          onClick={() => setView("tasks")}
-          active={view === "tasks"}
-        />
-        */}
-        <SidebarButton
-          icon={<FolderOpen />}
-          label="Projects"
-          collapsed={!open}
-          onClick={() => {
-            setActiveProject(null);
-            setView("projects");
-          }}
-          active={view === "projects"}
-        />
-      </nav>
+        {/* Primary actions */}
+        <nav className="flex flex-col gap-0.5 px-2 pt-4 pb-2">
+          <SidebarButton
+            icon={<SquarePen />}
+            label="New chat"
+            shortcut="⌘N"
+            onClick={() => openLanding()}
+            active={view === "chat" && active === null}
+          />
+          <SidebarButton
+            icon={<Clock />}
+            label="Scheduled"
+            onClick={() => setView("scheduled")}
+            active={view === "scheduled"}
+          />
+          <SidebarButton
+            icon={<Inbox />}
+            label="Inbox"
+            onClick={() => setView("inbox")}
+            active={view === "inbox"}
+          />
+          {/* Tasks (kanban) deferred — TasksPage exists but is backlog.
+          <SidebarButton
+            icon={<LayoutDashboard />}
+            label="Tasks"
+            onClick={() => setView("tasks")}
+            active={view === "tasks"}
+          />
+          */}
+          <SidebarButton
+            icon={<FolderOpen />}
+            label="Projects"
+            onClick={() => {
+              setActiveProject(null);
+              setView("projects");
+            }}
+            active={view === "projects"}
+          />
+        </nav>
 
-      {/* Chat history */}
-      <div className="mt-3 flex-1 overflow-x-hidden overflow-y-auto pb-3">
-        {open ? (
+        {/* Chat history */}
+        <div className="mt-3 flex-1 overflow-x-hidden overflow-y-auto pb-3">
           <div className="px-2">
             {(["Today", "This week", "Earlier"] as ChatBucket[]).map((bucket) => {
               const items = grouped[bucket];
@@ -224,40 +230,21 @@ export function Sidebar() {
               </div>
             )}
           </div>
-        ) : null}
-      </div>
+        </div>
 
-      {/* Footer */}
-      <div className="border-t border-edge-muted px-2 py-3">
-        {open ? (
+        {/* Footer */}
+        <div className="border-t border-edge-muted px-2 py-3">
           <div className="flex flex-col gap-0.5">
             <SidebarButton
               icon={<Settings />}
               label="Settings"
               shortcut="⌘,"
-              collapsed={false}
               active={view === "settings"}
               onClick={() => setView("settings")}
             />
             <MoreMenuButton view={view} setView={setView} />
           </div>
-        ) : (
-          <div className="flex flex-col gap-1">
-            <div className="flex justify-center">
-              <IconButton
-                icon={<Settings />}
-                label="Settings"
-                shortcut="⌘,"
-                tooltipSide="right"
-                showTooltip={false}
-                active={view === "settings"}
-                onClick={() => setView("settings")}
-                size="md"
-              />
-            </div>
-            <MoreMenuButtonCollapsed />
-          </div>
-        )}
+        </div>
       </div>
     </aside>
   );
@@ -336,27 +323,6 @@ function MoreMenuButton({
   );
 }
 
-/**
- * Collapsed-sidebar variant of the More menu. Renders just the icon; clicking
- * it re-expands the sidebar so the inline panel is usable (there's no room for
- * a flyout in a 64px-wide rail without reintroducing the clipping bug).
- */
-function MoreMenuButtonCollapsed() {
-  const toggleSidebar = useApp((s) => s.toggleSidebar);
-  return (
-    <div className="flex justify-center">
-      <IconButton
-        icon={<MoreHorizontal />}
-        label="More (expand sidebar)"
-        tooltipSide="right"
-        showTooltip={false}
-        onClick={toggleSidebar}
-        size="md"
-      />
-    </div>
-  );
-}
-
 function SectionLabel({ title }: { title: string }) {
   return (
     <div className="flex items-center justify-between px-2">
@@ -371,33 +337,15 @@ function SidebarButton({
   icon,
   label,
   shortcut,
-  collapsed,
   active,
   onClick,
 }: {
   icon: React.ReactNode;
   label: string;
   shortcut?: string;
-  collapsed: boolean;
   active?: boolean;
   onClick?: () => void;
 }) {
-  if (collapsed) {
-    return (
-      <div className="flex justify-center">
-        <IconButton
-          icon={icon}
-          label={label}
-          shortcut={shortcut}
-          tooltipSide="right"
-          showTooltip={false}
-          onClick={onClick}
-          active={active}
-          size="md"
-        />
-      </div>
-    );
-  }
   return (
     <button
       type="button"
