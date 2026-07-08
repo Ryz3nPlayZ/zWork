@@ -855,7 +855,8 @@ export type StreamEvent =
   | { type: "subagent_delta"; task_id: string; text: string }
   | { type: "subagent_activity"; task_id: string; event: StreamEvent }
   | { type: "subagent_done"; task_id: string; result?: string; error?: string }
-  | { type: "ask_question"; chat_id: string; question: string; options: string[] };
+  | { type: "ask_question"; chat_id: string; question: string; options: string[] }
+  | { type: "todo_update"; todos: Array<{ id: string; content: string; status: "pending" | "in_progress" | "completed" }> };
 
 /** Web-mode streaming: sends Anthropic-format request to the Axum API and
  *  translates Anthropic SSE chunks into the custom event format the UI expects. */

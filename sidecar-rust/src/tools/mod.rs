@@ -10,6 +10,7 @@ pub mod shell;
 pub mod search;
 pub mod doc_extract;
 pub mod stock;
+pub mod todos;
 
 // Risk evaluation for permission checking
 pub enum Risk {
@@ -573,6 +574,29 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
             }
         }));
         schemas.push(json!({
+            "name": "update_todos",
+            "description": "Maintain a live, ordered todo list of your CURRENT task that the user sees in a side panel. Send the FULL replacement list on every call (the panel re-renders from the snapshot; items not present are removed). Call this at the start of any multi-step task, mark exactly one step in_progress as you work, move steps to completed when done, and call again if the plan changes. Skip for single-step answers.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "todos": {
+                        "type": "array",
+                        "description": "Full ordered list of todo items. Each item: { id, content, status }. Use stable string ids so the UI can track items across calls.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": { "type": "string", "description": "Stable id (e.g. \"1\", \"2a\")." },
+                                "content": { "type": "string", "description": "Short imperative step description, e.g. \"Read auth.rs\"." },
+                                "status": { "type": "string", "enum": ["pending", "in_progress", "completed"], "description": "pending = not started, in_progress = actively working (keep exactly one), completed = done." }
+                            },
+                            "required": ["id", "content", "status"]
+                        }
+                    }
+                },
+                "required": ["todos"]
+            }
+        }));
+        schemas.push(json!({
             "name": "manage_tasks",
             "description": "List, create, update, or delete user tasks. Tasks have columns: inbox, todo, doing, done.",
             "parameters": {
@@ -962,6 +986,7 @@ pub fn execute_tool(
                     _ => Err(format!("Permission denied by user. They said: {}", answer)),
                 }
             }
+            "update_todos" => crate::tools::todos::execute_update_todos(&params, &tx).await,
             "manage_tasks" => {
                 let action = params.get("action").and_then(|v| v.as_str()).unwrap_or("list");
                 match action {
