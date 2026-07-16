@@ -386,13 +386,6 @@ function ProjectDetail() {
     [projects, activeId],
   );
 
-  if (!project) {
-    // Shouldn't reach here since ProjectView routes to list when no activeId,
-    // but handle gracefully.
-    setActiveProject(null);
-    return null;
-  }
-
   const [menuOpen, setMenuOpen] = useState(false);
 
   // Editable name/description inline
@@ -413,6 +406,20 @@ function ProjectDetail() {
   const [filesLoading, setFilesLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [deleteModal, setDeleteModal] = useState<{ open: boolean; filename: string }>({ open: false, filename: "" });
+
+  // If we land here with no resolved project, reset the active id and render
+  // nothing. Done in an effect (not during render) to avoid a render-phase
+  // setState, and after all hooks so the hook order is stable across renders
+  // (React error #300: "Rendered fewer hooks than expected").
+  useEffect(() => {
+    if (!project) setActiveProject(null);
+  }, [project, setActiveProject]);
+
+  if (!project) {
+    // Shouldn't reach here since ProjectView routes to list when no activeId,
+    // but handle gracefully.
+    return null;
+  }
 
   const loadProjectFiles = async () => {
     if (!activeId) return;
