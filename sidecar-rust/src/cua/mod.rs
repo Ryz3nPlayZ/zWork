@@ -339,6 +339,25 @@ pub async fn capture(app: Option<&str>) -> Result<CaptureResult, String> {
     let element_count = count_elements(&full_tree);
     let (tree_markdown, truncated) = truncate_tree(&full_tree, MAX_CAPTURE_ELEMENTS);
 
+    // Empty element tree means the AX read came back blank — almost always a
+    // missing macOS Accessibility grant on CuaDriver (the daemon can see the
+    // window exists but can't introspect its controls). Surface this as a hard
+    // error instead of a silent empty success, so the model doesn't declare
+    // victory on a screen it can't actually read and start hallucinating
+    // navigation that never happened. (Cache stays populated — the (pid,
+    // window_id) resolved fine; only the element tree was empty. Re-capturing
+    // after granting permission overwrites it.)
+    if element_count == 0 {
+        return Err(format!(
+            "Captured \"{app_name}\" but the accessibility tree came back empty \
+             (0 elements). CuaDriver is almost certainly missing the macOS \
+             Accessibility permission — grant it to CuaDriver in System Settings \
+             → Privacy & Security → Accessibility, then retry. (A truly empty \
+             window is rare; if this persists after granting, the app may expose \
+             no on-screen controls.)"
+        ));
+    }
+
     Ok(CaptureResult {
         app: app_name,
         window_title,
@@ -545,10 +564,35 @@ pub async fn set_value(element: u32, value: &str, app: Option<&str>) -> Result<A
 
 /// Launch an app (backgrounded). Caches the returned pid + first window so the
 /// agent can act without a separate capture.
+///
+/// Some stock macOS apps live outside `/Applications` and cua-driver's
+/// name→bundle resolution can't find them by display name — notably Finder
+/// (`/System/Library/CoreServices/Finder.app`), which returns the misleading
+/// "No installed macOS app found for name 'Finder'." When cua-driver reports
+/// that, fall back to `open -a <name>` (which LaunchServices resolves against
+/// the full app registry, CoreServices included), then retry once so we still
+/// get the pid/window to cache. The set of names that hit this is small and
+/// fixed, so we pattern-match rather than maintaining a denylist.
 pub async fn launch_app(app: &str) -> Result<ActionResult, String> {
     mark_desktop_use();
     let c = client().await?;
-    let result = c.call("launch_app", json!({ "name": app })).await?;
+    let result = c.call("launch_app", json!({ "name": app })).await;
+
+    // "No installed macOS app found" is cua-driver's name-resolution miss.
+    // Stock macOS apps like Finder live under /System/Library/CoreServices and
+    // aren't in cua-driver's app index, so resolve them via LaunchServices
+    // (`open -a`) and retry the driver call — `open` will have brought the app
+    // to the foreground, so the second call resolves to a running pid.
+    let result = match result {
+        Ok(r) => r,
+        Err(msg) if needs_open_fallback(&msg, app) => {
+            open_via_launchservices(app).await?;
+            // Best-effort retry; ignore a second miss and let the caller see it.
+            c.call("launch_app", json!({ "name": app })).await?
+        }
+        Err(e) => return Err(e),
+    };
+
     let pid = result.get("pid").and_then(|v| v.as_i64()).unwrap_or(0);
     let first_window = result
         .get("windows")
@@ -566,6 +610,64 @@ pub async fn launch_app(app: &str) -> Result<ActionResult, String> {
         cache.last_app = Some(app.to_string());
     }
     parse_action(result, "launch_app")
+}
+
+/// True if a cua-driver launch error is a name-resolution miss on an app that
+/// `open -a` can still resolve (Finder, System Settings, and other stock macOS
+/// apps living under /System). cua-driver phrases this as
+/// "No installed macOS app found for name '<name>'." — we additionally require
+/// the app to look like a known system app so we don't paper over genuine
+/// missing-app errors for arbitrary user input.
+fn needs_open_fallback(msg: &str, app: &str) -> bool {
+    if !msg.contains("No installed macOS app found") {
+        return false;
+    }
+    // Stock macOS apps whose display name LaunchServices resolves but cua-driver
+    // doesn't. Keep this narrow — over-broad matching would hide real failures
+    // (e.g. a typo'd app name).
+    matches!(
+        app.trim().to_lowercase().as_str(),
+        "finder"
+            | "system settings"
+            | "system preferences"
+            | "activity monitor"
+            | "keychain access"
+            | "disk utility"
+            | "console"
+            | "terminal"
+            | "textedit"
+            | "calculator"
+            | "notes"
+            | "stickies"
+            | "preview"
+            | "screenshot"
+            | "migration assistant"
+    )
+}
+
+/// Launch an app via LaunchServices (`open -a <name>`). `open` resolves against
+/// the full app registry (including /System/Library/CoreServices), unlike
+/// cua-driver's /Applications-scoped index. Non-blocking on the UI: `-g` keeps
+/// the new app in the background so we don't yank focus away mid-task.
+async fn open_via_launchservices(app: &str) -> Result<(), String> {
+    let status = tokio::process::Command::new("open")
+        .arg("-a")
+        .arg(app)
+        .arg("-g")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .status()
+        .await
+        .map_err(|e| format!("fallback `open -a {app}` failed to spawn: {e}"))?;
+    if !status.success() {
+        return Err(format!(
+            "fallback `open -a {app}` exited non-zero (status {status}). The app may \
+             not be resolvable by LaunchServices under that name."
+        ));
+    }
+    Ok(())
 }
 
 /// List running + installed apps. Defensive about the driver's response shape
