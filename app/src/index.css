@@ -221,10 +221,6 @@ html.sidebar-translucent aside.native-glass .bg-paper-raised {
   background-color: rgb(var(--paper-raised) / 0.5);
   backdrop-filter: saturate(1.8) blur(20px);
 }
-/* Drag strip border: soften when glass is on */
-html.sidebar-translucent aside.native-glass .border-b.border-line\/60 {
-  border-bottom-color: rgb(var(--line) / 0.08);
-}
 
 /* --------------------------------------------------------
    Text selection — theme-aware so it matches the palette

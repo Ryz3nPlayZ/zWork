@@ -1,11 +1,13 @@
 import { Suspense, lazy, useEffect, useState } from "react";
-import { CheckCircle2, ExternalLink, X, AlertTriangle } from "lucide-react";
+import { CheckCircle2, ExternalLink, X, AlertTriangle, PanelLeft, PanelRight, Search } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
-import { TopStrip } from "./components/TopStrip";
 import { Landing } from "./components/Landing";
+import { IconButton } from "./components/IconButton";
 import { useApp } from "./lib/store";
 import { consumeInstalledUpdateNotice, detectUpdate, installUpdate, openReleaseUrl, type UpdateCardState, type UpdateProgress } from "./lib/update";
 import { cn } from "./lib/cn";
+import { dragRegionAttrs, onDragMouseDown } from "./lib/drag";
+import { isMacOS } from "./lib/platform";
 import { loadZoom, applyZoom, zoomIn, zoomOut, zoomReset } from "./lib/zoom";
 import { useTranslucencyPref, nativeVibrancySupported } from "./lib/translucency";
 import { recordTelemetry, setTelemetryEnabled, startTelemetrySession, stopTelemetrySession } from "./lib/telemetry";
@@ -23,6 +25,7 @@ const SettingsPage = lazy(() => import("./components/Settings").then((m) => ({ d
 const SearchModal = lazy(() => import("./components/SearchModal").then((m) => ({ default: m.SearchModal })));
 const ProjectView = lazy(() => import("./components/ProjectView").then((m) => ({ default: m.ProjectView })));
 const ArtifactPanel = lazy(() => import("./components/ArtifactPanel").then((m) => ({ default: m.ArtifactPanel })));
+const TodoPanel = lazy(() => import("./components/TodoPanel").then((m) => ({ default: m.TodoPanel })));
 const AnalyticsPage = lazy(() => import("./components/AnalyticsPage").then((m) => ({ default: m.AnalyticsPage })));
 const PlanPage = lazy(() => import("./components/PlanPage").then((m) => ({ default: m.PlanPage })));
 const ConnectorsPage = lazy(() => import("./components/ConnectorsPage").then((m) => ({ default: m.ConnectorsPage })));
@@ -115,8 +118,11 @@ export default function App() {
   const active = useApp((s) => s.activeChatId);
   const chat = useApp((s) => (active ? s.chats[active] : undefined));
   const artifactPanelOpen = !!(view === "chat" && active && chat?.artifactPanelOpen);
+  const todoPanelOpen = !!(view === "chat" && active && chat?.todoPanelOpen);
+  const hasTodos = !!(view === "chat" && active && (chat?.todos?.length ?? 0) > 0);
   const openLanding = useApp((s) => s.openLanding);
   const toggleSidebar = useApp((s) => s.toggleSidebar);
+  const toggleTodoPanel = useApp((s) => s.toggleTodoPanel);
   const setView = useApp((s) => s.setView);
   const setSearchOpen = useApp((s) => s.setSearchOpen);
   const triggerFocusChatInput = useApp((s) => s.triggerFocusChatInput);
@@ -125,8 +131,15 @@ export default function App() {
   const keybindingsOpen = useApp((s) => s.keybindingsOpen);
   const setKeybindingsOpen = useApp((s) => s.setKeybindingsOpen);
 
+  // Translucency drives the base layer's fill. The base layer is the full-
+  // window drag region that sits behind the floating main pane; when native
+  // macOS vibrancy is on it goes fully transparent (vibrancy shows through),
+  // otherwise it uses a CSS tint+blur fallback or an opaque sidebar fill.
   const translucency = useTranslucencyPref();
-  const useNativeGlass = translucency === "on" && nativeVibrancySupported();
+  const translucentOn = translucency === "on";
+  const useNativeGlass = translucentOn && nativeVibrancySupported();
+  const isMac = isMacOS();
+  const sidebarOpen = useApp((s) => s.sidebarOpen);
 
   // Skip onboarding in browser preview mode (non-Tauri environment)
   const skipOnboarding = typeof window !== "undefined" && !((window as any).__TAURI_INTERNALS__);
@@ -412,7 +425,7 @@ export default function App() {
         void zoomReset();
       } else if (mod && e.key.toLowerCase() === "j") {
         e.preventDefault();
-        // setView("tasks"); // Disabled for now (deferred to backlog)
+        toggleTodoPanel();
       } else if (mod && e.key === "/") {
         e.preventDefault();
         setKeybindingsOpen(!keybindingsOpen);
@@ -420,7 +433,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openLanding, toggleSidebar, setView, setSearchOpen, triggerFocusChatInput, keybindingsOpen, setKeybindingsOpen]);
+  }, [openLanding, toggleSidebar, setView, setSearchOpen, triggerFocusChatInput, keybindingsOpen, setKeybindingsOpen, toggleTodoPanel]);
 
   const [showLandingOverlay, setShowLandingOverlay] = useState(showLanding);
   const [particlesExiting, setParticlesExiting] = useState(false);
@@ -479,22 +492,68 @@ export default function App() {
   }
 
   return (
-    <div className={cn("flex h-screen w-screen flex-col overflow-hidden", useNativeGlass ? "bg-transparent" : "bg-paper")}>
-      {/* TopStrip is the single drag region for the window and houses the
-          sidebar collapse button in a fixed spot next to the traffic lights.
-          See components/TopStrip.tsx. Requires core:window:allow-start-dragging. */}
-      <TopStrip />
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+    <div className="relative h-screen w-screen overflow-hidden">
+      {/*
+        BASE LAYER — the translucent foundation. Full-window drag region
+        (the 5px seams around the main pane + the sidebar area). Fill:
+        transparent for native vibrancy, tint+blur CSS fallback off-mac,
+        opaque sidebar fill when translucency is off.
+        Requires core:window:allow-start-dragging (see lib/drag.ts).
+      */}
+      <div
+        {...dragRegionAttrs()}
+        onMouseDown={onDragMouseDown}
+        className={cn(
+          "absolute inset-0",
+          useNativeGlass
+            ? "bg-transparent"
+            : translucentOn
+              ? "bg-paper-sidebar/85 backdrop-blur-xl"
+              : "bg-paper-sidebar",
+        )}
+      >
         <Sidebar />
-        {/* Main content stays opaque — translucency is sidebar-only so the
-            reading pane stays readable. The native Effect.Sidebar material is
-            applied to the whole window but only shows through transparent regions. */}
-        <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-paper">
-          {/* Hide DailyGoalBar progress bar (deferred to backlog)
-          <DailyGoalBar />
-          */}
-          <OfflineBanner />
-          <div className="relative flex-grow flex min-h-0 overflow-hidden">
+      </div>
+
+      {/*
+        MAIN PANE — floats above the base layer. Rounded, opaque, one
+        continuous surface. Its left edge tracks the sidebar so the 5px
+        translucent seam stays constant during collapse/expand. A
+        draggable band sits at the top of the pane (below); search and
+        sidebar toggle are separate window-level controls so they don't
+        slide with the pane.
+      */}
+      <main
+        className={cn(
+          "absolute flex flex-col overflow-hidden rounded-[14px] bg-paper shadow-float",
+          "transition-[left] duration-200 ease-out",
+          "top-[5px] right-[5px] bottom-[5px]",
+          sidebarOpen ? "left-[253px]" : "left-[5px]",
+        )}
+      >
+        {/*
+          Drag region — the defined draggable area of the main pane. The
+          pane is opaque and covers the base layer's full-window drag
+          region, so without this the window couldn't be moved from
+          inside the pane. SKIPPED for the active-chat view, whose own
+          floating header (see ChatView) is the drag region — so the
+          header sits at the true top with no empty band above it.
+          macOS indents it from the left so it doesn't sit under the
+          traffic lights when the sidebar is collapsed.
+        */}
+        {!(view === "chat" && active) && (
+          <div
+            {...dragRegionAttrs()}
+            onMouseDown={onDragMouseDown}
+            className={cn(
+              "h-[38px] shrink-0",
+              isMac && !sidebarOpen && "ml-[78px]",
+            )}
+            aria-hidden="true"
+          />
+        )}
+        <OfflineBanner />
+        <div className="relative flex flex-1 min-h-0 overflow-hidden">
           {view === "settings" ? (
             <Suspense fallback={panelFallback}>
               <SettingsPage />
@@ -583,19 +642,74 @@ export default function App() {
               </div>
             </div>
           )}
-          </div>
-        </main>
+        </div>
         {artifactPanelOpen && (
           <Suspense fallback={null}>
             <ArtifactPanel />
           </Suspense>
         )}
-        <Suspense fallback={null}>
-          <SearchModal />
-        </Suspense>
-        <KeybindingsModal />
-        <PermissionPrompt />
+        {hasTodos && (
+          <Suspense fallback={null}>
+            <TodoPanel />
+          </Suspense>
+        )}
+      </main>
+
+      {/*
+        WINDOW-LEVEL CONTROLS — search + sidebar toggle. Pinned to the
+        top-left of the WINDOW (not the pane), so they never slide when
+        the pane expands/contracts on sidebar toggle. On macOS they sit
+        just to the right of the traffic lights; off-mac they hug the
+        top-left corner.
+      */}
+      <div
+        data-no-drag
+        className={cn(
+          "absolute top-[7px] z-50 flex items-center gap-0.5",
+          isMac ? "left-[84px]" : "left-[10px]",
+        )}
+      >
+        <IconButton
+          icon={<Search />}
+          label="Search"
+          shortcut="⌘K"
+          tooltipSide="bottom"
+          showTooltip={false}
+          onClick={() => setSearchOpen(true)}
+          size="sm"
+        />
+        <IconButton
+          icon={<PanelLeft />}
+          label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+          shortcut="⌘\\"
+          tooltipSide="bottom"
+          showTooltip={false}
+          onClick={toggleSidebar}
+          size="sm"
+        />
+        {hasTodos && (
+          <IconButton
+            icon={<PanelRight />}
+            label={todoPanelOpen ? "Hide todo" : "Show todo"}
+            shortcut="⌘J"
+            tooltipSide="bottom"
+            showTooltip={false}
+            active={todoPanelOpen}
+            onClick={toggleTodoPanel}
+            size="sm"
+          />
+        )}
       </div>
+
+      {/*
+        Window-level overlays — outside the main pane so they cover the whole
+        window (search modal, keybindings, permission prompts).
+      */}
+      <Suspense fallback={null}>
+        <SearchModal />
+      </Suspense>
+      <KeybindingsModal />
+      <PermissionPrompt />
     </div>
   );
 }

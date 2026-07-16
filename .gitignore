@@ -69,6 +69,7 @@ intro-page/
 _hermes_agent_tmp/
 workspace/
 .hallmark/
+.zcode/
 
 # ===== Local ops notes =====
 serverdetails.md

@@ -76,8 +76,16 @@ async function handleAction(id, action, params) {
     }
   }
 
-  // Page-level actions — forward to content script
-  const pageActions = ["snapshot", "click", "type", "scroll", "eval", "upload", "download"];
+  // Page-level actions. `eval` runs in the page's MAIN world via the
+  // privileged chrome.scripting API (not the content script's eval()), so it
+  // is NOT subject to the page's Content Security Policy. Sites with strict
+  // CSPs (Google Forms/Docs, GitHub, etc.) block eval('...') in content
+  // scripts; executeScript with world:"MAIN" + func bypasses that because the
+  // browser serializes the function rather than evaluating a string.
+  const pageActions = ["snapshot", "click", "type", "scroll", "upload", "download"];
+  if (action === "eval") {
+    return await evalInMainWorld(id, params);
+  }
   if (pageActions.includes(action)) {
     return await sendToContentScript(id, action, params);
   }
@@ -108,6 +116,53 @@ async function sendToContentScript(id, action, params) {
       );
     });
   });
+}
+
+// Run a JS expression in the page's MAIN world. This is the CSP-safe path: it
+// uses chrome.scripting.executeScript with a serialized function, which the
+// browser injects as a first-party script — it is NOT subject to the page's
+// script-src CSP (unlike the content script's eval(), which CSP-strict sites
+// like Google Forms block). We wrap the expression in a Function body so
+// arbitrary expressions like `document.body.innerText` work.
+async function evalInMainWorld(id, params) {
+  const tabId = params.tabId || (await getActiveTabId());
+  const expression = params.expression;
+  if (typeof expression !== "string" || !expression.trim()) {
+    return { id, ok: false, error: "eval requires a non-empty 'expression' string" };
+  }
+
+  // The function runs in the MAIN world. args are passed by value, so the
+  // expression string is received as a normal parameter — no eval-in-extension.
+  const injected = new Function("expr", `"use strict"; return (eval(expr));`);
+
+  let results;
+  try {
+    results = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      func: injected,
+      args: [expression],
+    });
+  } catch (e) {
+    return { id, ok: false, error: `scripting.executeScript failed: ${e && e.message}` };
+  }
+
+  // executeScript returns [{ frameId, result }] per injected frame.
+  const frame = results && results[0];
+  const value = frame && frame.result;
+  // Functions/DOM nodes don't serialize across worlds — JSON-stringify so the
+  // agent gets a readable string rather than "[object Object]" or undefined.
+  let serializable = value;
+  if (typeof value === "object" && value !== null) {
+    try {
+      serializable = JSON.parse(JSON.stringify(value));
+    } catch {
+      serializable = String(value);
+    }
+  } else if (typeof value === "undefined") {
+    serializable = null;
+  }
+  return { id, ok: true, result: serializable };
 }
 
 async function ensureContentScript(tabId) {

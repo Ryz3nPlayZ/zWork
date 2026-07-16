@@ -1771,13 +1771,13 @@ pub async fn refactor_code(Json(body): Json<RefactorRequest>) -> impl IntoRespon
     let (api_key, base_url, shape, real_model) = if let Some(m) = s.custom_models.iter().find(|m| m.id == model_id) {
         let real = if m.model_id.is_empty() { "deepseek-v4-flash".to_string() } else { m.model_id.clone() };
         if let Some(cred) = resolve(&m.credential, &s, &m.base_url_override) {
-            (cred.api_key, cred.base_url, cred.shape, real)
+            (cred.api_key, cred.base_url, m.shape.clone(), real)
         } else {
             return Json(json!({ "error": "No credentials configured for refactoring model" }));
         }
     } else {
         match resolve("zwork_router", &s, "") {
-            Some(cred) => (cred.api_key, cred.base_url, cred.shape, "deepseek-v4-flash".to_string()),
+            Some(cred) => (cred.api_key, cred.base_url, "anthropic".to_string(), "deepseek-v4-flash".to_string()),
             None => return Json(json!({ "error": "No model credentials available" })),
         }
     };

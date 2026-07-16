@@ -329,7 +329,7 @@ All tools below are available every turn — pick the right one for the job rath
 
 **Files & shell:** Read before editing. Use `grep_search` to locate, `read_file` to read, then `write_file` (new files) or `replace_file_content` (targeted edits) to change. Use `run_command` for builds, tests, git, or anything not covered by a dedicated tool. Batch independent reads/edits in one turn.
 
-**Browser (Chrome bridge):** For any task involving a website, web app, login-gated page, or web form, use the `browser_*` tools — they drive the user's real Chrome (signed-in sessions). Always `browser_navigate` to a real URL, then `browser_snapshot` to see the page before clicking. Never guess URLs from memory or claim you can't browse.
+**Browser (Chrome bridge):** For any task involving a website, web app, login-gated page, or web form, use the `browser_*` tools — they drive the user's real Chrome (signed-in sessions). Always `browser_navigate` to a real URL, then `browser_snapshot` to see the page before clicking. Never guess URLs from memory or claim you can't browse. Element IDs from `browser_snapshot` are EPHEMERAL — they are rebuilt on every snapshot. Never reuse an element_id from an old snapshot; if the page changed at all (navigation, scroll, click, form submit), call `browser_snapshot` again before your next `browser_click`/`browser_type`, or you will get \"Element X not found\". Select form options with `browser_click`, NOT `browser_type` — `browser_type` is only for text fields (INPUT[text/email/number], TEXTAREA, contentEditable); calling it on a radio/checkbox/select will now return an error telling you to use `browser_click` instead. After filling out a form, do NOT claim success from `ok: true` alone — a tool succeeding does not mean the form is correctly filled. VERIFY with `browser_eval` before telling the user it's done, e.g. `browser_eval(\"JSON.stringify([...document.querySelectorAll('input:checked, [role=option][aria-selected=true]')].map(e => ({name: e.getAttribute('name')||e.getAttribute('aria-label'), value: e.value, checked: e.checked})))\")` to list all selected answers, and read the result — if it is empty or missing answers, re-snapshot and click the correct elements. Only tell the user the form is filled once the eval confirms the expected selections are present. If a page looks like a confirmation/submitted state (\"Your response has been recorded\", \"Thank you\", \"Submitted\") and the user wants to interact with the form, look for a \"Submit another response\"/\"Edit response\"/\"Reset\" link, click it to restore the fillable form, then re-snapshot before concluding the form is unfillable. If `browser_snapshot` shows the page but no input fields, use `browser_eval(document.body.innerText)` to read the full page text — the snapshot captures interactive elements, while `eval` reads everything (including text-rendered questions and dynamically loaded inputs). When the user asks you to fill out a form, quiz, or survey, USE YOUR OWN KNOWLEDGE to answer factual questions — do not ask the user for answers to questions you can reason about yourself. The user is delegating the work, not quizzing you; asking \"what answers do you want?\" for a technical quiz you can answer is a failure mode.
 
 **Desktop automation:** Use `desktop_*` tools to drive native apps. `desktop_capture` first to see current state, then act on coordinates from that capture. Re-capture after any state change before the next action.
 
@@ -522,6 +522,7 @@ pub fn build_system_prompt(
             "- `deploy_web_app(project_path)` — start a local dev server for a web project.",
             "- `read_skill(slug)` — load a skill's playbook.",
             "- `spawn_agent(description, model_id?)` — spawn a sub-agent for parallel independent work.",
+            "- `update_todos(todos)` — maintain a live todo list of your current task, shown to the user in a side panel. Send the FULL list on every call.",
         ];
 
         if include_academic {
@@ -591,6 +592,13 @@ pub fn build_system_prompt(
             priority.push("- \"open Google and search X\" → do NOT use `web_search`. The user wants a browser. Use the `browser_*` tools.".to_string());
         }
         priority.push("- \"find a file on my Google Drive\" → do NOT use `run_command`. Use `composio__GOOGLEDRIVE_FIND_FILE`.".to_string());
+
+        priority.push("".to_string());
+        priority.push("**Tracking your own progress (todos):**".to_string());
+        priority.push("- At the start of any non-trivial, multi-step task, call `update_todos` with a short ordered list (2–8 concrete steps) of what the task requires. The user sees this list live in a side panel.".to_string());
+        priority.push("- Keep exactly ONE step `in_progress` at a time (the one you're working on right now). Mark steps `completed` as soon as they're done.".to_string());
+        priority.push("- Call `update_todos` again whenever the plan changes, a step finishes, or you start a new step — send the FULL list each time.".to_string());
+        priority.push("- Skip the todo list for single-step answers, greetings, or simple lookups — only use it when there is real multi-step work to track.".to_string());
 
         priority.join("\n")
     };

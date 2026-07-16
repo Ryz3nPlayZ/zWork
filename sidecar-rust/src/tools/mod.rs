@@ -10,6 +10,7 @@ pub mod shell;
 pub mod search;
 pub mod doc_extract;
 pub mod stock;
+pub mod todos;
 
 // Risk evaluation for permission checking
 pub enum Risk {
@@ -506,7 +507,7 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
         }));
         schemas.push(json!({
             "name": "browser_click",
-            "description": "Click an element on the current browser page by its element ID from browser_snapshot.",
+            "description": "Click an element on the current browser page by its element ID from browser_snapshot. Use this to select radio buttons, checkboxes, dropdown options, buttons, and links. Element IDs are ephemeral — only use IDs from the most recent browser_snapshot.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -517,11 +518,11 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
         }));
         schemas.push(json!({
             "name": "browser_type",
-            "description": "Type text into an input field on the current browser page.",
+            "description": "Type text into a text input field (INPUT[text/email/number/search], TEXTAREA, or contentEditable). Does NOT work on radio buttons, checkboxes, selects, or buttons — use browser_click for those. Setting text on a non-text element is rejected.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "element_id": { "type": "integer", "description": "Element ID of input from browser_snapshot" },
+                    "element_id": { "type": "integer", "description": "Element ID of text input from browser_snapshot" },
                     "text": { "type": "string", "description": "Text to type" }
                 },
                 "required": ["element_id", "text"]
@@ -570,6 +571,29 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
                     "model_id": { "type": "string", "description": "Optional model override for the sub-agent" }
                 },
                 "required": ["description"]
+            }
+        }));
+        schemas.push(json!({
+            "name": "update_todos",
+            "description": "Maintain a live, ordered todo list of your CURRENT task that the user sees in a side panel. Send the FULL replacement list on every call (the panel re-renders from the snapshot; items not present are removed). Call this at the start of any multi-step task, mark exactly one step in_progress as you work, move steps to completed when done, and call again if the plan changes. Skip for single-step answers.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "todos": {
+                        "type": "array",
+                        "description": "Full ordered list of todo items. Each item: { id, content, status }. Use stable string ids so the UI can track items across calls.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": { "type": "string", "description": "Stable id (e.g. \"1\", \"2a\")." },
+                                "content": { "type": "string", "description": "Short imperative step description, e.g. \"Read auth.rs\"." },
+                                "status": { "type": "string", "enum": ["pending", "in_progress", "completed"], "description": "pending = not started, in_progress = actively working (keep exactly one), completed = done." }
+                            },
+                            "required": ["id", "content", "status"]
+                        }
+                    }
+                },
+                "required": ["todos"]
             }
         }));
         schemas.push(json!({
@@ -962,6 +986,7 @@ pub fn execute_tool(
                     _ => Err(format!("Permission denied by user. They said: {}", answer)),
                 }
             }
+            "update_todos" => crate::tools::todos::execute_update_todos(&params, &tx).await,
             "manage_tasks" => {
                 let action = params.get("action").and_then(|v| v.as_str()).unwrap_or("list");
                 match action {

@@ -321,6 +321,14 @@ export interface SubagentTask {
   activityCount?: number; // Number of activities seen
 }
 
+/** A single agent-authored todo step, shown in the right-side Todo panel. */
+export type TodoStatus = "pending" | "in_progress" | "completed";
+export interface AgentTodo {
+  id: string;
+  content: string;
+  status: TodoStatus;
+}
+
 export interface Chat {
   id: string;
   title: string;
@@ -338,6 +346,9 @@ export interface Chat {
   /** Chat-scoped artifact panel state. */
   artifactPanelOpen?: boolean;
   activeArtifactId?: string | null;
+  /** Chat-scoped agent todo list + panel open state (driven by `todo_update` events). */
+  todos?: AgentTodo[];
+  todoPanelOpen?: boolean;
   pendingQuestion?: {
     question: string;
     options: string[];
@@ -667,6 +678,10 @@ interface AppState {
   clearArtifacts: () => void;
   updateArtifact: (id: string, patch: Partial<Artifact>) => Promise<void>;
 
+  // Agent todo panel (chat-scoped, driven by `todo_update` events)
+  closeTodoPanel: () => void;
+  toggleTodoPanel: () => void;
+
   // Projects
   projects: Project[];
   activeProjectId: string | null;
@@ -966,6 +981,32 @@ export const useApp = create<AppState>((set, get) => ({
             artifactPanelOpen: false,
             activeArtifactId: null,
           },
+        },
+      };
+    }),
+  closeTodoPanel: () =>
+    set((s) => {
+      const chatId = s.activeChatId;
+      if (!chatId) return s;
+      const chat = s.chats[chatId];
+      if (!chat) return s;
+      return {
+        chats: {
+          ...s.chats,
+          [chatId]: { ...chat, todoPanelOpen: false },
+        },
+      };
+    }),
+  toggleTodoPanel: () =>
+    set((s) => {
+      const chatId = s.activeChatId;
+      if (!chatId) return s;
+      const chat = s.chats[chatId];
+      if (!chat) return s;
+      return {
+        chats: {
+          ...s.chats,
+          [chatId]: { ...chat, todoPanelOpen: !chat.todoPanelOpen },
         },
       };
     }),
@@ -2115,6 +2156,28 @@ export const useApp = create<AppState>((set, get) => ({
             // No-op on parts: the next event (text/tool_use) naturally opens a
             // new segment. Kept as a distinct event so future UI work can mark
             // a thinking segment "finalized" (e.g. auto-collapse) if desired.
+          } else if (evt.type === "todo_update") {
+            // Agent called `update_todos`. Replace the chat's todo snapshot
+            // with the full list, and auto-open the panel the first time a
+            // non-empty list arrives (subsequent updates never auto-close —
+            // once the user has dismissed it, we respect that until they reopen).
+            set((s) => {
+              const c = s.chats[localId];
+              if (!c) return s;
+              const hadTodos = (c.todos?.length ?? 0) > 0;
+              const wasOpen = c.todoPanelOpen === true;
+              const isFirstBatch = !hadTodos && !wasOpen;
+              return {
+                chats: {
+                  ...s.chats,
+                  [localId]: {
+                    ...c,
+                    todos: evt.todos,
+                    todoPanelOpen: isFirstBatch && evt.todos.length > 0 ? true : c.todoPanelOpen,
+                  },
+                },
+              };
+            });
           } else if (evt.type === "tool_use") {
             // The model requested a tool call. Open a `tool` part at this
             // position in the timeline — before the activity/tool_result
