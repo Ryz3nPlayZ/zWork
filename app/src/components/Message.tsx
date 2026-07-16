@@ -605,6 +605,18 @@ export function Message({
   const chatId = useApp((s) => s.activeChatId) ?? undefined;
   const showWorkingPlaceholder = !isUser && !!streaming && message.parts.length === 0;
 
+  // All hooks must run before any early return, or React throws error #300
+  // ("Rendered fewer hooks than expected"). The textEntries useMemo below is
+  // the one that used to sit after the isUser early return — moved up here.
+  const parts = message.parts;
+  const textEntries = useMemo(() => {
+    const entries: { part: Extract<MessagePart, { kind: "text" }>; i: number }[] = [];
+    parts.forEach((part, i) => {
+      if (part.kind === "text") entries.push({ part, i });
+    });
+    return entries;
+  }, [parts]);
+
   if (!isUser && !showWorkingPlaceholder && message.parts.length === 0 && (!activities || activities.length === 0)) {
     return null;
   }
@@ -617,16 +629,8 @@ export function Message({
   // Assistant message: separate the model's internal process (thinking +
   // tool calls) from the response text shown to the user. The process panel
   // renders above the message body; the message body contains only text parts.
-  const parts = message.parts;
   const lastPartIdx = parts.length - 1;
   const trailingIsText = parts.length > 0 && parts[lastPartIdx].kind === "text";
-  const textEntries = useMemo(() => {
-    const entries: { part: Extract<MessagePart, { kind: "text" }>; i: number }[] = [];
-    parts.forEach((part, i) => {
-      if (part.kind === "text") entries.push({ part, i });
-    });
-    return entries;
-  }, [parts]);
   const hasProcess = textEntries.length < parts.length;
 
   const openArtifactFromCode = onOpenArtifact
