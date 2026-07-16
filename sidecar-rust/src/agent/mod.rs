@@ -325,7 +325,7 @@ pub fn run_agent_turn(
             };
             let provider_name = m.credential.clone();
             if let Some(cred) = crate::server::resolve(&m.credential, &s, &m.base_url_override) {
-                (cred.api_key, cred.base_url, cred.shape, real_model, provider_name)
+                (cred.api_key, cred.base_url, m.shape.clone(), real_model, provider_name)
             } else {
                 ("".to_string(), m.base_url_override.clone(), m.shape.clone(), real_model, provider_name)
             }
@@ -337,7 +337,7 @@ pub fn run_agent_turn(
                 "deepseek-v4-flash".to_string()
             };
             if let Some(cred) = crate::server::resolve("zwork_router", &s, "") {
-                (cred.api_key, cred.base_url, cred.shape, real_model, "zWork Cloud Router".to_string())
+                (cred.api_key, cred.base_url, "anthropic".to_string(), real_model, "zWork Cloud Router".to_string())
             } else {
                 ("".to_string(), "https://api.tryzwork.app/api".to_string(), "anthropic".to_string(), real_model, "zWork Cloud Router".to_string())
             }
@@ -1317,14 +1317,14 @@ pub async fn spawn_subagent(
     } else if let Some(m) = s.custom_models.iter().find(|m| m.id == model_id) {
         let real = if m.model_id.is_empty() || m.model_id == "(default)" { "claude-3-5-sonnet-latest".to_string() } else { m.model_id.clone() };
         if let Some(cred) = crate::server::resolve(&m.credential, &s, &m.base_url_override) {
-            (cred.api_key, cred.base_url, cred.shape, real, m.credential.clone())
+            (cred.api_key, cred.base_url, m.shape.clone(), real, m.credential.clone())
         } else {
             return Err("No credentials for sub-agent model".to_string());
         }
     } else {
         let real = if model_id.contains("pro") { "deepseek-v4-pro".to_string() } else { "deepseek-v4-flash".to_string() };
         if let Some(cred) = crate::server::resolve("zwork_router", &s, "") {
-            (cred.api_key, cred.base_url, cred.shape, real, "zWork Cloud Router".to_string())
+            (cred.api_key, cred.base_url, "anthropic".to_string(), real, "zWork Cloud Router".to_string())
         } else {
             return Err("No credentials for sub-agent model".to_string());
         }
