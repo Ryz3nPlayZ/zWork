@@ -96,7 +96,7 @@ if (typeof window.__zbctl === "undefined") {
 
   // get accessible name
   function getName(el) {
-    return (
+    const direct =
       el.getAttribute("aria-label") ||
       (el.getAttribute("aria-labelledby") &&
         document
@@ -110,12 +110,26 @@ if (typeof window.__zbctl === "undefined") {
         document
           .querySelector(`label[for="${CSS.escape(el.id)}"]`)
           ?.textContent?.trim()) ||
-      // button/link text content (first line, trimmed)
-      (el.childNodes.length > 0 && getTextContent(el).slice(0, 80)) ||
-      ""
-    )
-      .trim()
-      .replace(/\s+/g, " ");
+      "";
+    if (direct) return direct.trim().replace(/\s+/g, " ");
+
+    // Role-based containers (radio/checkbox/option, common in Google Forms,
+    // Typeform, SurveyMonkey) often carry no aria-label — their label is the
+    // text content of the element or its nearest ancestor "label" wrapper.
+    // Walk descendants first (most specific), then fall back to a short
+    // ancestor climb to find the associated label text.
+    const own = getTextContent(el);
+    if (own) return own.slice(0, 80).trim().replace(/\s+/g, " ");
+
+    const role = el.getAttribute("role");
+    if (role === "radio" || role === "checkbox" || role === "option") {
+      let p = el.parentElement;
+      for (let depth = 0; depth < 3 && p; depth++, p = p.parentElement) {
+        const t = getTextContent(p);
+        if (t) return t.slice(0, 80).trim().replace(/\s+/g, " ");
+      }
+    }
+    return "";
   }
 
   function getTextContent(el) {
@@ -351,15 +365,63 @@ if (typeof window.__zbctl === "undefined") {
             ok: false,
             error: `Element ${params.elementId} not found (may have been removed)`,
           };
+        const role = getRole(node);
+        const isToggle = role === "radio" || role === "checkbox" ||
+          node.tagName === "INPUT" && (node.type === "radio" || node.type === "checkbox");
+        // Record checked state BEFORE clicking so we can verify it flipped.
+        const wasChecked = isToggle ? !!node.checked : null;
+
         node.focus();
         node.click();
-        return { ok: true };
+
+        // Google Forms (and many frameworks) put the click handler on a wrapping
+        // <label> or role="radio" container, not the <input> itself. If a toggle
+        // didn't actually flip, try the nearest ancestor <label> / [role="radio"]
+        // / [role="checkbox"], then a real MouseEvent as a last resort.
+        let verified = true;
+        if (isToggle && !!node.checked === wasChecked) {
+          const alt = node.closest('label, [role="radio"], [role="checkbox"], [role="menuitemradio"], [role="menuitemcheckbox"]');
+          if (alt && alt !== node) {
+            alt.click();
+          }
+          if (!!node.checked === wasChecked) {
+            node.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+          }
+          verified = !!node.checked !== wasChecked;
+        }
+
+        const out = { ok: true };
+        if (isToggle) out.checked = !!node.checked;
+        if (isToggle && !verified) {
+          // We clicked but the checked state did not change. Don't claim success —
+          // tell the model so it can re-snapshot and find the real clickable target.
+          out.ok = false;
+          out.error = `Clicked element ${params.elementId} but its checked state did not change (still ${wasChecked ? "checked" : "unchecked"}). The real click target may be a parent <label> or role="radio" wrapper — re-snapshot and try clicking the wrapper.`;
+        }
+        return out;
       }
 
       case "type": {
         const node = getNodeById(params.elementId);
         if (!node)
           return { ok: false, error: `Element ${params.elementId} not found` };
+
+        // Only real text-entry elements accept typed text. Setting .value on a
+        // radio/checkbox/button/select is a silent no-op, but historically
+        // returned ok:true — which caused the agent to believe it had filled a
+        // form when nothing happened. Reject explicitly with actionable guidance.
+        const role = getRole(node);
+        const isTextTarget = node.isContentEditable ||
+          node.tagName === "TEXTAREA" ||
+          (node.tagName === "INPUT" && !["radio", "checkbox", "button", "submit", "reset", "image", "file", "hidden", "range"].includes((node.type || "text").toLowerCase())) ||
+          role === "textbox" || role === "searchbox" || role === "spinbutton";
+        if (!isTextTarget) {
+          const hint = (role === "radio" || role === "checkbox")
+            ? `Element ${params.elementId} is a ${role} — use browser_click to select it, not browser_type.`
+            : `Element ${params.elementId} (role=${role || node.tagName}) is not a text input — use browser_click instead.`;
+          return { ok: false, error: hint };
+        }
+
         node.focus();
         if (node.isContentEditable) {
           node.textContent = params.text;
@@ -392,12 +454,14 @@ if (typeof window.__zbctl === "undefined") {
       }
 
       case "eval": {
-        try {
-          const result = eval(params.expression);
-          return { ok: true, result };
-        } catch (e) {
-          return { ok: false, error: e.message };
-        }
+        // Handled in the background via chrome.scripting MAIN-world injection
+        // (CSP-safe). If this reaches the content script, the background path
+        // is unavailable — return a clear pointer rather than tripping CSP.
+        return {
+          ok: false,
+          error:
+            "eval must run via background MAIN-world injection; this content-script path is deprecated.",
+        };
       }
 
       case "upload": {
@@ -467,37 +531,44 @@ if (typeof window.__zbctl === "undefined") {
 
       const result = executeAction(action, params || {});
 
-    // For mutating actions, wait for settle then send snapshot
-    if (["click", "type", "scroll", "upload"].includes(action)) {
-      // Start settle wait
-      if (settleTimer) clearTimeout(settleTimer);
+      // For mutating actions, wait for the page to settle, then respond with a
+      // fresh snapshot so the agent sees the post-action state.
+      //
+      // IMPORTANT: use LOCAL timers here, NOT the module-level `settleTimer`.
+      // That timer belongs to the push-based MutationObserver path (see above).
+      // Reusing it across concurrent onMessage invocations — which happens when
+      // the agent fires several clicks in one turn — caused each new message to
+      // `clearTimeout` the previous message's settle timer, orphaning its
+      // sendResponse and producing "message channel closed before a response
+      // was received" errors. Each request gets its own independent timers.
+      if (["click", "type", "scroll", "upload"].includes(action)) {
+        // If the action itself failed synchronously, respond immediately — no
+        // point waiting for mutations that won't come.
+        if (!result.ok) {
+          sendResponse({ id, ...result });
+          return false;
+        }
 
-      let settled = false;
-      let maxTimer = null;
+        let settled = false;
+        let settleLocal = null;
+        let maxLocal = null;
 
-      const onSettle = () => {
-        if (settled) return;
-        settled = true;
-        if (maxTimer) clearTimeout(maxTimer);
-        const snapshot = generateSnapshot();
-        sendResponse({ id, ...result, snapshot });
-      };
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          if (settleLocal) clearTimeout(settleLocal);
+          if (maxLocal) clearTimeout(maxLocal);
+          const snapshot = generateSnapshot();
+          sendResponse({ id, ...result, snapshot });
+        };
 
-      settleTimer = setTimeout(onSettle, SETTLE_MS);
-      maxTimer = setTimeout(onSettle, SETTLE_MAX_MS);
+        settleLocal = setTimeout(finish, SETTLE_MS);
+        maxLocal = setTimeout(finish, SETTLE_MAX_MS);
 
-      // If action itself failed, respond immediately
-      if (!result.ok) {
-        settled = true;
-        if (settleTimer) clearTimeout(settleTimer);
-        if (maxTimer) clearTimeout(maxTimer);
-        sendResponse({ id, ...result });
+        return true; // keep channel open for async response
       }
 
-      return true; // keep channel open for async response
-    }
-
-    // For non-mutating actions (snapshot, eval), respond immediately
+      // For non-mutating actions (snapshot, eval), respond immediately
       sendResponse({ id, ...result });
       return false;
     } catch (e) {

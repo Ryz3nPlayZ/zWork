@@ -507,7 +507,7 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
         }));
         schemas.push(json!({
             "name": "browser_click",
-            "description": "Click an element on the current browser page by its element ID from browser_snapshot.",
+            "description": "Click an element on the current browser page by its element ID from browser_snapshot. Use this to select radio buttons, checkboxes, dropdown options, buttons, and links. Element IDs are ephemeral — only use IDs from the most recent browser_snapshot.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -518,11 +518,11 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
         }));
         schemas.push(json!({
             "name": "browser_type",
-            "description": "Type text into an input field on the current browser page.",
+            "description": "Type text into a text input field (INPUT[text/email/number/search], TEXTAREA, or contentEditable). Does NOT work on radio buttons, checkboxes, selects, or buttons — use browser_click for those. Setting text on a non-text element is rejected.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "element_id": { "type": "integer", "description": "Element ID of input from browser_snapshot" },
+                    "element_id": { "type": "integer", "description": "Element ID of text input from browser_snapshot" },
                     "text": { "type": "string", "description": "Text to type" }
                 },
                 "required": ["element_id", "text"]
