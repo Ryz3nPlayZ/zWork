@@ -95,6 +95,19 @@ pub fn classify_provider_error(message: &str) -> ErrorClass {
         || lower.contains("stream read error")
         || lower.contains("temporarily unavailable")
         || lower.contains("try again")
+        // 5xx gateway errors are transient: the reverse proxy (nginx,
+        // Cloudflare, the zwork_router) couldn't reach a healthy upstream.
+        // 502 Bad Gateway is the canonical case — the proxy got an invalid
+        // response from the model server, almost always resolves on retry
+        // within seconds. 504 Gateway Timeout is the same family. 500 is
+        // included too: model servers commonly 500 on a transient internal
+        // crash and recover. (400/401/403 below remain permanent.)
+        || lower.contains("500")
+        || lower.contains("internal server error")
+        || lower.contains("502")
+        || lower.contains("bad gateway")
+        || lower.contains("504")
+        || lower.contains("gateway timeout")
     {
         return ErrorClass::Transient;
     }
@@ -951,7 +964,7 @@ pub fn run_agent_turn(
                     let _ = tx.send(json!({
                         "type": "status",
                         "text": format!(
-                            "Rate limited — retrying in {}s (attempt {}/{})…",
+                            "Transient upstream error — retrying in {}s (attempt {}/{})…",
                             delay_ms / 1000, transient_retries, MAX_TRANSIENT_RETRIES
                         )
                     })).await;
@@ -1562,6 +1575,15 @@ mod tests {
         // Service unavailable / 503 — server-side transient.
         assert_eq!(classify_provider_error("upstream HTTP 503"), ErrorClass::Transient);
         assert_eq!(classify_provider_error("The service is overloaded"), ErrorClass::Transient);
+        // 5xx gateway errors — proxy couldn't reach a healthy upstream.
+        // 502 Bad Gateway is the canonical transient gateway failure.
+        assert_eq!(classify_provider_error("upstream HTTP 502 Bad Gateway"), ErrorClass::Transient);
+        assert_eq!(classify_provider_error("502 Bad Gateway"), ErrorClass::Transient);
+        assert_eq!(classify_provider_error("bad gateway"), ErrorClass::Transient);
+        // 504 Gateway Timeout — proxy timed out waiting for upstream.
+        assert_eq!(classify_provider_error("upstream HTTP 504 Gateway Timeout"), ErrorClass::Transient);
+        // 500 Internal Server Error — transient upstream crash.
+        assert_eq!(classify_provider_error("upstream HTTP 500 Internal Server Error"), ErrorClass::Transient);
         // Connection failures — network-level transient.
         assert_eq!(classify_provider_error("upstream connect failed: connection refused"), ErrorClass::Transient);
         assert_eq!(classify_provider_error("stream read error: unexpected EOF"), ErrorClass::Transient);
