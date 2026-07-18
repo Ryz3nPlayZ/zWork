@@ -116,6 +116,84 @@ pub fn classify_provider_error(message: &str) -> ErrorClass {
     ErrorClass::Permanent
 }
 
+/// Translate a raw provider error (status line + optional response body) into a
+/// message the user can actually act on.
+///
+/// The streaming layer surfaces errors as a bare `"upstream HTTP 502 Bad
+/// Gateway"` — the `raw` body (e.g. the router's `router_upstreams_failed`) is
+/// captured separately and, without this helper, never reaches the UI. This
+/// recognizes the known router/provider error codes and returns clear text;
+/// unknown errors fall through to the original message so nothing is hidden.
+pub fn friendly_upstream_error(message: &str, raw: Option<&str>, retries_exhausted: bool) -> String {
+    let lower = message.to_ascii_lowercase();
+    let raw_lower = raw.unwrap_or("").to_ascii_lowercase();
+
+    // The zWork router returns 502 with body `router_upstreams_failed[: <detail>]`
+    // when every configured upstream model provider failed. This is a cloud-side
+    // outage — all upstreams are down, not a transient single-request blip.
+    if lower.contains("502") || raw_lower.contains("router_upstreams_failed") {
+        let detail = raw
+            .map(|r| {
+                let t = r.trim();
+                if t.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({t})")
+                }
+            })
+            .unwrap_or_default();
+        return format!(
+            "All model providers are currently unavailable{}{}. The cloud router \
+             reported that every upstream failed. This is usually temporary — \
+             please try again in a few minutes.",
+            detail,
+            if retries_exhausted {
+                " after multiple retries"
+            } else {
+                ""
+            }
+        );
+    }
+
+    // Generic gateway/proxy failures (504 Gateway Timeout, 500 Internal).
+    if lower.contains("504") || lower.contains("gateway timeout") {
+        return format!(
+            "The model provider timed out responding{}. Please try again.",
+            if retries_exhausted { " after multiple retries" } else { "" }
+        );
+    }
+
+    // 429 rate limit — surfaced as permanent after retries are exhausted.
+    if lower.contains("429") || lower.contains("rate limit") || lower.contains("too many requests") {
+        return "You've hit the model provider's rate limit. Please wait a moment and try again.".to_string();
+    }
+
+    // 401/403 auth — the router key or provider key is rejected.
+    if lower.contains("401") || lower.contains("unauthorized") || lower.contains("gateway_access_denied") {
+        return "Authentication failed — your model provider key or cloud token was rejected. Check your API key in Settings.".to_string();
+    }
+    if lower.contains("403") || lower.contains("forbidden") {
+        return "Access denied by the model provider. Your key may not have access to the requested model.".to_string();
+    }
+
+    // Connection-level failures (DNS, TLS, refused).
+    if lower.contains("connect failed") || lower.contains("connection") {
+        return format!(
+            "Couldn't reach the model provider{}. Check your internet connection and try again.",
+            if retries_exhausted { " after multiple retries" } else { "" }
+        );
+    }
+
+    // Fall through: surface the original message + body if we have one, so
+    // nothing is hidden. The original already carries the status code.
+    match raw {
+        Some(body) if !body.trim().is_empty() && body.trim() != message => {
+            format!("{message} — {}", body.trim())
+        }
+        _ => message.to_string(),
+    }
+}
+
 /// Keyword-detect the kind of artifact a message likely wants and return the
 /// steering instruction the Python backend appended to the prompt. Mirrors
 /// `server._artifact_hint`.
@@ -822,7 +900,7 @@ pub fn run_agent_turn(
             let mut stream = stream_llm(endpoint, headers, body, shape.clone(), turn, chat_id.clone());
             let mut assistant_content_blocks: Vec<serde_json::Value> = Vec::new();
             let mut tool_calls = Vec::new();
-            let mut turn_error: Option<String> = None;
+            let mut turn_error: Option<(String, Option<String>)> = None;
             // Accumulator for streamed reasoning chunks within this turn.
             // Anthropic/DeepSeek emit reasoning as many small deltas; we
             // forward each delta live (so the UI can render a streaming
@@ -944,10 +1022,13 @@ pub fn run_agent_turn(
                     LlmEvent::Usage(_) | LlmEvent::Finish { .. } => {
                         // Diagnostic only; already traced inside stream_llm.
                     }
-                    LlmEvent::ProviderError { message, .. } => {
+                    LlmEvent::ProviderError { message, raw } => {
                         // Don't emit yet — the retry logic below decides whether
-                        // to retry (transient) or surface it (permanent).
-                        turn_error = Some(message);
+                        // to retry (transient) or surface it (permanent). Keep
+                        // `raw` so we can surface the actual reason (e.g. the
+                        // router's "router_upstreams_failed" body) instead of a
+                        // bare "upstream HTTP 502 Bad Gateway".
+                        turn_error = Some((message, raw));
                     }
                     LlmEvent::Done => break,
                 }
@@ -955,7 +1036,7 @@ pub fn run_agent_turn(
 
             // A hard stream error ends the turn/task rather than executing any
             // partially-collected tool calls.
-            if let Some(ref err_msg) = turn_error {
+            if let Some((ref err_msg, ref raw_body)) = turn_error {
                 if classify_provider_error(err_msg) == ErrorClass::Transient
                     && transient_retries < MAX_TRANSIENT_RETRIES
                 {
@@ -976,6 +1057,7 @@ pub fn run_agent_turn(
                             "attempt": transient_retries,
                             "delay_ms": delay_ms,
                             "error": err_msg,
+                            "raw": raw_body,
                         }),
                     );
                     tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
@@ -989,8 +1071,15 @@ pub fn run_agent_turn(
                     }
                     continue;
                 }
-                // Permanent error: surface it to the UI and break.
-                let _ = tx.send(json!({ "type": "error", "text": err_msg })).await;
+                // Permanent error, OR transient but retries exhausted: surface a
+                // user-friendly message to the UI and break. `friendly_error`
+                // translates the bare status / router error codes into text the
+                // user can act on (e.g. "All model providers are currently
+                // unavailable" for the router's router_upstreams_failed).
+                let exhausted = classify_provider_error(err_msg) == ErrorClass::Transient
+                    && transient_retries >= MAX_TRANSIENT_RETRIES;
+                let friendly = friendly_upstream_error(err_msg, raw_body.as_deref(), exhausted);
+                let _ = tx.send(json!({ "type": "error", "text": friendly })).await;
                 break;
             }
 
@@ -1616,6 +1705,60 @@ mod tests {
             classify_provider_error("Tool NOTION_FETCH_ALL_BLOCK_CONTENTS not found"),
             ErrorClass::Permanent
         );
+    }
+
+    #[test]
+    fn test_friendly_upstream_error_router_upstreams_failed() {
+        // The actual reported case: 502 + router_upstreams_failed body.
+        let msg = friendly_upstream_error(
+            "upstream HTTP 502 Bad Gateway",
+            Some("router_upstreams_failed: "),
+            true,
+        );
+        assert!(
+            msg.contains("All model providers are currently unavailable"),
+            "router 502 should be friendly, got: {msg}"
+        );
+        assert!(
+            msg.contains("after multiple retries"),
+            "retries_exhausted should be reflected, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_friendly_upstream_error_504_timeout() {
+        let msg = friendly_upstream_error(
+            "upstream HTTP 504 Gateway Timeout",
+            None,
+            false,
+        );
+        assert!(msg.contains("timed out"), "504 should mention timeout, got: {msg}");
+    }
+
+    #[test]
+    fn test_friendly_upstream_error_401_auth() {
+        // The 401 gateway_access_denied seen in the trace log.
+        let msg = friendly_upstream_error(
+            "upstream HTTP 401 Unauthorized",
+            Some("gateway_access_denied"),
+            false,
+        );
+        assert!(
+            msg.contains("Authentication failed"),
+            "401 should be auth-friendly, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_friendly_upstream_error_unknown_falls_through() {
+        // Unknown errors keep their original message + body so nothing is hidden.
+        let msg = friendly_upstream_error(
+            "upstream HTTP 418 I'm a teapot",
+            Some("short and stout"),
+            false,
+        );
+        assert!(msg.contains("418"), "fallthrough should keep status: {msg}");
+        assert!(msg.contains("short and stout"), "fallthrough should keep body: {msg}");
     }
 
     #[test]
