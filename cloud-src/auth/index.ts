@@ -42,6 +42,20 @@ const mailTransport =
       })
     : null;
 
+// Startup sanity check: requireEmailVerification is true, so every
+// email/password sign-up (and sign-in) depends on verification emails going
+// out. If SMTP is only partially configured, mailTransport is null and
+// sendTransactionalEmail throws — making email auth fail with no obvious
+// cause in the logs. Warn loudly at boot so this is caught at deploy time.
+if (!mailTransport) {
+  console.warn(
+    "[zwork-auth] WARNING: SMTP is not fully configured — SMTP_HOST, SMTP_USER, and SMTP_PASS are all required. " +
+      "requireEmailVerification is enabled, so email/password auth will fail verification: " +
+      "verification and password-reset emails cannot be sent. " +
+      "Set the SMTP_* environment variables to enable email delivery."
+  );
+}
+
 function verificationCallbackUrl(url?: string) {
   const base = APP_PUBLIC_URL.replace(/\/$/, "");
   if (!url) return `${base}/auth/verified`;

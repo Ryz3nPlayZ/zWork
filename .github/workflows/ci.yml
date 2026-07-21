@@ -30,6 +30,63 @@ jobs:
         working-directory: ./app
         run: npm run build
 
+  sidecar-tests:
+    name: Sidecar Rust Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sidecar-rust -> target
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+      - name: Run cargo test
+        working-directory: ./sidecar-rust
+        run: cargo test
+
+  cloud-api-check:
+    name: Cloud API cargo check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cloud-src/api -> target
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+      - name: cargo check
+        working-directory: ./cloud-src/api
+        run: cargo check
+
+  tauri-check:
+    name: Tauri app cargo check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri -> target
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libssl-dev pkg-config
+      - name: cargo check
+        working-directory: ./app/src-tauri
+        run: cargo check
+
   docs-check:
     name: Documentation Check
     runs-on: ubuntu-latest
@@ -38,7 +95,18 @@ jobs:
       - name: Check markdown links
         run: |
           npm install -g markdown-link-check
-          find . -name "*.md" -not -path "*/node_modules/*" -exec markdown-link-check {} \;
+          failed=0
+          while IFS= read -r -d '' f; do
+            markdown-link-check "$f" || failed=1
+          done < <(find . -name "*.md" -not -path "*/node_modules/*" -print0)
+          if [ "$failed" -ne 0 ]; then
+            echo "Markdown link check failed for one or more files"
+            exit 1
+          fi
       - name: Check for TODO/FIXME comments
         run: |
-          grep -r "TODO\|FIXME" --include="*.py" --include="*.ts" --include="*.tsx" . || echo "No TODOs found"
+          if grep -r "TODO\|FIXME" --include="*.py" --include="*.ts" --include="*.tsx" .; then
+            echo "::warning::TODO/FIXME comments found (non-blocking)"
+          else
+            echo "No TODOs found"
+          fi
