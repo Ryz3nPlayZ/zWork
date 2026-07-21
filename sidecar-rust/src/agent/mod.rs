@@ -80,7 +80,40 @@ pub enum ErrorClass {
 }
 
 pub fn classify_provider_error(message: &str) -> ErrorClass {
+    classify_provider_error_with_raw(message, None)
+}
+
+/// Classify with the optional raw response body. The cloud router wraps every
+/// per-provider failure as a 502 `router_upstreams_failed: <detail>` envelope —
+/// including permanent client errors like a 400 invalid_request_error. The bare
+/// `message` ("upstream HTTP 502 Bad Gateway") looks transient, but the wrapped
+/// body reveals the real upstream status. This peeks inside that envelope so a
+/// 400/401/403 wrapped in a 502 is classified as Permanent (no retry) instead
+/// of being pointlessly retried 3× against a doomed malformed request.
+pub fn classify_provider_error_with_raw(message: &str, raw: Option<&str>) -> ErrorClass {
     let lower = message.to_ascii_lowercase();
+    let raw_lower = raw.unwrap_or("").to_ascii_lowercase();
+
+    // Router-wrapped permanent upstream errors: the envelope is 502, but the
+    // embedded body carries a definitive non-retryable status from the actual
+    // model provider. Detect these BEFORE the 5xx-transient rules below so
+    // they short-circuit to Permanent. (Only inspect when we are actually
+    // looking at a router envelope — otherwise 400/401/403 substrings in the
+    // top-level message would be transient-classified first.)
+    if raw_lower.contains("router_upstreams_failed") {
+        if raw_lower.contains("400")
+            || raw_lower.contains("invalid_request_error")
+            || raw_lower.contains("bad request")
+            || raw_lower.contains("401")
+            || raw_lower.contains("unauthorized")
+            || raw_lower.contains("gateway_access_denied")
+            || raw_lower.contains("403")
+            || raw_lower.contains("forbidden")
+        {
+            return ErrorClass::Permanent;
+        }
+    }
+
     // Transient: rate limits, service unavailable, connection issues.
     if lower.contains("429")
         || lower.contains("too many requests")
@@ -128,10 +161,47 @@ pub fn friendly_upstream_error(message: &str, raw: Option<&str>, retries_exhaust
     let lower = message.to_ascii_lowercase();
     let raw_lower = raw.unwrap_or("").to_ascii_lowercase();
 
-    // The zWork router returns 502 with body `router_upstreams_failed[: <detail>]`
-    // when every configured upstream model provider failed. This is a cloud-side
-    // outage — all upstreams are down, not a transient single-request blip.
-    if lower.contains("502") || raw_lower.contains("router_upstreams_failed") {
+    // The zWork router wraps EVERY per-provider failure as a 502
+    // `router_upstreams_failed: <failures>` — including permanent client-side
+    // errors like a 400 invalid_request_error or 401 auth failure. Before
+    // claiming "all providers unavailable", inspect the wrapped failure body
+    // for a permanent upstream status: if DeepSeek returned 400/401/403, that
+    // is the real cause and retrying will not help. The router's 502 envelope
+    // is a transport detail, not the user-facing truth.
+    if raw_lower.contains("router_upstreams_failed") {
+        // Permanent upstream errors embedded inside the router's 502 envelope.
+        // Format: `router_upstreams_failed: ProviderName:model 400 {error...}`
+        // or `... 401 {error...}` / `... 403 {error...}`.
+        if raw_lower.contains("400")
+            || raw_lower.contains("invalid_request_error")
+            || raw_lower.contains("bad request")
+        {
+            // Surface the actual provider message — it is specific and
+            // actionable (e.g. "messages.4: tool_use ids found without
+            // tool_result blocks immediately after"). Trim the router
+            // envelope prefix so the user sees the real cause, not the
+            // transport wrapper.
+            let detail = extract_upstream_detail(raw).unwrap_or_default();
+            return format!(
+                "The model provider rejected the request as invalid{}{}. {}",
+                if retries_exhausted { " after retries" } else { "" },
+                if detail.is_empty() { String::new() } else { format!(": {}", detail) },
+                "This is a request-shape problem, not a transient outage — retrying won't help. Try starting a new chat or rephrasing."
+            );
+        }
+        if raw_lower.contains("401")
+            || raw_lower.contains("unauthorized")
+            || raw_lower.contains("gateway_access_denied")
+        {
+            return "Authentication failed — the model provider rejected the API key. Check your API key in Settings.".to_string();
+        }
+        if raw_lower.contains("403") || raw_lower.contains("forbidden") {
+            return "Access denied by the model provider. Your key may not have access to the requested model.".to_string();
+        }
+
+        // Genuine all-upstreams-failed: no permanent status embedded, so this
+        // really is a cloud-side outage (every provider returned a transient
+        // error or was unreachable).
         let detail = raw
             .map(|r| {
                 let t = r.trim();
@@ -192,6 +262,36 @@ pub fn friendly_upstream_error(message: &str, raw: Option<&str>, retries_exhaust
         }
         _ => message.to_string(),
     }
+}
+
+/// Extract the human-readable detail from a router-wrapped failure body.
+///
+/// The router envelope looks like:
+///   `router_upstreams_failed: ProviderName:model_id 400 {"error":{"message":"..."}}`
+/// The user does not need the `router_upstreams_failed:` prefix or the
+/// `ProviderName:model_id 400 ` routing prefix — only the provider's actual
+/// error message. This strips the envelope and returns the JSON `message`
+/// field when present (the actionable part), falling back to the trimmed body
+/// after the prefix when the JSON shape is unexpected.
+fn extract_upstream_detail(raw: Option<&str>) -> Option<String> {
+    let body = raw?.trim();
+    // Strip the `router_upstreams_failed:` envelope prefix.
+    let after_prefix = match body.find("router_upstreams_failed:") {
+        Some(idx) => body[idx + "router_upstreams_failed:".len()..].trim(),
+        None => body,
+    };
+    // The remaining text is `ProviderName:model_id <status> {json}`. Find the
+    // first `{` — everything from there is the provider's JSON error body.
+    let json_start = after_prefix.find('{')?;
+    let json_str = &after_prefix[json_start..];
+    let parsed: serde_json::Value = serde_json::from_str(json_str).ok()?;
+    // Anthropic / OpenAI error shape: {"error":{"message":"..."}}
+    parsed
+        .get("error")
+        .and_then(|e| e.get("message"))
+        .and_then(|m| m.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| Some(json_str.trim_end_matches('}').to_string()))
 }
 
 /// Keyword-detect the kind of artifact a message likely wants and return the
@@ -782,7 +882,7 @@ pub fn run_agent_turn(
                             *content = json!(format!("{}\n\n{}", turn_ctx, s));
                         }
                     } else if let Some(arr) = content.as_array_mut() {
-                        // Anthropic content-blocks shape: prepend a text block.
+                        // Anthropic content-blocks shape: inject a text block.
                         // Avoid duplicates across turns.
                         let already = arr.iter().any(|b| {
                             b.get("text")
@@ -791,7 +891,19 @@ pub fn run_agent_turn(
                                 .unwrap_or(false)
                         });
                         if !already {
-                            arr.insert(0, json!({ "type": "text", "text": turn_ctx }));
+                            // If this user message is a tool_result batch
+                            // (content = [{type:tool_result,...}]), the
+                            // turn-context text block MUST come AFTER the
+                            // tool_result blocks, not before. DeepSeek's
+                            // Anthropic endpoint rejects a text block placed
+                            // before the tool_result with a 400
+                            // `tool_use ids found without tool_result blocks
+                            // immediately after` — the message after a
+                            // tool_use must lead with tool_result. Real
+                            // Anthropic tolerates either order; DeepSeek does
+                            // not. Pushing to the end keeps the turn-context
+                            // signal while preserving the required ordering.
+                            arr.push(json!({ "type": "text", "text": turn_ctx }));
                         }
                     }
                 }
@@ -1037,7 +1149,8 @@ pub fn run_agent_turn(
             // A hard stream error ends the turn/task rather than executing any
             // partially-collected tool calls.
             if let Some((ref err_msg, ref raw_body)) = turn_error {
-                if classify_provider_error(err_msg) == ErrorClass::Transient
+                if classify_provider_error_with_raw(err_msg, raw_body.as_deref())
+                    == ErrorClass::Transient
                     && transient_retries < MAX_TRANSIENT_RETRIES
                 {
                     transient_retries += 1;
@@ -1076,7 +1189,8 @@ pub fn run_agent_turn(
                 // translates the bare status / router error codes into text the
                 // user can act on (e.g. "All model providers are currently
                 // unavailable" for the router's router_upstreams_failed).
-                let exhausted = classify_provider_error(err_msg) == ErrorClass::Transient
+                let exhausted = classify_provider_error_with_raw(err_msg, raw_body.as_deref())
+                    == ErrorClass::Transient
                     && transient_retries >= MAX_TRANSIENT_RETRIES;
                 let friendly = friendly_upstream_error(err_msg, raw_body.as_deref(), exhausted);
                 let _ = tx.send(json!({ "type": "error", "text": friendly })).await;
@@ -1759,6 +1873,90 @@ mod tests {
         );
         assert!(msg.contains("418"), "fallthrough should keep status: {msg}");
         assert!(msg.contains("short and stout"), "fallthrough should keep body: {msg}");
+    }
+
+    #[test]
+    fn test_classify_router_wrapped_400_is_permanent() {
+        // The actual bug: the router wraps DeepSeek's 400 invalid_request_error
+        // as a 502 envelope. The bare message ("upstream HTTP 502 Bad Gateway")
+        // looks transient, but the wrapped body reveals a permanent 400.
+        // This MUST classify as Permanent so we don't retry a doomed request.
+        let raw = "router_upstreams_failed: DeepSeek:deepseek-v4-flash 400 \
+            {\"error\":{\"message\":\"messages.4: tool_use ids found without \
+            tool_result blocks\",\"type\":\"invalid_request_error\"}}";
+        assert_eq!(
+            classify_provider_error_with_raw("upstream HTTP 502 Bad Gateway", Some(raw)),
+            ErrorClass::Permanent,
+            "router-wrapped 400 must NOT be retried"
+        );
+        // Same for router-wrapped 401.
+        let raw_401 = "router_upstreams_failed: DeepSeek:deepseek-v4-flash 401 \
+            {\"error\":{\"message\":\"invalid api key\",\"type\":\"authentication_error\"}}";
+        assert_eq!(
+            classify_provider_error_with_raw("upstream HTTP 502 Bad Gateway", Some(raw_401)),
+            ErrorClass::Permanent,
+            "router-wrapped 401 must NOT be retried"
+        );
+        // But a router envelope with no permanent status remains transient
+        // (e.g. all providers genuinely returned 503/timeout).
+        let raw_transient = "router_upstreams_failed: DeepSeek:deepseek-v4-flash unreachable";
+        assert_eq!(
+            classify_provider_error_with_raw("upstream HTTP 502 Bad Gateway", Some(raw_transient)),
+            ErrorClass::Transient,
+            "router-wrapped transient failures should still retry"
+        );
+    }
+
+    #[test]
+    fn test_friendly_upstream_error_router_wrapped_400() {
+        // The exact error from the bug report: the user should see the real
+        // cause (the 400 invalid_request_error), NOT "all providers unavailable".
+        let raw = "router_upstreams_failed: DeepSeek:deepseek-v4-flash 400 \
+            {\"error\":{\"message\":\"messages.4: `tool_use` ids were found without \
+            `tool_result` blocks immediately after: call_00_XeMcWVdzAiMldkyzZIXy5135. \
+            Each `tool_use` block must have a corresponding `tool_result` block in \
+            the next message.\",\"type\":\"invalid_request_error\",\"param\":null,\
+            \"code\":\"invalid_request_error\"}}";
+        let msg = friendly_upstream_error("upstream HTTP 502 Bad Gateway", Some(raw), true);
+        assert!(
+            !msg.contains("All model providers are currently unavailable"),
+            "router-wrapped 400 must not claim providers are down, got: {msg}"
+        );
+        assert!(
+            msg.contains("rejected the request as invalid"),
+            "router-wrapped 400 should explain it's a request problem, got: {msg}"
+        );
+        assert!(
+            msg.contains("tool_use"),
+            "router-wrapped 400 should surface the actual provider message, got: {msg}"
+        );
+        assert!(
+            msg.contains("retrying won't help"),
+            "router-wrapped 400 should tell user not to retry, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_extract_upstream_detail() {
+        // Full envelope with Anthropic-style error JSON.
+        let raw = "router_upstreams_failed: DeepSeek:deepseek-v4-flash 400 \
+            {\"error\":{\"message\":\"messages.4: tool_use ids missing\",\"type\":\"invalid_request_error\"}}";
+        let detail = extract_upstream_detail(Some(raw));
+        assert_eq!(
+            detail.as_deref(),
+            Some("messages.4: tool_use ids missing"),
+            "should extract the actionable provider message, got: {detail:?}"
+        );
+        // Empty envelope.
+        assert_eq!(extract_upstream_detail(Some("router_upstreams_failed: ")), None);
+        // No envelope prefix at all — fall back to JSON parse of the whole body.
+        let raw_no_prefix = "{\"error\":{\"message\":\"bad input\"}}";
+        assert_eq!(
+            extract_upstream_detail(Some(raw_no_prefix)).as_deref(),
+            Some("bad input")
+        );
+        // Not JSON at all.
+        assert_eq!(extract_upstream_detail(Some("not json")), None);
     }
 
     #[test]

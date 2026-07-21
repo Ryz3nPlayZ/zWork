@@ -18,7 +18,7 @@ export function SlashMenu({
   activeIndex,
   onActiveIndexChange,
   onSelect,
-  onManage: _onManage,
+  onManage,
 }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
   const matches = useMemo(() => filterTemplates(templates, query), [templates, query]);
@@ -82,6 +82,16 @@ export function SlashMenu({
             );
           })
         )}
+      </div>
+      <div className="border-t border-line">
+        <button
+          type="button"
+          onClick={onManage}
+          className="press ring-focus flex w-full items-center justify-between px-3 py-2 text-left text-[11.5px] font-medium text-ink-muted hover:bg-paper-sunken/60"
+        >
+          <span>Manage templates</span>
+          <kbd className="rounded border border-line bg-paper px-1.5 py-px font-mono text-[10px] text-ink-faint">⏎</kbd>
+        </button>
       </div>
     </div>
   );

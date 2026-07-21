@@ -36,7 +36,6 @@ import type { Activity, Artifact, MessagePart } from "../lib/store";
 import { useApp } from "../lib/store";
 import { Logo } from "./Logo";
 import { IconButton } from "./IconButton";
-// AskCard rendering moved to ChatView's QuestionModal (native ask_question SSE event)
 import type { Message as Msg } from "../lib/store";
 import { api } from "../lib/api";
 

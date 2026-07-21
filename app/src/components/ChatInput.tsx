@@ -686,7 +686,7 @@ export function ChatInput({
       onSelect={insertTemplate}
       onManage={() => {
         setSlashState(null);
-        openSettings("memory");
+        openSettings("general");
       }}
     />
   );

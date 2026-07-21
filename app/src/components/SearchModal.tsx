@@ -28,7 +28,7 @@ interface ActionCmd {
 // ---- Result union ----
 type Result =
   | { kind: "action"; action: ActionCmd }
-  | { kind: "chat"; id: string; title: string; updatedAt: number };
+  | { kind: "chat"; id: string; title: string; preview?: string; updatedAt: number };
 
 function highlight(text: string, q: string): React.ReactNode {
   if (!q) return text;
@@ -134,11 +134,15 @@ export function SearchModal() {
       .map((a) => ({ kind: "action" as const, action: a }));
 
     const matchedChats: Result[] = (q
-      ? summaries.filter((c) => c.title.toLowerCase().includes(q))
+      ? summaries.filter((c) => {
+          const title = c.title.toLowerCase();
+          const preview = (c.preview ?? "").toLowerCase();
+          return title.includes(q) || preview.includes(q);
+        })
       : summaries
     )
       .slice(0, 60)
-      .map((c) => ({ kind: "chat" as const, id: c.id, title: c.title, updatedAt: c.updated_at }));
+      .map((c) => ({ kind: "chat" as const, id: c.id, title: c.title, preview: c.preview, updatedAt: c.updated_at }));
 
     // When there's a query, interleave actions first; when empty, show actions then chats.
     return [...matchedActions, ...matchedChats];
@@ -253,17 +257,28 @@ export function SearchModal() {
                   onMouseEnter={() => setActiveIdx(i)}
                   onClick={() => selectAt(i)}
                   className={cn(
-                    "press flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors",
+                    "press flex w-full items-start gap-3 px-4 py-2.5 text-left transition-colors",
                     active ? "bg-accent/8 text-ink" : "text-ink hover:bg-paper-sunken/60",
                   )}
                 >
                   <span className={cn("shrink-0", active ? "text-accent" : "text-ink-muted")}>
                     {r.kind === "action" ? r.action.icon : <MessageCircle className="h-4 w-4" />}
                   </span>
-                  <span className="flex-1 truncate text-[13.5px]">
-                    {r.kind === "action"
-                      ? r.action.label
-                      : highlight(r.title || "Untitled conversation", query)}
+                  <span className="flex-1 min-w-0">
+                    {r.kind === "action" ? (
+                      <span className="block truncate text-[13.5px]">{r.action.label}</span>
+                    ) : (
+                      <>
+                        <span className="block truncate text-[13.5px]">
+                          {highlight(r.title || "Untitled conversation", query)}
+                        </span>
+                        {r.preview && (
+                          <span className="block truncate text-[11.5px] text-ink-faint">
+                            {highlight(r.preview, query)}
+                          </span>
+                        )}
+                      </>
+                    )}
                   </span>
                   {r.kind === "action" && r.action.hint && (
                     <kbd className="shrink-0 rounded border border-line bg-paper px-1.5 py-0.5 text-[10px] text-ink-faint">

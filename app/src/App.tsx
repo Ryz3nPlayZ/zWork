@@ -151,7 +151,22 @@ export default function App() {
     notes?: string;
   } | null>(null);
   // In browser (non-Tauri) dev mode, skip cloud auth entirely and use a local stub.
-  const isBrowserDevMode = typeof window !== "undefined" && !((window as any).__TAURI_INTERNALS__) && !previewMode;
+  // But production web origins (app.tryzwork.app, tryzwork.app) are NOT dev —
+  // there we must run real cloud auth, same as the desktop app.
+  const isProductionWeb = (() => {
+    if (typeof window === "undefined") return false;
+    const origin = window.location.origin;
+    return (
+      origin === "https://app.tryzwork.app" ||
+      origin === "https://tryzwork.app" ||
+      origin === "https://www.tryzwork.app"
+    );
+  })();
+  const isBrowserDevMode =
+    typeof window !== "undefined" &&
+    !((window as any).__TAURI_INTERNALS__) &&
+    !previewMode &&
+    !isProductionWeb;
   const localStubUser: CloudUser = {
     user_id: "local-dev",
     email: "dev@zwork.local",

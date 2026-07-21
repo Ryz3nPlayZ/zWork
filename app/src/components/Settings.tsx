@@ -155,7 +155,12 @@ export function SettingsPage() {
   const [section, setSection] = useState<Section>("general");
 
   const refreshSettingsPage = useCallback(async () => {
-    await api.waitForBackend(20).catch(() => {});
+    // The health poll only matters on desktop (local sidecar readiness). On
+    // the web there's no sidecar, and /api/health polls just create console
+    // noise.
+    if (!IS_WEB) {
+      await api.waitForBackend(20).catch(() => {});
+    }
     await Promise.all([
       refreshProviders(),
       refreshSettings(),
@@ -1003,11 +1008,11 @@ function GeneralPanel({
 
           <div className="border-t border-line" />
 
-          {/* Single Toggle: Auto-Approve / Zero-Prompt Mode */}
+          {/* Single Toggle: Auto-Approve Destructive Actions */}
           <div className="flex items-start justify-between gap-4 pt-1">
             <div className="space-y-1 flex-1">
               <div className="text-[13px] font-medium text-ink flex items-center gap-2">
-                <span>Zero-Prompt Auto-Approve Mode</span>
+                <span>Auto-Approve Destructive Actions</span>
                 <span className={cn(
                   "px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase",
                   autoApproveDestructive
@@ -1018,7 +1023,7 @@ function GeneralPanel({
                 </span>
               </div>
               <p className="text-[11.5px] leading-relaxed text-ink-muted">
-                When enabled, zWork executes commands, reads and writes files, and controls the desktop immediately without asking you for permission. Enable this to remove all tool authorization prompts.
+                When enabled, the agent skips the per-action confirmation prompt for a small blocklist of destructive operations — commands like <code className="font-mono text-ink">rm&nbsp;-rf</code>, <code className="font-mono text-ink">format</code>, or <code className="font-mono text-ink">dropdb</code>, and writes to <code className="font-mono text-ink">settings.json</code> or <code className="font-mono text-ink">secrets.json</code>. Ordinary file edits, most commands, and the agent's clarifying questions are unaffected.
               </p>
             </div>
             
@@ -1131,15 +1136,16 @@ function GeneralPanel({
           {/* Wipe Local Cache Action */}
           <div className="flex items-center justify-between gap-4 pt-1">
             <div className="space-y-0.5">
-              <div className="text-[12.5px] font-medium text-ink">Clear Offline Application Cache</div>
-              <p className="text-[11.5px] text-ink-muted">Wipes all cached chats, summaries, and temporary preferences stored in this browser session.</p>
+              <div className="text-[12.5px] font-medium text-ink">Clear Offline Chat Cache</div>
+              <p className="text-[11.5px] text-ink-muted">Removes the cached chats and summaries used to display history while offline. Reopens empty until the next sync.</p>
             </div>
             <button
               onClick={() => {
                 try {
                   localStorage.removeItem("zwork:cached-chats");
                   localStorage.removeItem("zwork:cached-summaries");
-                  alert("Application cache cleared successfully!");
+                  localStorage.removeItem("zwork:cache-version");
+                  alert("Offline chat cache cleared.");
                 } catch {
                   alert("Failed to clear cache.");
                 }

@@ -136,14 +136,11 @@ export function Sidebar() {
             onClick={() => setView("inbox")}
             active={view === "inbox"}
           />
-          {/* Tasks (kanban) deferred — TasksPage exists but is backlog.
-          <SidebarButton
-            icon={<LayoutDashboard />}
-            label="Tasks"
-            onClick={() => setView("tasks")}
-            active={view === "tasks"}
-          />
-          */}
+          {/* Tasks (kanban) — deferred for reimplementation. The current
+              TasksPage (Board/List/Calendar) is fully built and its store
+              actions + backend (taskstore.rs) work, but the UX is being
+              redesigned. The route still resolves if `setView("tasks")` is
+              called directly. See docs/tasks-backlog.md for the plan. */}
           <SidebarButton
             icon={<FolderOpen />}
             label="Projects"

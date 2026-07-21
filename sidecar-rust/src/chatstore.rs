@@ -93,10 +93,14 @@ pub fn list_all() -> Vec<Value> {
                         let title = d.get("title").and_then(|v| v.as_str()).unwrap_or("Untitled").to_string();
                         let created_at = d.get("created_at").and_then(|v| v.as_u64()).unwrap_or(0);
                         let updated_at = d.get("updated_at").and_then(|v| v.as_u64()).unwrap_or(0);
-                        let message_count = d.get("messages").and_then(|v| v.as_array()).map_or(0, |a| a.len());
+                        let messages = d.get("messages").and_then(|v| v.as_array());
+                        let message_count = messages.map_or(0, |a| a.len());
                         let model = d.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
                         let project_id = d.get("project_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                         let kind = d.get("kind").and_then(|v| v.as_str()).unwrap_or("chat").to_string();
+                        let preview = messages
+                            .and_then(|a| preview_for_summary(a))
+                            .unwrap_or_default();
 
                         out.push(serde_json::json!({
                             "id": id,
@@ -106,7 +110,8 @@ pub fn list_all() -> Vec<Value> {
                             "message_count": message_count,
                             "model": model,
                             "project_id": project_id,
-                            "kind": kind
+                            "kind": kind,
+                            "preview": preview
                         }));
                     }
                 }
@@ -119,6 +124,69 @@ pub fn list_all() -> Vec<Value> {
         b_time.cmp(&a_time)
     });
     out
+}
+
+/// Build a short (~140 char) plaintext preview for the chat list. Prefers the
+/// most recent user message; falls back to the most recent assistant message.
+/// Used by SearchModal to match against message content, not just titles.
+fn preview_for_summary(messages: &[Value]) -> Option<String> {
+    /// Flatten a message's `content` (which may be a string or an array of
+    /// {type:"text", text:...} blocks) into a single trimmed string.
+    fn text_from_content(content: &Value) -> String {
+        match content {
+            Value::String(s) => s.clone(),
+            Value::Array(arr) => arr
+                .iter()
+                .filter_map(|block| {
+                    block
+                        .get("type")
+                        .and_then(|t| t.as_str())
+                        .filter(|t| *t == "text")
+                        .and_then(|_| block.get("text").and_then(|t| t.as_str()))
+                        .map(|s| s.to_string())
+                })
+                .collect::<Vec<_>>()
+                .join(" "),
+            _ => String::new(),
+        }
+    }
+
+    /// Collapse whitespace and cap at `max` chars on a word boundary.
+    fn truncate(s: &str, max: usize) -> String {
+        let collapsed: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+        if collapsed.chars().count() <= max {
+            return collapsed;
+        }
+        let head: String = collapsed.chars().take(max).collect();
+        // Walk back to the last space so we don't cut mid-word.
+        match head.rfind(' ') {
+            Some(i) if i > 0 => format!("{}…", &collapsed[..i]),
+            _ => format!("{}…", head),
+        }
+    }
+
+    let user_text = messages
+        .iter()
+        .rev()
+        .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+        .and_then(|m| m.get("content"))
+        .map(|c| text_from_content(c))
+        .filter(|s| !s.is_empty());
+    let text = user_text.or_else(|| {
+        messages
+            .iter()
+            .rev()
+            .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("assistant"))
+            .and_then(|m| m.get("content"))
+            .map(|c| text_from_content(c))
+            .filter(|s| !s.is_empty())
+    })?;
+    let trimmed = truncate(&text, 140);
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
 }
 
 pub fn get(chat_id: &str) -> Option<Chat> {

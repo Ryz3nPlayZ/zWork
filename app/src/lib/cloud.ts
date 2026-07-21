@@ -5,9 +5,18 @@ const IS_TAURI = typeof window !== "undefined" && !!(window as any).__TAURI_INTE
 const TOKEN_KEY = "zwork:cloud-token";
 const AUTH_CHANGED_EVENT = "zwork:cloud-auth-changed";
 
-/** Redirect to Better Auth Google sign-in for web (non-Tauri) environments. */
+/** Start Better Auth Google social sign-in for web (non-Tauri) environments.
+ *
+ *  Navigates the browser (top-level) to /api/auth/web/google on the auth host.
+ *  Better Auth mints the OAuth state, sets the state cookie, and 302s to Google
+ *  — all in a first-party context on api.tryzwork.app. This avoids the
+ *  cross-origin fetch + SameSite cookie storage issues that broke a fetch-based
+ *  start (the state cookie set via a cross-origin XHR was not reliably stored,
+ *  causing state_mismatch at callback time). On callback completion Better Auth
+ *  sets the session cookie and redirects to `callbackURL` (the app origin). */
 export function startWebGoogleSignIn() {
-  window.location.href = `${CLOUD_BASE}/api/auth/sign-in/google`;
+  const callbackURL = window.location.origin;
+  window.location.href = `${CLOUD_BASE}/api/auth/web/google?callbackURL=${encodeURIComponent(callbackURL)}`;
 }
 
 /** Check URL for a token param from OAuth callback and store it. Returns true if token was found. */
@@ -160,8 +169,14 @@ function setToken(token: string) {
 }
 
 export function clearCloudToken() {
+  // Only fire the auth-changed event if there was actually a token to clear.
+  // Otherwise every 401 (e.g. "not signed in yet" on the web) would re-trigger
+  // session fetches and loop.
+  const had = !!window.localStorage.getItem(TOKEN_KEY);
   window.localStorage.removeItem(TOKEN_KEY);
-  window.dispatchEvent(new CustomEvent(AUTH_CHANGED_EVENT));
+  if (had) {
+    window.dispatchEvent(new CustomEvent(AUTH_CHANGED_EVENT));
+  }
 }
 
 export function onCloudAuthChanged(listener: () => void) {
@@ -182,6 +197,10 @@ async function cloudFetch<T>(path: string, init?: RequestInit, token = getToken(
   const response = await fetch(`${CLOUD_BASE}${path}`, {
     ...init,
     headers,
+    // Web (non-Tauri) requests are cross-origin (app.tryzwork.app →
+    // api.tryzwork.app); include credentials so the Better Auth session cookie
+    // travels alongside the Bearer token. Tauri requests ignore this.
+    credentials: IS_TAURI ? "same-origin" : "include",
     signal: controller.signal,
   }).finally(() => clearTimeout(timeout));
   if (!response.ok) {
@@ -231,12 +250,25 @@ export async function startDesktopEmailSignUp(name: string, email: string, passw
 
 export async function fetchCloudSession(): Promise<CloudUser | null> {
   const token = getToken();
-  if (!token) return null;
+  // On the web (non-Tauri), the session may be a Better Auth cookie set after
+  // OAuth. There's no Bearer token in localStorage in that case, but we can
+  // detect the session cookie and still hit /api/session (which authenticates
+  // via the cookie through credentials: "include"). Without this, a signed-in
+  // web user with no localStorage token would never be recognized.
+  const hasSessionCookie =
+    !IS_TAURI &&
+    typeof document !== "undefined" &&
+    document.cookie.split(";").some((c) => c.trim().startsWith("better-auth.session_token="));
+
+  if (!token && !hasSessionCookie) return null;
   try {
-    return await cloudFetch<CloudUser>("/api/session");
+    return await cloudFetch<CloudUser>("/api/session", undefined, token || "");
   } catch (error) {
     if (error instanceof CloudFetchError && (error.status === 401 || error.status === 403)) {
-      clearCloudToken();
+      // Only clear + notify when we actually held a token. On the web with only
+      // a cookie, a 401 just means "not signed in" — clearing would fire the
+      // auth-changed event and re-trigger the fetch in an infinite loop.
+      if (token) clearCloudToken();
     }
     return null;
   }

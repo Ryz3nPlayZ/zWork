@@ -6,6 +6,7 @@ import LightRays from "./LightRays";
 import { useResolvedTheme } from "../lib/theme";
 import { useApp } from "../lib/store";
 import { startWebGoogleSignIn } from "../lib/cloud";
+import { IS_WEB } from "../lib/api";
 import { cn } from "../lib/cn";
 import { isMacOS, needsLightweightRendering } from "../lib/platform";
 import { dragRegionAttrs, onDragMouseDown } from "../lib/drag";
@@ -65,12 +66,30 @@ export function LoginScreen() {
   const [error, setError] = useState<string | null>(null);
   // const [notice, setNotice] = useState<string | null>(null);
 
-  const isWeb = typeof window !== "undefined" && !((window as any).__TAURI_INTERNALS__);
+  // Web vs Tauri detection. `IS_WEB` keys off `__TAURI_INTERNALS__`, which a
+  // browser extension or stray global can make truthy — that would route a web
+  // user into the desktop invoke() path and crash with "reading 'invoke' of
+  // undefined". Treat the known web origins as definitively web (the Tauri
+  // shell never serves over https to a real hostname), so a spoofed global
+  // can't force the desktop code path.
+  const isWeb = (() => {
+    if (typeof window === "undefined") return false;
+    const origin = window.location.origin;
+    if (
+      origin === "https://app.tryzwork.app" ||
+      origin === "https://tryzwork.app" ||
+      origin === "https://www.tryzwork.app"
+    ) {
+      return true;
+    }
+    return IS_WEB;
+  })();
 
   const handleGoogleSignIn = async () => {
     setError(null);
     if (isWeb) {
-      // Web: redirect to Better Auth Google OAuth
+      // Web: top-level navigation to Better Auth Google OAuth (sets state
+      // cookie first-party, then 302s to Google).
       startWebGoogleSignIn();
       return;
     }

@@ -1,0 +1,86 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* --------------------------------------------------------
+   Theme tokens — same zWork warm-minimal palette as the desktop
+   app and minimal-chat demo so the shared admin components render
+   identically everywhere. RGB triplets consumed by tailwind.config.js.
+   -------------------------------------------------------- */
+:root,
+:root.light {
+  color-scheme: light;
+
+  --paper: 242 240 232;
+  --paper-soft: 238 236 228;
+  --paper-raised: 234 232 224;
+  --paper-sunken: 246 244 236;
+
+  --ink: 48 46 40;
+  --ink-soft: 80 76 68;
+  --ink-muted: 110 106 96;
+  --ink-faint: 155 150 138;
+
+  --line: 218 214 202;
+  --line-soft: 228 224 212;
+  --line-strong: 200 196 184;
+
+  --accent: 48 46 40;
+
+  --shadow: 30 28 24;
+}
+
+:root.dark,
+.dark {
+  color-scheme: dark;
+
+  --paper: 42 42 46;
+  --paper-soft: 48 48 52;
+  --paper-raised: 56 56 60;
+  --paper-sunken: 36 36 40;
+
+  --ink: 220 218 210;
+  --ink-soft: 190 188 180;
+  --ink-muted: 140 138 130;
+  --ink-faint: 100 98 90;
+
+  --line: 60 60 65;
+  --line-soft: 54 54 58;
+  --line-strong: 72 72 78;
+
+  --accent: 220 218 210;
+
+  --shadow: 0 0 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: rgb(var(--paper));
+  color: rgb(var(--ink));
+  font-family: theme("fontFamily.sans");
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Thin scrollbars matching the rest of the product. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--line-strong)) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: rgb(var(--line-strong));
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}

@@ -53,3 +53,21 @@ app.tryzwork.app {
         file_server
     }
 }
+
+# 5. Admin Dashboard
+# Password-gated admin SPA. Same static-root + /api proxy pattern as the web
+# app demo, but a separate host so the public demo bundle stays untouched.
+# The SPA handles its own auth (POST /api/admin/verify-password → HMAC token).
+admin.tryzwork.app {
+    root * /var/www/admin.tryzwork.app
+    encode gzip
+
+    handle /api/* {
+        reverse_proxy axum_api:8080
+    }
+
+    handle {
+        try_files {path} /index.html
+        file_server
+    }
+}

@@ -3572,6 +3572,7 @@ version = "0.1.0"
 dependencies = [
  "async-stripe",
  "axum",
+ "base64 0.22.1",
  "chrono",
  "dotenvy",
  "futures",
