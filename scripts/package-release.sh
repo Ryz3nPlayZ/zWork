@@ -108,18 +108,21 @@ PY
   # Must run BEFORE signing.
   "$ROOT_DIR/scripts/patch-linux-appimage.sh" "$out"
 
-  sig_src="${src}.sig"
-  if [[ -f "$sig_src" ]]; then
-    cp "$sig_src" "$sig_out"
-  elif [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
-    (
-      cd "$ROOT_DIR/app"
-      npx tauri signer sign "$out"
-    )
-    if [[ ! -f "$sig_out" ]]; then
-      echo "AppImage signature was not created: $sig_out" >&2
-      exit 1
-    fi
+  # Always sign the FINAL, patched AppImage bytes. Any signature produced
+  # during `tauri build` covers the pre-patch AppImage and would fail
+  # updater verification, so it must never be copied to dist/.
+  if [[ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
+    echo "TAURI_SIGNING_PRIVATE_KEY is not set; refusing to ship an AppImage without a valid signature" >&2
+    exit 1
+  fi
+  rm -f "$sig_out"
+  (
+    cd "$ROOT_DIR/app"
+    npx tauri signer sign "$out"
+  )
+  if [[ ! -f "$sig_out" ]]; then
+    echo "AppImage signature was not created: $sig_out" >&2
+    exit 1
   fi
   echo "$out"
   exit 0
