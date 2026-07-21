@@ -1,9 +1,13 @@
 use axum::{
-    extract::DefaultBodyLimit,
+    extract::{DefaultBodyLimit, Request, State},
+    http::{header, HeaderName, HeaderValue, Method, StatusCode},
+    middleware::{self, Next},
+    response::Response,
     routing::{get, post, patch, delete},
     Router,
 };
-use tower_http::cors::{AllowPrivateNetwork, CorsLayer};
+use std::sync::Arc;
+use tower_http::cors::{AllowOrigin, AllowPrivateNetwork, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
@@ -16,6 +20,74 @@ use tracing::info;
 /// silently dropped before ever reaching the agent). 100 MB comfortably covers
 /// large photos, screenshots, and PDFs while still bounding the server.
 const MAX_BODY_BYTES: usize = 100 * 1024 * 1024;
+
+/// Rejects any request without a matching `x-zwork-token` header.
+///
+/// The sidecar binds 127.0.0.1 but is reachable by any local process — and,
+/// via browser requests to loopback, potentially by arbitrary websites. The
+/// per-run token is minted by the Tauri host at launch, passed to this process
+/// as `ZWORK_SIDECAR_TOKEN`, and only the desktop frontend can read it (via
+/// the `get_sidecar_token` Tauri command). This blocks drive-by localhost RCE
+/// against endpoints like /api/run-python.
+///
+/// `/ws` is exempt: the zbctl Chrome extension connects there
+/// (browser_bridge.rs) and has no way to learn the per-run token. The
+/// extension only receives browser_* commands over that socket — every other
+/// endpoint still requires the token.
+async fn require_sidecar_token(
+    State(expected): State<Arc<String>>,
+    req: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    if req.uri().path() == "/ws" {
+        return Ok(next.run(req).await);
+    }
+    let provided = req
+        .headers()
+        .get("x-zwork-token")
+        .and_then(|v| v.to_str().ok());
+    if provided == Some(expected.as_str()) {
+        Ok(next.run(req).await)
+    } else {
+        Err(StatusCode::UNAUTHORIZED)
+    }
+}
+
+fn cors_layer() -> CorsLayer {
+    // Only the Tauri webview and the zbctl Chrome extension may talk to this
+    // loopback server from a browser context. `allow_private_network` lets
+    // the extension (chrome-extension:// origin) reach us: modern Chrome
+    // blocks cross-context requests to private/loopback addresses (Private
+    // Network Access) unless the preflight echoes this header back.
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::predicate(|origin: &HeaderValue, _| {
+            let Ok(origin) = origin.to_str() else {
+                return false;
+            };
+            matches!(
+                origin,
+                "tauri://localhost" | "http://tauri.localhost" | "https://tauri.localhost"
+            ) || origin.starts_with("chrome-extension://")
+        }))
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::PATCH,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers([
+            header::CONTENT_TYPE,
+            HeaderName::from_static("x-zwork-token"),
+            HeaderName::from_static("x-zwork-app-version"),
+            HeaderName::from_static("x-zwork-os"),
+            HeaderName::from_static("x-zwork-run-id"),
+            HeaderName::from_static("x-zwork-chat-id"),
+            HeaderName::from_static("x-zwork-project-id"),
+        ])
+        .allow_private_network(AllowPrivateNetwork::yes())
+}
 
 mod paths;
 mod secretstore;
@@ -51,6 +123,20 @@ async fn main() {
         .unwrap_or_else(|_| "8787".to_string())
         .parse::<u16>()
         .unwrap_or(8787);
+
+    let sidecar_token = match std::env::var("ZWORK_SIDECAR_TOKEN") {
+        Ok(token) if !token.trim().is_empty() => Arc::new(token),
+        _ => {
+            // Dev mode (running the binary directly, outside the Tauri host):
+            // mint a throwaway token so the token middleware still runs.
+            let generated = uuid::Uuid::new_v4().to_string();
+            tracing::warn!(
+                "ZWORK_SIDECAR_TOKEN not set; generated a per-run token (dev mode). \
+                 Requests must send it as the x-zwork-token header."
+            );
+            Arc::new(generated)
+        }
+    };
 
     let app = Router::new()
         .route("/ws", get(browser_bridge::ws_handler))
@@ -128,13 +214,14 @@ async fn main() {
         .route("/api/scrape", post(server::scrape_url))
         .route("/api/export/docx", post(server::export_docx))
         .route("/api/export/pdf", post(server::export_pdf))
-        // `allow_private_network` lets the zbctl Chrome extension
-        // (chrome-extension:// origin) reach this loopback server. Modern
-        // Chrome blocks cross-context requests to private/loopback addresses
-        // (Private Network Access) unless the preflight echoes this header back.
-        .layer(
-            CorsLayer::permissive().allow_private_network(AllowPrivateNetwork::yes()),
-        );
+        // Token gate on every route (with the `/ws` exemption documented on
+        // `require_sidecar_token`). Added before the CORS layer so CORS stays
+        // outermost and preflight OPTIONS requests are answered without a token.
+        .layer(middleware::from_fn_with_state(
+            sidecar_token,
+            require_sidecar_token,
+        ))
+        .layer(cors_layer());
 
     let app = app.layer(
         TraceLayer::new_for_http()
@@ -160,6 +247,15 @@ async fn main() {
     // inbox. See scheduler::scheduler_loop.
     tokio::spawn(scheduler::scheduler_loop());
 
-    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = match tokio::net::TcpListener::bind(&addr).await {
+        Ok(listener) => listener,
+        Err(err) => {
+            tracing::error!("failed to bind {addr}: {err}");
+            std::process::exit(1);
+        }
+    };
+    if let Err(err) = axum::serve(listener, app).await {
+        tracing::error!("server exited with error: {err}");
+        std::process::exit(1);
+    }
 }

@@ -52,6 +52,17 @@ struct BackendState {
 /// Managed handle to the Python or packaged backend process.
 struct Backend(Mutex<BackendState>);
 
+/// Per-run token authenticating requests to the local sidecar. Minted at app
+/// launch, passed to the sidecar as `ZWORK_SIDECAR_TOKEN`, and exposed to the
+/// frontend via the `get_sidecar_token` command.
+struct SidecarToken(String);
+
+fn sidecar_token(app: &tauri::AppHandle) -> String {
+    app.try_state::<SidecarToken>()
+        .map(|token| token.0.clone())
+        .unwrap_or_default()
+}
+
 fn zwork_data_dir() -> PathBuf {
     if let Ok(v) = std::env::var("ZWORK_HOME") {
         return PathBuf::from(v);
@@ -81,7 +92,7 @@ fn append_log(msg: &str) {
     }
 }
 
-fn backend_http_healthy() -> bool {
+fn backend_http_healthy(token: &str) -> bool {
     let addr = "127.0.0.1:8787";
     // Use a generous timeout so slow-but-alive backends aren't killed mid-stream.
     let timeout = Duration::from_secs(5);
@@ -93,10 +104,10 @@ fn backend_http_healthy() -> bool {
     let _ = stream.set_read_timeout(Some(timeout));
     let _ = stream.set_write_timeout(Some(timeout));
 
-    if stream
-        .write_all(b"GET /api/health HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
-        .is_err()
-    {
+    // The sidecar rejects requests without the per-run token (401).
+    let request =
+        format!("GET /api/health HTTP/1.0\r\nHost: 127.0.0.1\r\nx-zwork-token: {token}\r\n\r\n");
+    if stream.write_all(request.as_bytes()).is_err() {
         return false;
     }
 
@@ -203,6 +214,11 @@ fn start_packaged_backend(app: &tauri::AppHandle) -> Option<BackendChild> {
         .env("PYTHONIOENCODING", "utf-8")
         .env("ZWORK_HOME", zwork_sidecar_home().display().to_string());
 
+    // Per-run token the sidecar requires on every request (except /ws).
+    if let Some(token) = app.try_state::<SidecarToken>() {
+        sidecar = sidecar.env("ZWORK_SIDECAR_TOKEN", token.0.clone());
+    }
+
     match sidecar.spawn() {
         Ok((mut rx, child)) => {
             append_log("Spawning packaged backend");
@@ -246,17 +262,28 @@ fn start_packaged_backend(app: &tauri::AppHandle) -> Option<BackendChild> {
 
 fn kill_stale_on_port(port: u16) {
     let port_str = port.to_string();
-    // Kill any process already bound to the backend port. This handles stale
-    // instances left behind by a previous run or by an external launcher.
+    // Kill stale backend processes still bound to the backend port. Only PIDs
+    // whose process command contains "zwork-backend" are killed — blindly
+    // SIGKILLing whatever holds the port could take out an unrelated user
+    // process that happened to bind it.
     let mut cmd = if cfg!(target_os = "linux") {
-        let mut c = Command::new("fuser");
-        c.arg("-k").arg(format!("{}/tcp", port_str));
+        let mut c = Command::new("sh");
+        c.arg("-c").arg(format!(
+            "for pid in $(fuser {port_str}/tcp 2>/dev/null); do \
+               ps -p \"$pid\" -o comm= 2>/dev/null | grep -q zwork-backend \
+                 && kill -9 \"$pid\" 2>/dev/null; \
+             done; true"
+        ));
         c
     } else {
-        // macOS / BSD: lsof -ti :PORT | xargs kill -9
+        // macOS / BSD: lsof -ti :PORT, filtered to zwork-backend processes.
         let mut c = Command::new("sh");
-        c.arg("-c")
-            .arg(format!("lsof -ti :{} 2>/dev/null | xargs kill -9 2>/dev/null; true", port_str));
+        c.arg("-c").arg(format!(
+            "for pid in $(lsof -ti :{port_str} 2>/dev/null); do \
+               ps -p \"$pid\" -o comm= 2>/dev/null | grep -q zwork-backend \
+                 && kill -9 \"$pid\" 2>/dev/null; \
+             done; true"
+        ));
         c
     };
     cmd.stdout(Stdio::null()).stderr(Stdio::null());
@@ -284,7 +311,8 @@ fn spawn_backend_initial(app: &tauri::AppHandle) -> Option<BackendChild> {
 }
 
 fn ensure_backend_running(app: &tauri::AppHandle, backend: &Backend) -> Result<bool, String> {
-    if backend_http_healthy() {
+    let token = sidecar_token(app);
+    if backend_http_healthy(&token) {
         return Ok(true);
     }
 
@@ -295,7 +323,7 @@ fn ensure_backend_running(app: &tauri::AppHandle, backend: &Backend) -> Result<b
 
     // Re-check after acquiring the lock — another thread may have spawned
     // a healthy backend while we were waiting.
-    if backend_http_healthy() {
+    if backend_http_healthy(&token) {
         return Ok(true);
     }
 
@@ -336,12 +364,13 @@ fn start_backend_watchdog(app: tauri::AppHandle) {
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_secs(30));
         if let Some(backend) = app.try_state::<Backend>() {
-            if !backend_http_healthy() {
+            let token = sidecar_token(&app);
+            if !backend_http_healthy(&token) {
                 // One retry after a short pause — a single slow response
                 // during heavy streaming work is not a dead backend.
                 append_log("Backend watchdog: first health check failed, retrying...");
                 std::thread::sleep(Duration::from_secs(3));
-                if !backend_http_healthy() {
+                if !backend_http_healthy(&token) {
                     append_log("Backend watchdog: second health check failed, restarting backend");
                     let _ = ensure_backend_running(&app, &backend);
                 } else {
@@ -423,6 +452,11 @@ fn restart_backend(app: tauri::AppHandle, backend: tauri::State<Backend>) -> Res
 }
 
 #[tauri::command]
+fn get_sidecar_token(token: tauri::State<SidecarToken>) -> String {
+    token.0.clone()
+}
+
+#[tauri::command]
 async fn begin_desktop_auth(app: tauri::AppHandle, start_url: String) -> Result<String, String> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -435,8 +469,14 @@ async fn begin_desktop_auth(app: tauri::AppHandle, start_url: String) -> Result<
     if !is_http_url(&start_url) {
         return Err("auth start_url must be an http(s) URL".into());
     }
+    // Bind this sign-in attempt to a random nonce. The cloud API round-trips
+    // it through the OAuth state and echoes it back on the localhost callback;
+    // a callback without a matching nonce is rejected, so another local
+    // process (or a website redirected to our listener) can't deliver its own
+    // auth code into this window.
+    let nonce = uuid::Uuid::new_v4().simple().to_string();
     let separator = if start_url.contains('?') { '&' } else { '?' };
-    let launch_url = format!("{start_url}{separator}port={port}");
+    let launch_url = format!("{start_url}{separator}port={port}&nonce={nonce}");
     app.shell()
         .open(launch_url, None)
         .map_err(|err| format!("failed to open browser: {err}"))?;
@@ -467,6 +507,7 @@ async fn begin_desktop_auth(app: tauri::AppHandle, start_url: String) -> Result<
     let query = path.split('?').nth(1).unwrap_or("");
     let mut code: Option<String> = None;
     let mut error_message: Option<String> = None;
+    let mut callback_nonce: Option<String> = None;
     for pair in query.split('&') {
         let mut parts = pair.splitn(2, '=');
         let key = parts.next().unwrap_or("");
@@ -475,11 +516,13 @@ async fn begin_desktop_auth(app: tauri::AppHandle, start_url: String) -> Result<
         match key {
             "code" if !decoded.is_empty() => code = Some(decoded),
             "error" if !decoded.is_empty() => error_message = Some(decoded),
+            "nonce" if !decoded.is_empty() => callback_nonce = Some(decoded),
             _ => {}
         }
     }
 
-    let ok = code.is_some() && error_message.is_none();
+    let nonce_ok = callback_nonce.as_deref() == Some(nonce.as_str());
+    let ok = code.is_some() && error_message.is_none() && nonce_ok;
     let html = if ok {
         "<!doctype html><html><body style=\"font-family:Georgia,serif;background:#f6efe5;color:#151313;display:grid;place-items:center;min-height:100vh;margin:0\"><div style=\"padding:24px 28px;border:1px solid rgba(21,19,19,.1);border-radius:20px;background:rgba(255,255,255,.86)\"><h1 style=\"margin:0 0 10px;font-size:28px\">Signed in</h1><p style=\"margin:0;color:#6a615b\">You can close this tab and return to zWork.</p></div></body></html>"
     } else {
@@ -495,6 +538,10 @@ async fn begin_desktop_auth(app: tauri::AppHandle, start_url: String) -> Result<
 
     if let Some(message) = error_message {
         return Err(message);
+    }
+
+    if !nonce_ok {
+        return Err("auth callback nonce mismatch".to_string());
     }
 
     code.ok_or_else(|| "missing auth code".to_string())
@@ -819,7 +866,8 @@ fn main() {
             begin_desktop_auth,
             open_macos_privacy_pane,
             register_overlay_shortcut,
-            get_overlay_shortcut
+            get_overlay_shortcut,
+            get_sidecar_token
         ])
         .setup(|app| {
             use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
@@ -891,6 +939,7 @@ fn main() {
             Ok(())
         })
         .manage(Backend(Mutex::new(BackendState { child: None, spawned_at: None })))
+        .manage(SidecarToken(uuid::Uuid::new_v4().to_string()))
         .build(tauri::generate_context!())
         .expect("error while building zWork");
 

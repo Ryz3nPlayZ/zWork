@@ -42,6 +42,21 @@ function clientHeaders(): Record<string, string> {
   };
 }
 
+let sidecarTokenPromise: Promise<string> | null = null;
+
+/** Per-run token authenticating requests to the local sidecar. Minted by the
+ *  Tauri host at launch; the sidecar rejects requests without it. Cached after
+ *  the first fetch. Resolves to "" outside Tauri (browser dev / web mode talk
+ *  to other backends that don't require it). */
+function getSidecarToken(): Promise<string> {
+  if (!sidecarTokenPromise) {
+    sidecarTokenPromise = IS_TAURI
+      ? invoke<string>("get_sidecar_token").catch(() => "")
+      : Promise.resolve("");
+  }
+  return sidecarTokenPromise;
+}
+
 const API_BASE = IS_TAURI ? "http://127.0.0.1:8787" : "";
 
 function u(path: string): string {
@@ -79,6 +94,9 @@ export interface ApiChatSummary {
   message_count: number;
   model: string;
   project_id?: string;
+  /** Short plaintext snippet of the most recent message — powers content
+   *  matching in SearchModal. Empty string when unavailable. */
+  preview?: string;
   /** `"chat"` (interactive, default) or `"automation"` (scheduled-task run).
    *  Filter `automation` out of the main chat list — they surface inside the
    *  scheduled task's run history instead. */
@@ -187,7 +205,11 @@ async function invokeBackendCommand(command: "ensure_backend" | "restart_backend
 async function healthFetch() {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5_000);
-  return fetch(u("/api/health"), { signal: controller.signal })
+  const token = await getSidecarToken();
+  return fetch(u("/api/health"), {
+    signal: controller.signal,
+    headers: token ? { "x-zwork-token": token } : undefined,
+  })
     .then((r) => j<{ ok: boolean; version: string }>(r))
     .finally(() => clearTimeout(timeout));
 }
@@ -211,6 +233,12 @@ async function waitForBackendReady(attempts = 60) {
 async function localFetch(path: string, init?: RequestInit) {
   if (IS_TAURI) {
     await waitForBackendReady(6);
+  }
+  const token = await getSidecarToken();
+  if (token) {
+    const headers = new Headers(init?.headers);
+    headers.set("x-zwork-token", token);
+    init = { ...init, headers };
   }
   return fetch(u(path), init);
 }
@@ -1108,11 +1136,13 @@ export async function streamChat(
   };
 
   const readStream = async () => {
+    const sidecarToken = await getSidecarToken();
     const resp = await fetch(u("/api/chat/stream"), {
       method: "POST",
       headers: {
         "content-type": "application/json",
         ...clientHeaders(),
+        ...(sidecarToken ? { "x-zwork-token": sidecarToken } : {}),
         ...(body.run_id ? { "x-zwork-run-id": body.run_id } : {}),
         ...(body.chat_id ? { "x-zwork-chat-id": body.chat_id } : {}),
         ...(body.project_id ? { "x-zwork-project-id": body.project_id } : {}),
