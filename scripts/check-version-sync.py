@@ -25,15 +25,26 @@ def read_cargo_version(path: Path) -> str:
     return m.group(1)
 
 
+def read_cask_version(path: Path) -> str:
+    """Extract version from Homebrew cask file."""
+    text = path.read_text(encoding="utf-8")
+    m = re.search(r'^\s*version\s*"([^"]+)"', text, re.MULTILINE)
+    if not m:
+        raise SystemExit(f"could not find version in {path}")
+    return m.group(1)
+
+
 def main() -> int:
     package_version = json.loads((ROOT / "app/package.json").read_text(encoding="utf-8"))["version"]
     tauri_version = json.loads((ROOT / "app/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))["version"]
     cargo_version = read_cargo_version(ROOT / "app/src-tauri/Cargo.toml")
+    cask_version = read_cask_version(ROOT / "Casks/zwork.rb")
 
     versions = {
         "app/package.json": package_version,
         "app/src-tauri/tauri.conf.json": tauri_version,
         "app/src-tauri/Cargo.toml": cargo_version,
+        "Casks/zwork.rb": cask_version,
     }
 
     unique_versions = set(versions.values())

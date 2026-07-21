@@ -77,6 +77,24 @@ zWork is for people who want the thing done, not another app to master.
 
 </div>
 
+### Command-line Installation
+
+#### macOS (Homebrew)
+```bash
+brew tap ryz3nplayz/zwork https://github.com/Ryz3nPlayZ/zWork
+brew install --cask zwork
+```
+
+#### Windows (PowerShell)
+```powershell
+irm https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install-windows.ps1 | iex
+```
+
+#### Linux (bash)
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install.sh | bash
+```
+
 Open it, sign in, ask for something.
 
 ---
