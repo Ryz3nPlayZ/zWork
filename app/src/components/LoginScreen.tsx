@@ -56,15 +56,7 @@ export function LoginScreen() {
   const isLoadingAuth = useApp((s) => s.isLoadingAuth);
   const signInWithGoogle = useApp((s) => s.signInWithGoogle);
   const theme = useResolvedTheme();
-  const [isSignUp, setIsSignUp] = useState(false);
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  // Email auth disabled for now
-  // const [emailBusy, setEmailBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // const [notice, setNotice] = useState<string | null>(null);
 
   // Web vs Tauri detection. `IS_WEB` keys off `__TAURI_INTERNALS__`, which a
   // browser extension or stray global can make truthy — that would route a web
@@ -98,51 +90,6 @@ export function LoginScreen() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign in failed. Please try again.");
     }
-  };
-
-  // Email auth disabled for now - keep code for future use
-  /*
-  const handleEmailAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setNotice(null);
-
-    if (isSignUp && password !== confirmPassword) {
-      setError("Passwords do not match.");
-      return;
-    }
-
-    setEmailBusy(true);
-    try {
-      if (isSignUp) {
-        const result = await startDesktopEmailSignUp(name.trim(), email.trim(), password);
-        setNotice(result.message || "Check your email to verify your account before signing in.");
-        setPassword("");
-        setConfirmPassword("");
-      } else {
-        await startDesktopEmailSignIn(email.trim(), password);
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Email sign-in failed.";
-      if (message.includes("403")) {
-        setError("Your email is not verified yet. Check your inbox for the verification link.");
-      } else {
-        setError(message);
-      }
-    } finally {
-      setEmailBusy(false);
-    }
-  };
-  */
-
-  const toggleMode = () => {
-    setIsSignUp(!isSignUp);
-    setError(null);
-    // setNotice(null);
-    setName("");
-    setEmail("");
-    setPassword("");
-    setConfirmPassword("");
   };
 
   return (
@@ -236,96 +183,16 @@ export function LoginScreen() {
               <div className="mb-6">
                 <span className="mb-3 inline-flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.14em] text-ink-muted">
                   <span className="h-[1px] w-4 bg-line-strong" />
-                  {isSignUp ? "Get started" : "Welcome back"}
+                  Welcome
                 </span>
 
                 <h2 className="text-[25px] font-medium leading-[1.18] tracking-tight text-ink md:text-[28px]">
-                  {isSignUp ? "Create your account" : "Sign in to continue"}
+                  Sign in to continue
                 </h2>
 
                 <p className="mt-2.5 text-[14px] leading-6 text-ink-muted">
-                  {isSignUp
-                    ? "Start your journey with your personal AI assistant"
-                    : "Pick up where you left off"}
+                  Pick up where you left off
                 </p>
-              </div>
-
-              {/* Email/password form - disabled for now */}
-              <div className="space-y-4 opacity-50 pointer-events-none">
-                {isSignUp && (
-                  <input
-                    type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Full name"
-                    className="w-full rounded-xl border border-line bg-paper-raised px-4 py-3 text-[16px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
-                    disabled
-                  />
-                )}
-
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Email address"
-                  className="w-full rounded-xl border border-line bg-paper-raised px-4 py-3 text-[16px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
-                  disabled
-                />
-
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Password"
-                  className="w-full rounded-xl border border-line bg-paper-raised px-4 py-3 text-[16px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
-                  disabled
-                />
-
-                {isSignUp && (
-                  <input
-                    type="password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    placeholder="Confirm password"
-                    className="w-full rounded-xl border border-line bg-paper-raised px-4 py-3 text-[16px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
-                    disabled
-                  />
-                )}
-
-                <button
-                  type="button"
-                  disabled
-                  className={cn(
-                    "inline-flex w-full items-center justify-center gap-1.5 rounded-xl px-4 py-3 text-[13px] font-medium transition-all",
-                    "cursor-not-allowed opacity-60",
-                    "bg-ink text-paper",
-                  )}
-                >
-                  {isSignUp ? "Create account" : "Sign in"}
-                </button>
-
-                <p className="text-center text-[12px] text-ink-faint">
-                  Email sign-up coming soon
-                </p>
-              </div>
-
-              {/* Account toggle text */}
-              <p className="mt-4 text-center text-[13px] text-ink-muted">
-                {isSignUp ? "Already have an account?" : "Don't have an account?"}{" "}
-                <button
-                  type="button"
-                  onClick={toggleMode}
-                  className="text-ink hover:underline font-medium"
-                >
-                  {isSignUp ? "Sign in" : "Sign up"}
-                </button>
-              </p>
-
-              {/* Divider */}
-              <div className="my-6 flex items-center gap-3">
-                <div className="flex-1 h-px bg-line" />
-                <span className="text-[11.5px] text-ink-faint uppercase tracking-wider">Or continue with</span>
-                <div className="flex-1 h-px bg-line" />
               </div>
 
               {/* Google sign in */}

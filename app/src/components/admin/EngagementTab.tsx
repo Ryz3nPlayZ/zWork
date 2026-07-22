@@ -115,7 +115,7 @@ export function EngagementTab({ apiFetch }: { apiFetch: <T>(path: string) => Pro
             onClick={() => setDays(d)}
             className={cn(
               "rounded-md px-2 py-1 text-xs font-medium transition-colors",
-              days === d ? "bg-accent text-white" : "bg-paper-sunken text-ink-muted hover:text-ink",
+              days === d ? "bg-ink text-paper" : "bg-paper-sunken text-ink-muted hover:text-ink",
             )}
           >
             {d}d
