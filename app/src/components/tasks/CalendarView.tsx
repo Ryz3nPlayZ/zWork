@@ -247,9 +247,9 @@ export function CalendarView({ tasks, events, onTaskClick }: Props) {
                         className={cn(
                           "truncate rounded px-1 py-px text-left text-[10px] font-medium transition-colors",
                           t.column === "done"
-                            ? "bg-green-500/10 text-green-700 line-through"
+                            ? "bg-success/10 text-success line-through"
                             : t.priority === "high"
-                            ? "bg-red-500/10 text-red-600"
+                            ? "bg-error/10 text-error"
                             : t.priority === "medium"
                             ? "bg-paper-sunken text-ink-muted"
                             : "bg-paper-sunken text-ink-faint"
@@ -304,16 +304,16 @@ export function CalendarView({ tasks, events, onTaskClick }: Props) {
                       className={cn(
                         "flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left transition-colors",
                         t.column === "done"
-                          ? "border-green-500/20 bg-green-500/5 text-green-700 line-through"
+                          ? "border-success/20 bg-success/5 text-success line-through"
                           : t.priority === "high"
-                          ? "border-red-500/20 bg-red-500/5 text-red-600"
+                          ? "border-error/20 bg-error/5 text-error"
                           : "border-line bg-paper-raised text-ink"
                       )}
                     >
                       <span className="text-[12px]">{t.title}</span>
                       <span className={cn(
                         "ml-auto rounded-full border px-1.5 py-px text-[9px] font-medium uppercase tracking-wider",
-                        t.column === "done" ? "border-green-500/20 text-green-600" : "border-line text-ink-faint"
+                        t.column === "done" ? "border-success/20 text-success" : "border-line text-ink-faint"
                       )}>
                         {t.column}
                       </span>

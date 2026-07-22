@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { isMacOS } from "../lib/platform";
+import { isDemoMode } from "../lib/preview";
 import { nativeVibrancySupported, useTranslucencyPref } from "../lib/translucency";
 import { Logo } from "./Logo";
 import { IconButton } from "./IconButton";
@@ -26,6 +27,7 @@ import { useApp, bucketFor, type ChatBucket, type View } from "../lib/store";
 
 export function Sidebar() {
   const isMac = isMacOS();
+  const demo = isDemoMode();
   const translucency = useTranslucencyPref();
   const translucentOn = translucency === "on";
   // Native macOS vibrancy shows real desktop behind a fully transparent aside;
@@ -124,18 +126,23 @@ export function Sidebar() {
             onClick={() => openLanding()}
             active={view === "chat" && active === null}
           />
-          <SidebarButton
-            icon={<Clock />}
-            label="Scheduled"
-            onClick={() => setView("scheduled")}
-            active={view === "scheduled"}
-          />
-          <SidebarButton
-            icon={<Inbox />}
-            label="Inbox"
-            onClick={() => setView("inbox")}
-            active={view === "inbox"}
-          />
+          {/* Desktop-only views — hidden in the public web demo. */}
+          {!demo && (
+            <SidebarButton
+              icon={<Clock />}
+              label="Scheduled"
+              onClick={() => setView("scheduled")}
+              active={view === "scheduled"}
+            />
+          )}
+          {!demo && (
+            <SidebarButton
+              icon={<Inbox />}
+              label="Inbox"
+              onClick={() => setView("inbox")}
+              active={view === "inbox"}
+            />
+          )}
           {/* Tasks (kanban) — deferred for reimplementation. The current
               TasksPage (Board/List/Calendar) is fully built and its store
               actions + backend (taskstore.rs) work, but the UX is being
@@ -239,7 +246,7 @@ export function Sidebar() {
               active={view === "settings"}
               onClick={() => setView("settings")}
             />
-            <MoreMenuButton view={view} setView={setView} />
+            {!demo && <MoreMenuButton view={view} setView={setView} />}
           </div>
         </div>
       </div>

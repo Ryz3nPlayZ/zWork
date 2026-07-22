@@ -4,9 +4,12 @@ import { ChatInput } from "./ChatInput";
 import { useApp } from "../lib/store";
 import { useResolvedTheme } from "../lib/theme";
 import { needsLightweightRendering } from "../lib/platform";
+import { isDemoMode } from "../lib/preview";
 import { cn } from "../lib/cn";
 import type { UpdateCardState, UpdateProgress } from "../lib/update";
 import LightRays from "./LightRays";
+
+const DESKTOP_DOWNLOAD_URL = "https://github.com/Ryz3nPlayZ/zWork/releases/latest";
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
@@ -159,7 +162,18 @@ export function Landing({
             />
           </div>
 
-
+          {/* Public web demo only: prompt visitors toward the full desktop app. */}
+          {isDemoMode() && (
+            <a
+              href={DESKTOP_DOWNLOAD_URL}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="press mt-6 inline-flex items-center gap-2 rounded-xl border border-line bg-paper-raised px-4 py-2 text-[13px] font-medium text-ink transition-colors hover:border-line-strong hover:bg-paper-sunken"
+            >
+              <Download className="h-4 w-4" />
+              Get the desktop app — it does a lot more
+            </a>
+          )}
 
           {updateCard && (
             <div className={cn(

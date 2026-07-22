@@ -246,11 +246,11 @@ export function AdminPage() {
               className="w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-accent"
               autoFocus
             />
-            {authError && <p className="text-xs text-red-500">{authError}</p>}
+            {authError && <p className="text-xs text-error">{authError}</p>}
             <button
               type="submit"
               disabled={loading || !password}
-              className="w-full rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              className="press ring-focus w-full rounded-lg bg-ink px-4 py-2 text-sm font-medium text-paper hover:bg-ink/90 disabled:opacity-50"
             >
               {loading ? "Signing in…" : "Sign in"}
             </button>
@@ -289,8 +289,8 @@ export function AdminPage() {
           <Shield className="h-5 w-5 text-ink-muted" />
           <h1 className="text-base font-semibold text-ink">zWork Admin</h1>
           {liveSummary && (
-            <span className="ml-2 flex items-center gap-1.5 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+            <span className="ml-2 flex items-center gap-1.5 rounded-full bg-success/10 px-2 py-0.5 text-[10px] font-bold text-success">
+              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-success" />
               {liveSummary.active_users_5m} active · {liveSummary.requests_per_min.toFixed(0)}/min
             </span>
           )}
@@ -298,7 +298,7 @@ export function AdminPage() {
         <div className="flex items-center gap-2">
           <button
             onClick={() => void loadData()}
-            className="rounded-lg p-1.5 text-ink-muted hover:bg-paper-sunken hover:text-ink"
+            className="press ring-focus rounded-lg p-1.5 text-ink-muted hover:bg-paper-sunken hover:text-ink"
             title="Refresh"
           >
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
@@ -312,7 +312,7 @@ export function AdminPage() {
               setToken("");
               sessionStorage.removeItem("zwork:admin-token");
             }}
-            className="rounded-lg p-1.5 text-ink-muted hover:bg-paper-sunken hover:text-ink"
+            className="press ring-focus rounded-lg p-1.5 text-ink-muted hover:bg-paper-sunken hover:text-ink"
             title="Sign out"
           >
             <LogOut className="h-4 w-4" />
@@ -409,10 +409,10 @@ export function AdminPage() {
                           className={cn(
                             "inline-block rounded-full px-2 py-0.5 text-[10px] font-bold uppercase",
                             u.tier === "max"
-                              ? "bg-purple-100 text-purple-700"
+                              ? "bg-warning/10 text-warning"
                               : u.tier === "pro"
-                                ? "bg-blue-100 text-blue-700"
-                                : "bg-gray-100 text-gray-600",
+                                ? "bg-info/10 text-info"
+                                : "bg-ink/5 text-ink-soft",
                           )}
                         >
                           {u.tier}

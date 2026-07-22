@@ -6,7 +6,7 @@ use axum::{
     routing::{delete, get, patch, post, put},
     Router,
 };
-use chrono::{DateTime, Duration, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 use hmac::{Hmac, Mac};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
@@ -44,6 +44,66 @@ struct AppState {
     composio_api_key: String,
     admin_token_secret: String,
     admin_token_ttl_hours: i64,
+    /// Public no-login chat demo (`/api/demo/chat`). Separate from the
+    /// authenticated gateway so it can never be reached by a leaked token,
+    /// and so its rate limits are independent. In-memory only.
+    demo: DemoConfig,
+}
+
+/// Configuration + per-IP accounting for the public `/api/demo/chat` endpoint.
+/// All state lives in memory — a container restart resets the daily counters,
+/// which is acceptable for a free public demo.
+#[derive(Clone)]
+struct DemoConfig {
+    enabled: bool,
+    /// Hard per-IP message cap per UTC day.
+    daily_requests_per_ip: i64,
+    /// Per-IP (hashed) → (UTC day-of-year index, count). Pruned lazily on read.
+    daily_counts: Arc<DailyCounter>,
+    /// Max messages accepted in one request body.
+    max_messages: usize,
+    /// Max total content characters across all messages.
+    max_total_chars: usize,
+    /// zWork-flavored system prompt prepended upstream-side.
+    system_prompt: String,
+}
+
+#[derive(Default)]
+struct DailyCounter {
+    /// key = sha256(ip)[0..16] hex, value = (day_index, count)
+    map: dashmap::DashMap<String, (u32, i64)>,
+}
+
+impl DailyCounter {
+    /// Returns the current count for `ip_key` on `today`, after pruning stale
+    /// entries from prior days. Mutates state (resets the day bucket on rollover).
+    fn count_for_today(&self, ip_key: &str, today: u32) -> i64 {
+        let mut entry = self
+            .map
+            .entry(ip_key.to_string())
+            .or_insert((today, 0));
+        if entry.0 != today {
+            *entry = (today, 0);
+        }
+        entry.1
+    }
+
+    fn increment(&self, ip_key: &str, today: u32) {
+        let mut entry = self
+            .map
+            .entry(ip_key.to_string())
+            .or_insert((today, 0));
+        if entry.0 != today {
+            *entry = (today, 1);
+        } else {
+            entry.1 += 1;
+        }
+    }
+
+    /// Drop entries from prior days so the map can't grow without bound.
+    fn prune(&self, today: u32) {
+        self.map.retain(|_, (day, _)| *day == today);
+    }
 }
 
 const COMPOSIO_BASE_URL: &str = "https://backend.composio.dev/api/v3";
@@ -2990,6 +3050,204 @@ async fn ai_proxy_anthropic(
     ))
 }
 
+/// Public, no-login chat demo at `POST /api/demo/chat`.
+///
+/// Streams an Anthropic-shaped SSE response from the same DeepSeek provider
+/// the authenticated gateway uses, but WITHOUT calling `ensure_gateway_access`
+/// — there is no token, no cookie, no DB user. Abuse is bounded by:
+///   - a tower-governor per-IP burst limiter on the route (see `demo_router`)
+///   - a per-IP daily message cap enforced here (`DemoConfig.daily_counts`)
+///   - hard caps on message count and total content size
+///
+/// The body shape matches what `minimal-chat/src/lib/demoApi.ts` sends:
+/// `{ messages: [{ role: "user"|"assistant", content: string }] }`. Only the
+/// last user message is forwarded as the turn to answer (multi-turn context is
+/// reconstructed from the prior messages array).
+async fn demo_chat(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<DemoChatBody>,
+) -> Result<Response, (StatusCode, String)> {
+    if !state.demo.enabled {
+        return Err((StatusCode::NOT_FOUND, "demo_disabled".to_string()));
+    }
+    if !state.features.hosted_gateway || state.gateway.providers.is_empty() {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "demo_backend_not_configured".to_string(),
+        ));
+    }
+
+    // Pick the Anthropic-protocol provider (DeepSeek anthropic endpoint).
+    // This is the same upstream `/api/v1/messages` uses.
+    let provider = state
+        .gateway
+        .providers
+        .iter()
+        .find(|p| p.protocol == GatewayProtocol::Anthropic)
+        .cloned()
+        .ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no_anthropic_provider".to_string(),
+        ))?;
+
+    // Per-IP daily cap. Hash the IP so the raw value is never stored.
+    let today = Utc::now().ordinal();
+    let ip_key = demo_ip_key(&headers, &state.demo.system_prompt);
+    {
+        let counter = &state.demo.daily_counts;
+        counter.prune(today);
+        let used = counter.count_for_today(&ip_key, today);
+        if used >= state.demo.daily_requests_per_ip {
+            return Err((
+                StatusCode::TOO_MANY_REQUESTS,
+                "daily_demo_limit_reached".to_string(),
+            ));
+        }
+    }
+
+    // Validate + cap the conversation window.
+    let messages = body.messages;
+    if messages.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "empty_messages".to_string()));
+    }
+    if messages.len() > state.demo.max_messages {
+        return Err((StatusCode::BAD_REQUEST, "too_many_messages".to_string()));
+    }
+    let total_chars: usize = messages
+        .iter()
+        .map(|m| m.content.chars().count())
+        .sum();
+    if total_chars > state.demo.max_total_chars {
+        return Err((StatusCode::BAD_REQUEST, "message_too_long".to_string()));
+    }
+
+    // Rebuild as Anthropic Messages content blocks. The demo keeps it text-only.
+    let upstream_messages: Vec<Value> = messages
+        .into_iter()
+        .map(|m| {
+            serde_json::json!({
+                "role": m.role,
+                "content": m.content,
+            })
+        })
+        .collect();
+
+    let model = provider.primary_model.clone();
+    let mut upstream_body = serde_json::json!({
+        "model": model,
+        "max_tokens": 2048,
+        "stream": true,
+        "system": state.demo.system_prompt,
+        "messages": upstream_messages,
+    });
+    // DeepSeek requires assistant turns to carry a thinking block.
+    ensure_thinking_blocks(&mut upstream_body);
+
+    let endpoint = format!("{}/v1/messages", provider.base_url.trim_end_matches('/'));
+    let resp = state
+        .http_client
+        .post(endpoint)
+        .header("Content-Type", "application/json")
+        .header("x-api-key", provider.api_key.clone())
+        .header("anthropic-version", "2023-06-01")
+        .json(&upstream_body)
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::warn!("demo upstream unreachable: {e}");
+            (
+                StatusCode::BAD_GATEWAY,
+                "demo_upstream_unreachable".to_string(),
+            )
+        })?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        let detail = resp
+            .text()
+            .await
+            .unwrap_or_default()
+            .chars()
+            .take(300)
+            .collect::<String>();
+        tracing::warn!("demo upstream returned {}: {}", status.as_u16(), detail);
+        return Err((StatusCode::BAD_GATEWAY, "demo_upstream_error".to_string()));
+    }
+
+    // Count this request against the daily cap only after we know the upstream
+    // accepted it (so a 5xx from the provider doesn't burn a user's quota).
+    state.demo.daily_counts.increment(&ip_key, today);
+
+    // Pass the SSE stream straight through. `sse_stream_with_usage` scans for
+    // usage events; we drop the receiver (no DB row to write them to for a
+    // anonymous demo) but still benefit from the stream plumbing.
+    let upstream_body_stream = resp.bytes_stream();
+    let (body, _usage_rx) = sse_stream_with_usage(upstream_body_stream);
+
+    let mut response = Response::new(body);
+    *response.status_mut() = status;
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/event-stream; charset=utf-8"),
+    );
+    response.headers_mut().insert(
+        HeaderName::from_static("x-zwork-router-provider"),
+        HeaderValue::from_str(&provider.name)
+            .unwrap_or_else(|_| HeaderValue::from_static("demo")),
+    );
+    response.headers_mut().insert(
+        HeaderName::from_static("x-zwork-router-model"),
+        HeaderValue::from_str(&model)
+            .unwrap_or_else(|_| HeaderValue::from_static("demo-model")),
+    );
+    response.headers_mut().insert(
+        HeaderName::from_static("x-zwork-router-label"),
+        HeaderValue::from_static("zWork Demo"),
+    );
+    Ok(response)
+}
+
+#[derive(Deserialize)]
+struct DemoChatBody {
+    messages: Vec<DemoChatMessage>,
+}
+
+#[derive(Deserialize)]
+struct DemoChatMessage {
+    role: String,
+    content: String,
+}
+
+/// Derive a stable, salted hash of the client IP for daily-limit accounting.
+/// Falls back to a fixed bucket when no IP can be determined (e.g. a misconfigured
+/// proxy) — that bucket shares the cap, which is the safe direction.
+fn demo_ip_key(headers: &HeaderMap, salt_source: &str) -> String {
+    // Prefer the leftmost X-Forwarded-For (set by Caddy) — that's the real client.
+    let raw = headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(|s| s.trim().to_string())
+        .or_else(|| {
+            headers
+                .get("x-real-ip")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.trim().to_string())
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+
+    // Mix in the router label (or any app secret) so the stored hash can't be
+    // correlated with IPs seen in other logs by a third party.
+    use sha2::Digest;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(raw.as_bytes());
+    hasher.update(b"|");
+    hasher.update(salt_source.as_bytes());
+    let digest = hasher.finalize();
+    hex::encode(&digest[..16])
+}
+
 fn cors_allowed_origins() -> Vec<HeaderValue> {
     let raw = std::env::var("CORS_ALLOWED_ORIGINS").unwrap_or_else(|_| {
         [
@@ -4475,21 +4733,20 @@ async fn compute_current_mrr(state: &AppState) -> (f64, i64) {
     // Page through all active subscriptions. Expand discount + price so we can
     // compute the effective monthly amount per sub in one pass.
     while has_more {
-        let mut url = format!(
-            "https://api.stripe.com/v1/subscriptions?status=active&limit=100&expand[]={}",
-            "data.discount.coupon,data.items.data.price"
-        );
-        if let Some(sa) = &starting_after {
-            url.push_str(&format!("&starting_after={}", sa));
-        }
-
-        let resp = match state
+        let mut req = state
             .http_client
-            .get(&url)
+            .get("https://api.stripe.com/v1/subscriptions")
             .bearer_auth(&state.stripe_secret_key)
-            .send()
-            .await
-        {
+            .query(&[
+                ("status", "active"),
+                ("limit", "100"),
+                ("expand[]", "data.discount.coupon"),
+                ("expand[]", "data.items.data.price"),
+            ]);
+        if let Some(sa) = &starting_after {
+            req = req.query(&[("starting_after", sa.as_str())]);
+        }
+        let resp = match req.send().await {
             Ok(r) => r,
             Err(e) => {
                 warn!("Stripe MRR query failed: {e}");
@@ -6996,6 +7253,24 @@ async fn main() {
             .ok()
             .and_then(|v| v.parse::<i64>().ok())
             .unwrap_or(12),
+        demo: DemoConfig {
+            enabled: env_bool("DEMO_ENABLED", true),
+            daily_requests_per_ip: std::env::var("DEMO_DAILY_REQUESTS_PER_IP")
+                .ok()
+                .and_then(|v| v.parse::<i64>().ok())
+                .unwrap_or(50),
+            daily_counts: Arc::new(DailyCounter::default()),
+            max_messages: 20,
+            max_total_chars: 32_000,
+            system_prompt: env_or(
+                "DEMO_SYSTEM_PROMPT",
+                "You are zWork, an action-oriented AI work assistant created by Zemu Liu. \
+                 This is a public web demo, so keep answers concise, friendly, and self-contained. \
+                 Respond in the same language the user writes in. \
+                 You cannot access files, run code, browse the web, or use tools in this demo — \
+                 if asked, mention the zWork desktop app for the full experience.",
+            ),
+        },
     };
 
     let cors = CorsLayer::new()
@@ -7065,6 +7340,32 @@ async fn main() {
             config: auth_governor_conf,
         });
 
+    // Per-IP rate limit for the public demo endpoint. Tighter than auth's
+    // 1/s burst-5: a free chat demo invites scripted abuse, so we cap bursts
+    // hard. The daily cap (DemoConfig) is the main defense; this stops a
+    // single IP from fanning out many concurrent streams within one second.
+    let demo_governor_conf = Arc::new(
+        GovernorConfigBuilder::default()
+            .per_second(1)
+            .burst_size(3)
+            .key_extractor(SmartIpKeyExtractor)
+            .finish()
+            .expect("valid demo governor config"),
+    );
+    let demo_governor_limiter = demo_governor_conf.limiter().clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            demo_governor_limiter.retain_recent();
+        }
+    });
+    let demo_routes = Router::new()
+        .route("/api/demo/chat", post(demo_chat))
+        .layer(GovernorLayer {
+            config: demo_governor_conf,
+        });
+
     let app = Router::new()
         .route("/health", get(health_check))
         // The web app (app.tryzwork.app) polls /api/health for backend
@@ -7129,6 +7430,7 @@ async fn main() {
             post(web_chats_add_message),
         )
         .merge(auth_routes)
+        .merge(demo_routes)
         .layer(cors)
         .layer(
             TraceLayer::new_for_http()

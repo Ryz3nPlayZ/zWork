@@ -412,7 +412,7 @@ function UserBubble({
                 if (e.key === "Escape") cancel();
               }}
               rows={Math.min(10, draft.split("\n").length + 1)}
-              className="w-full resize-none rounded-2xl rounded-br-md border border-accent/50 bg-paper-raised px-3.5 py-2.5 text-[14px] leading-6 text-ink outline-none ring-2 ring-accent/20 focus:ring-accent/30"
+              className="w-full resize-none rounded-2xl rounded-br-md border border-accent/50 bg-paper-raised px-3.5 py-2.5 text-[14px] leading-6 text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
             />
             <div className="flex items-center justify-end gap-1.5">
               <button

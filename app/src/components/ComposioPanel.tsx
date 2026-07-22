@@ -59,7 +59,7 @@ export function ComposioPanel() {
       </div>
 
       {connectError && (
-        <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-[12.5px] leading-relaxed text-red-700 dark:bg-red-500/10 dark:border-red-500/30 dark:text-red-400">
+        <div className="rounded-xl border border-error/20 bg-error/10 px-4 py-3 text-[12.5px] leading-relaxed text-error">
           {connectError}
         </div>
       )}
@@ -99,7 +99,7 @@ export function ComposioPanel() {
                   <div className="flex items-center gap-1.5">
                     <span className="text-[13px] font-medium text-ink truncate">{app.name}</span>
                     {isConnected && (
-                      <span className="shrink-0 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600">
+                      <span className="shrink-0 rounded-full bg-success/10 px-1.5 py-0.5 text-[10px] font-medium text-success">
                         Connected
                       </span>
                     )}
@@ -111,7 +111,7 @@ export function ComposioPanel() {
               ) : isConnected ? (
                 <button
                   onClick={() => disconnectComposioApp(app.id)}
-                  className="press ring-focus shrink-0 rounded-md border border-line px-2.5 py-1 text-[11.5px] font-medium text-ink-soft hover:text-red-500 hover:border-red-300"
+                  className="press ring-focus shrink-0 rounded-md border border-line px-2.5 py-1 text-[11.5px] font-medium text-ink-soft hover:text-error hover:border-error/30"
                 >
                   Disconnect
                 </button>

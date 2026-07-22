@@ -28,7 +28,7 @@ export function ConcurrentWorkBanner() {
             <div className="relative">
               <Bot className="h-5 w-5 text-ink" />
               {runningCount > 0 && (
-                <Loader2 className="absolute -right-1 -top-1 h-3 w-3 animate-spin text-brand" />
+                <Loader2 className="absolute -right-1 -top-1 h-3 w-3 animate-spin text-ink-muted" />
               )}
             </div>
             <div className="text-left">
@@ -73,7 +73,7 @@ function SubagentRow({ task }: { task: SubagentTask }) {
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-2">
           {task.status === "running" && (
-            <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-brand mt-0.5" />
+            <Loader2 className="h-4 w-4 flex-shrink-0 animate-spin text-ink-muted mt-0.5" />
           )}
           {task.status === "completed" && (
             <CheckCircle className="h-4 w-4 flex-shrink-0 text-success mt-0.5" />

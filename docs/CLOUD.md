@@ -58,34 +58,77 @@ flowchart TD
 
 ## Web demo (app.tryzwork.app)
 
-A public, **no-login chat demo** lives at `app.tryzwork.app`. It's a standalone
-SPA (`minimal-chat/`, served by Caddy from `/var/www/app.tryzwork.app`) that
-streams against an unauthenticated cloud endpoint.
+A public, **no-login chat demo** lives at `app.tryzwork.app`. It's the **real
+desktop app** (`app/`) running in a "demo mode" with desktop-only features
+disabled at runtime — same UI as the desktop app, chat-only, no login. Caddy
+serves it from `/var/www/app.tryzwork.app`.
 
-- **Endpoint:** `POST /api/demo/chat` — added in `cloud-src/api/src/main.rs`
-  (`demo_chat`). It skips `ensure_gateway_access` (no cookie/desktop/service
-  token), hardcodes the model (`deepseek-v4-flash`) and a locked demo system
-  prompt, caps the message history (last 10 turns, 4 000 chars/message) and
-  `max_tokens` (4 096), and forwards to the first Anthropic-protocol provider.
-  The response streams through as raw SSE.
-- **Abuse control:** a per-IP `GovernorLayer` (`demo_governor_conf`) with
-  `period(3s)` + `burst_size(4)`, keyed by `SmartIpKeyExtractor` (real client
-  IP from `X-Forwarded-For`). 429s are expected under rapid fire.
-- **Gating:** requires `ENABLE_HOSTED_GATEWAY=true` and a configured DeepSeek
-  provider; otherwise returns `404 hosted_gateway_disabled`.
+- **Demo mode activation:** `app/src/lib/preview.ts` exports `isDemoMode()`,
+  which returns `true` when `window.location.origin` is one of the demo origins
+  (`app.tryzwork.app`, `tryzwork.app`, `www.tryzwork.app`, overridable via
+  `VITE_ZWORK_DEMO_ORIGIN` at build time). The desktop app (`tauri://localhost`)
+  and the vite dev server (`localhost:1420`) never match, so their behavior is
+  unchanged — the same source builds both targets.
+- **What demo mode disables (all gated on `isDemoMode()`):**
+  - **LoginScreen / cloud auth** — a stub user is seeded in `App.tsx`, so the
+    auth gate is bypassed. No `fetchCloudSession()`, no BetterAuth.
+  - **Chat sends route to `/api/demo/chat`** — `streamChat` in `api.ts` checks
+    `isDemoMode()` first and calls `streamChatDemo` (anonymous, no cloud token,
+    no `/api/web/chats` persistence) instead of the authenticated gateway.
+  - **Desktop-only nav hidden** in `Sidebar.tsx`: Scheduled, Inbox, and the More
+    menu (Analytics/Plan/Connectors) are not rendered. New chat, Projects,
+    Settings, and chat history remain.
+  - **Telemetry / update checker / PostHog** — short-circuited (demo mode is a
+    `previewMode` value, and every such effect already early-returns).
+  - **Server-side chat refresh** — `refreshChats` no-ops (demo is ephemeral).
+- **What stays identical to desktop:** the entire chat UX — Landing greeting,
+  composer, message rendering (markdown + KaTeX + syntax highlighting), model
+  picker, theme/translucency, keyboard shortcuts, search modal. The UI is the
+  same React tree; only the routing + auth + nav are gated.
+
+- **Endpoint:** `POST /api/demo/chat` — `demo_chat` in `cloud-src/api/src/main.rs`.
+  It skips `ensure_gateway_access` entirely (no cookie/desktop/service token),
+  forwards the conversation to the first Anthropic-protocol provider (DeepSeek),
+  and streams the raw Anthropic-shaped SSE response back through
+  `sse_stream_with_usage`. The model is the provider's `primary_model`
+  (`DEEPSEEK_MODEL_PRIMARY`, default `deepseek-v4-flash`); `max_tokens` is 2 048.
+  A locked demo system prompt is injected server-side so the client can't
+  override it. The body is `{ messages: [{ role, content }] }` and the assistant
+  message is appended live as `content_block_delta` / `message_stop` events.
+- **Abuse control (two layers):**
+  1. A per-IP `GovernorLayer` (`demo_governor_conf`) — `per_second(1)` +
+     `burst_size(3)`, keyed by `SmartIpKeyExtractor` (real client IP from
+     `X-Forwarded-For`). Stops a single IP fanning out many concurrent streams.
+  2. An in-memory per-IP **daily** cap (`DemoConfig.daily_counts`, default 50/day
+     via `DEMO_DAILY_REQUESTS_PER_IP`). IPs are stored SHA-256 hashed + salted,
+     never raw. Resets on container restart. The count only increments after the
+     upstream accepts the request, so a 5xx from the provider doesn't burn quota.
+- **Body caps:** max 20 messages and 32 000 total content chars per request.
+- **Env:** `DEMO_ENABLED` (default `true`, kill-switch), `DEMO_DAILY_REQUESTS_PER_IP`
+  (default `50`), optional `DEMO_SYSTEM_PROMPT`.
+- **Gating:** requires `ENABLE_HOSTED_GATEWAY=true` and a configured Anthropic
+  provider; otherwise returns `404 demo_disabled` / `503 demo_backend_not_configured`.
 
 ### Deploy the demo
 
 ```bash
-# Builds minimal-chat/ and rsyncs dist/ to /var/www/app.tryzwork.app.
-./scripts/deploy-web-demo.sh
+# Frontend: builds app/ (the real desktop app source) as a web bundle and
+# rsyncs dist/ to /var/www/app.tryzwork.app. Demo mode auto-activates on the
+# app.tryzwork.app origin. Desktop build (npm run tauri build) is unaffected.
+./scripts/deploy-app-demo.sh
 ```
 
-If the demo *endpoint* code changed, rebuild the API container once afterward:
+If the demo *endpoint* code changed, sync the cloud source and rebuild the API
+container:
 
 ```bash
+# Sync updated cloud-src/api → server (skip .env, which holds live secrets), then:
 ./ssh-connect.sh 'cd ~/cloud && sudo docker compose up -d --build axum_api'
 ```
+
+> **Note:** `minimal-chat/` is an earlier standalone demo SPA, now superseded.
+> `scripts/deploy-web-demo.sh` still deploys it if you ever want it back, but
+> the production demo at `app.tryzwork.app` uses `app/` in demo mode.
 
 ## Environment variables
 
