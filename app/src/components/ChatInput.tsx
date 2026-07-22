@@ -40,6 +40,7 @@ import {
 } from "../lib/templates";
 import { IconButton } from "./IconButton";
 import { classifyFile } from "../lib/files";
+import { dragRegionAttrs, onDragMouseDown } from "../lib/drag";
 import { ModelPicker } from "./ModelPicker";
 import { SlashMenu } from "./SlashMenu";
 
@@ -617,15 +618,18 @@ export function ChatInput({
   };
 
   // Drag the overlay window by grabbing the chatbar (not the textarea/buttons).
-  // `.titlebar-drag` / `-webkit-app-region` is an Electron-ism WKWebView ignores,
-  // so we drive the drag explicitly via the Tauri window API.
+  // Two mechanisms are attached because macOS eats the first mousedown on an
+  // unfocused always-on-top window to activate it, which races the imperative
+  // `startDragging()` IPC and cancels the drag:
+  //  1. `data-tauri-drag-region` on the wrapper (declarative) — Tauri hooks this
+  //     at the native layer BEFORE the focus event interferes, so the first
+  //     click both focuses AND drags. This is the primary mechanism.
+  //  2. `onDragMouseDown` (imperative fallback) — calls `startDragging()` for
+  //     environments where the declarative region isn't honored. No-op on
+  //     interactive children (textarea, buttons) via the closest() check.
   const onBarMouseDown = (e: ReactMouseEvent<HTMLDivElement>) => {
-    if (!isOverlay || e.button !== 0) return;
-    const target = e.target as HTMLElement | null;
-    if (target?.closest("textarea, input, button, a, select, [data-no-drag]")) return;
-    void import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-      getCurrentWindow().startDragging().catch(() => {});
-    });
+    if (!isOverlay) return;
+    onDragMouseDown(e);
   };
 
   const attachmentList = attachments.length > 0 && (
@@ -730,20 +734,29 @@ export function ChatInput({
       <div
         ref={isOverlay ? toolsRef : undefined}
         onMouseDown={isOverlay ? onBarMouseDown : undefined}
+        {...(isOverlay ? dragRegionAttrs() : {})}
         className={cn(
-          // OpenCode-style input: fill matches the page (bg-paper, not raised),
-          // elevation faked via a hairline ring + soft shadow. On focus the
-          // ring shifts to an accent-tinted outline. This avoids the chatbox
-          // reading as a different-colored box — the "too light" complaint in
-          // Catppuccin Mocha / Atom One came from bg-paper-raised glaring.
-          "group relative w-full bg-paper transition-[box-shadow] hairline-ring",
+          // Main-window input: OpenCode-style fill matches the page (bg-paper,
+          // not raised), elevation faked via a hairline ring + soft shadow. On
+          // focus the ring shifts to an accent-tinted outline. This avoids the
+          // chatbox reading as a different-colored box — the "too light"
+          // complaint in Catppuccin Mocha / Atom One came from bg-paper-raised
+          // glaring.
+          //
+          // Overlay input: frosted glass — translucent paper tint +
+          // backdrop-blur + saturation over whatever the user is working on
+          // behind the floating pill. Matches the conversation panel's glass
+          // treatment (OverlayChatView) so the whole overlay reads as one
+          // floating element. Mirrors the sidebar's CSS-blur fallback pattern.
+          "group relative w-full transition-[box-shadow] hairline-ring",
           isOverlay
             ? cn(
+                "bg-paper/75 backdrop-blur-xl backdrop-saturate-150",
                 "flex items-center gap-1 px-2 py-2",
                 (multiline || attachments.length > 0) ? "rounded-2xl" : "rounded-full",
                 focused && "focus-ring",
               )
-            : cn("rounded-2xl", focused ? "focus-ring" : ""),
+            : cn("bg-paper rounded-2xl", focused ? "focus-ring" : ""),
           dragOver && "ring-2 ring-ink/30 border-dashed",
           className,
         )}
@@ -937,7 +950,7 @@ export function ChatInput({
       )}
 
       {isOverlay && toolsOpen && (
-        <div data-no-drag className="absolute bottom-full left-0 mb-2 w-56 animate-fade-in rounded-2xl hairline bg-paper p-1.5 shadow-lift">
+        <div data-no-drag className="absolute bottom-full left-0 mb-2 w-56 animate-fade-in rounded-2xl hairline bg-paper/85 backdrop-blur-xl p-1.5 shadow-lift">
           <OverlayToolItem
             icon={<Plus className="h-4 w-4" />}
             label="Attach file"

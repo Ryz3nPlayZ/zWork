@@ -17,6 +17,7 @@ import {
   type InboxItem,
 } from "./api";
 import { fetchCloudSession, getCloudToken, logoutCloudSession, startDesktopGoogleSignIn } from "./cloud";
+import { isDemoMode } from "./preview";
 import { invoke } from "@tauri-apps/api/core";
 import { setTelemetryEnabled, trackError, trackArtifactCreated, recordTelemetry } from "./telemetry";
 import {
@@ -354,6 +355,7 @@ export interface Chat {
   todos?: AgentTodo[];
   todoPanelOpen?: boolean;
   pendingQuestion?: {
+    questionId?: string;
     question: string;
     options: string[];
   } | null;
@@ -1454,6 +1456,9 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   refreshChats: async () => {
+    // Demo mode: no server-side chat persistence. Chat history lives only in
+    // the local store for the session; nothing to refresh from a backend.
+    if (isDemoMode()) return;
     if (get().backendOffline) {
       const cached = localStorage.getItem("zwork:cached-summaries");
       if (cached) set({ chatSummaries: JSON.parse(cached) });
@@ -1530,6 +1535,9 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   connectComposioApp: async (app: string) => {
+    // Desktop-only: the public web demo has no Connectors UI, but guard the
+    // action so it can't be reached via devtools/console in demo mode.
+    if (isDemoMode()) return;
     const { url } = await api.composioConnect(app);
     await invoke("open_external", { url });
     let attempts = 0;
@@ -1708,6 +1716,7 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   answerQuestion: async (chatId, answer) => {
+    const questionId = get().chats[chatId]?.pendingQuestion?.questionId;
     set((s) => {
       const c = s.chats[chatId];
       if (!c) return {};
@@ -1719,7 +1728,7 @@ export const useApp = create<AppState>((set, get) => ({
       };
     });
     try {
-      await api.answerQuestion(chatId, answer);
+      await api.answerQuestion(chatId, answer, questionId);
     } catch (e) {
       console.warn("answerQuestion failed:", e);
     }
@@ -2267,6 +2276,7 @@ export const useApp = create<AppState>((set, get) => ({
                   [localId]: {
                     ...c,
                     pendingQuestion: {
+                      questionId: evt.question_id,
                       question: evt.question,
                       options: evt.options,
                     },

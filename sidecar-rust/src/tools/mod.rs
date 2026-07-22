@@ -930,11 +930,12 @@ pub fn execute_tool(
                     .map(|arr| arr.iter().filter_map(|o| o.as_str().map(|s| s.to_string())).collect())
                     .unwrap_or_default();
                 let (qtx, qrx) = tokio::sync::oneshot::channel::<String>();
-                crate::agent::register_pending_question(&chat_id, qtx);
+                let question_id = crate::agent::register_pending_question(&chat_id, qtx);
                 // Surface the question card to the frontend.
                 let _ = tx.send(json!({
                     "type": "ask_question",
                     "chat_id": chat_id,
+                    "question_id": question_id,
                     "question": question,
                     "options": options,
                 })).await;
@@ -944,7 +945,7 @@ pub fn execute_tool(
                     Ok(Ok(answer)) => Ok(format!("User responded with: {}", answer)),
                     _ => {
                         // Timed out or the sender was dropped (run cancelled).
-                        crate::agent::clear_pending_question(&chat_id);
+                        crate::agent::clear_pending_question(&question_id);
                         Err("User did not respond to the question.".to_string())
                     }
                 }
@@ -961,17 +962,18 @@ pub fn execute_tool(
                     "Tell me what to do instead".to_string(),
                 ];
                 let (qtx, qrx) = tokio::sync::oneshot::channel::<String>();
-                crate::agent::register_pending_question(&chat_id, qtx);
+                let question_id = crate::agent::register_pending_question(&chat_id, qtx);
                 let _ = tx.send(json!({
                     "type": "ask_question",
                     "chat_id": chat_id,
+                    "question_id": question_id,
                     "question": question,
                     "options": options,
                 })).await;
                 let answer = match tokio::time::timeout(std::time::Duration::from_secs(300), qrx).await {
                     Ok(Ok(a)) => a,
                     _ => {
-                        crate::agent::clear_pending_question(&chat_id);
+                        crate::agent::clear_pending_question(&question_id);
                         "Deny".to_string()
                     }
                 };

@@ -1460,13 +1460,16 @@ pub async fn telemetry_event(Json(body): Json<TelemetryEventBody>) -> impl IntoR
 #[allow(dead_code)]
 pub struct AnswerQuestionBody {
     pub answer: String,
+    /// Optional: the specific question id (from the ask_question SSE event).
+    /// When omitted, resolves the chat's most-recently-registered question.
+    pub question_id: Option<String>,
 }
 
 pub async fn answer_question(
     Path(chat_id): Path<String>,
     Json(body): Json<AnswerQuestionBody>,
 ) -> impl IntoResponse {
-    let ok = crate::agent::answer_pending_question(&chat_id, &body.answer);
+    let ok = crate::agent::answer_pending_question(&chat_id, &body.answer, body.question_id.as_deref());
     Json(json!({ "success": ok }))
 }
 

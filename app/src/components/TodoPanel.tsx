@@ -48,7 +48,15 @@ export function TodoPanel() {
                 )}
               </div>
               <div className="flex items-center gap-2" data-no-drag>
-                <IconButton icon={<X />} label="Close todo panel" size="sm" onClick={close} />
+                <IconButton
+                  icon={<X />}
+                  label="Close todo panel"
+                  size="sm"
+                  variant="ghost"
+                  showTooltip={false}
+                  onClick={close}
+                  className="hover:bg-paper-sunken"
+                />
               </div>
             </div>
 

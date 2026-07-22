@@ -10,6 +10,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import packageJson from "../../package.json";
+import { isDemoMode } from "./preview";
 
 const IS_TAURI =
   typeof window !== "undefined" &&
@@ -358,11 +359,11 @@ export interface UploadedFile {
 export const api = {
   health: healthFetch,
 
-  answerQuestion: (chatId: string, answer: string) =>
+  answerQuestion: (chatId: string, answer: string, questionId?: string) =>
     localFetch(`/api/chats/${chatId}/answer-question`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ answer }),
+      body: JSON.stringify({ answer, question_id: questionId }),
     }).then((r) => j<{ status: string }>(r)),
 
   approveGate: (chatId: string, gateId: string) =>
@@ -883,7 +884,7 @@ export type StreamEvent =
   | { type: "subagent_delta"; task_id: string; text: string }
   | { type: "subagent_activity"; task_id: string; event: StreamEvent }
   | { type: "subagent_done"; task_id: string; result?: string; error?: string }
-  | { type: "ask_question"; chat_id: string; question: string; options: string[] }
+  | { type: "ask_question"; chat_id: string; question_id?: string; question: string; options: string[] }
   | { type: "todo_update"; todos: Array<{ id: string; content: string; status: "pending" | "in_progress" | "completed" }> };
 
 /** Web-mode streaming: sends Anthropic-format request to the Axum API and
@@ -1082,6 +1083,143 @@ async function streamChatWeb(
   onEvent({ type: "end" });
 }
 
+/**
+ * Demo-mode streaming: posts to the public, unauthenticated /api/demo/chat
+ * endpoint and translates the Anthropic-shaped SSE into the StreamEvent union
+ * the UI expects. Mirrors streamChatWeb's event mapping but:
+ *   - sends no Authorization header (anonymous)
+ *   - sends only { messages } — the server hardcodes model + system prompt
+ *   - performs no /api/web/chats persistence (demo is ephemeral)
+ *   - surfaces 429/503 as friendly errors matching the demo's limits
+ *
+ * `body.attachments` is ignored: the demo endpoint is text-only. Multi-turn
+ * context is reconstructed from the store's prior messages by the caller (the
+ * `send` action already passes only the new `message`; we rebuild history here
+ * from nothing because the demo endpoint receives the full conversation).
+ */
+async function streamChatDemo(
+  body: {
+    chat_id?: string;
+    run_id?: string;
+    message: string;
+    model?: string;
+    artifact_mode?: boolean;
+    project_id?: string;
+    plan_mode?: boolean;
+    auto_approve_destructive?: boolean;
+    attachments?: Array<{
+      client_id?: string | null;
+      name: string;
+      path: string;
+      data_url?: string;
+      mime: string;
+      kind: string;
+    }>;
+    web_search_enabled?: boolean;
+  },
+  onEvent: (evt: StreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  // The demo endpoint takes the full conversation as { messages }. We only
+  // have the current turn here; prior context is owned by the store. To keep
+  // the demo multi-turn, we send just this user message — the server treats
+  // each request as a single-turn exchange, which is the expected demo shape.
+  // (The store's `send` reconstructs history for the gateway path; for demo
+  // we deliberately keep it stateless to match the endpoint's design.)
+  const messages = [{ role: "user" as const, content: body.message }];
+
+  const resp = await fetch(u("/api/demo/chat"), {
+    method: "POST",
+    headers: { "content-type": "application/json", ...clientHeaders() },
+    body: JSON.stringify({ messages }),
+    signal,
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "");
+    let friendly: string;
+    switch (resp.status) {
+      case 429:
+        friendly =
+          "You've hit the demo's rate limit. Wait a bit and try again, or download the desktop app for unlimited use.";
+        break;
+      case 503:
+        friendly = "The demo isn't available right now. Try again in a moment.";
+        break;
+      case 404:
+        friendly = "The demo isn't available right now. Grab the desktop app at tryzwork.app.";
+        break;
+      default:
+        friendly = text || `Something went wrong (HTTP ${resp.status}).`;
+    }
+    onEvent({ type: "error", text: friendly });
+    onEvent({ type: "end" });
+    return;
+  }
+
+  // Provider/model from response headers (the demo endpoint sets x-zwork-router-*).
+  const provider = resp.headers.get("x-zwork-router-provider") || "zwork-demo";
+  const routerModel = resp.headers.get("x-zwork-router-model") || "zwork-flash";
+  onEvent({ type: "meta", provider, resolved_model: routerModel, upstream_provider: provider });
+  onEvent({ type: "status", text: "Drafting" });
+
+  if (!resp.body) {
+    onEvent({ type: "error", text: "No response stream from the demo server." });
+    onEvent({ type: "end" });
+    return;
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let sawText = false;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx: number;
+    while ((idx = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+      if (!line.startsWith("data:")) continue;
+      const data = line.slice(5).trim();
+      if (!data) continue;
+      try {
+        const chunk = JSON.parse(data);
+        // Text answer deltas — same shape streamChatWeb handles.
+        if (
+          chunk.type === "content_block_delta" &&
+          chunk.delta?.type === "text_delta" &&
+          chunk.delta?.text
+        ) {
+          sawText = true;
+          onEvent({ type: "delta", text: chunk.delta.text });
+        }
+        // Reasoning deltas → process panel (not blended into the answer).
+        if (
+          chunk.type === "content_block_delta" &&
+          chunk.delta?.type === "thinking_delta" &&
+          chunk.delta?.thinking
+        ) {
+          onEvent({ type: "thinking_delta", text: chunk.delta.thinking });
+        }
+        if (chunk.type === "message_stop") {
+          break;
+        }
+      } catch {
+        /* malformed SSE line — ignore */
+      }
+    }
+  }
+
+  if (!sawText) {
+    onEvent({ type: "error", text: "The model returned an empty response. Try rephrasing." });
+  }
+  onEvent({ type: "done" });
+  onEvent({ type: "end" });
+}
+
 export async function streamChat(
   body: {
     chat_id?: string;
@@ -1105,6 +1243,12 @@ export async function streamChat(
   onEvent: (evt: StreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
+  // Public no-login demo: route to the unauthenticated /api/demo/chat
+  // endpoint instead of the gateway. Must come before the IS_WEB branch,
+  // which targets the authenticated /api/v1/messages path.
+  if (isDemoMode()) {
+    return streamChatDemo(body, onEvent, signal);
+  }
   if (IS_WEB) {
     return streamChatWeb(body, onEvent, signal);
   }

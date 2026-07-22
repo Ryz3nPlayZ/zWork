@@ -362,34 +362,78 @@ pub fn reject_gate(gate_id: &str) -> bool {
 }
 
 // ── Pending interactive questions (ask_question / ask_user) ──────────────────
-// One in-flight question per chat_id, mirroring the permission-gate pattern.
-// The tool blocks on a oneshot until the frontend POSTs the answer.
+// In-flight questions keyed by a unique question id (NOT chat_id), mirroring the
+// permission-gate pattern. Tool calls run concurrently as parallel spawned
+// tasks, so keying by chat_id alone would let a second ask_question overwrite
+// the first's oneshot::Sender — dropping it, misrouting the user's answer, and
+// hanging the overwritten question until its 5-minute timeout. Keying by a
+// unique id lets concurrent questions coexist; the frontend's single-question
+// UX (one `pendingQuestion` per chat) is preserved by `answer_pending_question`
+// resolving the most recent question for a chat when no explicit id is given.
 fn pending_questions() -> &'static Mutex<HashMap<String, oneshot::Sender<String>>> {
     static INSTANCE: OnceLock<Mutex<HashMap<String, oneshot::Sender<String>>>> = OnceLock::new();
     INSTANCE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Resolve a pending question for a chat. Called by the /answer-question route.
-pub fn answer_pending_question(chat_id: &str, answer: &str) -> bool {
+/// Map chat_id → the question id most recently registered for it, so the
+/// legacy single-question answer route (no explicit question id) resolves the
+/// question the user is actually looking at.
+fn current_question_for_chat() -> &'static Mutex<HashMap<String, String>> {
+    static INSTANCE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    INSTANCE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Resolve a pending question. Called by the /answer-question route.
+/// If `question_id` is provided, resolves that specific question; otherwise
+/// resolves the most-recently-registered question for the chat (the one the
+/// single-question frontend is displaying).
+pub fn answer_pending_question(chat_id: &str, answer: &str, question_id: Option<&str>) -> bool {
     let mut map = pending_questions().lock().unwrap();
-    if let Some(tx) = map.remove(chat_id) {
+    let key = match question_id {
+        Some(qid) => qid.to_string(),
+        None => {
+            let cur = current_question_for_chat().lock().unwrap();
+            match cur.get(chat_id) {
+                Some(qid) => qid.clone(),
+                None => return false,
+            }
+        }
+    };
+    if let Some(tx) = map.remove(&key) {
         let _ = tx.send(answer.to_string());
+        // Clean up the current-question pointer if it pointed at this one.
+        let mut cur = current_question_for_chat().lock().unwrap();
+        if cur.get(chat_id).map(|s| s.as_str()) == Some(key.as_str()) {
+            cur.remove(chat_id);
+        }
         true
     } else {
         false
     }
 }
 
-/// Register a pending question (called from the tool dispatcher).
-pub fn register_pending_question(chat_id: &str, tx: oneshot::Sender<String>) {
-    let mut map = pending_questions().lock().unwrap();
-    map.insert(chat_id.to_string(), tx);
+/// Register a pending question (called from the tool dispatcher). Returns the
+/// generated question id so the caller can emit it in the ask_question SSE
+/// event for the frontend to echo back on answer.
+pub fn register_pending_question(chat_id: &str, tx: oneshot::Sender<String>) -> String {
+    let question_id = format!("q_{}", uuid::Uuid::new_v4().simple());
+    {
+        let mut map = pending_questions().lock().unwrap();
+        map.insert(question_id.clone(), tx);
+    }
+    // Track this as the chat's current question so the legacy answer route
+    // (no question_id) resolves it.
+    {
+        let mut cur = current_question_for_chat().lock().unwrap();
+        cur.insert(chat_id.to_string(), question_id.clone());
+    }
+    question_id
 }
 
 /// Drop a pending question (e.g. on timeout).
-pub fn clear_pending_question(chat_id: &str) {
+pub fn clear_pending_question(question_id: &str) {
     let mut map = pending_questions().lock().unwrap();
-    map.remove(chat_id);
+    map.remove(question_id);
 }
 
 // ── Per-run approved-commands allowlist ──────────────────────────────────────
@@ -1268,7 +1312,16 @@ pub fn run_agent_turn(
             let mut tool_results = Vec::new();
             let accumulated_activities_arc = std::sync::Arc::new(std::sync::Mutex::new(accumulated_activities));
             let db_lock = std::sync::Arc::new(tokio::sync::Mutex::new(()));
-            
+
+            // Capture (id, name) for each tool call BEFORE the loop below
+            // consumes `tool_calls` by value. These are used in the JoinError
+            // fallback to synthesize a tool_result that keeps tool_use /
+            // tool_result pairs balanced (see the error arm below).
+            let tool_call_ids: Vec<(String, String)> = tool_calls.iter().map(|tc| (
+                tc.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                tc.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            )).collect();
+
             let mut tasks = Vec::new();
             for tc in tool_calls {
                 let name = tc.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -1451,9 +1504,48 @@ pub fn run_agent_turn(
             
             // Await all tasks concurrently
             let completed_results = futures_util::future::join_all(tasks).await;
-            for res in completed_results {
-                if let Ok(result_val) = res {
-                    tool_results.push(result_val);
+            for (i, res) in completed_results.into_iter().enumerate() {
+                match res {
+                    Ok(result_val) => tool_results.push(result_val),
+                    Err(join_err) => {
+                        // A spawned tool task panicked (JoinError) or was
+                        // cancelled. We MUST still emit a tool_result for its
+                        // tool_use_id — otherwise the assistant's tool_use
+                        // blocks and the user's tool_result blocks become
+                        // unbalanced, which DeepSeek's Anthropic endpoint
+                        // rejects with HTTP 400 `tool_use ids found without
+                        // tool_result blocks`. The router wraps that 400 as a
+                        // 502, which looks like a transient outage but is
+                        // really this drop. Synthesize an error result so the
+                        // pairing stays 1:1 and the model can react to the
+                        // failure on the next turn.
+                        let (tc_id, tc_name) = tool_call_ids.get(i).cloned().unwrap_or(("unknown".to_string(), "unknown".to_string()));
+                        let panic_msg = if join_err.is_panic() {
+                            "tool task panicked"
+                        } else {
+                            "tool task cancelled"
+                        };
+                        tracing::error!(
+                            chat_id = %chat_id,
+                            tool_use_id = %tc_id,
+                            tool_name = %tc_name,
+                            error = %join_err,
+                            "{} — synthesizing error tool_result to keep tool_use/tool_result pairing balanced",
+                            panic_msg
+                        );
+                        llm_trace(
+                            &chat_id,
+                            turn,
+                            "tool_result",
+                            json!({ "name": tc_name, "ok": false, "len": panic_msg.len(), "preview": panic_msg, "panic": true }),
+                        );
+                        tool_results.push(json!({
+                            "type": "tool_result",
+                            "tool_use_id": tc_id,
+                            "content": format!("Internal dispatch error: {} ({}). Please retry or try a different approach.", panic_msg, join_err),
+                            "is_error": true
+                        }));
+                    }
                 }
             }
             

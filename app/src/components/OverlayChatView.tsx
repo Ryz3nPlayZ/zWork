@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
 import { attachPositionPersistence, fitOverlayWindow } from "../lib/overlayGeometry";
+import { dragRegionAttrs, onDragMouseDown } from "../lib/drag";
 import { Message } from "./Message";
 import { ChatInput } from "./ChatInput";
 import { QuestionModal } from "./QuestionModal";
@@ -122,8 +123,24 @@ export function OverlayChatView() {
     return () => window.removeEventListener("keydown", onKey);
   }, [dismiss]);
 
+  // Whole-window drag: mousedown anywhere non-interactive (the transparent
+  // padding, the conversation panel, empty space) focuses + drags the overlay.
+  // `onDragMouseDown` already short-circuits on interactive descendants
+  // (textarea, buttons, links, [contenteditable], [data-no-drag]), so clicks on
+  // the chatbar or message text fall through to their own handlers.
+  // We also set `data-tauri-drag-region` so Tauri hooks the drag at the native
+  // layer BEFORE the focus race on an unfocused always-on-top window can eat
+  // the first mousedown (see lib/drag.ts).
+  const onSurfaceMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    onDragMouseDown(e);
+  };
+
   return (
-    <div className="h-screen w-screen overflow-hidden bg-transparent">
+    <div
+      className="h-screen w-screen overflow-hidden bg-transparent"
+      onMouseDown={onSurfaceMouseDown}
+      {...dragRegionAttrs()}
+    >
       <div
         className={cn(
           "flex h-full w-full flex-col items-center justify-end px-4 pb-4 transition-opacity duration-200",
@@ -131,7 +148,15 @@ export function OverlayChatView() {
         )}
       >
         {hasMessages && chat && (
-          <div className="mb-3 w-full max-w-[720px] flex-1 min-h-0 overflow-hidden rounded-2xl border border-line bg-paper shadow-float">
+          <div
+            className={cn(
+              "mb-3 w-full max-w-[720px] flex-1 min-h-0 overflow-hidden rounded-2xl border border-line shadow-float",
+              // Translucent frosted glass over whatever you're working on behind
+              // the overlay. Mirrors the sidebar's CSS-blur fallback (native
+              // vibrancy would fight the fully-transparent overlay window).
+              "bg-paper/75 backdrop-blur-xl backdrop-saturate-150",
+            )}
+          >
             <div ref={scrollRef} className="h-full overflow-y-auto overflow-x-hidden px-5 py-5">
               <div className="mx-auto flex max-w-[640px] flex-col gap-4 pb-2">
                 {chat.messages.map((m, idx) => {

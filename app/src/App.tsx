@@ -176,10 +176,10 @@ export default function App() {
     updated_at: new Date().toISOString(),
   };
   const [cloudUser, setCloudUser] = useState<CloudUser | null>(
-    previewMode === "app" ? {
-      user_id: "preview-user",
-      email: "preview@zwork.local",
-      name: "Preview",
+    previewMode === "app" || previewMode === "demo" ? {
+      user_id: previewMode === "demo" ? "demo-user" : "preview-user",
+      email: previewMode === "demo" ? "demo@zwork.local" : "preview@zwork.local",
+      name: previewMode === "demo" ? "zWork Demo" : "Preview",
       tier: "free",
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -635,7 +635,7 @@ export default function App() {
               <div className="pointer-events-auto flex w-full max-w-[640px] items-center gap-3 rounded-2xl hairline bg-paper-raised px-4 py-3 shadow-lift">
                 <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
                 <div className="min-w-0 flex-1 text-[12.5px] text-ink">
-                  zWork {recentUpdateNotice.version} installed.{" "}
+                  zWork {recentUpdateNotice.version}.{" "}
                   <button
                     type="button"
                     onClick={() => {
@@ -657,17 +657,17 @@ export default function App() {
               </div>
             </div>
           )}
-        </div>
-        {artifactPanelOpen && (
-          <Suspense fallback={null}>
-            <ArtifactPanel />
-          </Suspense>
-        )}
-        {hasTodos && (
+          {artifactPanelOpen && (
+            <Suspense fallback={null}>
+              <ArtifactPanel />
+            </Suspense>
+          )}
+        {hasTodos && todoPanelOpen && (
           <Suspense fallback={null}>
             <TodoPanel />
           </Suspense>
         )}
+        </div>
       </main>
 
       {/*
