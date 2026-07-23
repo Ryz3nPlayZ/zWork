@@ -193,7 +193,7 @@ export function SearchModal() {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-ink/30 px-4 pt-[8vh] animate-fade-in"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 backdrop-blur-sm px-4 pt-[8vh] animate-fade-in"
       onClick={() => setOpen(false)}
     >
       <div

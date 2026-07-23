@@ -1943,13 +1943,6 @@ export const useApp = create<AppState>((set, get) => ({
 
     const runId = uid();
     const currentId = get().view === "projects" ? null : get().activeChatId;
-    if (currentId) {
-      const activeChat = get().chats[currentId];
-      if (activeChat && activeChat.pendingQuestion) {
-        await get().answerQuestion(currentId, trimmed);
-        return;
-      }
-    }
 
     // Clear any previous subagent state
     set({ subagents: [] });

@@ -78,7 +78,7 @@ export function PermissionPrompt() {
   };
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-ink/30 backdrop-blur-[3px] p-4">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-[3px] p-4">
       <div className="w-full max-w-[380px] rounded-2xl border border-line bg-paper-raised shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="px-5 pt-5 pb-4">

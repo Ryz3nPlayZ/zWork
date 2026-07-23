@@ -143,6 +143,8 @@ async fn main() {
         .route("/api/health", get(server::health))
         .route("/api/desktop/status", get(server::desktop_status))
         .route("/api/desktop/permissions/grant", post(server::desktop_grant))
+        .route("/api/desktop/windows", get(server::list_windows))
+        .route("/api/desktop/windows/:window_id/screenshot", post(server::capture_window))
         .route("/api/browser-bridge/status", get(server::browser_bridge_status))
         .route("/api/me", get(server::me))
         .route("/api/providers", get(server::get_providers))

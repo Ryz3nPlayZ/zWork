@@ -4,6 +4,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -165,6 +166,49 @@ pub async fn desktop_grant() -> impl IntoResponse {
             error: e,
         }
     }))
+}
+
+/// List on-screen windows for the "Share Window" picker. macOS-only.
+pub async fn list_windows() -> impl IntoResponse {
+    if !cfg!(target_os = "macos") {
+        return Json(json!({ "windows": [] }));
+    }
+    match crate::cua::list_on_screen_windows().await {
+        Ok(wins) => Json(json!({ "windows": wins })),
+        Err(e) => {
+            tracing::warn!("list_windows failed: {}", e);
+            Json(json!({ "windows": [], "error": e }))
+        }
+    }
+}
+
+/// Capture a screenshot of a specific window for the "Share Window" feature.
+/// Returns the PNG as base64 so the frontend can inject it as an image
+/// attachment. macOS-only; requires Screen Recording permission.
+pub async fn capture_window(
+    axum::extract::Path(window_id): axum::extract::Path<i64>,
+) -> impl IntoResponse {
+    if !cfg!(target_os = "macos") {
+        return Json(json!({ "error": "Desktop capture is only available on macOS." }));
+    }
+    match crate::cua::capture_window_screenshot(window_id).await {
+        Ok(path) => {
+            // Read the PNG and base64-encode it.
+            match std::fs::read(&path) {
+                Ok(bytes) => {
+                    let b64 = BASE64.encode(&bytes);
+                    // Clean up the temp file.
+                    let _ = std::fs::remove_file(&path);
+                    Json(json!({ "data_url": format!("data:image/png;base64,{}", b64), "mime": "image/png" }))
+                }
+                Err(e) => {
+                    let _ = std::fs::remove_file(&path);
+                    Json(json!({ "error": format!("Failed to read screenshot: {}", e) }))
+                }
+            }
+        }
+        Err(e) => Json(json!({ "error": e })),
+    }
 }
 
 pub async fn me() -> impl IntoResponse {

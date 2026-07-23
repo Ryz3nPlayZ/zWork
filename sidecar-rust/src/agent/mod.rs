@@ -64,6 +64,44 @@ fn max_tokens_for(model_id: &str) -> u64 {
     16384
 }
 
+/// Map a router-facing model id ("zwork-pro" / "zwork-flash", as registered in
+/// Settings) to the real upstream model the zWork Cloud Router serves.
+/// Explicit ids only — unknown ids fall back to flash WITH a log line, never
+/// a silent substring guess (`contains("pro")` mis-mapped ids like
+/// "grok-4-pro-fast" that happen to contain "pro").
+fn router_real_model(model_id: &str) -> String {
+    match model_id {
+        "zwork-pro" | "deepseek-v4-pro" => "deepseek-v4-pro".to_string(),
+        "zwork-flash" | "deepseek-v4-flash" => "deepseek-v4-flash".to_string(),
+        other => {
+            tracing::warn!(
+                "[agent] unknown router model id '{other}' — falling back to deepseek-v4-flash"
+            );
+            "deepseek-v4-flash".to_string()
+        }
+    }
+}
+
+/// True when a provider error is actually "the conversation is too long for
+/// the model's context window" — a 400 in disguise that is RECOVERABLE by
+/// compacting history, unlike other permanent 400s (malformed request shape,
+/// unbalanced tool_use/tool_result pairing, auth). Matches the phrasings used
+/// by OpenAI-compatible APIs, Anthropic, and the zWork router envelope.
+fn is_context_overflow_error(message: &str, raw: Option<&str>) -> bool {
+    let hay = format!(
+        "{} {}",
+        message.to_ascii_lowercase(),
+        raw.unwrap_or("").to_ascii_lowercase()
+    );
+    hay.contains("context_length_exceeded")
+        || hay.contains("context length")
+        || hay.contains("maximum context")
+        || hay.contains("context window")
+        || hay.contains("prompt is too long")
+        || hay.contains("too many tokens")
+        || hay.contains("input is too long")
+}
+
 /// Classify a provider error message as transient (retryable) or permanent.
 ///
 /// The `ProviderError` event carries only a string message — no HTTP status
@@ -566,11 +604,7 @@ pub fn run_agent_turn(
             }
         } else {
             // Fallback: zwork_router default models
-            let real_model = if model_id.contains("pro") {
-                "deepseek-v4-pro".to_string()
-            } else {
-                "deepseek-v4-flash".to_string()
-            };
+            let real_model = router_real_model(&model_id);
             if let Some(cred) = crate::server::resolve("zwork_router", &s, "") {
                 (cred.api_key, cred.base_url, "anthropic".to_string(), real_model, "zWork Cloud Router".to_string())
             } else {
@@ -708,20 +742,35 @@ pub fn run_agent_turn(
             }
         );
 
+        // Volatile, per-message context is collected here and injected into
+        // the LATEST USER MESSAGE (below), not the system prompt: the system
+        // prompt must stay byte-stable across the session so the Anthropic
+        // `cache_control` breakpoint keeps hitting the cached prefix.
+        let mut turn_extras: Vec<String> = Vec::new();
+
         // Artifact mode: steer the model toward rich deliverables. The hint
         // keyword-detects the likely artifact kind (doc/sheet/graph/code) the
         // way the Python backend did, so the same phrasings produce artifacts.
         if artifact_mode {
-            system_prompt.push_str("\n\n## Artifact mode\n");
-            system_prompt.push_str(&artifact_hint(&user_message));
+            turn_extras.push(format!(
+                "## Artifact mode\n{}",
+                artifact_hint(&user_message)
+            ));
         }
 
         // Web-search grounding: when enabled, run a quick search on the
-        // message and inject the results as grounding context (mirrors Python).
+        // message and inject the results (mirrors Python). web_search is
+        // Google News RSS only — label it honestly as headlines, not facts.
         if web_search_enabled {
             if let Some(grounding) = web_search_grounding(&user_message).await {
-                system_prompt.push_str("\n\n## Web Search Results (Grounding Context)\n");
-                system_prompt.push_str(&grounding);
+                turn_extras.push(format!(
+                    "## News headlines (recent, may be incomplete)\n{}\n\n\
+                     These are Google News headlines only — not verified facts, and possibly \
+                     incomplete. For factual detail or page content, fetch the actual page \
+                     (browser_navigate / browser_snapshot) instead of relying on the headlines; \
+                     if you can't, say so rather than guessing.",
+                    grounding
+                ));
             }
         }
 
@@ -733,18 +782,17 @@ pub fn run_agent_turn(
                 .map(|a| format!("- {} → {}", a.name, a.path_or_url()))
                 .collect::<Vec<_>>()
                 .join("\n");
-            system_prompt.push_str(&format!(
-                "\n\n## Current interaction context\nThe user attached:\n{listing}"
+            turn_extras.push(format!(
+                "## Current interaction context\nThe user attached:\n{listing}"
             ));
         }
 
-        // Caller-supplied extra system-prompt block. Used by the scheduler to
-        // inject scheduled-task identity, trigger description, and per-task
-        // memory. Interactive (HTTP) turns pass `None` — no-op here.
+        // Caller-supplied extra block. Used by the scheduler to inject
+        // scheduled-task identity, trigger description, and per-task memory.
+        // Interactive (HTTP) turns pass `None` — no-op here.
         if let Some(extra) = &extra_system_prompt {
             if !extra.trim().is_empty() {
-                system_prompt.push_str("\n\n");
-                system_prompt.push_str(extra);
+                turn_extras.push(extra.clone());
             }
         }
 
@@ -772,7 +820,36 @@ pub fn run_agent_turn(
                 }
             }
         }
-        
+
+        // Persisted tool traces from earlier runs give the model back its
+        // cross-message working memory (chatstore only persists display text,
+        // not tool calls). Injected as plain text into the latest user
+        // message — provider-agnostic, no tool_use blocks.
+        if let Some(traces) = chatstore::render_tool_traces(&chat.messages) {
+            turn_extras.insert(0, traces);
+        }
+
+        // Volatile context collected above (work-so-far trace, artifact hint,
+        // news grounding, attachment listing, scheduler extras) goes into the
+        // LATEST USER MESSAGE so the system prompt stays byte-stable and
+        // cache-friendly (same pattern as the <turn-context> block).
+        if !turn_extras.is_empty() {
+            let extras = turn_extras.join("\n\n");
+            if let Some(last_user) = history_messages
+                .iter_mut()
+                .rev()
+                .find(|m| m.get("role").and_then(|v| v.as_str()) == Some("user"))
+            {
+                if let Some(content) = last_user.get_mut("content") {
+                    if let Some(s) = content.as_str() {
+                        *content = json!(format!("{}\n\n{}", extras, s));
+                    } else if let Some(arr) = content.as_array_mut() {
+                        arr.push(json!({ "type": "text", "text": extras }));
+                    }
+                }
+            }
+        }
+
         repair_history_alternation(&mut history_messages);
         let mut doom_loop_detector = DoomLoopDetector::new();
             
@@ -1326,6 +1403,9 @@ pub fn run_agent_turn(
             for tc in tool_calls {
                 let name = tc.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let params = tc.get("input").cloned().unwrap_or(json!({}));
+                // Keep a clone for the tool_trace_entry below — `params` is moved
+                // into execute_tool inside the spawned task.
+                let params_for_trace = params.clone();
                 let tc_id = tc.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 
                 let tx = tx.clone();
@@ -1335,6 +1415,7 @@ pub fn run_agent_turn(
                 let assistant_msg_id = assistant_msg_id.clone();
                 let accumulated_text = accumulated_text.clone();
                 let auto_approve = auto_approve;
+                let params_for_trace = params_for_trace;
                 
                 tasks.push(tokio::spawn(async move {
                     llm_trace(
@@ -1493,20 +1574,28 @@ pub fn run_agent_turn(
                         );
                     }
                     
-                    json!({
-                        "type": "tool_result",
-                        "tool_use_id": tc_id,
-                        "content": final_result_txt,
-                        "is_error": !final_result_ok
-                    })
+                    let trace = chatstore::tool_trace_entry(&name, &params_for_trace, final_result_ok, &final_result_txt);
+                    (
+                        json!({
+                            "type": "tool_result",
+                            "tool_use_id": tc_id,
+                            "content": final_result_txt,
+                            "is_error": !final_result_ok
+                        }),
+                        trace,
+                    )
                 }));
             }
             
             // Await all tasks concurrently
             let completed_results = futures_util::future::join_all(tasks).await;
+            let mut turn_traces: Vec<Value> = Vec::new();
             for (i, res) in completed_results.into_iter().enumerate() {
                 match res {
-                    Ok(result_val) => tool_results.push(result_val),
+                    Ok((result_val, trace)) => {
+                        tool_results.push(result_val);
+                        turn_traces.push(trace);
+                    }
                     Err(join_err) => {
                         // A spawned tool task panicked (JoinError) or was
                         // cancelled. We MUST still emit a tool_result for its
@@ -1545,9 +1634,21 @@ pub fn run_agent_turn(
                             "content": format!("Internal dispatch error: {} ({}). Please retry or try a different approach.", panic_msg, join_err),
                             "is_error": true
                         }));
+                        turn_traces.push(chatstore::tool_trace_entry(
+                            &tc_name,
+                            &json!({}),
+                            false,
+                            panic_msg,
+                        ));
                     }
                 }
             }
+
+            // Persist this turn's tool trace on the assistant message so the
+            // NEXT run can rebuild "what was done earlier in this chat" —
+            // chatstore otherwise keeps only display text, and the model would
+            // forget every tool call between user messages.
+            chatstore::append_tool_trace(&chat_id, &assistant_msg_id, turn_traces);
             
             // Extract accumulated_activities back to local variable
             accumulated_activities = {
@@ -1630,7 +1731,7 @@ pub async fn spawn_subagent(
             return Err("No credentials for sub-agent model".to_string());
         }
     } else {
-        let real = if model_id.contains("pro") { "deepseek-v4-pro".to_string() } else { "deepseek-v4-flash".to_string() };
+        let real = router_real_model(model_id);
         if let Some(cred) = crate::server::resolve("zwork_router", &s, "") {
             (cred.api_key, cred.base_url, "anthropic".to_string(), real, "zWork Cloud Router".to_string())
         } else {

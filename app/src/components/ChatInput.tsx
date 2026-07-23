@@ -23,6 +23,10 @@ import {
   NotebookPen,
   ShieldAlert,
   MessageSquarePlus,
+  CheckCircle2,
+  XCircle,
+  Monitor,
+  Loader2,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { needsLightweightRendering } from "../lib/platform";
@@ -40,7 +44,7 @@ import {
 } from "../lib/templates";
 import { IconButton } from "./IconButton";
 import { classifyFile } from "../lib/files";
-import { dragRegionAttrs, onDragMouseDown } from "../lib/drag";
+import { onDragMouseDown } from "../lib/drag";
 import { ModelPicker } from "./ModelPicker";
 import { SlashMenu } from "./SlashMenu";
 
@@ -193,6 +197,19 @@ interface Props {
   onDismiss?: () => void;
   /** Reports the overlay bar's rendered height so the window can grow with the draft. */
   onHeightChange?: (height: number) => void;
+  /** When set, the composer morphs into an inline card instead of showing the
+   *  textarea + controls. "question" renders a multiple-choice card for
+   *  ask_question/ask_user_for_permission; "permission" renders an allow/deny
+   *  card for destructive-tool gates. The card occupies the same screen space. */
+  mode?: "default" | "question" | "permission";
+  /** Data for the question card (mode="question"). */
+  question?: { question: string; options: string[] };
+  /** Data for the permission card (mode="permission"). */
+  permission?: { reason: string };
+  /** Callback when the user answers a question card. */
+  onAnswerQuestion?: (answer: string) => void;
+  /** Callback when the user resolves a permission card. */
+  onResolvePermission?: (allow: boolean) => void;
 }
 
 export function ChatInput({
@@ -205,6 +222,11 @@ export function ChatInput({
   className,
   onDismiss,
   onHeightChange,
+  mode = "default",
+  question,
+  permission,
+  onAnswerQuestion,
+  onResolvePermission,
 }: Props) {
   const [localValue, setLocalValue] = useState("");
   const isControlled = propValue !== undefined;
@@ -227,6 +249,9 @@ export function ChatInput({
   const [uploading, setUploading] = useState(false);
   const [composing, setComposing] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [shareWindowOpen, setShareWindowOpen] = useState(false);
+  const [shareWindowLoading, setShareWindowLoading] = useState(false);
+  const [shareWindowError, setShareWindowError] = useState<string | null>(null);
   const dragCounter = useRef(0);
   const [templates, setTemplates] = useState<PromptTemplate[]>(() => loadTemplates());
   const [slashState, setSlashState] = useState<
@@ -617,6 +642,48 @@ export function ChatInput({
     await uploadFiles(files);
   };
 
+  /**
+   * Share Window flow: capture a specific window's screenshot via the sidecar
+   * (cua-driver), inject it as an image attachment, and auto-switch to
+   * zwork-vision so the model can see it. macOS-only; needs Screen Recording.
+   */
+  const shareWindow = async (windowId: number) => {
+    setShareWindowLoading(true);
+    setShareWindowError(null);
+    try {
+      const result = await api.captureWindow(windowId);
+      if (result.error || !result.data_url) {
+        setShareWindowError(result.error || "Capture failed");
+        return;
+      }
+      // Inject the screenshot as an image attachment.
+      const id = `${Date.now().toString(36)}-share`;
+      const previewUrl = URL.createObjectURL(
+        await (await fetch(result.data_url)).blob(),
+      );
+      setAttachments((prev) => [
+        ...prev,
+        {
+          id,
+          name: "Shared window",
+          mime: result.mime || "image/png",
+          kind: "image" as const,
+          size: 0,
+          previewUrl,
+          dataUrl: result.data_url,
+          uploadedPath: result.data_url,
+        },
+      ]);
+      // Auto-switch to zwork-vision so the model can process the image.
+      useApp.getState().setModel("zwork-vision");
+      setShareWindowOpen(false);
+    } catch (e) {
+      setShareWindowError(e instanceof Error ? e.message : "Capture failed");
+    } finally {
+      setShareWindowLoading(false);
+    }
+  };
+
   // Drag the overlay window by grabbing the chatbar (not the textarea/buttons).
   // Two mechanisms are attached because macOS eats the first mousedown on an
   // unfocused always-on-top window to activate it, which races the imperative
@@ -695,6 +762,31 @@ export function ChatInput({
     />
   );
 
+  // When mode is "question" or "permission", the composer morphs into an
+  // inline card instead of the textarea + controls. The card occupies the
+  // same screen space (same wrapper className) so the transition is seamless.
+  if (mode === "question" && question) {
+    return (
+      <ComposerCardShell variant={variant} className={className}>
+        <QuestionCardBody
+          question={question.question}
+          options={question.options}
+          onAnswer={onAnswerQuestion}
+        />
+      </ComposerCardShell>
+    );
+  }
+  if (mode === "permission" && permission) {
+    return (
+      <ComposerCardShell variant={variant} className={className}>
+        <PermissionCardBody
+          reason={permission.reason}
+          onResolve={onResolvePermission}
+        />
+      </ComposerCardShell>
+    );
+  }
+
   return (
     <>
       {/* Full-viewport drop overlay when dragging files */}
@@ -734,7 +826,6 @@ export function ChatInput({
       <div
         ref={isOverlay ? toolsRef : undefined}
         onMouseDown={isOverlay ? onBarMouseDown : undefined}
-        {...(isOverlay ? dragRegionAttrs() : {})}
         className={cn(
           // Main-window input: OpenCode-style fill matches the page (bg-paper,
           // not raised), elevation faked via a hairline ring + soft shadow. On
@@ -960,6 +1051,15 @@ export function ChatInput({
             }}
           />
           <OverlayToolItem
+            icon={<Monitor className="h-4 w-4" />}
+            label="Share window"
+            onClick={() => {
+              setToolsOpen(false);
+              setShareWindowOpen(true);
+              setShareWindowError(null);
+            }}
+          />
+          <OverlayToolItem
             icon={<FileText className="h-4 w-4" />}
             label={artifactMode ? "Artifact: on" : "Artifact"}
             active={artifactMode}
@@ -986,6 +1086,17 @@ export function ChatInput({
           )}
         </div>
       )}
+
+      {/* Share Window picker — lists on-screen windows, captures the selected
+          one as a screenshot, and routes to zwork-vision. */}
+      {isOverlay && shareWindowOpen && (
+        <ShareWindowPicker
+          loading={shareWindowLoading}
+          error={shareWindowError}
+          onPick={shareWindow}
+          onClose={() => setShareWindowOpen(false)}
+        />
+      )}
       <input
         ref={fileInputRef}
         type="file"
@@ -1001,5 +1112,303 @@ export function ChatInput({
       />
     </div>
     </>
+  );
+}
+
+/**
+ * Shared wrapper for the question/permission cards. Matches the composer's
+ * geometry (same rounded corners, frosted glass for overlay, paper for main)
+ * so the morph feels seamless — the card appears exactly where the chatbox was.
+ */
+function ComposerCardShell({
+  variant,
+  className,
+  children,
+}: {
+  variant: "default" | "overlay";
+  className?: string;
+  children: ReactNode;
+}) {
+  const isOverlay = variant === "overlay";
+  return (
+    <div
+      className={cn(
+        "relative w-full rounded-2xl border border-line shadow-lift p-4",
+        isOverlay
+          ? "bg-paper/85 backdrop-blur-xl backdrop-saturate-150"
+          : "bg-paper-raised",
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * Question card — renders the model's question + vertical answer choices.
+ * "Other" reveals a text input. Consistent corner radius, theme-correct text.
+ */
+function QuestionCardBody({
+  question,
+  options,
+  onAnswer,
+}: {
+  question: string;
+  options: string[];
+  onAnswer?: (answer: string) => void;
+}) {
+  const [otherText, setOtherText] = useState("");
+  const [showOther, setShowOther] = useState(false);
+  // Filter out meta-options (the model sometimes includes "tell me what to do instead").
+  const cleanOptions = options.filter(
+    (o) => !/tell me what to do|instead/i.test(o),
+  );
+  const hasOther = options.length > cleanOptions.length || !options.some((o) => /other/i.test(o));
+  const allOptions = hasOther ? [...cleanOptions, "Other"] : cleanOptions;
+
+  const handleSelect = (opt: string) => {
+    if (opt === "Other") {
+      setShowOther(true);
+      return;
+    }
+    onAnswer?.(opt);
+  };
+
+  const submitOther = () => {
+    if (otherText.trim()) onAnswer?.(otherText.trim());
+  };
+
+  return (
+    <div className="flex flex-col gap-3" data-no-drag>
+      <p className="text-[14px] font-medium leading-snug text-ink">{question}</p>
+      {showOther ? (
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={otherText}
+            autoFocus
+            onChange={(e) => setOtherText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                submitOther();
+              }
+            }}
+            placeholder="Type your answer…"
+            className="flex-1 rounded-lg border border-line bg-paper px-3 py-2 text-[13px] text-ink placeholder:text-ink-faint focus:outline-none focus:border-line-strong"
+          />
+          <button
+            type="button"
+            onClick={submitOther}
+            disabled={!otherText.trim()}
+            className="press ring-focus rounded-lg bg-ink px-3 py-2 text-[12.5px] font-semibold text-paper hover:bg-ink/90 disabled:opacity-50"
+          >
+            Send
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {allOptions.map((opt, i) => (
+            <button
+              key={`${opt}-${i}`}
+              type="button"
+              onClick={() => handleSelect(opt)}
+              className={cn(
+                "press ring-focus flex items-center gap-2.5 rounded-xl border border-line bg-paper px-3 py-2 text-left text-[13px] text-ink transition-colors hover:bg-paper-sunken",
+                opt === "Other" && "text-ink-muted",
+              )}
+            >
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-line text-[10px] font-medium text-ink-muted">
+                {String.fromCharCode(65 + i)}
+              </span>
+              <span className="flex-1">{opt}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Permission card — "zWork wants to run: {command}" with Allow / Don't allow / Other.
+ * Always visible (no collapsed state) so the user sees it immediately.
+ */
+function PermissionCardBody({
+  reason,
+  onResolve,
+}: {
+  reason: string;
+  onResolve?: (allow: boolean) => void;
+}) {
+  const [showOther, setShowOther] = useState(false);
+  const [otherText, setOtherText] = useState("");
+
+  return (
+    <div className="flex flex-col gap-3" data-no-drag>
+      <div className="flex items-start gap-2.5">
+        <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+        <div className="flex-1">
+          <p className="text-[13px] font-medium text-ink">zWork wants to run a command</p>
+          {reason && (
+            <p className="mt-1 text-[12px] leading-relaxed text-ink-muted">{reason}</p>
+          )}
+        </div>
+      </div>
+      {showOther ? (
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={otherText}
+            autoFocus
+            onChange={(e) => setOtherText(e.target.value)}
+            placeholder="Tell zWork what to do instead…"
+            className="flex-1 rounded-lg border border-line bg-paper px-3 py-2 text-[13px] text-ink placeholder:text-ink-faint focus:outline-none focus:border-line-strong"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              if (otherText.trim()) onResolve?.(false);
+            }}
+            disabled={!otherText.trim()}
+            className="press ring-focus rounded-lg bg-ink px-3 py-2 text-[12.5px] font-semibold text-paper hover:bg-ink/90 disabled:opacity-50"
+          >
+            Send
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          <button
+            type="button"
+            onClick={() => onResolve?.(true)}
+            className="press ring-focus flex items-center gap-2.5 rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-left text-[13px] font-medium text-ink transition-colors hover:bg-success/20"
+          >
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
+            <span className="flex-1">Allow</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onResolve?.(false)}
+            className="press ring-focus flex items-center gap-2.5 rounded-xl border border-error/30 bg-error/5 px-3 py-2 text-left text-[13px] font-medium text-ink transition-colors hover:bg-error/10"
+          >
+            <XCircle className="h-4 w-4 shrink-0 text-error" />
+            <span className="flex-1">Don't allow</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowOther(true)}
+            className="press ring-focus flex items-center gap-2.5 rounded-xl border border-line bg-paper px-3 py-2 text-left text-[13px] text-ink-muted transition-colors hover:bg-paper-sunken"
+          >
+            <MessageSquarePlus className="h-4 w-4 shrink-0" />
+            <span className="flex-1">Other (tell zWork what to do instead)</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Share Window picker — fetches the list of on-screen windows from the sidecar
+ * (via cua-driver's list_windows), lets the user pick one, and calls back with
+ * the window_id. The parent captures the screenshot and injects it.
+ */
+function ShareWindowPicker({
+  loading,
+  error,
+  onPick,
+  onClose,
+}: {
+  loading: boolean;
+  error: string | null;
+  onPick: (windowId: number) => void;
+  onClose: () => void;
+}) {
+  const [windows, setWindows] = useState<Array<{ window_id: number; app_name: string; title: string }>>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.listWindows().then((result) => {
+      if (cancelled) return;
+      if (result.error) {
+        setLoadError(result.error);
+      } else {
+        setWindows(result.windows);
+      }
+    }).catch((e) => {
+      if (!cancelled) setLoadError(e instanceof Error ? e.message : "Failed to list windows");
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  return (
+    <div
+      className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 backdrop-blur-sm animate-fade-in"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-[420px] rounded-2xl border border-line bg-paper-raised p-4 shadow-lift"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-[14px] font-semibold text-ink">Share a window</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="press rounded-full p-1 text-ink-faint hover:bg-paper-sunken hover:text-ink"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <p className="mb-3 text-[12px] leading-relaxed text-ink-muted">
+          Pick a window to share. zWork will capture a screenshot and send it to the vision model.
+        </p>
+        {loadError && (
+          <div className="mb-3 rounded-lg border border-error/20 bg-error/5 px-3 py-2 text-[12px] text-error">
+            {loadError}
+            <div className="mt-1 text-ink-muted">Screen Recording permission may be required.</div>
+          </div>
+        )}
+        {error && (
+          <div className="mb-3 rounded-lg border border-error/20 bg-error/5 px-3 py-2 text-[12px] text-error">
+            {error}
+          </div>
+        )}
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 py-6 text-[13px] text-ink-muted">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Capturing…
+          </div>
+        ) : (
+          <div className="max-h-[320px] overflow-y-auto">
+            {windows.length === 0 && !loadError ? (
+              <p className="py-6 text-center text-[13px] text-ink-faint">No windows found.</p>
+            ) : (
+              <div className="flex flex-col gap-1">
+                {windows.map((w) => (
+                  <button
+                    key={w.window_id}
+                    type="button"
+                    onClick={() => onPick(w.window_id)}
+                    className="press flex items-center gap-2.5 rounded-xl border border-line bg-paper px-3 py-2 text-left transition-colors hover:bg-paper-sunken"
+                  >
+                    <Monitor className="h-4 w-4 shrink-0 text-ink-muted" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[13px] font-medium text-ink">{w.app_name}</div>
+                      {w.title && (
+                        <div className="truncate text-[11px] text-ink-muted">{w.title}</div>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

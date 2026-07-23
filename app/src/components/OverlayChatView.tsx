@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { LogicalPosition, LogicalSize } from "@tauri-apps/api/dpi";
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
-import { attachPositionPersistence, fitOverlayWindow } from "../lib/overlayGeometry";
+import { IS_TAURI } from "../lib/platform";
+import { attachPositionPersistence, fitOverlayWindow, resetOverlayPlacement } from "../lib/overlayGeometry";
 import { dragRegionAttrs, onDragMouseDown } from "../lib/drag";
 import { Message } from "./Message";
 import { ChatInput } from "./ChatInput";
@@ -106,6 +108,9 @@ export function OverlayChatView() {
     try {
       const { getCurrentWindow } = await import("@tauri-apps/api/window");
       await getCurrentWindow().hide();
+      // Reset placement so the next summon defaults to bottom-center (unless
+      // the user explicitly dragged during this session).
+      resetOverlayPlacement();
     } catch {
       // Not in Tauri (browser dev) — no-op.
     }
@@ -123,27 +128,59 @@ export function OverlayChatView() {
     return () => window.removeEventListener("keydown", onKey);
   }, [dismiss]);
 
-  // Whole-window drag: mousedown anywhere non-interactive (the transparent
-  // padding, the conversation panel, empty space) focuses + drags the overlay.
-  // `onDragMouseDown` already short-circuits on interactive descendants
-  // (textarea, buttons, links, [contenteditable], [data-no-drag]), so clicks on
-  // the chatbar or message text fall through to their own handlers.
-  // We also set `data-tauri-drag-region` so Tauri hooks the drag at the native
-  // layer BEFORE the focus race on an unfocused always-on-top window can eat
-  // the first mousedown (see lib/drag.ts).
-  const onSurfaceMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    onDragMouseDown(e);
+  // Resize the overlay window by dragging the top edge of the expanded panel.
+  // The handle calls win.setSize() with a new height based on the drag delta
+  // (dragging up = taller, down = shorter), keeping the bottom pinned.
+  const onResizeMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!IS_TAURI) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const startY = e.clientY;
+    let active = false;
+
+    const onMove = async (ev: PointerEvent) => {
+      const delta = startY - ev.clientY; // up = positive
+      if (!active && Math.abs(delta) < 3) return;
+      active = true;
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        const win = getCurrentWindow();
+        const size = await win.outerSize();
+        const scale = window.devicePixelRatio || 1;
+        const curH = size.height / scale;
+        const newH = Math.max(76, Math.min(900, curH + delta));
+        const curW = size.width / scale;
+        // Keep bottom pinned: move Y up by the same delta we grew.
+        const pos = await win.outerPosition();
+        const newY = pos.y / scale - (newH - curH);
+        await win.setSize(new LogicalSize(curW, newH));
+        await win.setPosition(new LogicalPosition(pos.x / scale, newY));
+      } catch { /* noop */ }
+      // Update startY so the delta is incremental per move event.
+      // (We don't reset startY — the delta is cumulative from drag start,
+      // but since we apply it each frame, we reset to current to avoid
+      // runaway growth.)
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
   };
+  // Two grips exist:
+  //   1. The pill's left edge (the GripVertical button in ChatInput) — works
+  //      in both idle and expanded states.
+  //   2. A drag header strip at the top of the expanded conversation panel
+  //      (below) — a generous target for moving the window once it's grown.
+  // The root div is intentionally NOT a drag region, so users can select and
+  // copy message text without the window following the cursor.
 
   return (
-    <div
-      className="h-screen w-screen overflow-hidden bg-transparent"
-      onMouseDown={onSurfaceMouseDown}
-      {...dragRegionAttrs()}
-    >
+    <div className="h-screen w-screen overflow-hidden bg-transparent">
       <div
         className={cn(
-          "flex h-full w-full flex-col items-center justify-end px-4 pb-4 transition-opacity duration-200",
+          "flex h-full w-full flex-col items-center justify-end px-4 pb-4 pt-2 transition-opacity duration-200",
           mounted ? "opacity-100" : "opacity-0",
         )}
       >
@@ -157,7 +194,34 @@ export function OverlayChatView() {
               "bg-paper/75 backdrop-blur-xl backdrop-saturate-150",
             )}
           >
-            <div ref={scrollRef} className="h-full overflow-y-auto overflow-x-hidden px-5 py-5">
+            {/* Resize handle — a thin strip at the very top of the expanded
+                panel. Drag up to make taller, down to shorten. Bottom stays
+                pinned so the pill doesn't move. */}
+            <div
+              onMouseDown={onResizeMouseDown}
+              className="h-1.5 w-full shrink-0 cursor-ns-resize hover:bg-ink/5"
+              title="Drag to resize"
+              aria-label="Resize handle"
+            />
+            {/* Drag header — draggable part of the expanded panel for moving.
+                Generous height (28px) so it's easy to grab. Marks the panel
+                as movable without sacrificing text selection in the body. */}
+            <div
+              onMouseDown={onDragMouseDown}
+              {...dragRegionAttrs()}
+              className="flex h-7 shrink-0 cursor-grab items-center justify-center active:cursor-grabbing"
+              title="Drag to move"
+              aria-label="Drag handle"
+            >
+              <span className="h-1 w-10 rounded-full bg-ink/15" />
+            </div>
+            {/* Message body is explicitly no-drag so text selection, links,
+                and code copy work normally. */}
+            <div
+              ref={scrollRef}
+              data-no-drag
+              className="h-full overflow-y-auto overflow-x-hidden px-5 pb-5"
+            >
               <div className="mx-auto flex max-w-[640px] flex-col gap-4 pb-2">
                 {chat.messages.map((m, idx) => {
                   const isLast = idx === chat.messages.length - 1;

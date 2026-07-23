@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useState } from "react";
-import { CheckCircle2, ExternalLink, X, AlertTriangle, PanelLeft, PanelRight, Search } from "lucide-react";
+import { CheckCircle2, ExternalLink, X, AlertTriangle, PanelLeft, Search } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
 import { Landing } from "./components/Landing";
 import { IconButton } from "./components/IconButton";
@@ -25,7 +25,6 @@ const SettingsPage = lazy(() => import("./components/Settings").then((m) => ({ d
 const SearchModal = lazy(() => import("./components/SearchModal").then((m) => ({ default: m.SearchModal })));
 const ProjectView = lazy(() => import("./components/ProjectView").then((m) => ({ default: m.ProjectView })));
 const ArtifactPanel = lazy(() => import("./components/ArtifactPanel").then((m) => ({ default: m.ArtifactPanel })));
-const TodoPanel = lazy(() => import("./components/TodoPanel").then((m) => ({ default: m.TodoPanel })));
 const AnalyticsPage = lazy(() => import("./components/AnalyticsPage").then((m) => ({ default: m.AnalyticsPage })));
 const PlanPage = lazy(() => import("./components/PlanPage").then((m) => ({ default: m.PlanPage })));
 const ConnectorsPage = lazy(() => import("./components/ConnectorsPage").then((m) => ({ default: m.ConnectorsPage })));
@@ -118,11 +117,8 @@ export default function App() {
   const active = useApp((s) => s.activeChatId);
   const chat = useApp((s) => (active ? s.chats[active] : undefined));
   const artifactPanelOpen = !!(view === "chat" && active && chat?.artifactPanelOpen);
-  const todoPanelOpen = !!(view === "chat" && active && chat?.todoPanelOpen);
-  const hasTodos = !!(view === "chat" && active && (chat?.todos?.length ?? 0) > 0);
   const openLanding = useApp((s) => s.openLanding);
   const toggleSidebar = useApp((s) => s.toggleSidebar);
-  const toggleTodoPanel = useApp((s) => s.toggleTodoPanel);
   const setView = useApp((s) => s.setView);
   const setSearchOpen = useApp((s) => s.setSearchOpen);
   const triggerFocusChatInput = useApp((s) => s.triggerFocusChatInput);
@@ -438,9 +434,6 @@ export default function App() {
       } else if (mod && e.key === "0") {
         e.preventDefault();
         void zoomReset();
-      } else if (mod && e.key.toLowerCase() === "j") {
-        e.preventDefault();
-        toggleTodoPanel();
       } else if (mod && e.key === "/") {
         e.preventDefault();
         setKeybindingsOpen(!keybindingsOpen);
@@ -448,7 +441,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openLanding, toggleSidebar, setView, setSearchOpen, triggerFocusChatInput, keybindingsOpen, setKeybindingsOpen, toggleTodoPanel]);
+  }, [openLanding, toggleSidebar, setView, setSearchOpen, triggerFocusChatInput, keybindingsOpen, setKeybindingsOpen]);
 
   const [showLandingOverlay, setShowLandingOverlay] = useState(showLanding);
   const [particlesExiting, setParticlesExiting] = useState(false);
@@ -662,11 +655,6 @@ export default function App() {
               <ArtifactPanel />
             </Suspense>
           )}
-        {hasTodos && todoPanelOpen && (
-          <Suspense fallback={null}>
-            <TodoPanel />
-          </Suspense>
-        )}
         </div>
       </main>
 
@@ -702,18 +690,6 @@ export default function App() {
           onClick={toggleSidebar}
           size="sm"
         />
-        {hasTodos && (
-          <IconButton
-            icon={<PanelRight />}
-            label={todoPanelOpen ? "Hide todo" : "Show todo"}
-            shortcut="⌘J"
-            tooltipSide="bottom"
-            showTooltip={false}
-            active={todoPanelOpen}
-            onClick={toggleTodoPanel}
-            size="sm"
-          />
-        )}
       </div>
 
       {/*

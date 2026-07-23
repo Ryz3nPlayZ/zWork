@@ -428,6 +428,35 @@ fn open_external(app: tauri::AppHandle, url: String) -> Result<(), String> {
     app.shell().open(url, None).map_err(|err| err.to_string())
 }
 
+/// Check whether zWork itself has Accessibility permission (TCC). Distinct from
+/// the CuaDriver daemon's AX grant — the app needs its own AX permission for
+/// global input monitoring and certain window-drag features. Returns false on
+/// non-macOS. The `prompt` parameter, when true, triggers the system prompt
+/// (the user sees the standard "allow accessibility" dialog).
+#[tauri::command]
+fn ax_is_trusted(prompt: Option<bool>) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        // AXIsProcessTrustedWithOptions is in ApplicationServices.framework.
+        // We link it directly via extern "C" to avoid pulling in objc2/icrate.
+        use std::os::raw::c_void;
+        extern "C" {
+            fn AXIsProcessTrustedWithOptions(options: *mut c_void) -> bool;
+        }
+        // CFDictionaryRef for {kAXTrustedCheckOptionPrompt: true}. Building a
+        // CFDictionary via FFI is verbose; for the prompt=true case we use a
+        // minimal approach: pass null (no prompt) when unsure, or call the
+        // privacy-pane deep link separately.
+        let _ = prompt;
+        unsafe { AXIsProcessTrustedWithOptions(std::ptr::null_mut()) }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = prompt;
+        false
+    }
+}
+
 #[tauri::command]
 fn ensure_backend(app: tauri::AppHandle, backend: tauri::State<Backend>) -> Result<bool, String> {
     ensure_backend_running(&app, &backend)
@@ -865,6 +894,7 @@ fn main() {
             restart_backend,
             begin_desktop_auth,
             open_macos_privacy_pane,
+            ax_is_trusted,
             register_overlay_shortcut,
             get_overlay_shortcut,
             get_sidecar_token

@@ -193,6 +193,25 @@ function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+/**
+ * Map an upstream model id (e.g. "deepseek-v4-flash", "gemma4:31b") back to
+ * its friendly zWork display name. Returns undefined if the id isn't a known
+ * upstream we whitelabel, so the caller can fall back to the user-facing model
+ * id from the request. Used to scrub upstream provider names from the UI.
+ */
+export function whitelabelModelName(upstreamId: string | null | undefined): string | undefined {
+  if (!upstreamId) return undefined;
+  const id = upstreamId.toLowerCase();
+  // DeepSeek family (zwork-flash / zwork-pro)
+  if (id.includes("deepseek-v4-pro") || id === "deepseek-pro") return "zwork-pro";
+  if (id.includes("deepseek-v4-flash") || id.includes("deepseek-flash") || id.includes("deepseek-chat")) return "zwork-flash";
+  // Vision family (Gemma 4 31B cloud)
+  if (id.includes("gemma4") || id.includes("gemma-4") || id.includes("gemma")) return "zwork-vision";
+  // Already-friendly ids pass through.
+  if (id === "zwork-flash" || id === "zwork-pro" || id === "zwork-vision") return upstreamId;
+  return undefined;
+}
+
 async function invokeBackendCommand(command: "ensure_backend" | "restart_backend") {
   if (!IS_TAURI) return;
   try {
@@ -690,6 +709,18 @@ export const api = {
       j<DesktopStatus>(r),
     ),
 
+  /** List on-screen windows for the "Share Window" picker (macOS only). */
+  listWindows: () =>
+    localFetch("/api/desktop/windows").then((r) =>
+      j<{ windows: Array<{ window_id: number; pid: number; app_name: string; title: string; bounds?: { x: number; y: number; width: number; height: number } }>; error?: string }>(r),
+    ),
+
+  /** Capture a screenshot of a specific window (macOS only, needs Screen Recording). */
+  captureWindow: (windowId: number) =>
+    localFetch(`/api/desktop/windows/${windowId}/screenshot`, { method: "POST" }).then((r) =>
+      j<{ data_url?: string; mime?: string; error?: string }>(r),
+    ),
+
   browserBridgeStatus: () =>
     localFetch("/api/browser-bridge/status").then((r) =>
       j<{ connected: boolean }>(r),
@@ -918,7 +949,10 @@ async function streamChatWeb(
 
   const isPro = body.model === "zwork-pro";
   const isVision = body.model === "zwork-vision";
-  const resolvedModel = isPro ? "deepseek-v4-pro" : isVision ? "zwork-vision" : "deepseek-v4-flash";
+  // Upstream model id sent to the router (never shown to the user).
+  const upstreamModel = isPro ? "deepseek-v4-pro" : isVision ? "zwork-vision" : "deepseek-v4-flash";
+  // Friendly display name (whitelabel — never expose the upstream id).
+  const friendlyModel = body.model;
   const useOpenAi = isVision;
 
   const headers: Record<string, string> = {
@@ -944,14 +978,14 @@ async function streamChatWeb(
 
   const upstreamBody = useOpenAi
     ? {
-        model: resolvedModel,
+        model: upstreamModel,
         messages: [{ role: "user" as const, content: userContent }],
         stream: true,
         max_tokens: 16384,
       }
     : {
-        model: resolvedModel,
-        system: `You are zWork, an action-oriented AI work assistant created by Zemu Liu. Respond in the same language the user writes in. Be concise, direct, and helpful. If the user writes in English, respond in English. Under the hood you are ${resolvedModel} from DeepSeek.`,
+        model: upstreamModel,
+        system: `You are zWork, an action-oriented AI work assistant created by Zemu Liu. Respond in the same language the user writes in. Be concise, direct, and helpful. If the user writes in English, respond in English.`,
         messages: [{ role: "user" as const, content: body.message }],
         stream: true,
         max_tokens: 16384,
@@ -1005,10 +1039,13 @@ async function streamChatWeb(
     return;
   }
 
-  // Extract provider/model from response headers
+  // Extract provider/model from response headers. The router may echo the
+  // upstream model id in x-zwork-router-model; map it back to the friendly
+  // zWork name so the upstream provider is never surfaced to the user.
   const provider = resp.headers.get("x-zwork-router-provider") || "zwork-router";
-  const routerModel = resp.headers.get("x-zwork-router-model") || resolvedModel;
-  onEvent({ type: "meta", provider, resolved_model: routerModel, upstream_provider: provider });
+  const rawRouterModel = resp.headers.get("x-zwork-router-model");
+  const displayModel = whitelabelModelName(rawRouterModel) ?? friendlyModel ?? "zwork-flash";
+  onEvent({ type: "meta", provider, resolved_model: displayModel, upstream_provider: provider });
 
   onEvent({ type: "status", text: "Drafting" });
 

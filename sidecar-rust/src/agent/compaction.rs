@@ -192,15 +192,42 @@ pub async fn compact_conversation_history(
     shape: &str,
     model_id: &str,
 ) -> Result<(), String> {
+    compact_history_with_threshold(history, endpoint, headers, shape, model_id, 800_000).await
+}
+
+/// Same as `compact_conversation_history` but compacts regardless of size.
+/// Used when the provider has REJECTED the request for exceeding its context
+/// window — "below our usual threshold" is not a reason to skip in that case,
+/// because the model's real window is smaller than our heuristic assumed.
+pub async fn force_compact_conversation_history(
+    history: &mut Vec<Value>,
+    endpoint: &str,
+    headers: &reqwest::header::HeaderMap,
+    shape: &str,
+    model_id: &str,
+) -> Result<(), String> {
+    compact_history_with_threshold(history, endpoint, headers, shape, model_id, 0).await
+}
+
+async fn compact_history_with_threshold(
+    history: &mut Vec<Value>,
+    endpoint: &str,
+    headers: &reqwest::header::HeaderMap,
+    shape: &str,
+    model_id: &str,
+    min_chars: usize,
+) -> Result<(), String> {
     let total_chars: usize = history
         .iter()
         .map(|m| m.get("content").map(|c| c.to_string().len()).unwrap_or(0))
         .sum();
 
-    // Trigger compaction if character count exceeds 800,000 characters (~200,000 tokens)
-    // and there are enough messages to compact. We want to preserve system prompt (index 0)
-    // and at least the last 3 messages (to preserve immediate conversational context).
-    if total_chars <= 800_000 || history.len() <= 4 {
+    // Trigger compaction if character count exceeds the threshold (800,000
+    // characters ≈ ~200,000 tokens for the opportunistic pass; 0 when forced
+    // after a context-overflow 400) and there are enough messages to compact.
+    // We want to preserve system prompt (index 0) and at least the last 3
+    // messages (to preserve immediate conversational context).
+    if total_chars <= min_chars || history.len() <= 4 {
         return Ok(());
     }
 
