@@ -114,10 +114,15 @@ fn is_destructive_command(cmd_lower: &str) -> bool {
 /// absolute `cwd` is inside the working directory and allowed. Appends (`>>`)
 /// don't truncate and are not gated here.
 fn redirect_overwrites_outside(cmd: &str, cwd: Option<&str>) -> bool {
-    let re = regex::Regex::new(r"(?:^|[\s;&|])(?:\d+)?>(?!>|&)\s*([^\s;&|]+)").unwrap();
+    // Rust's regex crate has no look-around, so capture the char after `>`
+    // instead: `>>` (append) and `>&` (fd dup) are skipped via group 1.
+    let re = regex::Regex::new(r"(?:^|[\s;&|])(?:\d+)?>([>&]?)\s*([^\s;&|]+)").unwrap();
     for caps in re.captures_iter(cmd) {
+        if caps.get(1).map(|m| !m.as_str().is_empty()).unwrap_or(false) {
+            continue;
+        }
         let target = caps
-            .get(1)
+            .get(2)
             .map(|m| m.as_str())
             .unwrap_or("")
             .trim_matches(|c| c == '"' || c == '\'');

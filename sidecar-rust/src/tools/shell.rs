@@ -105,10 +105,14 @@ pub async fn execute_run_command(
             let mut reader = BufReader::new(stdout).lines();
             let mut captured = String::new();
             while let Ok(Some(line)) = reader.next_line().await {
-                let _ = tx_out.send(json!({
+                // Best-effort UI streaming: never block the reader on a full
+                // channel. If the UI stops draining (or a test drops the
+                // receiver), a bounded channel would deadlock the handle join
+                // below after the child exits.
+                let _ = tx_out.try_send(json!({
                     "type": "status",
                     "text": line
-                })).await;
+                }));
                 captured.push_str(&line);
                 captured.push('\n');
             }
@@ -120,10 +124,10 @@ pub async fn execute_run_command(
             let mut reader = BufReader::new(stderr).lines();
             let mut captured = String::new();
             while let Ok(Some(line)) = reader.next_line().await {
-                let _ = tx_err.send(json!({
+                let _ = tx_err.try_send(json!({
                     "type": "status",
                     "text": format!("[stderr] {}", line)
-                })).await;
+                }));
                 captured.push_str("[stderr] ");
                 captured.push_str(&line);
                 captured.push('\n');
