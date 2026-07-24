@@ -50,9 +50,12 @@ export function QuestionModal({ question, options, onSubmit, onDismiss }: Questi
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center">
-      {/* Backdrop */}
+      {/* Backdrop. NOTE: no backdrop-blur — inside the fully-transparent overlay
+          window, backdrop-filter fills the backdrop's bounding box with an
+          opaque frosted layer instead of blurring the desktop. A flat tint is
+          the correct treatment on a transparent surface. */}
       <div
-        className="absolute inset-0 bg-black/20 backdrop-blur-sm animate-fade-in"
+        className="absolute inset-0 bg-black/30 animate-fade-in"
         onClick={() => onDismiss?.()}
       />
 

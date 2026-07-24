@@ -19,8 +19,11 @@ const IDLE_WIDTH = 720;
 /** Idle window height when the bar is a single line. Generous enough that the
  * pill (48px content + focus ring) is never clipped at the top. */
 const IDLE_MIN_HEIGHT = 76;
-/** Cap so an essay-length draft doesn't swallow the screen. */
-const IDLE_MAX_HEIGHT = 380;
+/** Cap so an essay-length draft doesn't swallow the screen. Generous enough
+ * that opening the + tools menu or the Share Window picker (which need vertical
+ * room above the pill) isn't clipped — the textarea itself is internally capped
+ * at 200px, so this ceiling only matters for those overlay UI elements. */
+const IDLE_MAX_HEIGHT = 600;
 /** Tall conversation panel that opens above the bar. */
 const CHAT_HEIGHT = 640;
 /** Keep the window this far inside the work-area edges when clamping. */

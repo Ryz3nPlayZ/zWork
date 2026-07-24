@@ -752,8 +752,15 @@ pub async fn capture_window_screenshot(window_id: i64) -> Result<String, String>
         std::env::temp_dir().to_string_lossy(),
         uuid::Uuid::new_v4().simple()
     );
-    // call get_window_state with vision capture mode to produce the screenshot.
-    let _ = c
+    // Call get_window_state with vision capture mode to produce the screenshot.
+    // IMPORTANT: capture the result — the driver returns "No content produced
+    // (neither AX tree nor screenshot succeeded)" as a *successful* result (not
+    // as `isError`) when the vision capture fails, which is almost always a
+    // missing macOS Screen Recording grant on CuaDriver. `call()` would swallow
+    // that into an Ok(Value::String(...)); without inspecting it here we'd
+    // surface only the generic "file missing" message below, hiding the real
+    // cause from the user.
+    let call_result = c
         .call(
             "get_window_state",
             json!({
@@ -764,9 +771,38 @@ pub async fn capture_window_screenshot(window_id: i64) -> Result<String, String>
             }),
         )
         .await?;
-    // Verify the file exists.
+
+    // Verify the file exists. If it doesn't, the vision capture failed —
+    // surface the driver's own message (plus the Screen Recording hint) instead
+    // of a generic "file not found".
     if !std::path::Path::new(&out_path).exists() {
-        return Err("screenshot capture did not produce a file — check Screen Recording permission".to_string());
+        // `call()` unwraps content[].text into the returned Value; extract it
+        // so the error is actionable.
+        let result_text = match &call_result {
+            Value::String(s) => s.clone(),
+            other => other
+                .get("content")
+                .and_then(|c| c.as_array())
+                .and_then(|c| c.first())
+                .and_then(|c| c.get("text"))
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .to_string(),
+        };
+        return Err(if result_text.contains("No content produced") {
+            "CuaDriver couldn't capture this window (\"No content produced\"). \
+             This almost always means CuaDriver is missing the macOS Screen \
+             Recording permission — grant CuaDriver (not zWork) Screen Recording \
+             in System Settings → Privacy & Security → Screen Recording, then \
+             retry."
+                .to_string()
+        } else if !result_text.is_empty() {
+            format!("cua-driver: {result_text}")
+        } else {
+            "screenshot capture did not produce a file — check Screen Recording \
+             permission for CuaDriver"
+                .to_string()
+        });
     }
     Ok(out_path)
 }

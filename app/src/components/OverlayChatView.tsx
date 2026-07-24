@@ -188,10 +188,13 @@ export function OverlayChatView() {
           <div
             className={cn(
               "mb-3 w-full max-w-[720px] flex-1 min-h-0 overflow-hidden rounded-2xl border border-line shadow-float",
-              // Translucent frosted glass over whatever you're working on behind
-              // the overlay. Mirrors the sidebar's CSS-blur fallback (native
-              // vibrancy would fight the fully-transparent overlay window).
-              "bg-paper/75 backdrop-blur-xl backdrop-saturate-150",
+              // NOTE: no backdrop-blur here. On a fully-transparent Tauri
+              // overlay window, `backdrop-filter` has nothing behind it to
+              // sample (the window's own backing store is transparent), so
+              // WebKit fills the element's bounding box with an opaque frosted
+              // rectangle — clipped to border-radius only on some platforms.
+              // A solid fill is the correct treatment for a floating overlay.
+              "bg-paper",
             )}
           >
             {/* Resize handle — a thin strip at the very top of the expanded

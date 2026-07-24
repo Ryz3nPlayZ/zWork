@@ -297,11 +297,26 @@ export function ChatInput({
     el.style.height = Math.min(el.scrollHeight, 200) + "px";
     setMultiline(el.scrollHeight > 28);
     // Report the overlay bar's height so the overlay window grows with the draft.
+    // When the + tools menu or the share-window picker is open, we also reserve
+    // room ABOVE the bar for the upward-opening menu — otherwise it's clipped by
+    // the idle window's 76px height (the original "+ menu is cut off" bug).
     if (isOverlay && onHeightChange) {
       const bar = toolsRef.current;
-      if (bar) onHeightChange(bar.scrollHeight);
+      if (bar) {
+        let h = bar.scrollHeight;
+        if (toolsOpen) {
+          // The menu opens above the bar (~256px wide, ~5 items ≈ 220px tall,
+          // plus margin). Reserve enough vertical space so it isn't clipped.
+          h += 260;
+        }
+        if (shareWindowOpen) {
+          // The picker is a centered modal; reserve enough for the dialog too.
+          h += 420;
+        }
+        onHeightChange(h);
+      }
     }
-  }, [value, isOverlay, onHeightChange, setMultiline]);
+  }, [value, isOverlay, onHeightChange, setMultiline, toolsOpen, shareWindowOpen]);
 
   useEffect(() => {
     if (autoFocus) areaRef.current?.focus();
@@ -834,15 +849,16 @@ export function ChatInput({
           // complaint in Catppuccin Mocha / Atom One came from bg-paper-raised
           // glaring.
           //
-          // Overlay input: frosted glass — translucent paper tint +
-          // backdrop-blur + saturation over whatever the user is working on
-          // behind the floating pill. Matches the conversation panel's glass
-          // treatment (OverlayChatView) so the whole overlay reads as one
-          // floating element. Mirrors the sidebar's CSS-blur fallback pattern.
+          // Overlay input: solid fill — on a fully-transparent Tauri overlay
+          // window, `backdrop-filter` has nothing to sample (the window's own
+          // backing store is transparent), so WebKit fills the element's
+          // bounding box with an opaque frosted rectangle instead of blurring
+          // the desktop. A solid bg-paper is the correct treatment for a
+          // floating overlay; the shadow + hairline ring carry the elevation.
           "group relative w-full transition-[box-shadow] hairline-ring",
           isOverlay
             ? cn(
-                "bg-paper/75 backdrop-blur-xl backdrop-saturate-150",
+                "bg-paper",
                 "flex items-center gap-1 px-2 py-2",
                 (multiline || attachments.length > 0) ? "rounded-2xl" : "rounded-full",
                 focused && "focus-ring",
@@ -1041,7 +1057,7 @@ export function ChatInput({
       )}
 
       {isOverlay && toolsOpen && (
-        <div data-no-drag className="absolute bottom-full left-0 mb-2 w-56 animate-fade-in rounded-2xl hairline bg-paper/85 backdrop-blur-xl p-1.5 shadow-lift">
+        <div data-no-drag className="absolute bottom-full left-0 mb-2 w-56 animate-fade-in rounded-2xl hairline bg-paper p-1.5 shadow-lift">
           <OverlayToolItem
             icon={<Plus className="h-4 w-4" />}
             label="Attach file"
@@ -1117,7 +1133,7 @@ export function ChatInput({
 
 /**
  * Shared wrapper for the question/permission cards. Matches the composer's
- * geometry (same rounded corners, frosted glass for overlay, paper for main)
+ * geometry (same rounded corners, solid fill for overlay, paper for main)
  * so the morph feels seamless — the card appears exactly where the chatbox was.
  */
 function ComposerCardShell({
@@ -1134,9 +1150,7 @@ function ComposerCardShell({
     <div
       className={cn(
         "relative w-full rounded-2xl border border-line shadow-lift p-4",
-        isOverlay
-          ? "bg-paper/85 backdrop-blur-xl backdrop-saturate-150"
-          : "bg-paper-raised",
+        isOverlay ? "bg-paper" : "bg-paper-raised",
         className,
       )}
     >
@@ -1345,7 +1359,7 @@ function ShareWindowPicker({
 
   return (
     <div
-      className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 backdrop-blur-sm animate-fade-in"
+      className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 animate-fade-in"
       onClick={onClose}
     >
       <div
