@@ -1,0 +1,26 @@
+{
+  "$schema": "https://github.com/tcort/markdown-link-check",
+  "ignorePatterns": [
+    {
+      "comment": "GitHub meta-pages that 404 for repos with no stars / no discussions enabled. These are badge link targets, not documentation links — their availability depends on repo state, not link rot.",
+      "pattern": "^https://github.com/[^/]+/[^/]+/(stargazers|discussions)"
+    },
+    {
+      "comment": "Local loopback / template placeholders in docs (OAuth callback examples, docker-compose hostnames). markdown-link-check can't meaningfully fetch these.",
+      "pattern": "^(http|https)://(localhost|127\\.0\\.0\\.1|better_auth)"
+    }
+  ],
+  "replacementPatterns": [],
+  "httpHeaders": [
+    {
+      "urls": ["https://github.com", "https://api.github.com"],
+      "headers": {
+        "User-Agent": "markdown-link-check"
+      }
+    }
+  ],
+  "timeout": "10s",
+  "retryOn429": true,
+  "retryCount": 3,
+  "fallbackResponseStatus": [200, 301, 302, 308, 401, 403]
+}

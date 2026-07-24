@@ -106,7 +106,7 @@ sidecar/
 
 ### Adding a New Tool
 
-1. Open `sidecar/agent/tools.py`
+1. Open `sidecar-rust/src/tools/mod.rs`
 2. Add a schema dict to `TOOL_SCHEMAS` with `name`, `description`, and `input_schema`
 3. Write an async generator handler `_handle_<tool_name>` that yields `status`, `activity`, and `tool_result` events
 4. Register the handler in the `execute_tool` dispatch block

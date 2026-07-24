@@ -71,7 +71,7 @@ In managed mode:
 | Desktop UI | `app/src` | screens, settings, analytics, updater UX |
 | Tauri shell | `app/src-tauri` | window shell, packaged backend, native auth helpers |
 | Local agent backend | `sidecar` | chat execution, settings, skills, local tool access |
-| Research pipeline | `sidecar/agent/tools.py` | academic research tools: novelty check, hardware detection, paper drafting |
+| Research pipeline | `sidecar-rust/src/academic.rs` | academic research tools: novelty check, hardware detection, paper drafting |
 | Cloud deployment source | `cloud-src` | auth, API, schema, reverse proxy, compose config |
 | Tests | `tests` | local backend and security regression coverage |
 

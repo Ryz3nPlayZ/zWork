@@ -2,7 +2,7 @@
 
 zWork ships a suite of academic research tools that enable the agent to go from a raw research idea to a finished paper draft in a single session.
 
-All tools are defined in [`sidecar/agent/tools.py`](../sidecar/agent/tools.py) and follow the standard generator-based tool handler pattern (yielding `status`, `activity`, and `tool_result` events).
+All tools are defined in [`sidecar-rust/src/tools/mod.rs`](../sidecar-rust/src/tools/mod.rs) (with the academic pipeline in [`sidecar-rust/src/academic.rs`](../sidecar-rust/src/academic.rs)) and follow the standard handler pattern (emitting `status`, `activity`, and `tool_result` events).
 
 ---
 
@@ -177,4 +177,4 @@ async def _handle_research_tool(tool_input: dict, ...) -> AsyncGenerator:
     yield {"type": "tool_result", "content": result}
 ```
 
-All tools are registered in `TOOL_SCHEMAS` and dispatched through `execute_tool` in `sidecar/agent/tools.py`.
+All tools are registered in the tool schema table and dispatched through `execute_tool` in `sidecar-rust/src/tools/mod.rs`.
