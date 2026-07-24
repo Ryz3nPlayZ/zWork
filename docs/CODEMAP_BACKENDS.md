@@ -22,8 +22,8 @@ zWork has two backend layers:
 | `sidecar/agent/providers.py` | provider/model discovery and normalization |
 | `sidecar/agent/chatstore.py` | chat persistence and retrieval |
 | `sidecar/agent/projects.py` | project-oriented persistence |
-| `sidecar/agent/skills.py` | skill discovery/indexing |
-| `sidecar/agent/tools.py` | tool definitions exposed to the model loop; includes academic research pipeline tools (see [RESEARCH_TOOLS.md](RESEARCH_TOOLS.md)) |
+| `sidecar-rust/src/skills.rs` | skill discovery/indexing |
+| `sidecar-rust/src/tools/mod.rs` | tool definitions exposed to the model loop; includes academic research pipeline tools (see [RESEARCH_TOOLS.md](RESEARCH_TOOLS.md)) |
 
 ## Core orchestration
 

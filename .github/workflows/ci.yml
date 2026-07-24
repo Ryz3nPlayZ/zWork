@@ -83,18 +83,21 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libssl-dev pkg-config
-      # Tauri's build script globs `binaries/cua-driver*` as a bundled resource
-      # (tauri.conf.json) and hard-fails if the glob matches nothing. The real
-      # binary is platform-specific and only staged by release.yml (which
-      # downloads it per-OS). For this type-check we only need the file to
-      # *exist* so the glob resolves — a placeholder is sufficient and keeps
-      # CI from depending on a macOS-only artifact.
-      - name: Stage placeholder cua-driver binary
+      # Tauri's build script globs several bundled resources (tauri.conf.json)
+      # and hard-fails if ANY glob matches nothing: binaries/cua-driver*,
+      # zWork-Skills/**/*, CuaDriver.app/**/*. The real artifacts are
+      # platform-specific / gitignored and only staged by release.yml (which
+      # downloads cua-driver per-OS and dittos CuaDriver.app, and by
+      # prepare-bundle.cjs for zWork-Skills). For this type-check we only need
+      # the globs to resolve — placeholder files are sufficient and keep CI
+      # from depending on macOS-only / build-machine-only artifacts.
+      - name: Stage placeholder bundled resources
         working-directory: ./app/src-tauri
         run: |
-          mkdir -p binaries
-          [ -f binaries/cua-driver ] || echo '#!/bin/sh' > binaries/cua-driver
-          chmod +x binaries/cua-driver
+          mkdir -p binaries zWork-Skills CuaDriver.app/Contents/MacOS
+          [ -f binaries/cua-driver ] || { echo '#!/bin/sh' > binaries/cua-driver; chmod +x binaries/cua-driver; }
+          [ -f zWork-Skills/.placeholder ] || echo 'CI placeholder — real skills staged by prepare-bundle.cjs' > zWork-Skills/.placeholder
+          [ -f CuaDriver.app/Contents/MacOS/cua-driver ] || { echo '#!/bin/sh' > CuaDriver.app/Contents/MacOS/cua-driver; chmod +x CuaDriver.app/Contents/MacOS/cua-driver; }
       - name: cargo check
         working-directory: ./app/src-tauri
         run: cargo check
@@ -113,10 +116,12 @@ jobs:
           # READMEs with inherently flaky external links to figma/firecrawl/
           # npm, plus tool-generated planning dirs) — none of which we maintain
           # or can fix. Scope to docs/, the root README, and .github/.
+          # Config (.markdown-link-check.json) ignores GitHub meta-pages
+          # (/stargazers, /discussions) that 404 based on repo state.
           while IFS= read -r -d '' f; do
-            markdown-link-check "$f" || failed=1
+            markdown-link-check --config .markdown-link-check.json "$f" || failed=1
           done < <(find docs .github -name "*.md" -not -path "*/node_modules/*" -print0)
-          [ -f README.md ] && markdown-link-check README.md || failed=1
+          [ -f README.md ] && markdown-link-check --config .markdown-link-check.json README.md || failed=1
           if [ "$failed" -ne 0 ]; then
             echo "Markdown link check failed for one or more files"
             exit 1
