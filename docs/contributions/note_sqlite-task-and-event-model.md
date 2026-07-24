@@ -9,4 +9,4 @@ SQLite and local JSON storage structures for tracking Kanban board tasks and cal
 
 ## Details
 This note provides guidelines and documentation on the handling of `SQLite Task and Event Model` in zWork.
-Ensure that any future refactoring of related modules preserves this behavior and conforms to [design.md](file:///home/zemul/Programming/zWork/design.md).
+Ensure that any future refactoring of related modules preserves this behavior and conforms to [design.md](../../design.md).

@@ -9,4 +9,4 @@ macOS window drag region configuration details and how we prevent duplicate drag
 
 ## Details
 This note provides guidelines and documentation on the handling of `Tauri Window Regions` in zWork.
-Ensure that any future refactoring of related modules preserves this behavior and conforms to [design.md](file:///home/zemul/Programming/zWork/design.md).
+Ensure that any future refactoring of related modules preserves this behavior and conforms to [design.md](../../design.md).

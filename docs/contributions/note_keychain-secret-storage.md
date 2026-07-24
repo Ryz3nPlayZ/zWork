@@ -9,4 +9,4 @@ Keychain storage mechanism using keyring with a file fallback configuration for 
 
 ## Details
 This note provides guidelines and documentation on the handling of `Keychain Secret Storage` in zWork.
-Ensure that any future refactoring of related modules preserves this behavior and conforms to [design.md](file:///home/zemul/Programming/zWork/design.md).
+Ensure that any future refactoring of related modules preserves this behavior and conforms to [design.md](../../design.md).

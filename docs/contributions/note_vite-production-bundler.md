@@ -9,4 +9,4 @@ Tauri frontend bundling script configuration using Vite, TypeScript, and postpro
 
 ## Details
 This note provides guidelines and documentation on the handling of `Vite Production Bundler` in zWork.
-Ensure that any future refactoring of related modules preserves this behavior and conforms to [design.md](file:///home/zemul/Programming/zWork/design.md).
+Ensure that any future refactoring of related modules preserves this behavior and conforms to [design.md](../../design.md).

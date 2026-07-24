@@ -9,4 +9,4 @@ Regex parsing of standard error output to detect missing Node packages and Pytho
 
 ## Details
 This note provides guidelines and documentation on the handling of `Missing Dependencies Detector` in zWork.
-Ensure that any future refactoring of related modules preserves this behavior and conforms to [design.md](file:///home/zemul/Programming/zWork/design.md).
+Ensure that any future refactoring of related modules preserves this behavior and conforms to [design.md](../../design.md).

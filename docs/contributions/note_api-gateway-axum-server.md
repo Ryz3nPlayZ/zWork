@@ -9,4 +9,4 @@ Axum routing configuration for user profile management and hosted router proxyin
 
 ## Details
 This note provides guidelines and documentation on the handling of `API Gateway Axum Server` in zWork.
-Ensure that any future refactoring of related modules preserves this behavior and conforms to [design.md](file:///home/zemul/Programming/zWork/design.md).
+Ensure that any future refactoring of related modules preserves this behavior and conforms to [design.md](../../design.md).

@@ -9,4 +9,4 @@ Tauri backend supervisor, startup grace periods, health check intervals, and pre
 
 ## Details
 This note provides guidelines and documentation on the handling of `Watchdog and Grace Periods` in zWork.
-Ensure that any future refactoring of related modules preserves this behavior and conforms to [design.md](file:///home/zemul/Programming/zWork/design.md).
+Ensure that any future refactoring of related modules preserves this behavior and conforms to [design.md](../../design.md).
