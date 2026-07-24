@@ -9,4 +9,4 @@ Routing resolutions to prevent OAuth state parameter mismatches on desktop reloa
 
 ## Details
 This note provides guidelines and documentation on the handling of `Better Auth Route resolution` in zWork.
-Ensure that any future refactoring of related modules preserves this behavior and conforms to [design.md](file:///home/zemul/Programming/zWork/design.md).
+Ensure that any future refactoring of related modules preserves this behavior and conforms to [design.md](../../design.md).

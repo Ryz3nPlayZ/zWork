@@ -9,4 +9,4 @@ NVIDIA CUDA and macOS Apple Silicon MPS capabilities detection logic in detect_h
 
 ## Details
 This note provides guidelines and documentation on the handling of `GPU and Hardware Profiles` in zWork.
-Ensure that any future refactoring of related modules preserves this behavior and conforms to [design.md](file:///home/zemul/Programming/zWork/design.md).
+Ensure that any future refactoring of related modules preserves this behavior and conforms to [design.md](../../design.md).
