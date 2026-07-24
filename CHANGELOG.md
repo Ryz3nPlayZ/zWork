@@ -2,6 +2,43 @@
 
 All notable changes to zWork are documented in this file.
 
+## v0.5.0-beta.12
+
+**Fix: friendly agent error messages instead of bare upstream HTTP status.**
+
+### Fixes
+- **Upstream failures now surface actionable text.** When the cloud router reports `router_upstreams_failed` (every model provider down), 502/504 gateway errors, 429 rate limits, 401/403 auth problems, or plain connection failures, the agent translates them into guidance the user can act on instead of a bare `upstream HTTP 502 Bad Gateway`. Retries-exhausted errors get the same friendly treatment. Unknown errors still fall through with the original message and response body so nothing is hidden. (#163)
+
+## v0.5.0-beta.11
+
+**Fix: retry transient gateway errors instead of giving up.**
+
+### Fixes
+- **502/504/500 gateway errors are now retried** with backoff before surfacing an error, instead of failing the turn on the first transient blip. (#161)
+
+## v0.5.0-beta.10
+
+**Fix: React error #300 crash.**
+
+### Fixes
+- **Moved hooks before early returns** in the affected components, eliminating the React error #300 ("rendered fewer hooks than expected") crash. (#159)
+
+## v0.5.0-beta.9
+
+**Agent todo panel, desktop/browser automation robustness, and another round of window-chrome fixes.**
+
+### New
+- **Agent-maintained todo panel.** A new `update_todos` tool lets the agent keep a live todo list for its current task; the UI renders it in a right-side TodoPanel that auto-opens on the first batch and updates in place as steps are marked in progress or completed. Toggle with `Cmd+J`. (#158)
+
+### Fixes
+- **Desktop/browser automation robustness and agent shape routing** — hardening across the cua-driver desktop-control path and the embedded Chrome extension bridge. (#158)
+- **Sidebar translucency restored.** The earlier "stop the top bar going translucent" fix had made the root container always opaque, blocking desktop vibrancy from reaching the sidebar. Opacity is now scoped per segment: the sidebar column goes translucent while the reading pane never bleeds. (#158)
+- **Top bar reworked.** The dedicated drag "chin" is gone — the window drags from the exposed translucent seams and a 38px band at the top of the main pane (skipped over active chats so the chat header sits at the true top). Search (`Cmd+K`) and the sidebar toggle are now floating window-level controls next to the traffic lights. (#158)
+
+## v0.5.0-beta.7 / v0.5.0-beta.8
+
+**Skipped.** No releases were cut for these version numbers — versioning jumped directly from v0.5.0-beta.6 to v0.5.0-beta.9.
+
 ## v0.5.0-beta.6
 
 **UI overhaul: calmer theme system, redesigned titlebar, and a draggable window that finally feels right.**

@@ -36,9 +36,8 @@ import type { Activity, Artifact, MessagePart } from "../lib/store";
 import { useApp } from "../lib/store";
 import { Logo } from "./Logo";
 import { IconButton } from "./IconButton";
-// AskCard rendering moved to ChatView's QuestionModal (native ask_question SSE event)
 import type { Message as Msg } from "../lib/store";
-import { api } from "../lib/api";
+import { api, whitelabelModelName } from "../lib/api";
 
 function formatTime(ts: number): string {
   if (!ts) return "";
@@ -413,7 +412,7 @@ function UserBubble({
                 if (e.key === "Escape") cancel();
               }}
               rows={Math.min(10, draft.split("\n").length + 1)}
-              className="w-full resize-none rounded-2xl rounded-br-md border border-accent/50 bg-paper-raised px-3.5 py-2.5 text-[14px] leading-6 text-ink outline-none ring-2 ring-accent/20 focus:ring-accent/30"
+              className="w-full resize-none rounded-2xl rounded-br-md border border-accent/50 bg-paper-raised px-3.5 py-2.5 text-[14px] leading-6 text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
             />
             <div className="flex items-center justify-end gap-1.5">
               <button
@@ -509,7 +508,7 @@ function ProcessPanel({
 
   let summary: string;
   if (isActive) {
-    summary = latest.kind === "thinking" ? "Thinking…" : `Running ${latest.part.label}…`;
+    summary = latest.kind === "thinking" ? "Thinking…" : `${latest.part.label}…`;
   } else if (thoughtCount > 0 && toolCount > 0) {
     summary = `Thought · ${toolCount} tools`;
   } else if (thoughtCount > 0) {
@@ -730,7 +729,7 @@ export function Message({
         )}>
           {message.resolvedModel && (
             <span className="inline-flex items-center rounded-full border border-line bg-paper-sunken px-2 py-0.5 text-[10.5px] text-ink-muted">
-              {message.providerLabel || "Model"}: {message.resolvedModel}
+              {message.providerLabel || "Model"}: {whitelabelModelName(message.resolvedModel) ?? message.resolvedModel}
             </span>
           )}
           <IconButton
@@ -766,15 +765,16 @@ export function Message({
 function ToolCallAccordion({
   part,
   chatId,
-  messageId,
+  // messageId was used by the old inline gate handler (handleResolve), which
+  // moved to the composer's permission card. Kept in the prop interface for
+  // API stability; prefixed to silence the unused warning.
+  messageId: _messageId,
 }: {
   part: Extract<MessagePart, { kind: "tool" }>;
   chatId?: string;
   messageId: string;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [resolving, setResolving] = useState(false);
-  const resolveGate = useApp((s) => s.resolveGate);
   const Icon = getIcon(part.tool || part.label);
   const running = !part.done;
   const errored = part.done && part.ok === false;
@@ -786,17 +786,6 @@ function ToolCallAccordion({
       inputPreview = JSON.stringify(part.input, null, 2);
     } catch {
       inputPreview = String(part.input);
-    }
-  }
-
-  async function handleResolve(allow: boolean) {
-    if (!part.pendingGate || !chatId) return;
-    const gateId = part.pendingGate.gateId;
-    setResolving(true);
-    try {
-      await resolveGate(chatId, messageId, gateId, allow);
-    } finally {
-      setResolving(false);
     }
   }
 
@@ -817,7 +806,7 @@ function ToolCallAccordion({
         className={cn(
           "press flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-[12.5px] transition-colors",
           hasGate
-            ? "border-warning/20 bg-warning/5 text-warning-fg hover:bg-warning/10"
+            ? "border-warning/20 bg-warning/5 text-warning hover:bg-warning/10"
             : errored
               ? "border-error/20 bg-error/5 text-error hover:bg-error/10"
               : "border-line bg-paper-sunken text-ink-muted hover:bg-paper hover:text-ink",
@@ -825,7 +814,7 @@ function ToolCallAccordion({
       >
         <Icon className="h-3.5 w-3.5 shrink-0" />
         <span className="flex-1 truncate">
-          {running ? `Running ${part.label}…` : `tool call (${part.label})`}
+          {running ? `${part.label}…` : part.label}
         </span>
         {running && <Loader2 className="h-3 w-3 shrink-0 animate-spin" />}
         {part.done && part.ok !== false && (
@@ -851,31 +840,9 @@ function ToolCallAccordion({
         <div className="mt-1 flex flex-col gap-2">
           {hasGate && (
             <div className="rounded-lg border border-warning/20 bg-warning/5 px-3 py-2">
-              {part.pendingGate!.reason && (
-                <p className="mb-1.5 text-[11.5px] leading-relaxed text-warning-fg">
-                  {part.pendingGate!.reason}
-                </p>
-              )}
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  disabled={resolving}
-                  onClick={() => void handleResolve(true)}
-                  className="press ring-focus inline-flex items-center gap-1 rounded-md bg-success px-2.5 py-1 text-[11.5px] font-semibold text-success-fg hover:bg-success/90 disabled:opacity-60"
-                >
-                  {resolving ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
-                  Allow
-                </button>
-                <button
-                  type="button"
-                  disabled={resolving}
-                  onClick={() => void handleResolve(false)}
-                  className="press ring-focus inline-flex items-center gap-1 rounded-md border border-error/30 bg-paper px-2.5 py-1 text-[11.5px] font-semibold text-error hover:bg-error/5 disabled:opacity-60"
-                >
-                  <XCircle className="h-3 w-3" />
-                  Deny
-                </button>
-              </div>
+              <p className="text-[11.5px] leading-relaxed text-ink-muted">
+                Permission required — respond in the card below to continue.
+              </p>
             </div>
           )}
 

@@ -1,8 +1,29 @@
-import { useEffect, useState } from "react";
-import { Activity, DollarSign, Key, LogOut, RefreshCw, Shield, TrendingUp, Users } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import {
+  Activity,
+  DollarSign,
+  Key,
+  LogOut,
+  Radio,
+  RefreshCw,
+  ScrollText,
+  Shield,
+  TrendingUp,
+  Users,
+  Heart,
+} from "lucide-react";
 import { cn } from "../lib/cn";
+import { HealthTab } from "./admin/HealthTab";
+import { RevenueTab } from "./admin/RevenueTab";
+import { EngagementTab } from "./admin/EngagementTab";
+import { LiveTab } from "./admin/LiveTab";
+import { AuditTab } from "./admin/AuditTab";
 
-const API_BASE = "https://api.tryzwork.app";
+// API base: in the admin-web SPA (admin.tryzwork.app) requests go through
+// Caddy's /api/* proxy, so an empty base (relative URLs) is correct. In the
+// desktop app, the absolute API origin is required. `VITE_ADMIN_API_BASE` lets
+// the admin-web build override without changing this shared source.
+const API_BASE = import.meta.env.VITE_ADMIN_API_BASE ?? "https://api.tryzwork.app";
 
 interface Metrics {
   total_users: number;
@@ -52,26 +73,31 @@ interface ModelUsage {
   completion_tokens: number;
 }
 
-type Tab = "overview" | "users" | "usage" | "models";
-
-function formatDate(iso: string | null) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+interface LiveSummary {
+  active_users_5m: number;
+  requests_per_min: number;
 }
 
-function formatNumber(n: number) {
+type Tab = "overview" | "health" | "revenue" | "engagement" | "users" | "usage" | "models" | "live" | "audit";
+
+function formatNumber(n: number | null | undefined) {
+  if (n === null || n === undefined || Number.isNaN(n)) return "—";
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return n.toLocaleString();
 }
 
-function MetricCard({ label, value, sub, icon: Icon }: { label: string; value: string; sub?: string; icon: React.ElementType }) {
+function MetricCard({
+  label,
+  value,
+  sub,
+  icon: Icon,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  icon: React.ElementType;
+}) {
   return (
     <div className="rounded-xl border border-line bg-paper-raised p-4">
       <div className="flex items-center gap-2 text-ink-muted">
@@ -94,19 +120,26 @@ export function AdminPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [usage, setUsage] = useState<UsageRow[]>([]);
   const [models, setModels] = useState<ModelUsage[]>([]);
+  const [liveSummary, setLiveSummary] = useState<LiveSummary | null>(null);
+  const [userSearch, setUserSearch] = useState("");
 
   const headers: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
 
-  async function apiFetch<T>(path: string): Promise<T> {
-    const res = await fetch(`${API_BASE}${path}`, { headers });
-    if (res.status === 401) {
-      setToken("");
-      sessionStorage.removeItem("zwork:admin-token");
-      throw new Error("Session expired");
-    }
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    return res.json();
-  }
+  const apiFetch = useCallback(
+    async function apiFetch<T>(path: string): Promise<T> {
+      const res = await fetch(`${API_BASE}${path}`, { headers });
+      if (res.status === 401) {
+        setToken("");
+        sessionStorage.removeItem("zwork:admin-token");
+        throw new Error("Session expired");
+      }
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      return res.json();
+    },
+    // headers object identity changes only when token changes; include it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [token],
+  );
 
   async function login() {
     setLoading(true);
@@ -151,6 +184,31 @@ export function AdminPage() {
     }
   }
 
+  // Light live-summary polling for the overview badge.
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    async function tick() {
+      try {
+        const d = await apiFetch<LiveSummary>(`/api/admin/metrics/live?_=${Date.now()}`);
+        if (!cancelled) setLiveSummary(d);
+      } catch {
+        /* swallowed — overview is non-critical */
+      }
+    }
+    tick();
+    const i = setInterval(tick, 30_000);
+    const onVis = () => {
+      if (document.visibilityState === "hidden") clearInterval(i);
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      cancelled = true;
+      clearInterval(i);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [token, apiFetch]);
+
   async function updateTier(userId: string, tier: string) {
     await fetch(`${API_BASE}/api/admin/users/${userId}/tier`, {
       method: "PUT",
@@ -162,6 +220,7 @@ export function AdminPage() {
 
   useEffect(() => {
     if (token) loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   if (!token) {
@@ -187,11 +246,11 @@ export function AdminPage() {
               className="w-full rounded-lg border border-line bg-paper px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-accent"
               autoFocus
             />
-            {authError && <p className="text-xs text-red-500">{authError}</p>}
+            {authError && <p className="text-xs text-error">{authError}</p>}
             <button
               type="submit"
               disabled={loading || !password}
-              className="w-full rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              className="press ring-focus w-full rounded-lg bg-ink px-4 py-2 text-sm font-medium text-paper hover:bg-ink/90 disabled:opacity-50"
             >
               {loading ? "Signing in…" : "Sign in"}
             </button>
@@ -203,10 +262,25 @@ export function AdminPage() {
 
   const tabs: { id: Tab; label: string; icon: React.ElementType }[] = [
     { id: "overview", label: "Overview", icon: TrendingUp },
+    { id: "health", label: "Health", icon: Heart },
+    { id: "revenue", label: "Revenue", icon: DollarSign },
+    { id: "engagement", label: "Engagement", icon: Activity },
     { id: "users", label: "Users", icon: Users },
     { id: "usage", label: "Usage", icon: Activity },
     { id: "models", label: "Models", icon: Key },
+    { id: "live", label: "Live", icon: Radio },
+    { id: "audit", label: "Audit", icon: ScrollText },
   ];
+
+  const filteredUsers = users.filter((u) => {
+    if (!userSearch.trim()) return true;
+    const q = userSearch.toLowerCase();
+    return (
+      u.email.toLowerCase().includes(q) ||
+      u.name.toLowerCase().includes(q) ||
+      u.tier.toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-paper">
@@ -214,21 +288,31 @@ export function AdminPage() {
         <div className="flex items-center gap-2">
           <Shield className="h-5 w-5 text-ink-muted" />
           <h1 className="text-base font-semibold text-ink">zWork Admin</h1>
+          {liveSummary && (
+            <span className="ml-2 flex items-center gap-1.5 rounded-full bg-success/10 px-2 py-0.5 text-[10px] font-bold text-success">
+              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-success" />
+              {liveSummary.active_users_5m} active · {liveSummary.requests_per_min.toFixed(0)}/min
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={() => void loadData()}
-            className="rounded-lg p-1.5 text-ink-muted hover:bg-paper-sunken hover:text-ink"
+            className="press ring-focus rounded-lg p-1.5 text-ink-muted hover:bg-paper-sunken hover:text-ink"
             title="Refresh"
           >
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
           </button>
           <button
             onClick={() => {
+              void fetch(`${API_BASE}/api/admin/logout`, {
+                method: "POST",
+                headers,
+              }).catch(() => {});
               setToken("");
               sessionStorage.removeItem("zwork:admin-token");
             }}
-            className="rounded-lg p-1.5 text-ink-muted hover:bg-paper-sunken hover:text-ink"
+            className="press ring-focus rounded-lg p-1.5 text-ink-muted hover:bg-paper-sunken hover:text-ink"
             title="Sign out"
           >
             <LogOut className="h-4 w-4" />
@@ -236,13 +320,13 @@ export function AdminPage() {
         </div>
       </div>
 
-      <div className="flex gap-1 border-b border-line px-4">
+      <div className="flex gap-1 overflow-x-auto border-b border-line px-4">
         {tabs.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
             className={cn(
-              "flex items-center gap-1.5 rounded-t-lg px-3 py-2 text-xs font-medium transition-colors",
+              "flex shrink-0 items-center gap-1.5 rounded-t-lg px-3 py-2 text-xs font-medium transition-colors",
               tab === t.id
                 ? "border-b-2 border-accent text-accent"
                 : "text-ink-muted hover:text-ink",
@@ -255,6 +339,7 @@ export function AdminPage() {
       </div>
 
       <div className="flex-1 overflow-auto p-6">
+        {/* Overview */}
         {tab === "overview" && metrics && (
           <div className="space-y-6">
             <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
@@ -269,66 +354,100 @@ export function AdminPage() {
               <MetricCard icon={Activity} label="Churn Rate" value={`${(metrics.churn_rate * 100).toFixed(1)}%`} />
               <MetricCard icon={DollarSign} label="API Cost (est.)" value={`$${metrics.estimated_cost_usd.toFixed(2)}`} sub={`${formatNumber(metrics.total_prompt_tokens + metrics.total_completion_tokens)} tokens total`} />
             </div>
+            <div className="rounded-xl border border-line bg-paper-raised p-4">
+              <p className="text-xs text-ink-muted">
+                Explore operational health, revenue trends, and engagement in the dedicated tabs above.
+                The <strong>Health</strong> tab surfaces latency, error rates, and provider status; the <strong>Revenue</strong> tab
+                shows MRR, churn, and gross margin; the <strong>Engagement</strong> tab tracks DAU/WAU/MAU stickiness.
+              </p>
+            </div>
           </div>
         )}
 
+        {/* Health */}
+        {tab === "health" && <HealthTab apiFetch={apiFetch} />}
+
+        {/* Revenue */}
+        {tab === "revenue" && <RevenueTab apiFetch={apiFetch} />}
+
+        {/* Engagement */}
+        {tab === "engagement" && <EngagementTab apiFetch={apiFetch} />}
+
+        {/* Users */}
         {tab === "users" && (
-          <div className="overflow-auto rounded-xl border border-line">
-            <table className="w-full text-left text-xs">
-              <thead className="border-b border-line bg-paper-sunken">
-                <tr>
-                  <th className="px-3 py-2 font-medium text-ink-muted">User</th>
-                  <th className="px-3 py-2 font-medium text-ink-muted">Tier</th>
-                  <th className="px-3 py-2 font-medium text-ink-muted">Requests</th>
-                  <th className="px-3 py-2 font-medium text-ink-muted">Tokens</th>
-                  <th className="px-3 py-2 font-medium text-ink-muted">Est. Cost</th>
-                  <th className="px-3 py-2 font-medium text-ink-muted">Sub Status</th>
-                  <th className="px-3 py-2 font-medium text-ink-muted">Last Active</th>
-                  <th className="px-3 py-2 font-medium text-ink-muted">Joined</th>
-                  <th className="px-3 py-2 font-medium text-ink-muted">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((u) => (
-                  <tr key={u.user_id} className="border-b border-line/50 hover:bg-paper-sunken/50">
-                    <td className="px-3 py-2">
-                      <div className="font-medium text-ink">{u.name}</div>
-                      <div className="text-ink-muted">{u.email}</div>
-                    </td>
-                    <td className="px-3 py-2">
-                      <span className={cn(
-                        "inline-block rounded-full px-2 py-0.5 text-[10px] font-bold uppercase",
-                        u.tier === "max" ? "bg-purple-100 text-purple-700" :
-                        u.tier === "pro" ? "bg-blue-100 text-blue-700" :
-                        "bg-gray-100 text-gray-600",
-                      )}>
-                        {u.tier}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-ink">{formatNumber(u.total_requests)}</td>
-                    <td className="px-3 py-2 text-ink">{formatNumber(u.total_prompt_tokens + u.total_completion_tokens)}</td>
-                    <td className="px-3 py-2 text-ink font-medium">${u.estimated_cost_usd.toFixed(2)}</td>
-                    <td className="px-3 py-2 text-ink-muted">{u.subscription_status || "—"}</td>
-                    <td className="px-3 py-2 text-ink-muted whitespace-nowrap">{formatDate(u.last_activity)}</td>
-                    <td className="px-3 py-2 text-ink-muted whitespace-nowrap">{formatDate(u.created_at)}</td>
-                    <td className="px-3 py-2">
-                      <select
-                        value={u.tier}
-                        onChange={(e) => void updateTier(u.user_id, e.target.value)}
-                        className="rounded border border-line bg-paper px-1.5 py-0.5 text-[11px] text-ink"
-                      >
-                        <option value="free">free</option>
-                        <option value="pro">pro</option>
-                        <option value="max">max</option>
-                      </select>
-                    </td>
+          <div className="space-y-3">
+            <input
+              value={userSearch}
+              onChange={(e) => setUserSearch(e.target.value)}
+              placeholder="Search by name, email, or tier…"
+              className="w-full max-w-sm rounded-lg border border-line bg-paper px-3 py-1.5 text-sm text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-accent"
+            />
+            <div className="overflow-auto rounded-xl border border-line">
+              <table className="w-full text-left text-xs">
+                <thead className="border-b border-line bg-paper-sunken">
+                  <tr>
+                    <th className="px-3 py-2 font-medium text-ink-muted">User</th>
+                    <th className="px-3 py-2 font-medium text-ink-muted">Tier</th>
+                    <th className="px-3 py-2 font-medium text-ink-muted">Requests</th>
+                    <th className="px-3 py-2 font-medium text-ink-muted">Tokens</th>
+                    <th className="px-3 py-2 font-medium text-ink-muted">Est. Cost</th>
+                    <th className="px-3 py-2 font-medium text-ink-muted">Sub Status</th>
+                    <th className="px-3 py-2 font-medium text-ink-muted">Last Active</th>
+                    <th className="px-3 py-2 font-medium text-ink-muted">Joined</th>
+                    <th className="px-3 py-2 font-medium text-ink-muted">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {filteredUsers.map((u) => (
+                    <tr key={u.user_id} className="border-b border-line/50 hover:bg-paper-sunken/50">
+                      <td className="px-3 py-2">
+                        <div className="font-medium text-ink">{u.name}</div>
+                        <div className="text-ink-muted">{u.email}</div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <span
+                          className={cn(
+                            "inline-block rounded-full px-2 py-0.5 text-[10px] font-bold uppercase",
+                            u.tier === "max"
+                              ? "bg-warning/10 text-warning"
+                              : u.tier === "pro"
+                                ? "bg-info/10 text-info"
+                                : "bg-ink/5 text-ink-soft",
+                          )}
+                        >
+                          {u.tier}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-ink">{formatNumber(u.total_requests)}</td>
+                      <td className="px-3 py-2 text-ink">{formatNumber(u.total_prompt_tokens + u.total_completion_tokens)}</td>
+                      <td className="px-3 py-2 text-ink font-medium">${u.estimated_cost_usd.toFixed(2)}</td>
+                      <td className="px-3 py-2 text-ink-muted">{u.subscription_status || "—"}</td>
+                      <td className="px-3 py-2 text-ink-muted whitespace-nowrap">
+                        {u.last_activity ? new Date(u.last_activity).toLocaleDateString() : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-ink-muted whitespace-nowrap">
+                        {new Date(u.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="px-3 py-2">
+                        <select
+                          value={u.tier}
+                          onChange={(e) => void updateTier(u.user_id, e.target.value)}
+                          className="rounded border border-line bg-paper px-1.5 py-0.5 text-[11px] text-ink"
+                        >
+                          <option value="free">free</option>
+                          <option value="pro">pro</option>
+                          <option value="max">max</option>
+                        </select>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
+        {/* Usage */}
         {tab === "usage" && (
           <div className="overflow-auto rounded-xl border border-line">
             <table className="w-full text-left text-xs">
@@ -358,6 +477,7 @@ export function AdminPage() {
           </div>
         )}
 
+        {/* Models */}
         {tab === "models" && (
           <div className="overflow-auto rounded-xl border border-line">
             <table className="w-full text-left text-xs">
@@ -384,6 +504,12 @@ export function AdminPage() {
             </table>
           </div>
         )}
+
+        {/* Live */}
+        {tab === "live" && <LiveTab apiFetch={apiFetch} />}
+
+        {/* Audit */}
+        {tab === "audit" && <AuditTab apiFetch={apiFetch} />}
 
         {!metrics && tab === "overview" && (
           <div className="flex items-center justify-center py-20 text-sm text-ink-muted">

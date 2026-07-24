@@ -151,7 +151,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 animate-fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 animate-fade-in"
       onClick={onClose}
     >
       <div
@@ -754,7 +754,7 @@ function ProjectDetail() {
       {/* Delete file confirmation modal */}
       {deleteModal.open && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-fade-in px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 animate-fade-in px-4"
           onClick={() => setDeleteModal({ open: false, filename: "" })}
         >
           <div
@@ -789,7 +789,7 @@ function ProjectDetail() {
               <button
                 type="button"
                 onClick={() => void confirmDeleteFile()}
-                className="press rounded-md bg-red-600 px-4 py-1.5 text-[12.5px] font-medium text-white hover:bg-red-700"
+                className="press ring-focus rounded-md bg-error px-4 py-1.5 text-[12.5px] font-medium text-error-fg hover:bg-error/90"
               >
                 Delete
               </button>
@@ -891,7 +891,7 @@ function EditModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 animate-fade-in px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 animate-fade-in px-4"
       onClick={onClose}
     >
       <div

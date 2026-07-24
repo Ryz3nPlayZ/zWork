@@ -17,8 +17,8 @@ export function classifyFile(name: string, mime?: string): FileClassification {
   ) {
     return {
       category: "Spreadsheet",
-      colorClass: "text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/40",
-      bgClass: "bg-emerald-50 dark:bg-emerald-950/20",
+      colorClass: "text-success border-success/30",
+      bgClass: "bg-success/10",
       icon: "📊",
     };
   }
@@ -29,8 +29,8 @@ export function classifyFile(name: string, mime?: string): FileClassification {
   ) {
     return {
       category: "Image",
-      colorClass: "text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-900/40",
-      bgClass: "bg-blue-50 dark:bg-blue-950/20",
+      colorClass: "text-info border-info/30",
+      bgClass: "bg-info/10",
       icon: "🖼️",
     };
   }
@@ -43,8 +43,8 @@ export function classifyFile(name: string, mime?: string): FileClassification {
   ) {
     return {
       category: "Code",
-      colorClass: "text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-900/40",
-      bgClass: "bg-amber-50 dark:bg-amber-950/20",
+      colorClass: "text-warning border-warning/30",
+      bgClass: "bg-warning/10",
       icon: "💻",
     };
   }

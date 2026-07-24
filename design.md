@@ -10,21 +10,20 @@ modern-minimal
 
 Light mode:
 - `--paper`   242 240 232
-- `--paper-soft` 248 246 238
-- `--paper-raised` 252 250 242
-- `--paper-sunken` 234 232 224
+- `--paper-soft` 238 236 228
+- `--paper-raised` 234 232 224
+- `--paper-sunken` 246 244 236
 - `--paper-sidebar` 236 234 226
 - `--ink`     48 46 40
 - `--ink-soft` 80 76 68
-- `--ink-muted` 130 126 115
-- `--ink-faint` 175 170 158
+- `--ink-muted` 110 106 96
+- `--ink-faint` 155 150 138
 - `--line`    218 214 202
 - `--line-soft` 228 224 212
 - `--line-strong` 200 196 184
 - `--accent`  48 46 40
-- `--bubble`  232 230 222
-- `--bubble-fg` 48 46 40
 - `--shadow`  30 28 24
+- `--border-overlay` 0 0 0
 - `--success` 16 185 129
 - `--success-fg` 255 255 255
 - `--warning` 245 158 11
@@ -35,21 +34,21 @@ Light mode:
 - `--info-fg` 255 255 255
 
 Dark mode:
-- `--paper`   42 42 46
-- `--paper-soft` 48 48 52
-- `--paper-raised` 56 56 60
-- `--paper-sunken` 36 36 40
-- `--paper-sidebar` 38 38 42
-- `--ink`     220 218 210
-- `--ink-soft` 190 188 180
-- `--ink-muted` 140 138 130
-- `--ink-faint` 100 98 90
-- `--line`    60 60 65
-- `--line-soft` 54 54 58
-- `--line-strong` 72 72 78
-- `--accent`  220 218 210
-- `--bubble`  72 72 76
-- `--bubble-fg` 232 230 222
+- `--paper`   22 22 24
+- `--paper-soft` 26 26 29
+- `--paper-raised` 31 31 34
+- `--paper-sunken` 18 18 20
+- `--paper-sidebar` 20 20 22
+- `--ink`     236 236 234
+- `--ink-soft` 213 213 211
+- `--ink-muted` 160 160 157
+- `--ink-faint` 108 108 106
+- `--line`    45 45 49
+- `--line-soft` 40 40 44
+- `--line-strong` 62 62 66
+- `--accent`  236 236 234
+- `--shadow`  0 0 0
+- `--border-overlay` 255 255 255
 - `--success` 52 211 153
 - `--success-fg` 0 0 0
 - `--warning` 251 191 36
@@ -58,6 +57,12 @@ Dark mode:
 - `--error-fg` 0 0 0
 - `--info` 96 165 250
 - `--info-fg` 0 0 0
+
+Note: the light-mode surface hierarchy deliberately inverts the usual order
+(OpenCode mirror rule in `app/src/index.css`): `paper-raised` is DARKER than
+`paper`, stepping toward the foreground instead of lighter, and `paper-sunken`
+is the lightest surface. The dark palette is a soft warm-neutral set, not pure
+black. `app/src/index.css` is the source of truth; the values above mirror it.
 
 ### Color schemes
 Parchment remains the default and locked system palette. The Settings color-scheme

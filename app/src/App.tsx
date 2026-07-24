@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useState } from "react";
-import { CheckCircle2, ExternalLink, X, AlertTriangle, PanelLeft, PanelRight, Search } from "lucide-react";
+import { CheckCircle2, ExternalLink, X, AlertTriangle, PanelLeft, Search } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
 import { Landing } from "./components/Landing";
 import { IconButton } from "./components/IconButton";
@@ -25,7 +25,6 @@ const SettingsPage = lazy(() => import("./components/Settings").then((m) => ({ d
 const SearchModal = lazy(() => import("./components/SearchModal").then((m) => ({ default: m.SearchModal })));
 const ProjectView = lazy(() => import("./components/ProjectView").then((m) => ({ default: m.ProjectView })));
 const ArtifactPanel = lazy(() => import("./components/ArtifactPanel").then((m) => ({ default: m.ArtifactPanel })));
-const TodoPanel = lazy(() => import("./components/TodoPanel").then((m) => ({ default: m.TodoPanel })));
 const AnalyticsPage = lazy(() => import("./components/AnalyticsPage").then((m) => ({ default: m.AnalyticsPage })));
 const PlanPage = lazy(() => import("./components/PlanPage").then((m) => ({ default: m.PlanPage })));
 const ConnectorsPage = lazy(() => import("./components/ConnectorsPage").then((m) => ({ default: m.ConnectorsPage })));
@@ -118,11 +117,8 @@ export default function App() {
   const active = useApp((s) => s.activeChatId);
   const chat = useApp((s) => (active ? s.chats[active] : undefined));
   const artifactPanelOpen = !!(view === "chat" && active && chat?.artifactPanelOpen);
-  const todoPanelOpen = !!(view === "chat" && active && chat?.todoPanelOpen);
-  const hasTodos = !!(view === "chat" && active && (chat?.todos?.length ?? 0) > 0);
   const openLanding = useApp((s) => s.openLanding);
   const toggleSidebar = useApp((s) => s.toggleSidebar);
-  const toggleTodoPanel = useApp((s) => s.toggleTodoPanel);
   const setView = useApp((s) => s.setView);
   const setSearchOpen = useApp((s) => s.setSearchOpen);
   const triggerFocusChatInput = useApp((s) => s.triggerFocusChatInput);
@@ -151,7 +147,22 @@ export default function App() {
     notes?: string;
   } | null>(null);
   // In browser (non-Tauri) dev mode, skip cloud auth entirely and use a local stub.
-  const isBrowserDevMode = typeof window !== "undefined" && !((window as any).__TAURI_INTERNALS__) && !previewMode;
+  // But production web origins (app.tryzwork.app, tryzwork.app) are NOT dev —
+  // there we must run real cloud auth, same as the desktop app.
+  const isProductionWeb = (() => {
+    if (typeof window === "undefined") return false;
+    const origin = window.location.origin;
+    return (
+      origin === "https://app.tryzwork.app" ||
+      origin === "https://tryzwork.app" ||
+      origin === "https://www.tryzwork.app"
+    );
+  })();
+  const isBrowserDevMode =
+    typeof window !== "undefined" &&
+    !((window as any).__TAURI_INTERNALS__) &&
+    !previewMode &&
+    !isProductionWeb;
   const localStubUser: CloudUser = {
     user_id: "local-dev",
     email: "dev@zwork.local",
@@ -161,10 +172,10 @@ export default function App() {
     updated_at: new Date().toISOString(),
   };
   const [cloudUser, setCloudUser] = useState<CloudUser | null>(
-    previewMode === "app" ? {
-      user_id: "preview-user",
-      email: "preview@zwork.local",
-      name: "Preview",
+    previewMode === "app" || previewMode === "demo" ? {
+      user_id: previewMode === "demo" ? "demo-user" : "preview-user",
+      email: previewMode === "demo" ? "demo@zwork.local" : "preview@zwork.local",
+      name: previewMode === "demo" ? "zWork Demo" : "Preview",
       tier: "free",
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -423,9 +434,6 @@ export default function App() {
       } else if (mod && e.key === "0") {
         e.preventDefault();
         void zoomReset();
-      } else if (mod && e.key.toLowerCase() === "j") {
-        e.preventDefault();
-        toggleTodoPanel();
       } else if (mod && e.key === "/") {
         e.preventDefault();
         setKeybindingsOpen(!keybindingsOpen);
@@ -433,7 +441,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openLanding, toggleSidebar, setView, setSearchOpen, triggerFocusChatInput, keybindingsOpen, setKeybindingsOpen, toggleTodoPanel]);
+  }, [openLanding, toggleSidebar, setView, setSearchOpen, triggerFocusChatInput, keybindingsOpen, setKeybindingsOpen]);
 
   const [showLandingOverlay, setShowLandingOverlay] = useState(showLanding);
   const [particlesExiting, setParticlesExiting] = useState(false);
@@ -620,7 +628,7 @@ export default function App() {
               <div className="pointer-events-auto flex w-full max-w-[640px] items-center gap-3 rounded-2xl hairline bg-paper-raised px-4 py-3 shadow-lift">
                 <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
                 <div className="min-w-0 flex-1 text-[12.5px] text-ink">
-                  zWork {recentUpdateNotice.version} installed.{" "}
+                  zWork {recentUpdateNotice.version}.{" "}
                   <button
                     type="button"
                     onClick={() => {
@@ -642,17 +650,12 @@ export default function App() {
               </div>
             </div>
           )}
+          {artifactPanelOpen && (
+            <Suspense fallback={null}>
+              <ArtifactPanel />
+            </Suspense>
+          )}
         </div>
-        {artifactPanelOpen && (
-          <Suspense fallback={null}>
-            <ArtifactPanel />
-          </Suspense>
-        )}
-        {hasTodos && (
-          <Suspense fallback={null}>
-            <TodoPanel />
-          </Suspense>
-        )}
       </main>
 
       {/*
@@ -687,18 +690,6 @@ export default function App() {
           onClick={toggleSidebar}
           size="sm"
         />
-        {hasTodos && (
-          <IconButton
-            icon={<PanelRight />}
-            label={todoPanelOpen ? "Hide todo" : "Show todo"}
-            shortcut="⌘J"
-            tooltipSide="bottom"
-            showTooltip={false}
-            active={todoPanelOpen}
-            onClick={toggleTodoPanel}
-            size="sm"
-          />
-        )}
       </div>
 
       {/*

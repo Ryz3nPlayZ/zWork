@@ -1,10 +1,89 @@
 use serde_json::{json, Value};
+use std::collections::HashMap;
 
 /// Tool results bigger than this (chars) are treated as bulky captures /
 /// snapshots and evicted from history once a fresher one exists. AX trees and
 /// large page snapshots routinely hit 5–50 KB each; uncapped, they dominate the
 /// per-turn token cost because every turn re-sends the full history.
 const LARGE_RESULT_THRESHOLD: usize = 2_000;
+
+/// Index `tool_use_id` → (tool name, tool input) from the assistant
+/// `tool_use` blocks, so an eviction stub can name the tool — and the file or
+/// skill — that produced the bulky result instead of handing out
+/// one-size-fits-all recovery advice.
+fn tool_use_index(history: &[Value]) -> HashMap<String, (String, Value)> {
+    let mut map = HashMap::new();
+    for m in history {
+        if m.get("role").and_then(|v| v.as_str()) != Some("assistant") {
+            continue;
+        }
+        let arr = match m.get("content").and_then(|c| c.as_array()) {
+            Some(a) => a,
+            None => continue,
+        };
+        for item in arr {
+            if item.get("type").and_then(|v| v.as_str()) != Some("tool_use") {
+                continue;
+            }
+            let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            if id.is_empty() {
+                continue;
+            }
+            let name = item
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let input = item.get("input").cloned().unwrap_or(Value::Null);
+            map.insert(id.to_string(), (name, input));
+        }
+    }
+    map
+}
+
+/// Per-tool eviction stub. Captures/snapshots get the re-capture advice (they
+/// really are stale after any state change); file reads name the path; skill
+/// playbooks name the slug; everything else gets a neutral stub with no
+/// (wrong) recovery instructions.
+fn eviction_stub(tool_name: &str, input: &Value, len: usize) -> String {
+    let lower = tool_name.to_ascii_lowercase();
+    if lower.contains("capture") || lower.contains("snapshot") || lower.contains("screenshot") {
+        return format!(
+            "[earlier {tool_name} output omitted to save context — was {len} chars. \
+             Re-capture (desktop_capture / browser_snapshot) if you need the \
+             current screen state.]"
+        );
+    }
+    if matches!(tool_name, "read_file" | "list_dir" | "grep_search") {
+        let path = input.get("path").and_then(|v| v.as_str()).unwrap_or("");
+        let target = if path.is_empty() {
+            String::new()
+        } else {
+            format!(" for `{path}`")
+        };
+        return format!(
+            "[earlier {tool_name} output{target} omitted to save context — was {len} chars. \
+             Re-read with read_file if you need it again.]"
+        );
+    }
+    if tool_name == "read_skill" {
+        let slug = input.get("slug").and_then(|v| v.as_str()).unwrap_or("");
+        let target = if slug.is_empty() {
+            String::new()
+        } else {
+            format!(" for `{slug}`")
+        };
+        return format!(
+            "[earlier read_skill playbook{target} omitted to save context — was {len} chars. \
+             Re-load with read_skill if you need it again.]"
+        );
+    }
+    if tool_name.is_empty() {
+        format!("[earlier tool output omitted to save context — was {len} chars.]")
+    } else {
+        format!("[earlier {tool_name} output omitted to save context — was {len} chars.]")
+    }
+}
 
 /// Evict bulky `tool_result` contents from history, sparing the final
 /// `role:"user"` message (the freshest batch). Per the iron workflow the agent
@@ -22,6 +101,8 @@ pub fn evict_stale_bulky_results(history: &mut Vec<Value>) {
         Some(idx) => idx,
         None => return,
     };
+
+    let tool_index = tool_use_index(history);
 
     let mut evicted = 0usize;
     for (i, m) in history.iter_mut().enumerate() {
@@ -45,12 +126,9 @@ pub fn evict_stale_bulky_results(history: &mut Vec<Value>) {
                 .map(|s| s.len())
                 .unwrap_or(0);
             if len > LARGE_RESULT_THRESHOLD {
-                let stub = format!(
-                    "[earlier tool output omitted to save context — was {len} chars. \
-                     Re-capture (desktop_capture / browser_snapshot) if you need the \
-                     current screen state.]"
-                );
-                item["content"] = Value::String(stub);
+                let id = item.get("tool_use_id").and_then(|v| v.as_str()).unwrap_or("");
+                let (name, input) = tool_index.get(id).cloned().unwrap_or_default();
+                item["content"] = Value::String(eviction_stub(&name, &input, len));
                 evicted += 1;
             }
         }
@@ -114,15 +192,42 @@ pub async fn compact_conversation_history(
     shape: &str,
     model_id: &str,
 ) -> Result<(), String> {
+    compact_history_with_threshold(history, endpoint, headers, shape, model_id, 800_000).await
+}
+
+/// Same as `compact_conversation_history` but compacts regardless of size.
+/// Used when the provider has REJECTED the request for exceeding its context
+/// window — "below our usual threshold" is not a reason to skip in that case,
+/// because the model's real window is smaller than our heuristic assumed.
+pub async fn force_compact_conversation_history(
+    history: &mut Vec<Value>,
+    endpoint: &str,
+    headers: &reqwest::header::HeaderMap,
+    shape: &str,
+    model_id: &str,
+) -> Result<(), String> {
+    compact_history_with_threshold(history, endpoint, headers, shape, model_id, 0).await
+}
+
+async fn compact_history_with_threshold(
+    history: &mut Vec<Value>,
+    endpoint: &str,
+    headers: &reqwest::header::HeaderMap,
+    shape: &str,
+    model_id: &str,
+    min_chars: usize,
+) -> Result<(), String> {
     let total_chars: usize = history
         .iter()
         .map(|m| m.get("content").map(|c| c.to_string().len()).unwrap_or(0))
         .sum();
 
-    // Trigger compaction if character count exceeds 800,000 characters (~200,000 tokens)
-    // and there are enough messages to compact. We want to preserve system prompt (index 0)
-    // and at least the last 3 messages (to preserve immediate conversational context).
-    if total_chars <= 800_000 || history.len() <= 4 {
+    // Trigger compaction if character count exceeds the threshold (800,000
+    // characters ≈ ~200,000 tokens for the opportunistic pass; 0 when forced
+    // after a context-overflow 400) and there are enough messages to compact.
+    // We want to preserve system prompt (index 0) and at least the last 3
+    // messages (to preserve immediate conversational context).
+    if total_chars <= min_chars || history.len() <= 4 {
         return Ok(());
     }
 

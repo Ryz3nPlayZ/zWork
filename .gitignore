@@ -35,6 +35,9 @@ app/src-tauri/CuaDriver.app/
 .release/
 dist/
 
+# ===== Local scratch projects (demos, not part of the desktop release) =====
+minimal-chat/
+
 # ===== zWork runtime state =====
 .sidecar/
 .zwork/

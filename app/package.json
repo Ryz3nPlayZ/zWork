@@ -1,7 +1,7 @@
 {
   "name": "sidecar-app",
   "private": true,
-  "version": "0.5.0-beta.12",
+  "version": "0.5.0",
   "type": "module",
   "scripts": {
     "dev": "node ../scripts/prepare-bundle.cjs && vite",
@@ -26,6 +26,7 @@
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
     "react-syntax-highlighter": "^16.1.1",
+    "recharts": "^2.15.4",
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",

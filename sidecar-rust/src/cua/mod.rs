@@ -684,6 +684,129 @@ pub async fn list_apps() -> Result<Vec<Value>, String> {
     Ok(vec![result])
 }
 
+/// Enumerate on-screen, layer-0 windows for the "Share Window" feature.
+/// Returns `[{ window_id, pid, app_name, title, bounds }]` filtered to the
+/// current Space. Excludes zWork's own windows so the user doesn't screenshot
+/// the overlay or main window itself.
+pub async fn list_on_screen_windows() -> Result<Vec<Value>, String> {
+    let c = client().await?;
+    let result = c
+        .call("list_windows", json!({ "on_screen_only": true }))
+        .await?;
+    let windows = result
+        .as_array()
+        .or_else(|| result.get("windows").and_then(|v| v.as_array()))
+        .cloned()
+        .unwrap_or_default();
+    // Filter out zWork's own windows (by app_name) so the picker doesn't show
+    // the overlay or main window as a shareable target.
+    let filtered: Vec<Value> = windows
+        .into_iter()
+        .filter(|w| {
+            let app = w
+                .get("app_name")
+                .or_else(|| w.get("owner"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            !app.eq_ignore_ascii_case("zwork") && !app.eq_ignore_ascii_case("zWork")
+        })
+        .collect();
+    Ok(filtered)
+}
+
+/// Capture a screenshot of a specific window (by window_id) as a PNG file.
+/// Uses cua-driver's `get_window_state` with `capture_mode: "vision"` (screenshot
+/// only, no AX walk) and `screenshot_out_file` to write the PNG to disk. Returns
+/// the path to the written file. The caller reads + base64-encodes it for the
+/// vision model.
+pub async fn capture_window_screenshot(window_id: i64) -> Result<String, String> {
+    // Resolve the pid for this window_id from list_windows.
+    let c = client().await?;
+    let win_result = c
+        .call("list_windows", json!({ "on_screen_only": true }))
+        .await?;
+    let windows = win_result
+        .as_array()
+        .or_else(|| win_result.get("windows").and_then(|v| v.as_array()))
+        .cloned()
+        .unwrap_or_default();
+    let pid = windows
+        .iter()
+        .find_map(|w| {
+            let wid = w
+                .get("window_id")
+                .or_else(|| w.get("id"))
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            if wid == window_id {
+                w.get("pid").and_then(|v| v.as_i64())
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| format!("window_id {} not found among on-screen windows", window_id))?;
+
+    // Write the screenshot to a temp file.
+    let out_path = format!(
+        "{}/zwork-share-{}.png",
+        std::env::temp_dir().to_string_lossy(),
+        uuid::Uuid::new_v4().simple()
+    );
+    // Call get_window_state with vision capture mode to produce the screenshot.
+    // IMPORTANT: capture the result — the driver returns "No content produced
+    // (neither AX tree nor screenshot succeeded)" as a *successful* result (not
+    // as `isError`) when the vision capture fails, which is almost always a
+    // missing macOS Screen Recording grant on CuaDriver. `call()` would swallow
+    // that into an Ok(Value::String(...)); without inspecting it here we'd
+    // surface only the generic "file missing" message below, hiding the real
+    // cause from the user.
+    let call_result = c
+        .call(
+            "get_window_state",
+            json!({
+                "pid": pid,
+                "window_id": window_id,
+                "capture_mode": "vision",
+                "screenshot_out_file": out_path,
+            }),
+        )
+        .await?;
+
+    // Verify the file exists. If it doesn't, the vision capture failed —
+    // surface the driver's own message (plus the Screen Recording hint) instead
+    // of a generic "file not found".
+    if !std::path::Path::new(&out_path).exists() {
+        // `call()` unwraps content[].text into the returned Value; extract it
+        // so the error is actionable.
+        let result_text = match &call_result {
+            Value::String(s) => s.clone(),
+            other => other
+                .get("content")
+                .and_then(|c| c.as_array())
+                .and_then(|c| c.first())
+                .and_then(|c| c.get("text"))
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .to_string(),
+        };
+        return Err(if result_text.contains("No content produced") {
+            "CuaDriver couldn't capture this window (\"No content produced\"). \
+             This almost always means CuaDriver is missing the macOS Screen \
+             Recording permission — grant CuaDriver (not zWork) Screen Recording \
+             in System Settings → Privacy & Security → Screen Recording, then \
+             retry."
+                .to_string()
+        } else if !result_text.is_empty() {
+            format!("cua-driver: {result_text}")
+        } else {
+            "screenshot capture did not produce a file — check Screen Recording \
+             permission for CuaDriver"
+                .to_string()
+        });
+    }
+    Ok(out_path)
+}
+
 /// Wait locally (no driver round-trip).
 pub async fn wait(seconds: f64) -> Result<ActionResult, String> {
     tokio::time::sleep(std::time::Duration::from_secs_f64(seconds)).await;

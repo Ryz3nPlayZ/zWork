@@ -463,7 +463,7 @@ export function ArtifactCodeViewer({ artifact }: { artifact: Artifact }) {
                 placeholder="Describe what changes you want to make in plain English..."
                 rows={3}
                 disabled={refactoring}
-                className="w-full text-[12px] bg-paper border border-line rounded-lg p-2 focus:outline-none focus:border-accent-soft disabled:opacity-50 text-ink resize-none placeholder:text-ink-faint"
+                className="w-full text-[12px] bg-paper border border-line rounded-lg p-2 focus:outline-none focus:border-accent disabled:opacity-50 text-ink resize-none placeholder:text-ink-faint"
               />
             </div>
 
@@ -492,11 +492,11 @@ export function ArtifactCodeViewer({ artifact }: { artifact: Artifact }) {
             <button
               onClick={handleRefactor}
               disabled={refactoring || !refactorPrompt.trim()}
-              className="w-full py-2 px-3 text-[11.5px] font-medium rounded-lg bg-accent text-white hover:bg-accent-soft disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5 shadow-[0_1px_2px_rgba(0,0,0,0.05)] cursor-pointer"
+              className="w-full py-2 px-3 text-[11.5px] font-medium rounded-lg bg-ink text-paper hover:bg-ink/90 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5 shadow-[0_1px_2px_rgba(0,0,0,0.05)] cursor-pointer"
             >
               {refactoring ? (
                 <>
-                  <div className="h-3 w-3 animate-spin rounded-full border border-white border-t-transparent" />
+                  <div className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
                   Generating Plan...
                 </>
               ) : (
@@ -534,7 +534,7 @@ export function ArtifactCodeViewer({ artifact }: { artifact: Artifact }) {
                   </button>
                   <button
                     onClick={handleApplyRefactor}
-                    className="py-1.5 px-3 text-[11px] font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 transition-colors flex items-center justify-center gap-1 cursor-pointer"
+                    className="py-1.5 px-3 text-[11px] font-medium rounded-lg bg-success text-success-fg hover:bg-success/90 transition-colors flex items-center justify-center gap-1 cursor-pointer"
                   >
                     Apply Changes
                   </button>

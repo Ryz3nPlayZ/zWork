@@ -17,8 +17,13 @@ import {
   type InboxItem,
 } from "./api";
 import { fetchCloudSession, getCloudToken, logoutCloudSession, startDesktopGoogleSignIn } from "./cloud";
+import { isDemoMode } from "./preview";
 import { invoke } from "@tauri-apps/api/core";
-import { setTelemetryEnabled, trackError, trackArtifactCreated } from "./telemetry";
+import { setTelemetryEnabled, trackError, trackArtifactCreated, recordTelemetry } from "./telemetry";
+import {
+  emitChatListChanged,
+  registerWindowSync,
+} from "./windowSync";
 
 const LEGACY_MANAGED_BASE_URLS = new Set(["https://ollama.com/v1"]);
 const LEGACY_MANAGED_MODEL_IDS = new Set([
@@ -350,6 +355,7 @@ export interface Chat {
   todos?: AgentTodo[];
   todoPanelOpen?: boolean;
   pendingQuestion?: {
+    questionId?: string;
     question: string;
     options: string[];
   } | null;
@@ -1450,6 +1456,9 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   refreshChats: async () => {
+    // Demo mode: no server-side chat persistence. Chat history lives only in
+    // the local store for the session; nothing to refresh from a backend.
+    if (isDemoMode()) return;
     if (get().backendOffline) {
       const cached = localStorage.getItem("zwork:cached-summaries");
       if (cached) set({ chatSummaries: JSON.parse(cached) });
@@ -1526,6 +1535,9 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   connectComposioApp: async (app: string) => {
+    // Desktop-only: the public web demo has no Connectors UI, but guard the
+    // action so it can't be reached via devtools/console in demo mode.
+    if (isDemoMode()) return;
     const { url } = await api.composioConnect(app);
     await invoke("open_external", { url });
     let attempts = 0;
@@ -1677,15 +1689,17 @@ export const useApp = create<AppState>((set, get) => ({
     try {
       await api.deleteChat(id);
     } catch (e) { console.warn("deleteChat failed:", e) }
+    const wasActive = get().activeChatId === id;
     set((s) => {
       const { [id]: _, ...rest } = s.chats;
       void _;
       return {
         chats: rest,
-        activeChatId: s.activeChatId === id ? null : s.activeChatId,
+        activeChatId: wasActive ? null : s.activeChatId,
       };
     });
     await get().refreshChats();
+    void emitChatListChanged();
   },
 
   renameChat: async (id, title) => {
@@ -1698,9 +1712,11 @@ export const useApp = create<AppState>((set, get) => ({
       return { chats: { ...s.chats, [id]: { ...c, title } } };
     });
     await get().refreshChats();
+    void emitChatListChanged();
   },
 
   answerQuestion: async (chatId, answer) => {
+    const questionId = get().chats[chatId]?.pendingQuestion?.questionId;
     set((s) => {
       const c = s.chats[chatId];
       if (!c) return {};
@@ -1712,7 +1728,7 @@ export const useApp = create<AppState>((set, get) => ({
       };
     });
     try {
-      await api.answerQuestion(chatId, answer);
+      await api.answerQuestion(chatId, answer, questionId);
     } catch (e) {
       console.warn("answerQuestion failed:", e);
     }
@@ -1875,6 +1891,13 @@ export const useApp = create<AppState>((set, get) => ({
         },
       };
     });
+    // Fire-and-forget; respects the telemetry opt-out (post() early-returns
+    // when disabled) and fans out to PostHog + the sidecar telemetry log.
+    recordTelemetry("feedback_bad", {
+      chat_id: id,
+      message_id: messageId,
+      model: get().model,
+    });
   },
 
   editAndResend: async (messageId, newText) => {
@@ -1920,13 +1943,6 @@ export const useApp = create<AppState>((set, get) => ({
 
     const runId = uid();
     const currentId = get().view === "projects" ? null : get().activeChatId;
-    if (currentId) {
-      const activeChat = get().chats[currentId];
-      if (activeChat && activeChat.pendingQuestion) {
-        await get().answerQuestion(currentId, trimmed);
-        return;
-      }
-    }
 
     // Clear any previous subagent state
     set({ subagents: [] });
@@ -2103,6 +2119,9 @@ export const useApp = create<AppState>((set, get) => ({
                 };
               });
               localId = evt.id;
+              // A brand-new chat just got its real id — tell the other window
+              // so its sidebar picks it up.
+              void emitChatListChanged();
             }
           } else if (evt.type === "status") {
             set((s) => {
@@ -2250,6 +2269,7 @@ export const useApp = create<AppState>((set, get) => ({
                   [localId]: {
                     ...c,
                     pendingQuestion: {
+                      questionId: evt.question_id,
                       question: evt.question,
                       options: evt.options,
                     },
@@ -2665,6 +2685,8 @@ export const useApp = create<AppState>((set, get) => ({
       set({ _abort: null });
       // Refresh history so the new chat shows up in the sidebar.
       get().refreshChats();
+      // Notify the other window (overlay ↔ main) so its sidebar updates too.
+      void emitChatListChanged();
     }
   },
 
@@ -2747,6 +2769,19 @@ if (typeof window !== "undefined") {
     } catch (e) {
       console.warn("Failed to write offline cache:", e);
     }
+  });
+}
+
+// Cross-window chat-list sync (overlay ↔ main). The two windows are separate
+// OS webviews with independent stores; Tauri's event bus is the only channel.
+// The overlay is an independent quick-chat surface, so we deliberately sync
+// only the chat LIST (so a quick question asked in the overlay shows up in
+// the main window's sidebar afterward), NOT the active chat — the overlay
+// opens to a fresh pill every time and never disturbs the main window's view.
+// Registration is a no-op in browser dev mode. See lib/windowSync.ts.
+if (typeof window !== "undefined") {
+  void registerWindowSync({
+    onListChanged: () => useApp.getState().refreshChats(),
   });
 }
 

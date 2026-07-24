@@ -14,6 +14,12 @@ pub struct ChatMessage {
     pub created_at: u64,
     #[serde(default)]
     pub activities: Vec<Value>,
+    /// Compact trace of the tool calls made during this assistant turn:
+    /// (tool name, brief args summary, one-line result digest) per call.
+    /// Persisted so a NEW run can rebuild "what was done earlier in this
+    /// chat" without storing raw tool_use/tool_result blocks.
+    #[serde(default)]
+    pub tool_trace: Vec<Value>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -93,10 +99,14 @@ pub fn list_all() -> Vec<Value> {
                         let title = d.get("title").and_then(|v| v.as_str()).unwrap_or("Untitled").to_string();
                         let created_at = d.get("created_at").and_then(|v| v.as_u64()).unwrap_or(0);
                         let updated_at = d.get("updated_at").and_then(|v| v.as_u64()).unwrap_or(0);
-                        let message_count = d.get("messages").and_then(|v| v.as_array()).map_or(0, |a| a.len());
+                        let messages = d.get("messages").and_then(|v| v.as_array());
+                        let message_count = messages.map_or(0, |a| a.len());
                         let model = d.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
                         let project_id = d.get("project_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                         let kind = d.get("kind").and_then(|v| v.as_str()).unwrap_or("chat").to_string();
+                        let preview = messages
+                            .and_then(|a| preview_for_summary(a))
+                            .unwrap_or_default();
 
                         out.push(serde_json::json!({
                             "id": id,
@@ -106,7 +116,8 @@ pub fn list_all() -> Vec<Value> {
                             "message_count": message_count,
                             "model": model,
                             "project_id": project_id,
-                            "kind": kind
+                            "kind": kind,
+                            "preview": preview
                         }));
                     }
                 }
@@ -119,6 +130,69 @@ pub fn list_all() -> Vec<Value> {
         b_time.cmp(&a_time)
     });
     out
+}
+
+/// Build a short (~140 char) plaintext preview for the chat list. Prefers the
+/// most recent user message; falls back to the most recent assistant message.
+/// Used by SearchModal to match against message content, not just titles.
+fn preview_for_summary(messages: &[Value]) -> Option<String> {
+    /// Flatten a message's `content` (which may be a string or an array of
+    /// {type:"text", text:...} blocks) into a single trimmed string.
+    fn text_from_content(content: &Value) -> String {
+        match content {
+            Value::String(s) => s.clone(),
+            Value::Array(arr) => arr
+                .iter()
+                .filter_map(|block| {
+                    block
+                        .get("type")
+                        .and_then(|t| t.as_str())
+                        .filter(|t| *t == "text")
+                        .and_then(|_| block.get("text").and_then(|t| t.as_str()))
+                        .map(|s| s.to_string())
+                })
+                .collect::<Vec<_>>()
+                .join(" "),
+            _ => String::new(),
+        }
+    }
+
+    /// Collapse whitespace and cap at `max` chars on a word boundary.
+    fn truncate(s: &str, max: usize) -> String {
+        let collapsed: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+        if collapsed.chars().count() <= max {
+            return collapsed;
+        }
+        let head: String = collapsed.chars().take(max).collect();
+        // Walk back to the last space so we don't cut mid-word.
+        match head.rfind(' ') {
+            Some(i) if i > 0 => format!("{}…", &collapsed[..i]),
+            _ => format!("{}…", head),
+        }
+    }
+
+    let user_text = messages
+        .iter()
+        .rev()
+        .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+        .and_then(|m| m.get("content"))
+        .map(|c| text_from_content(c))
+        .filter(|s| !s.is_empty());
+    let text = user_text.or_else(|| {
+        messages
+            .iter()
+            .rev()
+            .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("assistant"))
+            .and_then(|m| m.get("content"))
+            .map(|c| text_from_content(c))
+            .filter(|s| !s.is_empty())
+    })?;
+    let trimmed = truncate(&text, 140);
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
 }
 
 pub fn get(chat_id: &str) -> Option<Chat> {
@@ -201,6 +275,7 @@ pub fn append_message(chat_id: &str, role: &str, content: Value) -> Option<ChatM
         content: content.clone(),
         created_at: now_ms(),
         activities: Vec::new(),
+        tool_trace: Vec::new(),
     };
     
     c.messages.push(msg.clone());
@@ -260,14 +335,102 @@ pub fn set_project(chat_id: &str, project_id: &str) -> Option<Chat> {
     Some(c)
 }
 
-#[allow(dead_code)]
-pub fn set_compaction(chat_id: &str, summary: &str, cursor: u64) -> Option<Chat> {
+/// Cap on one trace entry's args summary / result digest (chars). Keeps a
+/// turn's trace ~1–2 KB even with chatty tools.
+const TRACE_ARGS_CAP: usize = 120;
+const TRACE_DIGEST_CAP: usize = 200;
+/// Cap on the rendered "Work done so far" block (chars). Tail-biased: recent
+/// work matters most.
+const TRACE_BLOCK_CAP: usize = 4_000;
+
+/// Collapse whitespace and cap at `max` chars (char-boundary safe).
+fn trace_clip(s: &str, max: usize) -> String {
+    let collapsed: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.chars().count() <= max {
+        return collapsed;
+    }
+    let head: String = collapsed.chars().take(max).collect();
+    format!("{}…", head.trim_end())
+}
+
+/// Build one capped tool-trace entry: tool name, brief args summary, and a
+/// one-line result digest. Provider-agnostic plain data — not a tool_use
+/// block — so it works on every wire shape.
+pub fn tool_trace_entry(name: &str, params: &Value, ok: bool, result: &str) -> Value {
+    serde_json::json!({
+        "name": name,
+        "args": trace_clip(&params.to_string(), TRACE_ARGS_CAP),
+        "ok": ok,
+        "digest": trace_clip(result, TRACE_DIGEST_CAP),
+    })
+}
+
+/// Append a turn's tool-trace entries to the assistant message that produced
+/// them. One assistant message spans the whole run, so each executor turn
+/// appends its batch as it completes.
+pub fn append_tool_trace(chat_id: &str, message_id: &str, entries: Vec<Value>) -> Option<ChatMessage> {
+    if entries.is_empty() {
+        return None;
+    }
     let mut c = get(chat_id)?;
-    c.compacted_summary = summary.to_string();
-    c.compaction_cursor = cursor;
-    c.updated_at = now_ms();
-    save(&c);
-    Some(c)
+    let mut updated = None;
+    for msg in &mut c.messages {
+        if msg.id == message_id {
+            msg.tool_trace.extend(entries);
+            updated = Some(msg.clone());
+            break;
+        }
+    }
+    if updated.is_some() {
+        c.updated_at = now_ms();
+        save(&c);
+    }
+    updated
+}
+
+/// Render the tool traces persisted on prior messages as a compact
+/// "Work done so far" block for history rebuild. Digest-only plain text
+/// (never real tool_use blocks), tail-biased to ~4 KB. Returns None when no
+/// prior turn recorded any tool work.
+pub fn render_tool_traces(messages: &[ChatMessage]) -> Option<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for msg in messages {
+        if msg.role != "assistant" {
+            continue;
+        }
+        for entry in &msg.tool_trace {
+            let name = entry.get("name").and_then(|v| v.as_str()).unwrap_or("tool");
+            let args = entry.get("args").and_then(|v| v.as_str()).unwrap_or("");
+            let ok = entry.get("ok").and_then(|v| v.as_bool()).unwrap_or(true);
+            let digest = entry.get("digest").and_then(|v| v.as_str()).unwrap_or("");
+            let status = if ok { "ok" } else { "FAILED" };
+            if digest.is_empty() {
+                lines.push(format!("- `{}` {} → {}", name, args, status));
+            } else {
+                lines.push(format!("- `{}` {} → {} — \"{}\"", name, args, status, digest));
+            }
+        }
+    }
+    if lines.is_empty() {
+        return None;
+    }
+    // Tail-biased cap: drop the OLDEST work first.
+    let mut total: usize = lines.iter().map(|l| l.len() + 1).sum();
+    let mut start = 0usize;
+    while total > TRACE_BLOCK_CAP && start < lines.len() - 1 {
+        total -= lines[start].len() + 1;
+        start += 1;
+    }
+    let mut block = String::from(
+        "## Work done so far\n\
+         Earlier turns in this chat already ran these tools (digest only — \
+         re-run a tool if you need its full output):\n",
+    );
+    if start > 0 {
+        block.push_str(&format!("- […{} earlier tool call(s) omitted]\n", start));
+    }
+    block.push_str(&lines[start..].join("\n"));
+    Some(block)
 }
 
 /// Remove all messages after the given message_id, optionally updating that

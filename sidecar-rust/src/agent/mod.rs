@@ -64,6 +64,44 @@ fn max_tokens_for(model_id: &str) -> u64 {
     16384
 }
 
+/// Map a router-facing model id ("zwork-pro" / "zwork-flash", as registered in
+/// Settings) to the real upstream model the zWork Cloud Router serves.
+/// Explicit ids only — unknown ids fall back to flash WITH a log line, never
+/// a silent substring guess (`contains("pro")` mis-mapped ids like
+/// "grok-4-pro-fast" that happen to contain "pro").
+fn router_real_model(model_id: &str) -> String {
+    match model_id {
+        "zwork-pro" | "deepseek-v4-pro" => "deepseek-v4-pro".to_string(),
+        "zwork-flash" | "deepseek-v4-flash" => "deepseek-v4-flash".to_string(),
+        other => {
+            tracing::warn!(
+                "[agent] unknown router model id '{other}' — falling back to deepseek-v4-flash"
+            );
+            "deepseek-v4-flash".to_string()
+        }
+    }
+}
+
+/// True when a provider error is actually "the conversation is too long for
+/// the model's context window" — a 400 in disguise that is RECOVERABLE by
+/// compacting history, unlike other permanent 400s (malformed request shape,
+/// unbalanced tool_use/tool_result pairing, auth). Matches the phrasings used
+/// by OpenAI-compatible APIs, Anthropic, and the zWork router envelope.
+fn is_context_overflow_error(message: &str, raw: Option<&str>) -> bool {
+    let hay = format!(
+        "{} {}",
+        message.to_ascii_lowercase(),
+        raw.unwrap_or("").to_ascii_lowercase()
+    );
+    hay.contains("context_length_exceeded")
+        || hay.contains("context length")
+        || hay.contains("maximum context")
+        || hay.contains("context window")
+        || hay.contains("prompt is too long")
+        || hay.contains("too many tokens")
+        || hay.contains("input is too long")
+}
+
 /// Classify a provider error message as transient (retryable) or permanent.
 ///
 /// The `ProviderError` event carries only a string message — no HTTP status
@@ -80,7 +118,40 @@ pub enum ErrorClass {
 }
 
 pub fn classify_provider_error(message: &str) -> ErrorClass {
+    classify_provider_error_with_raw(message, None)
+}
+
+/// Classify with the optional raw response body. The cloud router wraps every
+/// per-provider failure as a 502 `router_upstreams_failed: <detail>` envelope —
+/// including permanent client errors like a 400 invalid_request_error. The bare
+/// `message` ("upstream HTTP 502 Bad Gateway") looks transient, but the wrapped
+/// body reveals the real upstream status. This peeks inside that envelope so a
+/// 400/401/403 wrapped in a 502 is classified as Permanent (no retry) instead
+/// of being pointlessly retried 3× against a doomed malformed request.
+pub fn classify_provider_error_with_raw(message: &str, raw: Option<&str>) -> ErrorClass {
     let lower = message.to_ascii_lowercase();
+    let raw_lower = raw.unwrap_or("").to_ascii_lowercase();
+
+    // Router-wrapped permanent upstream errors: the envelope is 502, but the
+    // embedded body carries a definitive non-retryable status from the actual
+    // model provider. Detect these BEFORE the 5xx-transient rules below so
+    // they short-circuit to Permanent. (Only inspect when we are actually
+    // looking at a router envelope — otherwise 400/401/403 substrings in the
+    // top-level message would be transient-classified first.)
+    if raw_lower.contains("router_upstreams_failed") {
+        if raw_lower.contains("400")
+            || raw_lower.contains("invalid_request_error")
+            || raw_lower.contains("bad request")
+            || raw_lower.contains("401")
+            || raw_lower.contains("unauthorized")
+            || raw_lower.contains("gateway_access_denied")
+            || raw_lower.contains("403")
+            || raw_lower.contains("forbidden")
+        {
+            return ErrorClass::Permanent;
+        }
+    }
+
     // Transient: rate limits, service unavailable, connection issues.
     if lower.contains("429")
         || lower.contains("too many requests")
@@ -128,10 +199,47 @@ pub fn friendly_upstream_error(message: &str, raw: Option<&str>, retries_exhaust
     let lower = message.to_ascii_lowercase();
     let raw_lower = raw.unwrap_or("").to_ascii_lowercase();
 
-    // The zWork router returns 502 with body `router_upstreams_failed[: <detail>]`
-    // when every configured upstream model provider failed. This is a cloud-side
-    // outage — all upstreams are down, not a transient single-request blip.
-    if lower.contains("502") || raw_lower.contains("router_upstreams_failed") {
+    // The zWork router wraps EVERY per-provider failure as a 502
+    // `router_upstreams_failed: <failures>` — including permanent client-side
+    // errors like a 400 invalid_request_error or 401 auth failure. Before
+    // claiming "all providers unavailable", inspect the wrapped failure body
+    // for a permanent upstream status: if DeepSeek returned 400/401/403, that
+    // is the real cause and retrying will not help. The router's 502 envelope
+    // is a transport detail, not the user-facing truth.
+    if raw_lower.contains("router_upstreams_failed") {
+        // Permanent upstream errors embedded inside the router's 502 envelope.
+        // Format: `router_upstreams_failed: ProviderName:model 400 {error...}`
+        // or `... 401 {error...}` / `... 403 {error...}`.
+        if raw_lower.contains("400")
+            || raw_lower.contains("invalid_request_error")
+            || raw_lower.contains("bad request")
+        {
+            // Surface the actual provider message — it is specific and
+            // actionable (e.g. "messages.4: tool_use ids found without
+            // tool_result blocks immediately after"). Trim the router
+            // envelope prefix so the user sees the real cause, not the
+            // transport wrapper.
+            let detail = extract_upstream_detail(raw).unwrap_or_default();
+            return format!(
+                "The model provider rejected the request as invalid{}{}. {}",
+                if retries_exhausted { " after retries" } else { "" },
+                if detail.is_empty() { String::new() } else { format!(": {}", detail) },
+                "This is a request-shape problem, not a transient outage — retrying won't help. Try starting a new chat or rephrasing."
+            );
+        }
+        if raw_lower.contains("401")
+            || raw_lower.contains("unauthorized")
+            || raw_lower.contains("gateway_access_denied")
+        {
+            return "Authentication failed — the model provider rejected the API key. Check your API key in Settings.".to_string();
+        }
+        if raw_lower.contains("403") || raw_lower.contains("forbidden") {
+            return "Access denied by the model provider. Your key may not have access to the requested model.".to_string();
+        }
+
+        // Genuine all-upstreams-failed: no permanent status embedded, so this
+        // really is a cloud-side outage (every provider returned a transient
+        // error or was unreachable).
         let detail = raw
             .map(|r| {
                 let t = r.trim();
@@ -192,6 +300,36 @@ pub fn friendly_upstream_error(message: &str, raw: Option<&str>, retries_exhaust
         }
         _ => message.to_string(),
     }
+}
+
+/// Extract the human-readable detail from a router-wrapped failure body.
+///
+/// The router envelope looks like:
+///   `router_upstreams_failed: ProviderName:model_id 400 {"error":{"message":"..."}}`
+/// The user does not need the `router_upstreams_failed:` prefix or the
+/// `ProviderName:model_id 400 ` routing prefix — only the provider's actual
+/// error message. This strips the envelope and returns the JSON `message`
+/// field when present (the actionable part), falling back to the trimmed body
+/// after the prefix when the JSON shape is unexpected.
+fn extract_upstream_detail(raw: Option<&str>) -> Option<String> {
+    let body = raw?.trim();
+    // Strip the `router_upstreams_failed:` envelope prefix.
+    let after_prefix = match body.find("router_upstreams_failed:") {
+        Some(idx) => body[idx + "router_upstreams_failed:".len()..].trim(),
+        None => body,
+    };
+    // The remaining text is `ProviderName:model_id <status> {json}`. Find the
+    // first `{` — everything from there is the provider's JSON error body.
+    let json_start = after_prefix.find('{')?;
+    let json_str = &after_prefix[json_start..];
+    let parsed: serde_json::Value = serde_json::from_str(json_str).ok()?;
+    // Anthropic / OpenAI error shape: {"error":{"message":"..."}}
+    parsed
+        .get("error")
+        .and_then(|e| e.get("message"))
+        .and_then(|m| m.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| Some(json_str.trim_end_matches('}').to_string()))
 }
 
 /// Keyword-detect the kind of artifact a message likely wants and return the
@@ -262,34 +400,78 @@ pub fn reject_gate(gate_id: &str) -> bool {
 }
 
 // ── Pending interactive questions (ask_question / ask_user) ──────────────────
-// One in-flight question per chat_id, mirroring the permission-gate pattern.
-// The tool blocks on a oneshot until the frontend POSTs the answer.
+// In-flight questions keyed by a unique question id (NOT chat_id), mirroring the
+// permission-gate pattern. Tool calls run concurrently as parallel spawned
+// tasks, so keying by chat_id alone would let a second ask_question overwrite
+// the first's oneshot::Sender — dropping it, misrouting the user's answer, and
+// hanging the overwritten question until its 5-minute timeout. Keying by a
+// unique id lets concurrent questions coexist; the frontend's single-question
+// UX (one `pendingQuestion` per chat) is preserved by `answer_pending_question`
+// resolving the most recent question for a chat when no explicit id is given.
 fn pending_questions() -> &'static Mutex<HashMap<String, oneshot::Sender<String>>> {
     static INSTANCE: OnceLock<Mutex<HashMap<String, oneshot::Sender<String>>>> = OnceLock::new();
     INSTANCE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Resolve a pending question for a chat. Called by the /answer-question route.
-pub fn answer_pending_question(chat_id: &str, answer: &str) -> bool {
+/// Map chat_id → the question id most recently registered for it, so the
+/// legacy single-question answer route (no explicit question id) resolves the
+/// question the user is actually looking at.
+fn current_question_for_chat() -> &'static Mutex<HashMap<String, String>> {
+    static INSTANCE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    INSTANCE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Resolve a pending question. Called by the /answer-question route.
+/// If `question_id` is provided, resolves that specific question; otherwise
+/// resolves the most-recently-registered question for the chat (the one the
+/// single-question frontend is displaying).
+pub fn answer_pending_question(chat_id: &str, answer: &str, question_id: Option<&str>) -> bool {
     let mut map = pending_questions().lock().unwrap();
-    if let Some(tx) = map.remove(chat_id) {
+    let key = match question_id {
+        Some(qid) => qid.to_string(),
+        None => {
+            let cur = current_question_for_chat().lock().unwrap();
+            match cur.get(chat_id) {
+                Some(qid) => qid.clone(),
+                None => return false,
+            }
+        }
+    };
+    if let Some(tx) = map.remove(&key) {
         let _ = tx.send(answer.to_string());
+        // Clean up the current-question pointer if it pointed at this one.
+        let mut cur = current_question_for_chat().lock().unwrap();
+        if cur.get(chat_id).map(|s| s.as_str()) == Some(key.as_str()) {
+            cur.remove(chat_id);
+        }
         true
     } else {
         false
     }
 }
 
-/// Register a pending question (called from the tool dispatcher).
-pub fn register_pending_question(chat_id: &str, tx: oneshot::Sender<String>) {
-    let mut map = pending_questions().lock().unwrap();
-    map.insert(chat_id.to_string(), tx);
+/// Register a pending question (called from the tool dispatcher). Returns the
+/// generated question id so the caller can emit it in the ask_question SSE
+/// event for the frontend to echo back on answer.
+pub fn register_pending_question(chat_id: &str, tx: oneshot::Sender<String>) -> String {
+    let question_id = format!("q_{}", uuid::Uuid::new_v4().simple());
+    {
+        let mut map = pending_questions().lock().unwrap();
+        map.insert(question_id.clone(), tx);
+    }
+    // Track this as the chat's current question so the legacy answer route
+    // (no question_id) resolves it.
+    {
+        let mut cur = current_question_for_chat().lock().unwrap();
+        cur.insert(chat_id.to_string(), question_id.clone());
+    }
+    question_id
 }
 
 /// Drop a pending question (e.g. on timeout).
-pub fn clear_pending_question(chat_id: &str) {
+pub fn clear_pending_question(question_id: &str) {
     let mut map = pending_questions().lock().unwrap();
-    map.remove(chat_id);
+    map.remove(question_id);
 }
 
 // ── Per-run approved-commands allowlist ──────────────────────────────────────
@@ -422,11 +604,7 @@ pub fn run_agent_turn(
             }
         } else {
             // Fallback: zwork_router default models
-            let real_model = if model_id.contains("pro") {
-                "deepseek-v4-pro".to_string()
-            } else {
-                "deepseek-v4-flash".to_string()
-            };
+            let real_model = router_real_model(&model_id);
             if let Some(cred) = crate::server::resolve("zwork_router", &s, "") {
                 (cred.api_key, cred.base_url, "anthropic".to_string(), real_model, "zWork Cloud Router".to_string())
             } else {
@@ -564,20 +742,35 @@ pub fn run_agent_turn(
             }
         );
 
+        // Volatile, per-message context is collected here and injected into
+        // the LATEST USER MESSAGE (below), not the system prompt: the system
+        // prompt must stay byte-stable across the session so the Anthropic
+        // `cache_control` breakpoint keeps hitting the cached prefix.
+        let mut turn_extras: Vec<String> = Vec::new();
+
         // Artifact mode: steer the model toward rich deliverables. The hint
         // keyword-detects the likely artifact kind (doc/sheet/graph/code) the
         // way the Python backend did, so the same phrasings produce artifacts.
         if artifact_mode {
-            system_prompt.push_str("\n\n## Artifact mode\n");
-            system_prompt.push_str(&artifact_hint(&user_message));
+            turn_extras.push(format!(
+                "## Artifact mode\n{}",
+                artifact_hint(&user_message)
+            ));
         }
 
         // Web-search grounding: when enabled, run a quick search on the
-        // message and inject the results as grounding context (mirrors Python).
+        // message and inject the results (mirrors Python). web_search is
+        // Google News RSS only — label it honestly as headlines, not facts.
         if web_search_enabled {
             if let Some(grounding) = web_search_grounding(&user_message).await {
-                system_prompt.push_str("\n\n## Web Search Results (Grounding Context)\n");
-                system_prompt.push_str(&grounding);
+                turn_extras.push(format!(
+                    "## News headlines (recent, may be incomplete)\n{}\n\n\
+                     These are Google News headlines only — not verified facts, and possibly \
+                     incomplete. For factual detail or page content, fetch the actual page \
+                     (browser_navigate / browser_snapshot) instead of relying on the headlines; \
+                     if you can't, say so rather than guessing.",
+                    grounding
+                ));
             }
         }
 
@@ -589,18 +782,17 @@ pub fn run_agent_turn(
                 .map(|a| format!("- {} → {}", a.name, a.path_or_url()))
                 .collect::<Vec<_>>()
                 .join("\n");
-            system_prompt.push_str(&format!(
-                "\n\n## Current interaction context\nThe user attached:\n{listing}"
+            turn_extras.push(format!(
+                "## Current interaction context\nThe user attached:\n{listing}"
             ));
         }
 
-        // Caller-supplied extra system-prompt block. Used by the scheduler to
-        // inject scheduled-task identity, trigger description, and per-task
-        // memory. Interactive (HTTP) turns pass `None` — no-op here.
+        // Caller-supplied extra block. Used by the scheduler to inject
+        // scheduled-task identity, trigger description, and per-task memory.
+        // Interactive (HTTP) turns pass `None` — no-op here.
         if let Some(extra) = &extra_system_prompt {
             if !extra.trim().is_empty() {
-                system_prompt.push_str("\n\n");
-                system_prompt.push_str(extra);
+                turn_extras.push(extra.clone());
             }
         }
 
@@ -628,7 +820,36 @@ pub fn run_agent_turn(
                 }
             }
         }
-        
+
+        // Persisted tool traces from earlier runs give the model back its
+        // cross-message working memory (chatstore only persists display text,
+        // not tool calls). Injected as plain text into the latest user
+        // message — provider-agnostic, no tool_use blocks.
+        if let Some(traces) = chatstore::render_tool_traces(&chat.messages) {
+            turn_extras.insert(0, traces);
+        }
+
+        // Volatile context collected above (work-so-far trace, artifact hint,
+        // news grounding, attachment listing, scheduler extras) goes into the
+        // LATEST USER MESSAGE so the system prompt stays byte-stable and
+        // cache-friendly (same pattern as the <turn-context> block).
+        if !turn_extras.is_empty() {
+            let extras = turn_extras.join("\n\n");
+            if let Some(last_user) = history_messages
+                .iter_mut()
+                .rev()
+                .find(|m| m.get("role").and_then(|v| v.as_str()) == Some("user"))
+            {
+                if let Some(content) = last_user.get_mut("content") {
+                    if let Some(s) = content.as_str() {
+                        *content = json!(format!("{}\n\n{}", extras, s));
+                    } else if let Some(arr) = content.as_array_mut() {
+                        arr.push(json!({ "type": "text", "text": extras }));
+                    }
+                }
+            }
+        }
+
         repair_history_alternation(&mut history_messages);
         let mut doom_loop_detector = DoomLoopDetector::new();
             
@@ -782,7 +1003,7 @@ pub fn run_agent_turn(
                             *content = json!(format!("{}\n\n{}", turn_ctx, s));
                         }
                     } else if let Some(arr) = content.as_array_mut() {
-                        // Anthropic content-blocks shape: prepend a text block.
+                        // Anthropic content-blocks shape: inject a text block.
                         // Avoid duplicates across turns.
                         let already = arr.iter().any(|b| {
                             b.get("text")
@@ -791,7 +1012,19 @@ pub fn run_agent_turn(
                                 .unwrap_or(false)
                         });
                         if !already {
-                            arr.insert(0, json!({ "type": "text", "text": turn_ctx }));
+                            // If this user message is a tool_result batch
+                            // (content = [{type:tool_result,...}]), the
+                            // turn-context text block MUST come AFTER the
+                            // tool_result blocks, not before. DeepSeek's
+                            // Anthropic endpoint rejects a text block placed
+                            // before the tool_result with a 400
+                            // `tool_use ids found without tool_result blocks
+                            // immediately after` — the message after a
+                            // tool_use must lead with tool_result. Real
+                            // Anthropic tolerates either order; DeepSeek does
+                            // not. Pushing to the end keeps the turn-context
+                            // signal while preserving the required ordering.
+                            arr.push(json!({ "type": "text", "text": turn_ctx }));
                         }
                     }
                 }
@@ -1037,7 +1270,8 @@ pub fn run_agent_turn(
             // A hard stream error ends the turn/task rather than executing any
             // partially-collected tool calls.
             if let Some((ref err_msg, ref raw_body)) = turn_error {
-                if classify_provider_error(err_msg) == ErrorClass::Transient
+                if classify_provider_error_with_raw(err_msg, raw_body.as_deref())
+                    == ErrorClass::Transient
                     && transient_retries < MAX_TRANSIENT_RETRIES
                 {
                     transient_retries += 1;
@@ -1076,7 +1310,8 @@ pub fn run_agent_turn(
                 // translates the bare status / router error codes into text the
                 // user can act on (e.g. "All model providers are currently
                 // unavailable" for the router's router_upstreams_failed).
-                let exhausted = classify_provider_error(err_msg) == ErrorClass::Transient
+                let exhausted = classify_provider_error_with_raw(err_msg, raw_body.as_deref())
+                    == ErrorClass::Transient
                     && transient_retries >= MAX_TRANSIENT_RETRIES;
                 let friendly = friendly_upstream_error(err_msg, raw_body.as_deref(), exhausted);
                 let _ = tx.send(json!({ "type": "error", "text": friendly })).await;
@@ -1154,11 +1389,23 @@ pub fn run_agent_turn(
             let mut tool_results = Vec::new();
             let accumulated_activities_arc = std::sync::Arc::new(std::sync::Mutex::new(accumulated_activities));
             let db_lock = std::sync::Arc::new(tokio::sync::Mutex::new(()));
-            
+
+            // Capture (id, name) for each tool call BEFORE the loop below
+            // consumes `tool_calls` by value. These are used in the JoinError
+            // fallback to synthesize a tool_result that keeps tool_use /
+            // tool_result pairs balanced (see the error arm below).
+            let tool_call_ids: Vec<(String, String)> = tool_calls.iter().map(|tc| (
+                tc.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                tc.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            )).collect();
+
             let mut tasks = Vec::new();
             for tc in tool_calls {
                 let name = tc.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let params = tc.get("input").cloned().unwrap_or(json!({}));
+                // Keep a clone for the tool_trace_entry below — `params` is moved
+                // into execute_tool inside the spawned task.
+                let params_for_trace = params.clone();
                 let tc_id = tc.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 
                 let tx = tx.clone();
@@ -1168,6 +1415,7 @@ pub fn run_agent_turn(
                 let assistant_msg_id = assistant_msg_id.clone();
                 let accumulated_text = accumulated_text.clone();
                 let auto_approve = auto_approve;
+                let params_for_trace = params_for_trace;
                 
                 tasks.push(tokio::spawn(async move {
                     llm_trace(
@@ -1326,22 +1574,81 @@ pub fn run_agent_turn(
                         );
                     }
                     
-                    json!({
-                        "type": "tool_result",
-                        "tool_use_id": tc_id,
-                        "content": final_result_txt,
-                        "is_error": !final_result_ok
-                    })
+                    let trace = chatstore::tool_trace_entry(&name, &params_for_trace, final_result_ok, &final_result_txt);
+                    (
+                        json!({
+                            "type": "tool_result",
+                            "tool_use_id": tc_id,
+                            "content": final_result_txt,
+                            "is_error": !final_result_ok
+                        }),
+                        trace,
+                    )
                 }));
             }
             
             // Await all tasks concurrently
             let completed_results = futures_util::future::join_all(tasks).await;
-            for res in completed_results {
-                if let Ok(result_val) = res {
-                    tool_results.push(result_val);
+            let mut turn_traces: Vec<Value> = Vec::new();
+            for (i, res) in completed_results.into_iter().enumerate() {
+                match res {
+                    Ok((result_val, trace)) => {
+                        tool_results.push(result_val);
+                        turn_traces.push(trace);
+                    }
+                    Err(join_err) => {
+                        // A spawned tool task panicked (JoinError) or was
+                        // cancelled. We MUST still emit a tool_result for its
+                        // tool_use_id — otherwise the assistant's tool_use
+                        // blocks and the user's tool_result blocks become
+                        // unbalanced, which DeepSeek's Anthropic endpoint
+                        // rejects with HTTP 400 `tool_use ids found without
+                        // tool_result blocks`. The router wraps that 400 as a
+                        // 502, which looks like a transient outage but is
+                        // really this drop. Synthesize an error result so the
+                        // pairing stays 1:1 and the model can react to the
+                        // failure on the next turn.
+                        let (tc_id, tc_name) = tool_call_ids.get(i).cloned().unwrap_or(("unknown".to_string(), "unknown".to_string()));
+                        let panic_msg = if join_err.is_panic() {
+                            "tool task panicked"
+                        } else {
+                            "tool task cancelled"
+                        };
+                        tracing::error!(
+                            chat_id = %chat_id,
+                            tool_use_id = %tc_id,
+                            tool_name = %tc_name,
+                            error = %join_err,
+                            "{} — synthesizing error tool_result to keep tool_use/tool_result pairing balanced",
+                            panic_msg
+                        );
+                        llm_trace(
+                            &chat_id,
+                            turn,
+                            "tool_result",
+                            json!({ "name": tc_name, "ok": false, "len": panic_msg.len(), "preview": panic_msg, "panic": true }),
+                        );
+                        tool_results.push(json!({
+                            "type": "tool_result",
+                            "tool_use_id": tc_id,
+                            "content": format!("Internal dispatch error: {} ({}). Please retry or try a different approach.", panic_msg, join_err),
+                            "is_error": true
+                        }));
+                        turn_traces.push(chatstore::tool_trace_entry(
+                            &tc_name,
+                            &json!({}),
+                            false,
+                            panic_msg,
+                        ));
+                    }
                 }
             }
+
+            // Persist this turn's tool trace on the assistant message so the
+            // NEXT run can rebuild "what was done earlier in this chat" —
+            // chatstore otherwise keeps only display text, and the model would
+            // forget every tool call between user messages.
+            chatstore::append_tool_trace(&chat_id, &assistant_msg_id, turn_traces);
             
             // Extract accumulated_activities back to local variable
             accumulated_activities = {
@@ -1424,7 +1731,7 @@ pub async fn spawn_subagent(
             return Err("No credentials for sub-agent model".to_string());
         }
     } else {
-        let real = if model_id.contains("pro") { "deepseek-v4-pro".to_string() } else { "deepseek-v4-flash".to_string() };
+        let real = router_real_model(model_id);
         if let Some(cred) = crate::server::resolve("zwork_router", &s, "") {
             (cred.api_key, cred.base_url, "anthropic".to_string(), real, "zWork Cloud Router".to_string())
         } else {
@@ -1759,6 +2066,90 @@ mod tests {
         );
         assert!(msg.contains("418"), "fallthrough should keep status: {msg}");
         assert!(msg.contains("short and stout"), "fallthrough should keep body: {msg}");
+    }
+
+    #[test]
+    fn test_classify_router_wrapped_400_is_permanent() {
+        // The actual bug: the router wraps DeepSeek's 400 invalid_request_error
+        // as a 502 envelope. The bare message ("upstream HTTP 502 Bad Gateway")
+        // looks transient, but the wrapped body reveals a permanent 400.
+        // This MUST classify as Permanent so we don't retry a doomed request.
+        let raw = "router_upstreams_failed: DeepSeek:deepseek-v4-flash 400 \
+            {\"error\":{\"message\":\"messages.4: tool_use ids found without \
+            tool_result blocks\",\"type\":\"invalid_request_error\"}}";
+        assert_eq!(
+            classify_provider_error_with_raw("upstream HTTP 502 Bad Gateway", Some(raw)),
+            ErrorClass::Permanent,
+            "router-wrapped 400 must NOT be retried"
+        );
+        // Same for router-wrapped 401.
+        let raw_401 = "router_upstreams_failed: DeepSeek:deepseek-v4-flash 401 \
+            {\"error\":{\"message\":\"invalid api key\",\"type\":\"authentication_error\"}}";
+        assert_eq!(
+            classify_provider_error_with_raw("upstream HTTP 502 Bad Gateway", Some(raw_401)),
+            ErrorClass::Permanent,
+            "router-wrapped 401 must NOT be retried"
+        );
+        // But a router envelope with no permanent status remains transient
+        // (e.g. all providers genuinely returned 503/timeout).
+        let raw_transient = "router_upstreams_failed: DeepSeek:deepseek-v4-flash unreachable";
+        assert_eq!(
+            classify_provider_error_with_raw("upstream HTTP 502 Bad Gateway", Some(raw_transient)),
+            ErrorClass::Transient,
+            "router-wrapped transient failures should still retry"
+        );
+    }
+
+    #[test]
+    fn test_friendly_upstream_error_router_wrapped_400() {
+        // The exact error from the bug report: the user should see the real
+        // cause (the 400 invalid_request_error), NOT "all providers unavailable".
+        let raw = "router_upstreams_failed: DeepSeek:deepseek-v4-flash 400 \
+            {\"error\":{\"message\":\"messages.4: `tool_use` ids were found without \
+            `tool_result` blocks immediately after: call_00_XeMcWVdzAiMldkyzZIXy5135. \
+            Each `tool_use` block must have a corresponding `tool_result` block in \
+            the next message.\",\"type\":\"invalid_request_error\",\"param\":null,\
+            \"code\":\"invalid_request_error\"}}";
+        let msg = friendly_upstream_error("upstream HTTP 502 Bad Gateway", Some(raw), true);
+        assert!(
+            !msg.contains("All model providers are currently unavailable"),
+            "router-wrapped 400 must not claim providers are down, got: {msg}"
+        );
+        assert!(
+            msg.contains("rejected the request as invalid"),
+            "router-wrapped 400 should explain it's a request problem, got: {msg}"
+        );
+        assert!(
+            msg.contains("tool_use"),
+            "router-wrapped 400 should surface the actual provider message, got: {msg}"
+        );
+        assert!(
+            msg.contains("retrying won't help"),
+            "router-wrapped 400 should tell user not to retry, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_extract_upstream_detail() {
+        // Full envelope with Anthropic-style error JSON.
+        let raw = "router_upstreams_failed: DeepSeek:deepseek-v4-flash 400 \
+            {\"error\":{\"message\":\"messages.4: tool_use ids missing\",\"type\":\"invalid_request_error\"}}";
+        let detail = extract_upstream_detail(Some(raw));
+        assert_eq!(
+            detail.as_deref(),
+            Some("messages.4: tool_use ids missing"),
+            "should extract the actionable provider message, got: {detail:?}"
+        );
+        // Empty envelope.
+        assert_eq!(extract_upstream_detail(Some("router_upstreams_failed: ")), None);
+        // No envelope prefix at all — fall back to JSON parse of the whole body.
+        let raw_no_prefix = "{\"error\":{\"message\":\"bad input\"}}";
+        assert_eq!(
+            extract_upstream_detail(Some(raw_no_prefix)).as_deref(),
+            Some("bad input")
+        );
+        // Not JSON at all.
+        assert_eq!(extract_upstream_detail(Some("not json")), None);
     }
 
     #[test]

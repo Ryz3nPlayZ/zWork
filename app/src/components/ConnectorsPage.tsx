@@ -150,8 +150,8 @@ export function ConnectorsPage() {
                         {app.name}
                       </h3>
                       {isConnected && (
-                        <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-600">
-                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                        <span className="shrink-0 inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-0.5 text-[11px] font-medium text-success">
+                          <span className="h-1.5 w-1.5 rounded-full bg-success" />
                           Connected
                         </span>
                       )}
@@ -216,7 +216,7 @@ export function ConnectorsPage() {
                 <div>
                   <h3 className="text-[18px] font-semibold text-ink">{expandedAppData.name}</h3>
                   {isExpandedConnected && (
-                    <span className="inline-flex items-center gap-1 text-[12px] font-medium text-emerald-600">
+                    <span className="inline-flex items-center gap-1 text-[12px] font-medium text-success">
                       <Check className="h-3 w-3" /> Connected
                     </span>
                   )}
@@ -238,7 +238,7 @@ export function ConnectorsPage() {
 
             {/* Error */}
             {connectError && (
-              <div className="mt-4 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-[12.5px] leading-relaxed text-red-700 dark:bg-red-500/10 dark:border-red-500/30 dark:text-red-400">
+              <div className="mt-4 rounded-xl border border-error/20 bg-error/10 px-4 py-3 text-[12.5px] leading-relaxed text-error">
                 {connectError}
               </div>
             )}
@@ -253,7 +253,7 @@ export function ConnectorsPage() {
                       void disconnectComposioApp(expandedAppData.id);
                       setExpandedApp(null);
                     }}
-                    className="press ring-focus flex-1 rounded-xl border border-red-300 bg-red-50 px-4 py-2.5 text-[13px] font-medium text-red-600 hover:bg-red-100 transition-colors dark:bg-red-500/10 dark:hover:bg-red-500/20"
+                    className="press ring-focus flex-1 rounded-xl border border-error/20 bg-error/5 px-4 py-2.5 text-[13px] font-medium text-error hover:bg-error/10 transition-colors"
                   >
                     Disconnect
                   </button>

@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Pencil, Check, X, AlertCircle, Settings as SettingsIcon, RefreshCcw, Download, ChevronDown, ArrowLeft } from "lucide-react";
+import { Pencil, Check, X, AlertCircle, Settings as SettingsIcon, RefreshCcw, Download, ChevronDown, ArrowLeft, NotebookPen } from "lucide-react";
 import { useApp } from "../lib/store";
 import { ChatInput } from "./ChatInput";
 import { Message } from "./Message";
 import { ConcurrentWorkBanner } from "./ConcurrentWorkBanner";
-import { QuestionModal } from "./QuestionModal";
+import { TodoPanel } from "./TodoPanel";
 import { dragRegionAttrs, onDragMouseDown } from "../lib/drag";
+import { isMacOS } from "../lib/platform";
+import { cn } from "../lib/cn";
 
 export function ChatView() {
   const chat = useApp((s) =>
@@ -19,7 +21,36 @@ export function ChatView() {
   const openArtifact = useApp((s) => s.openArtifact);
   const regenerateMessage = useApp((s) => s.regenerateMessage);
   const flagBadResponse = useApp((s) => s.flagBadResponse);
+  const sidebarOpen = useApp((s) => s.sidebarOpen);
+  const resolveGate = useApp((s) => s.resolveGate);
+  const planMode = useApp((s) => s.planMode);
   const endRef = useRef<HTMLDivElement>(null);
+
+  // Detect the active permission gate — scan the chat's messages for the most
+  // recent tool part with a pendingGate. This drives the composer's "permission"
+  // mode so the user sees the allow/deny card inline where the chatbox was.
+  const activeGate = (() => {
+    if (!chat) return null;
+    for (let i = chat.messages.length - 1; i >= 0; i--) {
+      const msg = chat.messages[i];
+      if (msg.role !== "assistant") continue;
+      for (let j = msg.parts.length - 1; j >= 0; j--) {
+        const part = msg.parts[j];
+        if (part.kind === "tool" && part.pendingGate) {
+          return { messageId: msg.id, gateId: part.pendingGate.gateId, reason: part.pendingGate.reason };
+        }
+      }
+    }
+    return null;
+  })();
+
+  // The composer mode: question card takes priority over permission card,
+  // both take priority over the default chatbox.
+  const composerMode: "default" | "question" | "permission" = chat?.pendingQuestion
+    ? "question"
+    : activeGate
+      ? "permission"
+      : "default";
 
   const [editing, setEditing] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
@@ -113,6 +144,9 @@ export function ChatView() {
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col bg-paper relative">
       <div className="flex flex-1 flex-col overflow-hidden relative">
+        {/* Sticky todo/progress card — floats over the top-right of the chat.
+            Scrolling the messages doesn't move it. Collapsible. */}
+        <TodoPanel />
         {/*
           Floating chat header — title + export live on their own layer at the
           true top of the chat (the pane drops its own drag band for the
@@ -126,7 +160,19 @@ export function ChatView() {
         <div
           {...dragRegionAttrs()}
           onMouseDown={onDragMouseDown}
-          className="absolute inset-x-0 top-0 z-20 flex items-center justify-between px-5 py-2.5 bg-gradient-to-b from-paper via-paper/95 to-transparent"
+          className={cn(
+            "absolute inset-x-0 top-0 z-20 flex items-center justify-between py-2.5 pr-5 bg-gradient-to-b from-paper via-paper/95 to-transparent",
+            // When the sidebar is collapsed, the main pane slides left and the
+            // chat title would slide under the window-level controls (search +
+            // sidebar toggle). Reserve a left gutter matching those controls
+            // so the title stays clear. On macOS the controls sit at ~84px to
+            // clear the traffic lights; elsewhere they hug the corner at ~10px.
+            sidebarOpen
+              ? "pl-5"
+              : isMacOS()
+                ? "pl-[96px]"
+                : "pl-[52px]",
+          )}
         >
           <div className="flex min-w-0 items-center gap-2">
             {chat.projectId && (
@@ -230,6 +276,14 @@ export function ChatView() {
         {/* Messages */}
         <div className="flex-1 overflow-y-auto pb-44">
           <div className="mx-auto flex max-w-[960px] flex-col gap-5 px-6 pt-14 pb-8">
+            {/* Plan mode indicator — shows when plan mode is active so the user
+                knows the agent is restricted to read-only tools. */}
+            {planMode && (
+              <div className="flex items-center gap-2 rounded-xl border border-accent/20 bg-accent/5 px-3 py-2 text-[12px] text-ink-muted">
+                <NotebookPen className="h-3.5 w-3.5 shrink-0 text-accent" />
+                <span>Plan mode is active — zWork will plan and investigate without making changes. Toggle it in the security preset picker below.</span>
+              </div>
+            )}
             <ConcurrentWorkBanner />
             {chat.messages.map((m, idx) => {
               const isLast = idx === chat.messages.length - 1;
@@ -279,21 +333,26 @@ export function ChatView() {
           </div>
         </div>
 
-        {/* Composer — floating directly over the chat text */}
+        {/* Composer — floating directly over the chat text. When the agent asks
+            a question or needs permission, the composer morphs into an inline
+            card (question/permission mode) instead of showing the textarea. */}
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-paper via-paper/95 to-transparent px-6 pb-5 pt-10 pointer-events-none z-10">
           <div className="mx-auto max-w-[960px] pointer-events-auto">
-            <ChatInput autoFocus placeholder="Reply to zWork" />
+            <ChatInput
+              autoFocus
+              placeholder="Reply to zWork"
+              mode={composerMode}
+              question={chat.pendingQuestion ? { question: chat.pendingQuestion.question, options: chat.pendingQuestion.options } : undefined}
+              permission={activeGate ? { reason: activeGate.reason } : undefined}
+              onAnswerQuestion={(answer) => void useApp.getState().answerQuestion(chat.id, answer)}
+              onResolvePermission={(allow) => {
+                if (activeGate) {
+                  void resolveGate(chat.id, activeGate.messageId, activeGate.gateId, allow);
+                }
+              }}
+            />
           </div>
         </div>
-
-        {/* Agent question modal — blocks interaction until answered */}
-        {chat.pendingQuestion && (
-          <QuestionModal
-            question={chat.pendingQuestion.question}
-            options={chat.pendingQuestion.options}
-            onSubmit={(answer) => void useApp.getState().answerQuestion(chat.id, answer)}
-          />
-        )}
       </div>
     </div>
   );

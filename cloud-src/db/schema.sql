@@ -1,3 +1,16 @@
+-- ============================================================================
+-- DEPRECATED — NOT USED AT RUNTIME.
+--
+-- This file is never mounted or executed: docker-compose.yml does not
+-- reference it. The actual schema is created at runtime by:
+--   * cloud-src/api (table creation in api/src/main.rs, e.g. `app_users`
+--     with tier CHECK (tier IN ('free', 'pro', 'max')))
+--   * Better Auth migrations (cloud-src/auth, applied via entrypoint.sh)
+--
+-- Note: the `tier` CHECK below lacks 'max' and does not match the live
+-- schema. Kept for historical reference only — do not deploy from this file.
+-- ============================================================================
+
 -- Users table for tracking Google OAuth users
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

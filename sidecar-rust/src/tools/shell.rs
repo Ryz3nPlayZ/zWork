@@ -10,6 +10,29 @@ use crate::watchdog::{register_process, unregister_process};
 /// `command_timeout_seconds`. 0 means unbounded (long-running servers etc.).
 const DEFAULT_COMMAND_TIMEOUT_SECS: u64 = 180;
 
+/// Cap on the combined stdout+stderr returned to the model. The cap is
+/// tail-biased: build errors and test failures live at the END of the output,
+/// so when we truncate we keep the tail and say so.
+const MAX_OUTPUT_BYTES: usize = 12 * 1024;
+
+/// Keep the last `max` bytes of `s` (snapped to a char boundary), prefixing a
+/// truncation note when anything was dropped.
+fn tail_cap(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        return s.to_string();
+    }
+    let mut start = s.len() - max;
+    while !s.is_char_boundary(start) {
+        start += 1;
+    }
+    format!(
+        "[output truncated: showing last ~{} KB of {} bytes]\n{}",
+        max / 1024,
+        s.len(),
+        &s[start..]
+    )
+}
+
 pub async fn execute_run_command(
     params: &Value,
     chat_id: &str,
@@ -80,23 +103,36 @@ pub async fn execute_run_command(
         let tx_out = tx.clone();
         let stdout_handle = tokio::spawn(async move {
             let mut reader = BufReader::new(stdout).lines();
+            let mut captured = String::new();
             while let Ok(Some(line)) = reader.next_line().await {
-                let _ = tx_out.send(json!({
+                // Best-effort UI streaming: never block the reader on a full
+                // channel. If the UI stops draining (or a test drops the
+                // receiver), a bounded channel would deadlock the handle join
+                // below after the child exits.
+                let _ = tx_out.try_send(json!({
                     "type": "status",
                     "text": line
-                })).await;
+                }));
+                captured.push_str(&line);
+                captured.push('\n');
             }
+            captured
         });
 
         let tx_err = tx.clone();
         let stderr_handle = tokio::spawn(async move {
             let mut reader = BufReader::new(stderr).lines();
+            let mut captured = String::new();
             while let Ok(Some(line)) = reader.next_line().await {
-                let _ = tx_err.send(json!({
+                let _ = tx_err.try_send(json!({
                     "type": "status",
                     "text": format!("[stderr] {}", line)
-                })).await;
+                }));
+                captured.push_str("[stderr] ");
+                captured.push_str(&line);
+                captured.push('\n');
             }
+            captured
         });
 
         // Wait for process completion, bounded by the timeout. A hung command
@@ -123,15 +159,134 @@ pub async fn execute_run_command(
             }
         };
 
-        let _ = stdout_handle.await;
-        let _ = stderr_handle.await;
+        let stdout_text = stdout_handle.await.unwrap_or_default();
+        let stderr_text = stderr_handle.await.unwrap_or_default();
 
         unregister_process(chat_id, pid);
 
+        // Combine stdout + stderr (stderr lines tagged) so the model can read
+        // build errors, test failures, and `ls` results — previously only the
+        // UI saw them. Tail-biased cap: errors live at the end.
+        let mut combined = stdout_text;
+        if !stderr_text.is_empty() {
+            if !combined.is_empty() {
+                combined.push('\n');
+            }
+            combined.push_str(&stderr_text);
+        }
+        let output = tail_cap(combined.trim_end(), MAX_OUTPUT_BYTES);
+
         match status {
-            Ok(s) if s.success() => Ok("Process exited successfully (status: 0)".to_string()),
-            Ok(s) => Err(format!("Process exited with status code: {}", s.code().unwrap_or(-1))),
+            Ok(s) if s.success() => Ok(if output.is_empty() {
+                "Process exited successfully (status: 0, no output)".to_string()
+            } else {
+                format!("Process exited successfully (status: 0)\n\nOutput:\n{}", output)
+            }),
+            Ok(s) => {
+                let code = s.code().unwrap_or(-1);
+                Err(if output.is_empty() {
+                    format!("Process exited with status code: {}", code)
+                } else {
+                    format!("Process exited with status code: {}\n\nOutput:\n{}", code, output)
+                })
+            }
             Err(e) => Err(e),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tail_cap_keeps_short_output_verbatim() {
+        assert_eq!(tail_cap("hello", 100), "hello");
+    }
+
+    #[test]
+    fn test_tail_cap_keeps_tail_and_says_so() {
+        let big = "a".repeat(MAX_OUTPUT_BYTES + 500);
+        let capped = tail_cap(&big, MAX_OUTPUT_BYTES);
+        assert!(capped.starts_with("[output truncated: showing last ~12 KB"));
+        assert!(capped.len() <= MAX_OUTPUT_BYTES + 128);
+    }
+
+    #[test]
+    fn test_tail_cap_respects_char_boundaries() {
+        // 4-byte emoji straddling the cut point must not panic or split.
+        let big = format!("{}{}", "x".repeat(MAX_OUTPUT_BYTES), "🦀".repeat(100));
+        let capped = tail_cap(&big, MAX_OUTPUT_BYTES);
+        assert!(capped.contains("🦀"));
+    }
+
+    #[tokio::test]
+    async fn test_stdout_is_returned_to_the_model() {
+        let (tx, _rx) = mpsc::channel(64);
+        let params = json!({ "command": "echo hello-from-stdout", "timeout": 30 });
+        let res = execute_run_command(&params, "test-chat", &tx).await;
+        let msg = res.expect("echo should succeed");
+        assert!(msg.contains("status: 0"), "got: {msg}");
+        assert!(msg.contains("hello-from-stdout"), "got: {msg}");
+    }
+
+    #[tokio::test]
+    async fn test_stderr_is_returned_to_the_model() {
+        let (tx, _rx) = mpsc::channel(64);
+        let params = json!({ "command": "echo out-line; echo err-line >&2", "timeout": 30 });
+        let res = execute_run_command(&params, "test-chat", &tx).await;
+        let msg = res.expect("command should succeed");
+        assert!(msg.contains("out-line"), "got: {msg}");
+        assert!(msg.contains("[stderr] err-line"), "got: {msg}");
+    }
+
+    #[tokio::test]
+    async fn test_failing_command_returns_output_in_error() {
+        let (tx, _rx) = mpsc::channel(64);
+        let params = json!({ "command": "echo boom-stack-trace >&2; exit 3", "timeout": 30 });
+        let res = execute_run_command(&params, "test-chat", &tx).await;
+        let err = res.expect_err("exit 3 should be an error");
+        assert!(err.contains("status code: 3"), "got: {err}");
+        assert!(err.contains("boom-stack-trace"), "got: {err}");
+    }
+
+    #[tokio::test]
+    async fn test_no_output_says_so() {
+        let (tx, _rx) = mpsc::channel(64);
+        let params = json!({ "command": "true", "timeout": 30 });
+        let res = execute_run_command(&params, "test-chat", &tx).await;
+        assert_eq!(res.unwrap(), "Process exited successfully (status: 0, no output)");
+    }
+
+    #[tokio::test]
+    async fn test_huge_output_is_tail_biased() {
+        let (tx, _rx) = mpsc::channel(64);
+        // ~34 KB of numbered lines; the tail must survive, the head must not.
+        let params = json!({
+            "command": "i=0; while [ $i -lt 2000 ]; do echo \"line-$i-xxxxxxxx\"; i=$((i+1)); done",
+            "timeout": 30
+        });
+        let res = execute_run_command(&params, "test-chat", &tx).await;
+        let msg = res.expect("loop should succeed");
+        assert!(msg.contains("[output truncated"), "got head: {}", &msg[..200.min(msg.len())]);
+        assert!(msg.contains("line-1999"), "tail missing");
+        assert!(!msg.contains("line-0-x"), "head should have been dropped");
+        assert!(msg.len() <= MAX_OUTPUT_BYTES + 256, "got {} bytes", msg.len());
+    }
+
+    #[tokio::test]
+    async fn test_ui_streaming_still_happens() {
+        let (tx, mut rx) = mpsc::channel(64);
+        let params = json!({ "command": "echo streamed-line", "timeout": 30 });
+        let res = execute_run_command(&params, "test-chat", &tx).await;
+        assert!(res.is_ok());
+        drop(tx);
+        let mut saw = false;
+        while let Some(evt) = rx.recv().await {
+            if evt.get("text").and_then(|v| v.as_str()) == Some("streamed-line") {
+                saw = true;
+            }
+        }
+        assert!(saw, "status stream should still carry the line");
     }
 }

@@ -10,6 +10,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import packageJson from "../../package.json";
+import { isDemoMode } from "./preview";
 
 const IS_TAURI =
   typeof window !== "undefined" &&
@@ -40,6 +41,21 @@ function clientHeaders(): Record<string, string> {
     "x-zwork-app-version": APP_VERSION,
     "x-zwork-os": clientPlatform(),
   };
+}
+
+let sidecarTokenPromise: Promise<string> | null = null;
+
+/** Per-run token authenticating requests to the local sidecar. Minted by the
+ *  Tauri host at launch; the sidecar rejects requests without it. Cached after
+ *  the first fetch. Resolves to "" outside Tauri (browser dev / web mode talk
+ *  to other backends that don't require it). */
+function getSidecarToken(): Promise<string> {
+  if (!sidecarTokenPromise) {
+    sidecarTokenPromise = IS_TAURI
+      ? invoke<string>("get_sidecar_token").catch(() => "")
+      : Promise.resolve("");
+  }
+  return sidecarTokenPromise;
 }
 
 const API_BASE = IS_TAURI ? "http://127.0.0.1:8787" : "";
@@ -79,6 +95,9 @@ export interface ApiChatSummary {
   message_count: number;
   model: string;
   project_id?: string;
+  /** Short plaintext snippet of the most recent message — powers content
+   *  matching in SearchModal. Empty string when unavailable. */
+  preview?: string;
   /** `"chat"` (interactive, default) or `"automation"` (scheduled-task run).
    *  Filter `automation` out of the main chat list — they surface inside the
    *  scheduled task's run history instead. */
@@ -174,6 +193,25 @@ function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+/**
+ * Map an upstream model id (e.g. "deepseek-v4-flash", "gemma4:31b") back to
+ * its friendly zWork display name. Returns undefined if the id isn't a known
+ * upstream we whitelabel, so the caller can fall back to the user-facing model
+ * id from the request. Used to scrub upstream provider names from the UI.
+ */
+export function whitelabelModelName(upstreamId: string | null | undefined): string | undefined {
+  if (!upstreamId) return undefined;
+  const id = upstreamId.toLowerCase();
+  // DeepSeek family (zwork-flash / zwork-pro)
+  if (id.includes("deepseek-v4-pro") || id === "deepseek-pro") return "zwork-pro";
+  if (id.includes("deepseek-v4-flash") || id.includes("deepseek-flash") || id.includes("deepseek-chat")) return "zwork-flash";
+  // Vision family (Gemma 4 31B cloud)
+  if (id.includes("gemma4") || id.includes("gemma-4") || id.includes("gemma")) return "zwork-vision";
+  // Already-friendly ids pass through.
+  if (id === "zwork-flash" || id === "zwork-pro" || id === "zwork-vision") return upstreamId;
+  return undefined;
+}
+
 async function invokeBackendCommand(command: "ensure_backend" | "restart_backend") {
   if (!IS_TAURI) return;
   try {
@@ -187,7 +225,11 @@ async function invokeBackendCommand(command: "ensure_backend" | "restart_backend
 async function healthFetch() {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5_000);
-  return fetch(u("/api/health"), { signal: controller.signal })
+  const token = await getSidecarToken();
+  return fetch(u("/api/health"), {
+    signal: controller.signal,
+    headers: token ? { "x-zwork-token": token } : undefined,
+  })
     .then((r) => j<{ ok: boolean; version: string }>(r))
     .finally(() => clearTimeout(timeout));
 }
@@ -211,6 +253,12 @@ async function waitForBackendReady(attempts = 60) {
 async function localFetch(path: string, init?: RequestInit) {
   if (IS_TAURI) {
     await waitForBackendReady(6);
+  }
+  const token = await getSidecarToken();
+  if (token) {
+    const headers = new Headers(init?.headers);
+    headers.set("x-zwork-token", token);
+    init = { ...init, headers };
   }
   return fetch(u(path), init);
 }
@@ -330,11 +378,11 @@ export interface UploadedFile {
 export const api = {
   health: healthFetch,
 
-  answerQuestion: (chatId: string, answer: string) =>
+  answerQuestion: (chatId: string, answer: string, questionId?: string) =>
     localFetch(`/api/chats/${chatId}/answer-question`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ answer }),
+      body: JSON.stringify({ answer, question_id: questionId }),
     }).then((r) => j<{ status: string }>(r)),
 
   approveGate: (chatId: string, gateId: string) =>
@@ -661,6 +709,18 @@ export const api = {
       j<DesktopStatus>(r),
     ),
 
+  /** List on-screen windows for the "Share Window" picker (macOS only). */
+  listWindows: () =>
+    localFetch("/api/desktop/windows").then((r) =>
+      j<{ windows: Array<{ window_id: number; pid: number; app_name: string; title: string; bounds?: { x: number; y: number; width: number; height: number } }>; error?: string }>(r),
+    ),
+
+  /** Capture a screenshot of a specific window (macOS only, needs Screen Recording). */
+  captureWindow: (windowId: number) =>
+    localFetch(`/api/desktop/windows/${windowId}/screenshot`, { method: "POST" }).then((r) =>
+      j<{ data_url?: string; mime?: string; error?: string }>(r),
+    ),
+
   browserBridgeStatus: () =>
     localFetch("/api/browser-bridge/status").then((r) =>
       j<{ connected: boolean }>(r),
@@ -855,7 +915,7 @@ export type StreamEvent =
   | { type: "subagent_delta"; task_id: string; text: string }
   | { type: "subagent_activity"; task_id: string; event: StreamEvent }
   | { type: "subagent_done"; task_id: string; result?: string; error?: string }
-  | { type: "ask_question"; chat_id: string; question: string; options: string[] }
+  | { type: "ask_question"; chat_id: string; question_id?: string; question: string; options: string[] }
   | { type: "todo_update"; todos: Array<{ id: string; content: string; status: "pending" | "in_progress" | "completed" }> };
 
 /** Web-mode streaming: sends Anthropic-format request to the Axum API and
@@ -889,7 +949,10 @@ async function streamChatWeb(
 
   const isPro = body.model === "zwork-pro";
   const isVision = body.model === "zwork-vision";
-  const resolvedModel = isPro ? "deepseek-v4-pro" : isVision ? "zwork-vision" : "deepseek-v4-flash";
+  // Upstream model id sent to the router (never shown to the user).
+  const upstreamModel = isPro ? "deepseek-v4-pro" : isVision ? "zwork-vision" : "deepseek-v4-flash";
+  // Friendly display name (whitelabel — never expose the upstream id).
+  const friendlyModel = body.model;
   const useOpenAi = isVision;
 
   const headers: Record<string, string> = {
@@ -915,14 +978,14 @@ async function streamChatWeb(
 
   const upstreamBody = useOpenAi
     ? {
-        model: resolvedModel,
+        model: upstreamModel,
         messages: [{ role: "user" as const, content: userContent }],
         stream: true,
         max_tokens: 16384,
       }
     : {
-        model: resolvedModel,
-        system: `You are zWork, an action-oriented AI work assistant created by Zemu Liu. Respond in the same language the user writes in. Be concise, direct, and helpful. If the user writes in English, respond in English. Under the hood you are ${resolvedModel} from DeepSeek.`,
+        model: upstreamModel,
+        system: `You are zWork, an action-oriented AI work assistant created by Zemu Liu. Respond in the same language the user writes in. Be concise, direct, and helpful. If the user writes in English, respond in English.`,
         messages: [{ role: "user" as const, content: body.message }],
         stream: true,
         max_tokens: 16384,
@@ -976,10 +1039,13 @@ async function streamChatWeb(
     return;
   }
 
-  // Extract provider/model from response headers
+  // Extract provider/model from response headers. The router may echo the
+  // upstream model id in x-zwork-router-model; map it back to the friendly
+  // zWork name so the upstream provider is never surfaced to the user.
   const provider = resp.headers.get("x-zwork-router-provider") || "zwork-router";
-  const routerModel = resp.headers.get("x-zwork-router-model") || resolvedModel;
-  onEvent({ type: "meta", provider, resolved_model: routerModel, upstream_provider: provider });
+  const rawRouterModel = resp.headers.get("x-zwork-router-model");
+  const displayModel = whitelabelModelName(rawRouterModel) ?? friendlyModel ?? "zwork-flash";
+  onEvent({ type: "meta", provider, resolved_model: displayModel, upstream_provider: provider });
 
   onEvent({ type: "status", text: "Drafting" });
 
@@ -1054,6 +1120,143 @@ async function streamChatWeb(
   onEvent({ type: "end" });
 }
 
+/**
+ * Demo-mode streaming: posts to the public, unauthenticated /api/demo/chat
+ * endpoint and translates the Anthropic-shaped SSE into the StreamEvent union
+ * the UI expects. Mirrors streamChatWeb's event mapping but:
+ *   - sends no Authorization header (anonymous)
+ *   - sends only { messages } — the server hardcodes model + system prompt
+ *   - performs no /api/web/chats persistence (demo is ephemeral)
+ *   - surfaces 429/503 as friendly errors matching the demo's limits
+ *
+ * `body.attachments` is ignored: the demo endpoint is text-only. Multi-turn
+ * context is reconstructed from the store's prior messages by the caller (the
+ * `send` action already passes only the new `message`; we rebuild history here
+ * from nothing because the demo endpoint receives the full conversation).
+ */
+async function streamChatDemo(
+  body: {
+    chat_id?: string;
+    run_id?: string;
+    message: string;
+    model?: string;
+    artifact_mode?: boolean;
+    project_id?: string;
+    plan_mode?: boolean;
+    auto_approve_destructive?: boolean;
+    attachments?: Array<{
+      client_id?: string | null;
+      name: string;
+      path: string;
+      data_url?: string;
+      mime: string;
+      kind: string;
+    }>;
+    web_search_enabled?: boolean;
+  },
+  onEvent: (evt: StreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  // The demo endpoint takes the full conversation as { messages }. We only
+  // have the current turn here; prior context is owned by the store. To keep
+  // the demo multi-turn, we send just this user message — the server treats
+  // each request as a single-turn exchange, which is the expected demo shape.
+  // (The store's `send` reconstructs history for the gateway path; for demo
+  // we deliberately keep it stateless to match the endpoint's design.)
+  const messages = [{ role: "user" as const, content: body.message }];
+
+  const resp = await fetch(u("/api/demo/chat"), {
+    method: "POST",
+    headers: { "content-type": "application/json", ...clientHeaders() },
+    body: JSON.stringify({ messages }),
+    signal,
+  });
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "");
+    let friendly: string;
+    switch (resp.status) {
+      case 429:
+        friendly =
+          "You've hit the demo's rate limit. Wait a bit and try again, or download the desktop app for unlimited use.";
+        break;
+      case 503:
+        friendly = "The demo isn't available right now. Try again in a moment.";
+        break;
+      case 404:
+        friendly = "The demo isn't available right now. Grab the desktop app at tryzwork.app.";
+        break;
+      default:
+        friendly = text || `Something went wrong (HTTP ${resp.status}).`;
+    }
+    onEvent({ type: "error", text: friendly });
+    onEvent({ type: "end" });
+    return;
+  }
+
+  // Provider/model from response headers (the demo endpoint sets x-zwork-router-*).
+  const provider = resp.headers.get("x-zwork-router-provider") || "zwork-demo";
+  const routerModel = resp.headers.get("x-zwork-router-model") || "zwork-flash";
+  onEvent({ type: "meta", provider, resolved_model: routerModel, upstream_provider: provider });
+  onEvent({ type: "status", text: "Drafting" });
+
+  if (!resp.body) {
+    onEvent({ type: "error", text: "No response stream from the demo server." });
+    onEvent({ type: "end" });
+    return;
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let sawText = false;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx: number;
+    while ((idx = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+      if (!line.startsWith("data:")) continue;
+      const data = line.slice(5).trim();
+      if (!data) continue;
+      try {
+        const chunk = JSON.parse(data);
+        // Text answer deltas — same shape streamChatWeb handles.
+        if (
+          chunk.type === "content_block_delta" &&
+          chunk.delta?.type === "text_delta" &&
+          chunk.delta?.text
+        ) {
+          sawText = true;
+          onEvent({ type: "delta", text: chunk.delta.text });
+        }
+        // Reasoning deltas → process panel (not blended into the answer).
+        if (
+          chunk.type === "content_block_delta" &&
+          chunk.delta?.type === "thinking_delta" &&
+          chunk.delta?.thinking
+        ) {
+          onEvent({ type: "thinking_delta", text: chunk.delta.thinking });
+        }
+        if (chunk.type === "message_stop") {
+          break;
+        }
+      } catch {
+        /* malformed SSE line — ignore */
+      }
+    }
+  }
+
+  if (!sawText) {
+    onEvent({ type: "error", text: "The model returned an empty response. Try rephrasing." });
+  }
+  onEvent({ type: "done" });
+  onEvent({ type: "end" });
+}
+
 export async function streamChat(
   body: {
     chat_id?: string;
@@ -1077,6 +1280,12 @@ export async function streamChat(
   onEvent: (evt: StreamEvent) => void,
   signal?: AbortSignal,
 ): Promise<void> {
+  // Public no-login demo: route to the unauthenticated /api/demo/chat
+  // endpoint instead of the gateway. Must come before the IS_WEB branch,
+  // which targets the authenticated /api/v1/messages path.
+  if (isDemoMode()) {
+    return streamChatDemo(body, onEvent, signal);
+  }
   if (IS_WEB) {
     return streamChatWeb(body, onEvent, signal);
   }
@@ -1108,11 +1317,13 @@ export async function streamChat(
   };
 
   const readStream = async () => {
+    const sidecarToken = await getSidecarToken();
     const resp = await fetch(u("/api/chat/stream"), {
       method: "POST",
       headers: {
         "content-type": "application/json",
         ...clientHeaders(),
+        ...(sidecarToken ? { "x-zwork-token": sidecarToken } : {}),
         ...(body.run_id ? { "x-zwork-run-id": body.run_id } : {}),
         ...(body.chat_id ? { "x-zwork-chat-id": body.chat_id } : {}),
         ...(body.project_id ? { "x-zwork-project-id": body.project_id } : {}),

@@ -176,13 +176,13 @@ export function PlanPage({ cloudUser, onUserChanged }: { cloudUser: CloudUser; o
         </header>
 
         {error && (
-          <div className="mb-8 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-700">
+          <div className="mb-8 rounded-2xl border border-error/20 bg-error/10 px-4 py-3 text-[13px] text-error">
             {error}
           </div>
         )}
 
         {upgrading && (
-          <div className="mb-8 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-700 flex items-center gap-2">
+          <div className="mb-8 rounded-2xl border border-success/20 bg-success/10 px-4 py-3 text-[13px] text-success flex items-center gap-2">
             <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
             Waiting for payment to complete…
           </div>
@@ -210,7 +210,7 @@ export function PlanPage({ cloudUser, onUserChanged }: { cloudUser: CloudUser; o
               )}
             >
               Annual
-              <span className="ml-1.5 rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-bold text-emerald-600">
+              <span className="ml-1.5 rounded-full bg-success/10 px-1.5 py-0.5 text-[10px] font-bold text-success">
                 Save 17%
               </span>
             </button>

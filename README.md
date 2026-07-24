@@ -130,7 +130,7 @@ Drive macOS apps (capture, click, type) via cua-driver and automate the browser 
 
 **Real deliverables**
 
-Generate and export `.docx`/`.xlsx`/`.pdf`, deploy a local web app to a live URL, and produce structured documents — not just text in a chat.
+Generate and export `.docx`/`.xlsx`/`.pdf`, serve a local web app on a localhost URL, and produce structured documents — not just text in a chat.
 
 </td>
 </tr>

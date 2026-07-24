@@ -16,10 +16,14 @@ import { currentMonitor, getCurrentWindow, primaryMonitor } from "@tauri-apps/ap
  */
 
 const IDLE_WIDTH = 720;
-/** Idle window height when the bar is a single line. */
-const IDLE_MIN_HEIGHT = 64;
-/** Cap so an essay-length draft doesn't swallow the screen. */
-const IDLE_MAX_HEIGHT = 380;
+/** Idle window height when the bar is a single line. Generous enough that the
+ * pill (48px content + focus ring) is never clipped at the top. */
+const IDLE_MIN_HEIGHT = 76;
+/** Cap so an essay-length draft doesn't swallow the screen. Generous enough
+ * that opening the + tools menu or the Share Window picker (which need vertical
+ * room above the pill) isn't clipped — the textarea itself is internally capped
+ * at 200px, so this ceiling only matters for those overlay UI elements. */
+const IDLE_MAX_HEIGHT = 600;
 /** Tall conversation panel that opens above the bar. */
 const CHAT_HEIGHT = 640;
 /** Keep the window this far inside the work-area edges when clamping. */
@@ -82,8 +86,22 @@ function fitsOnScreen(x: number, y: number, width: number, height: number, wa: {
   );
 }
 
-/** True after the first placement this session; subsequent calls preserve the window's current position. */
-let placed = false;
+/** Whether the user has explicitly dragged the overlay this session. Until
+ * they do, every show defaults to bottom-center. Set true by the onMoved
+ * listener in attachPositionPersistence. */
+let userDragged = false;
+
+/** Mark that the user has dragged — called from the position-persistence
+ * listener. Once true, fitOverlayWindow preserves the user's position. */
+export function markUserDragged(): void {
+  userDragged = true;
+}
+
+/** Reset the drag flag — call when the overlay is hidden so the next show
+ * defaults to bottom-center again (unless the user drags). */
+export function resetOverlayPlacement(): void {
+  userDragged = false;
+}
 
 /**
  * Size + position the overlay. Called on mount and whenever the mode or the
@@ -110,19 +128,21 @@ export async function fitOverlayWindow(
   let x: number;
   let y: number;
 
-  if (!placed) {
+  if (!userDragged) {
+    // The user hasn't explicitly moved the overlay this session. Default to
+    // bottom-center on the current monitor — the expected position for a
+    // global chat overlay. (A saved position is only honored if the user
+    // dragged in a prior session AND it still fits.)
     const saved = loadSavedPos();
     if (saved && fitsOnScreen(saved.x, saved.y, width, height, wa)) {
       x = saved.x;
       y = saved.y;
     } else {
-      // Default: bottom-center on the current monitor.
       x = wa.workX + (wa.workW - width) / 2;
       y = wa.workY + wa.workH - height - BOTTOM_MARGIN;
     }
-    placed = true;
   } else {
-    // Preserve where the user put it (or where we last placed it).
+    // The user dragged — preserve where they put it.
     const pos = await win.outerPosition().catch(() => null);
     if (pos) {
       x = pos.x / wa.scale;
@@ -135,7 +155,8 @@ export async function fitOverlayWindow(
 
   // Clamp horizontally into the work area.
   x = clamp(x, wa.workX + EDGE_MARGIN, wa.workX + wa.workW - width - EDGE_MARGIN);
-  // Vertically: if growing pushed the bottom past the work area, shift up; never above the top.
+  // Vertically: keep the bottom pinned. If growing pushed the bottom past the
+  // work area, shift up; never above the top.
   if (y + height > wa.workY + wa.workH - EDGE_MARGIN) {
     y = wa.workY + wa.workH - height - EDGE_MARGIN;
   }
@@ -143,8 +164,63 @@ export async function fitOverlayWindow(
     y = wa.workY + EDGE_MARGIN;
   }
 
-  await win.setSize(new LogicalSize(width, height));
-  await win.setPosition(new LogicalPosition(Math.round(x), Math.round(y)));
+  // Smoothly animate the size/position transition instead of snapping. The
+  // bottom is pinned (y shifts up as height grows) so the pill appears to
+  // stay put while the panel expands above it.
+  await animateOverlayTo(win, width, height, x, y, wa.scale);
+}
+
+/**
+ * Tween the overlay window from its current size/position to the target over
+ * ~180ms using requestAnimationFrame. The bottom edge stays pinned (y moves
+ * up as height grows). Tauri v2 setSize/setPosition are instant, so we step
+ * through intermediate values to fake an animation. Coarse steps (~10) keep
+ * IPC overhead low; the CSS opacity fade on the conversation panel masks any
+ * stair-stepping.
+ */
+async function animateOverlayTo(
+  win: ReturnType<typeof getCurrentWindow>,
+  targetW: number,
+  targetH: number,
+  targetX: number,
+  targetY: number,
+  scale: number,
+): Promise<void> {
+  const startPos = await win.outerPosition().catch(() => null);
+  const startSize = await win.outerSize().catch(() => null);
+  if (!startPos || !startSize) {
+    // Can't read current geometry — just snap.
+    await win.setSize(new LogicalSize(targetW, targetH));
+    await win.setPosition(new LogicalPosition(Math.round(targetX), Math.round(targetY)));
+    return;
+  }
+
+  const startW = startSize.width / scale;
+  const startH = startSize.height / scale;
+  const start_X = startPos.x / scale;
+  const start_Y = startPos.y / scale;
+
+  // If we're already at the target (within 1px), skip the animation.
+  if (Math.abs(startH - targetH) < 2 && Math.abs(startW - targetW) < 2) {
+    await win.setSize(new LogicalSize(targetW, targetH));
+    await win.setPosition(new LogicalPosition(Math.round(targetX), Math.round(targetY)));
+    return;
+  }
+
+  const STEPS = 10;
+  const STEP_MS = 18; // ~180ms total
+  const ease = (t: number) => 1 - Math.pow(1 - t, 3); // ease-out-cubic
+
+  for (let i = 1; i <= STEPS; i++) {
+    const t = ease(i / STEPS);
+    const w = Math.round(startW + (targetW - startW) * t);
+    const h = Math.round(startH + (targetH - startH) * t);
+    const px = Math.round(start_X + (targetX - start_X) * t);
+    const py = Math.round(start_Y + (targetY - start_Y) * t);
+    await win.setSize(new LogicalSize(w, h));
+    await win.setPosition(new LogicalPosition(px, py));
+    if (i < STEPS) await new Promise((r) => setTimeout(r, STEP_MS));
+  }
 }
 
 /**
@@ -161,6 +237,8 @@ export async function attachPositionPersistence(): Promise<() => void> {
     const scale = window.devicePixelRatio || 1;
     const x = payload.x / scale;
     const y = payload.y / scale;
+    // The user explicitly moved the overlay — stop defaulting to bottom-center.
+    markUserDragged();
     clearTimeout(timer);
     timer = setTimeout(() => savePos(x, y), 250);
   });

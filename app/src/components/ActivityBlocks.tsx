@@ -58,14 +58,14 @@ export function ActivityBlocks({ items }: { items: ActivityItem[] }) {
             className={cn(
               "flex items-center gap-2.5 rounded-lg border px-3 py-2 text-[12.5px] font-medium transition-colors",
               item.done
-                ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300"
+                ? "border-success/20 bg-success/10 text-success"
                 : "border-line bg-paper-sunken text-ink",
             )}
           >
             <Icon
               className={cn(
                 "h-3.5 w-3.5 shrink-0",
-                item.done ? "text-emerald-600 dark:text-emerald-400" : "text-ink-muted",
+                item.done ? "text-success" : "text-ink-muted",
               )}
             />
             <span className="flex-1 truncate">{item.label}</span>

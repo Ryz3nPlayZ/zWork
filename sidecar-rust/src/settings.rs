@@ -432,12 +432,13 @@ Allowed `kind` values:
 
 ## Permissions
 
-You have FULL, UNRESTRICTED access to this computer through your tools. There is NO sandbox, NO container, and NO permission layer blocking you. Every tool call executes directly on the host system.
-- `write_file`, `run_command`, `list_dir`, `read_file` — all execute with the same privileges as the user's terminal.
+You have powerful local access to this computer through your tools. There is no sandbox or container — every tool call executes directly on the host system with the same privileges as the user's terminal.
+- `write_file`, `run_command`, `list_dir`, `read_file` — all execute locally with the user's privileges.
 - You CAN create directories, install packages, run servers, edit any file, and execute any command.
-- NEVER claim \"sandbox restrictions\", \"I don't have permission\", or \"that operation is blocked\" — these do not exist. If a tool fails, it is because the command itself failed (wrong path, missing program, etc.), not because you are restricted.
+- Potentially destructive actions (recursive deletes, force-pushes, overwriting files outside the working directory, piping downloads into a shell, etc.) are gated: the user is asked to approve them first. If a call is gated, explain briefly what you want to do and wait for the user's decision — never try to route around the gate.
+- NEVER claim \"sandbox restrictions\" or \"I don't have permission\" as an excuse — if a tool fails, it is because the command itself failed (wrong path, missing program, etc.) or the user declined a permission prompt, not because you are restricted.
 - DO NOT ask the user to run commands for you. Run them yourself via `run_command`.
-- The only actions that need explicit user confirmation are truly irreversible external ones: sending payments, posting publicly, sending emails, or deleting large amounts of user data (`rm -rf` on home/docs). Everything else — just do it.
+- The only actions that need explicit user confirmation are destructive or irreversible ones: deleting data, overwriting system files, force-pushing, sending payments, posting publicly, sending emails. Everything else — just do it.
 
 {plan_mode_block}
 
@@ -514,7 +515,7 @@ pub fn build_system_prompt(
             "- `list_dir(path)` — list immediate contents of a directory.",
             "- `write_file(path, content)` — create or overwrite a file with the ENTIRE contents. Parent dirs auto-created.",
             "- `run_command(command, cwd?, background?)` — run shell. Set `background=true` for servers; foreground has 180s timeout.",
-            "- `web_search(query?)` — search web/news for current information. Use for recent events, facts, general research.",
+            "- `web_search(query?)` — fetch recent Google News headlines. News headlines only; may be incomplete and is NOT factual lookup or page content — to verify facts or read a page, open it with `browser_navigate` / `browser_snapshot` (or tell the user you can't confirm it from headlines).",
             "- `save_memory(content, target?)` — persist information across sessions.",
             "- `ask_question(question, options)` — ask user a clarifying question with choices.",
             "- `ask_user(question, options)` — ask user a question with choices when preferences are ambiguous.",
@@ -553,7 +554,51 @@ pub fn build_system_prompt(
             list.push("- `browser_tabs()` — list Chrome tabs.");
         }
 
-        list.join("\n")
+        let mut out = list.join("\n");
+
+        // Cross-check against the registered schemas: any tool in
+        // `get_tool_schemas(false)` that the hand-written list above forgot
+        // still gets a generic line, so a registered tool is never invisible
+        // to the model. The hand-written lines stay authoritative (they carry
+        // behavioral guidance); these are a safety net for drift. Same
+        // include_academic / include_desktop gating as the groups above.
+        let academic_gated = [
+            "extract_document",
+            "search_papers",
+            "format_citation",
+            "get_stock_data",
+            "detect_hardware",
+        ];
+        let mut generated: Vec<String> = Vec::new();
+        for schema in crate::tools::get_tool_schemas(false) {
+            let name = schema.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            if name.is_empty() {
+                continue;
+            }
+            let already_listed = list.iter().any(|l| l.contains(&format!("`{}(", name)));
+            if already_listed {
+                continue;
+            }
+            let desktop_gated = name.starts_with("desktop_") || name.starts_with("browser_");
+            if (desktop_gated && !include_desktop)
+                || (academic_gated.contains(&name) && !include_academic)
+            {
+                continue;
+            }
+            let desc = schema
+                .get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .lines()
+                .next()
+                .unwrap_or("");
+            generated.push(format!("- `{}` — {}", name, desc));
+        }
+        if !generated.is_empty() {
+            out.push('\n');
+            out.push_str(&generated.join("\n"));
+        }
+        out
     };
 
     let tool_priority_block = {
@@ -569,7 +614,7 @@ pub fn build_system_prompt(
             idx += 1;
         }
 
-        priority.push(format!("{}. **Current events / factual lookup → `web_search`.** For news, weather, sports, \"what happened today\", or any factual question about the world.", idx));
+        priority.push(format!("{}. **Current events / news → `web_search`.** For news, weather, sports, \"what happened today\". It returns recent Google News headlines only — NOT verified facts or page content; for factual detail, open the actual page with the browser tools or say you can't confirm it.", idx));
         idx += 1;
 
         if include_desktop {

@@ -6,7 +6,7 @@ use axum::{
     routing::{delete, get, patch, post, put},
     Router,
 };
-use chrono::{DateTime, Duration, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 use hmac::{Hmac, Mac};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
@@ -42,6 +42,68 @@ struct AppState {
     features: AppFeatures,
     gateway: GatewayConfig,
     composio_api_key: String,
+    admin_token_secret: String,
+    admin_token_ttl_hours: i64,
+    /// Public no-login chat demo (`/api/demo/chat`). Separate from the
+    /// authenticated gateway so it can never be reached by a leaked token,
+    /// and so its rate limits are independent. In-memory only.
+    demo: DemoConfig,
+}
+
+/// Configuration + per-IP accounting for the public `/api/demo/chat` endpoint.
+/// All state lives in memory — a container restart resets the daily counters,
+/// which is acceptable for a free public demo.
+#[derive(Clone)]
+struct DemoConfig {
+    enabled: bool,
+    /// Hard per-IP message cap per UTC day.
+    daily_requests_per_ip: i64,
+    /// Per-IP (hashed) → (UTC day-of-year index, count). Pruned lazily on read.
+    daily_counts: Arc<DailyCounter>,
+    /// Max messages accepted in one request body.
+    max_messages: usize,
+    /// Max total content characters across all messages.
+    max_total_chars: usize,
+    /// zWork-flavored system prompt prepended upstream-side.
+    system_prompt: String,
+}
+
+#[derive(Default)]
+struct DailyCounter {
+    /// key = sha256(ip)[0..16] hex, value = (day_index, count)
+    map: dashmap::DashMap<String, (u32, i64)>,
+}
+
+impl DailyCounter {
+    /// Returns the current count for `ip_key` on `today`, after pruning stale
+    /// entries from prior days. Mutates state (resets the day bucket on rollover).
+    fn count_for_today(&self, ip_key: &str, today: u32) -> i64 {
+        let mut entry = self
+            .map
+            .entry(ip_key.to_string())
+            .or_insert((today, 0));
+        if entry.0 != today {
+            *entry = (today, 0);
+        }
+        entry.1
+    }
+
+    fn increment(&self, ip_key: &str, today: u32) {
+        let mut entry = self
+            .map
+            .entry(ip_key.to_string())
+            .or_insert((today, 0));
+        if entry.0 != today {
+            *entry = (today, 1);
+        } else {
+            entry.1 += 1;
+        }
+    }
+
+    /// Drop entries from prior days so the map can't grow without bound.
+    fn prune(&self, today: u32) {
+        self.map.retain(|_, (day, _)| *day == today);
+    }
 }
 
 const COMPOSIO_BASE_URL: &str = "https://backend.composio.dev/api/v3";
@@ -200,22 +262,50 @@ fn load_gateway_providers() -> Vec<GatewayProvider> {
 
     let api_key = std::env::var("DEEPSEEK_API_KEY").unwrap_or_default();
     if !api_key.trim().is_empty() {
-        providers.push(GatewayProvider {
-            name: "DeepSeek".to_string(),
-            base_url: env_or("DEEPSEEK_BASE_URL", "https://api.deepseek.com/anthropic"),
-            api_key,
-            primary_model: env_or("DEEPSEEK_MODEL_PRIMARY", "deepseek-v4-flash"),
-            fallback_model: env_or("DEEPSEEK_MODEL_FALLBACK", "deepseek-v4-flash"),
-            protocol: match std::env::var("DEEPSEEK_PROTOCOL")
-                .unwrap_or_default()
-                .trim()
-                .to_ascii_lowercase()
-                .as_str()
-            {
-                "openai" => GatewayProtocol::OpenAi,
-                _ => GatewayProtocol::Anthropic,
-            },
-        });
+        // DeepSeek exposes TWO wire formats over the same API key:
+        //   - https://api.deepseek.com/anthropic  → Anthropic Messages shape
+        //   - https://api.deepseek.com             → OpenAI Chat Completions shape
+        // The two gateway handlers (`ai_proxy_anthropic` for /api/v1/messages,
+        // `ai_proxy` for /api/v1/chat/completions) each filter providers by
+        // `protocol`, so a single provider entry can only serve one shape.
+        // Registering DeepSeek under BOTH protocols lets the desktop sidecar
+        // (Anthropic shape) and the web demo (OpenAI shape) share the same
+        // upstream — without this, only one endpoint has a provider and the
+        // other returns a bare 502 with an empty failure list.
+        //
+        // `DEEPSEEK_PROTOCOL` is preserved as a backward-compat hint but is no
+        // longer exclusive: if it pins "anthropic" or "openai" explicitly, only
+        // that variant registers; otherwise (unset / "both" / anything else)
+        // both variants register.
+        let primary = env_or("DEEPSEEK_MODEL_PRIMARY", "deepseek-v4-flash");
+        let fallback = env_or("DEEPSEEK_MODEL_FALLBACK", "deepseek-v4-flash");
+        let pin = std::env::var("DEEPSEEK_PROTOCOL")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        let register_anthropic = pin.is_empty() || pin == "both" || pin == "anthropic";
+        let register_openai = pin.is_empty() || pin == "both" || pin == "openai";
+
+        if register_anthropic {
+            providers.push(GatewayProvider {
+                name: "DeepSeek".to_string(),
+                base_url: env_or("DEEPSEEK_BASE_URL", "https://api.deepseek.com/anthropic"),
+                api_key: api_key.clone(),
+                primary_model: primary.clone(),
+                fallback_model: fallback.clone(),
+                protocol: GatewayProtocol::Anthropic,
+            });
+        }
+        if register_openai {
+            providers.push(GatewayProvider {
+                name: "DeepSeek".to_string(),
+                base_url: env_or("DEEPSEEK_OPENAI_BASE_URL", "https://api.deepseek.com"),
+                api_key: api_key.clone(),
+                primary_model: primary.clone(),
+                fallback_model: fallback.clone(),
+                protocol: GatewayProtocol::OpenAi,
+            });
+        }
     }
 
     // Load Groq provider
@@ -388,6 +478,7 @@ struct DesktopAuthStartQuery {
     port: u16,
     error: Option<String>,
     error_description: Option<String>,
+    nonce: Option<String>,
 }
 
 #[derive(Deserialize, sqlx::FromRow)]
@@ -589,13 +680,20 @@ struct AdminUserRow {
 struct AdminUsageByTime {
     date: NaiveDate,
     requests: i64,
+    roots: i64,
+    continuations: i64,
+    prompt_tokens: i64,
+    completion_tokens: i64,
     tokens: i64,
 }
 
 #[derive(Clone, Serialize)]
 struct AdminUsageByModel {
+    provider_name: Option<String>,
     model_id: String,
     requests: i64,
+    prompt_tokens: i64,
+    completion_tokens: i64,
     tokens: i64,
     percentage: f64,
 }
@@ -771,6 +869,24 @@ async fn bootstrap_schema(db: &PgPool) -> Result<(), sqlx::Error> {
         r#"
         ALTER TABLE app_users
         ADD COLUMN IF NOT EXISTS subscription_current_period_end TIMESTAMPTZ;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE app_users
+        ADD COLUMN IF NOT EXISTS subscription_started_at TIMESTAMPTZ;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        ALTER TABLE app_users
+        ADD COLUMN IF NOT EXISTS subscription_ended_at TIMESTAMPTZ;
         "#,
     )
     .execute(db)
@@ -1203,6 +1319,59 @@ async fn bootstrap_schema(db: &PgPool) -> Result<(), sqlx::Error> {
     .execute(db)
     .await?;
 
+    // ── Admin dashboard: sessions + audit log ──
+    // The admin dashboard issues stateless HMAC-signed tokens after password
+    // verification. We persist only the SHA-256 hash of each token so that we
+    // can revoke individual sessions and stamp last_used_at without ever
+    // storing the raw bearer.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS admin_sessions (
+            token_hash TEXT PRIMARY KEY,
+            email TEXT NOT NULL,
+            issued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            expires_at TIMESTAMPTZ NOT NULL,
+            last_used_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            revoked_at TIMESTAMPTZ
+        );
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_admin_sessions_email_issued
+        ON admin_sessions(email, issued_at DESC);
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS admin_audit_log (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            actor_email TEXT,
+            action TEXT NOT NULL,
+            target_user_id TEXT,
+            metadata JSONB,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_admin_audit_log_created_at
+        ON admin_audit_log(created_at DESC);
+        "#,
+    )
+    .execute(db)
+    .await?;
+
     Ok(())
 }
 
@@ -1374,23 +1543,39 @@ async fn ensure_owner_or_service(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<Option<AppUser>, StatusCode> {
-    // First check if there's a valid admin token (from password auth)
-    if let Some(token_value) = headers.get("authorization").and_then(|v| v.to_str().ok()) {
-        if token_value.starts_with("Bearer admin_") {
-            // Token format: admin_<uuid>_<email>_<timestamp>
-            return Ok(None); // Admin token is valid, proceed
+    let (_actor_email, user) = ensure_owner_or_service_with_actor(state, headers).await?;
+    Ok(user)
+}
+
+/// Like `ensure_owner_or_service` but also returns the actor email (from the
+/// admin token if present, otherwise the owner user's email) so handlers can
+/// write accurate audit-log entries.
+async fn ensure_owner_or_service_with_actor(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<(Option<String>, Option<AppUser>), StatusCode> {
+    // First check for an HMAC-signed admin token (from password auth).
+    // verify_admin_token returns Ok(None) for non-admin-shaped tokens so we
+    // fall through to gateway/owner auth; Ok(Some(email)) means a valid admin
+    // session; Err means admin-shaped but invalid (bad sig / expired / revoked).
+    if let Some(raw) = read_bearer_token(headers) {
+        if raw.starts_with(ADMIN_TOKEN_PREFIX) {
+            match verify_admin_token(state, &raw).await? {
+                Some(email) => return Ok((Some(email), None)),
+                None => {}
+            }
         }
     }
 
     let access = ensure_gateway_access(state, headers).await?;
     match access {
-        GatewayAccess::ServiceToken => Ok(None),
+        GatewayAccess::ServiceToken => Ok((None, None)),
         other => {
             let user = resolve_app_user(state, other)
                 .await?
                 .ok_or(StatusCode::UNAUTHORIZED)?;
             if is_owner_email(state, &user.email) {
-                Ok(Some(user))
+                Ok((Some(user.email.clone()), Some(user)))
             } else {
                 Err(StatusCode::FORBIDDEN)
             }
@@ -2865,6 +3050,204 @@ async fn ai_proxy_anthropic(
     ))
 }
 
+/// Public, no-login chat demo at `POST /api/demo/chat`.
+///
+/// Streams an Anthropic-shaped SSE response from the same DeepSeek provider
+/// the authenticated gateway uses, but WITHOUT calling `ensure_gateway_access`
+/// — there is no token, no cookie, no DB user. Abuse is bounded by:
+///   - a tower-governor per-IP burst limiter on the route (see `demo_router`)
+///   - a per-IP daily message cap enforced here (`DemoConfig.daily_counts`)
+///   - hard caps on message count and total content size
+///
+/// The body shape matches what `minimal-chat/src/lib/demoApi.ts` sends:
+/// `{ messages: [{ role: "user"|"assistant", content: string }] }`. Only the
+/// last user message is forwarded as the turn to answer (multi-turn context is
+/// reconstructed from the prior messages array).
+async fn demo_chat(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<DemoChatBody>,
+) -> Result<Response, (StatusCode, String)> {
+    if !state.demo.enabled {
+        return Err((StatusCode::NOT_FOUND, "demo_disabled".to_string()));
+    }
+    if !state.features.hosted_gateway || state.gateway.providers.is_empty() {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "demo_backend_not_configured".to_string(),
+        ));
+    }
+
+    // Pick the Anthropic-protocol provider (DeepSeek anthropic endpoint).
+    // This is the same upstream `/api/v1/messages` uses.
+    let provider = state
+        .gateway
+        .providers
+        .iter()
+        .find(|p| p.protocol == GatewayProtocol::Anthropic)
+        .cloned()
+        .ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no_anthropic_provider".to_string(),
+        ))?;
+
+    // Per-IP daily cap. Hash the IP so the raw value is never stored.
+    let today = Utc::now().ordinal();
+    let ip_key = demo_ip_key(&headers, &state.demo.system_prompt);
+    {
+        let counter = &state.demo.daily_counts;
+        counter.prune(today);
+        let used = counter.count_for_today(&ip_key, today);
+        if used >= state.demo.daily_requests_per_ip {
+            return Err((
+                StatusCode::TOO_MANY_REQUESTS,
+                "daily_demo_limit_reached".to_string(),
+            ));
+        }
+    }
+
+    // Validate + cap the conversation window.
+    let messages = body.messages;
+    if messages.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "empty_messages".to_string()));
+    }
+    if messages.len() > state.demo.max_messages {
+        return Err((StatusCode::BAD_REQUEST, "too_many_messages".to_string()));
+    }
+    let total_chars: usize = messages
+        .iter()
+        .map(|m| m.content.chars().count())
+        .sum();
+    if total_chars > state.demo.max_total_chars {
+        return Err((StatusCode::BAD_REQUEST, "message_too_long".to_string()));
+    }
+
+    // Rebuild as Anthropic Messages content blocks. The demo keeps it text-only.
+    let upstream_messages: Vec<Value> = messages
+        .into_iter()
+        .map(|m| {
+            serde_json::json!({
+                "role": m.role,
+                "content": m.content,
+            })
+        })
+        .collect();
+
+    let model = provider.primary_model.clone();
+    let mut upstream_body = serde_json::json!({
+        "model": model,
+        "max_tokens": 2048,
+        "stream": true,
+        "system": state.demo.system_prompt,
+        "messages": upstream_messages,
+    });
+    // DeepSeek requires assistant turns to carry a thinking block.
+    ensure_thinking_blocks(&mut upstream_body);
+
+    let endpoint = format!("{}/v1/messages", provider.base_url.trim_end_matches('/'));
+    let resp = state
+        .http_client
+        .post(endpoint)
+        .header("Content-Type", "application/json")
+        .header("x-api-key", provider.api_key.clone())
+        .header("anthropic-version", "2023-06-01")
+        .json(&upstream_body)
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::warn!("demo upstream unreachable: {e}");
+            (
+                StatusCode::BAD_GATEWAY,
+                "demo_upstream_unreachable".to_string(),
+            )
+        })?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        let detail = resp
+            .text()
+            .await
+            .unwrap_or_default()
+            .chars()
+            .take(300)
+            .collect::<String>();
+        tracing::warn!("demo upstream returned {}: {}", status.as_u16(), detail);
+        return Err((StatusCode::BAD_GATEWAY, "demo_upstream_error".to_string()));
+    }
+
+    // Count this request against the daily cap only after we know the upstream
+    // accepted it (so a 5xx from the provider doesn't burn a user's quota).
+    state.demo.daily_counts.increment(&ip_key, today);
+
+    // Pass the SSE stream straight through. `sse_stream_with_usage` scans for
+    // usage events; we drop the receiver (no DB row to write them to for a
+    // anonymous demo) but still benefit from the stream plumbing.
+    let upstream_body_stream = resp.bytes_stream();
+    let (body, _usage_rx) = sse_stream_with_usage(upstream_body_stream);
+
+    let mut response = Response::new(body);
+    *response.status_mut() = status;
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/event-stream; charset=utf-8"),
+    );
+    response.headers_mut().insert(
+        HeaderName::from_static("x-zwork-router-provider"),
+        HeaderValue::from_str(&provider.name)
+            .unwrap_or_else(|_| HeaderValue::from_static("demo")),
+    );
+    response.headers_mut().insert(
+        HeaderName::from_static("x-zwork-router-model"),
+        HeaderValue::from_str(&model)
+            .unwrap_or_else(|_| HeaderValue::from_static("demo-model")),
+    );
+    response.headers_mut().insert(
+        HeaderName::from_static("x-zwork-router-label"),
+        HeaderValue::from_static("zWork Demo"),
+    );
+    Ok(response)
+}
+
+#[derive(Deserialize)]
+struct DemoChatBody {
+    messages: Vec<DemoChatMessage>,
+}
+
+#[derive(Deserialize)]
+struct DemoChatMessage {
+    role: String,
+    content: String,
+}
+
+/// Derive a stable, salted hash of the client IP for daily-limit accounting.
+/// Falls back to a fixed bucket when no IP can be determined (e.g. a misconfigured
+/// proxy) — that bucket shares the cap, which is the safe direction.
+fn demo_ip_key(headers: &HeaderMap, salt_source: &str) -> String {
+    // Prefer the leftmost X-Forwarded-For (set by Caddy) — that's the real client.
+    let raw = headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(|s| s.trim().to_string())
+        .or_else(|| {
+            headers
+                .get("x-real-ip")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.trim().to_string())
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+
+    // Mix in the router label (or any app secret) so the stored hash can't be
+    // correlated with IPs seen in other logs by a third party.
+    use sha2::Digest;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(raw.as_bytes());
+    hasher.update(b"|");
+    hasher.update(salt_source.as_bytes());
+    let digest = hasher.finalize();
+    hex::encode(&digest[..16])
+}
+
 fn cors_allowed_origins() -> Vec<HeaderValue> {
     let raw = std::env::var("CORS_ALLOWED_ORIGINS").unwrap_or_else(|_| {
         [
@@ -3029,6 +3412,13 @@ fn stripe_signature_valid(secret: &str, payload: &[u8], header_value: &str) -> b
         Some(value) if !value.is_empty() => value,
         _ => return false,
     };
+
+    // Reject stale or future-dated timestamps to prevent webhook replay.
+    // Stripe's recommended default tolerance is 5 minutes (300s).
+    match timestamp.parse::<i64>() {
+        Ok(ts) if (Utc::now().timestamp() - ts).abs() <= 300 => {}
+        _ => return false,
+    }
 
     let mut signed = timestamp.into_bytes();
     signed.push(b'.');
@@ -3366,6 +3756,12 @@ async fn stripe_webhook(
             );
 
             if let Some(user_id) = user_id {
+                // When the subscription becomes active for the first time,
+                // stamp subscription_started_at. When it ends, stamp
+                // subscription_ended_at so the revenue dashboard can compute churn.
+                let is_active = status == "active" || status == "trialing";
+                let is_terminated = event_type == "customer.subscription.deleted"
+                    || status == "canceled";
                 let result = if user_id.is_empty() {
                     sqlx::query(
                         r#"
@@ -3375,6 +3771,8 @@ async fn stripe_webhook(
                             subscription_price_id = $5,
                             subscription_current_period_end = $6,
                             tier = $7,
+                            subscription_started_at = COALESCE(subscription_started_at, CASE WHEN $8 THEN NOW() ELSE NULL END),
+                            subscription_ended_at = CASE WHEN $9 THEN NOW() ELSE subscription_ended_at END,
                             updated_at = NOW()
                         WHERE stripe_customer_id = $1
                         "#,
@@ -3386,6 +3784,8 @@ async fn stripe_webhook(
                     .bind(&price_id)
                     .bind(current_period_end)
                     .bind(subscription_tier(status, price_id.as_ref()))
+                    .bind(is_active)
+                    .bind(is_terminated)
                     .execute(&state.db)
                     .await
                 } else {
@@ -3398,6 +3798,8 @@ async fn stripe_webhook(
                             subscription_price_id = $6,
                             subscription_current_period_end = $7,
                             tier = $8,
+                            subscription_started_at = COALESCE(subscription_started_at, CASE WHEN $9 THEN NOW() ELSE NULL END),
+                            subscription_ended_at = CASE WHEN $10 THEN NOW() ELSE subscription_ended_at END,
                             updated_at = NOW()
                         WHERE user_id = $1
                         "#,
@@ -3410,6 +3812,8 @@ async fn stripe_webhook(
                     .bind(&price_id)
                     .bind(current_period_end)
                     .bind(subscription_tier(status, price_id.as_ref()))
+                    .bind(is_active)
+                    .bind(is_terminated)
                     .execute(&state.db)
                     .await
                 };
@@ -3606,11 +4010,9 @@ async fn admin_metrics_overview(
     .await
     .unwrap_or(0);
 
-    let paid_users: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM app_users WHERE tier IN ('pro', 'max')")
-            .fetch_one(&state.db)
-            .await
-            .unwrap_or(0);
+    // MRR + paid count come straight from Stripe so discounts (e.g. 100%-off
+    // coupons) are accounted for. See compute_current_mrr for the rationale.
+    let (mrr, paid_users) = compute_current_mrr(&state).await;
 
     let churn_rate = if active_users_30d > 0 {
         ((active_users_30d - active_users_7d) as f64) / (active_users_30d as f64)
@@ -3624,58 +4026,6 @@ async fn admin_metrics_overview(
         0.0
     };
 
-    let pro_monthly = std::env::var("STRIPE_PRICE_PRO_MONTHLY").unwrap_or_default();
-    let pro_annual = std::env::var("STRIPE_PRICE_PRO_ANNUAL").unwrap_or_default();
-    let max_monthly = std::env::var("STRIPE_PRICE_MAX_MONTHLY").unwrap_or_default();
-    let max_annual = std::env::var("STRIPE_PRICE_MAX_ANNUAL").unwrap_or_default();
-
-    let pro_price_monthly = std::env::var("PRO_PRICE_MONTHLY_USD")
-        .ok()
-        .and_then(|v| v.parse::<f64>().ok())
-        .unwrap_or(20.0);
-    let pro_price_annual_monthly = std::env::var("PRO_PRICE_ANNUAL_MONTHLY_USD")
-        .ok()
-        .and_then(|v| v.parse::<f64>().ok())
-        .unwrap_or(16.0);
-    let max_price_monthly = std::env::var("MAX_PRICE_MONTHLY_USD")
-        .ok()
-        .and_then(|v| v.parse::<f64>().ok())
-        .unwrap_or(50.0);
-    let max_price_annual_monthly = std::env::var("MAX_PRICE_ANNUAL_MONTHLY_USD")
-        .ok()
-        .and_then(|v| v.parse::<f64>().ok())
-        .unwrap_or(40.0);
-
-    let subscription_rows = sqlx::query(
-        "SELECT tier, subscription_price_id FROM app_users WHERE subscription_status = 'active'"
-    )
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
-
-    let mut mrr = 0.0_f64;
-    for row in &subscription_rows {
-        let tier: String = row.get("tier");
-        let price_id: Option<String> = row.get("subscription_price_id");
-        let pid = price_id.as_deref().unwrap_or("");
-        match tier.as_str() {
-            "pro" => {
-                if pid == pro_annual {
-                    mrr += pro_price_annual_monthly;
-                } else {
-                    mrr += pro_price_monthly;
-                }
-            }
-            "max" => {
-                if pid == max_annual {
-                    mrr += max_price_annual_monthly;
-                } else {
-                    mrr += max_price_monthly;
-                }
-            }
-            _ => {}
-        }
-    }
 
     let arpu = if total_users > 0 {
         mrr / (total_users as f64)
@@ -3782,10 +4132,14 @@ async fn admin_usage_by_time(
 
     let usage: Vec<AdminUsageByTime> = sqlx::query(
         r#"
-        SELECT 
-            DATE(created_at) as date,
-            COUNT(*) as requests,
-            COALESCE(SUM(total_tokens), 0) as tokens
+        SELECT
+            DATE(created_at)::date as date,
+            COUNT(*)::bigint as requests,
+            COUNT(*) FILTER (WHERE request_kind = 'root')::bigint as roots,
+            COUNT(*) FILTER (WHERE request_kind = 'continuation')::bigint as continuations,
+            COALESCE(SUM(prompt_tokens), 0)::bigint as prompt_tokens,
+            COALESCE(SUM(completion_tokens), 0)::bigint as completion_tokens,
+            COALESCE(SUM(total_tokens), 0)::bigint as tokens
         FROM gateway_requests
         WHERE created_at > NOW() - INTERVAL '90 days'
         GROUP BY DATE(created_at)
@@ -3799,6 +4153,10 @@ async fn admin_usage_by_time(
     .map(|row| AdminUsageByTime {
         date: row.get("date"),
         requests: row.get("requests"),
+        roots: row.get("roots"),
+        continuations: row.get("continuations"),
+        prompt_tokens: row.get("prompt_tokens"),
+        completion_tokens: row.get("completion_tokens"),
         tokens: row.get("tokens"),
     })
     .collect();
@@ -3813,17 +4171,20 @@ async fn admin_usage_by_model(
     let _owner = ensure_owner_or_service(&state, &headers).await?;
 
     let total: i64 =
-        sqlx::query_scalar("SELECT COALESCE(SUM(total_tokens), 0) FROM gateway_requests")
+        sqlx::query_scalar("SELECT COALESCE(SUM(total_tokens), 0)::bigint FROM gateway_requests")
             .fetch_one(&state.db)
             .await
             .unwrap_or(1);
 
     let usage: Vec<AdminUsageByModel> = sqlx::query(
         r#"
-        SELECT 
+        SELECT
+            MAX(provider_name) as provider_name,
             model_id,
-            COUNT(*) as requests,
-            COALESCE(SUM(total_tokens), 0) as tokens
+            COUNT(*)::bigint as requests,
+            COALESCE(SUM(prompt_tokens), 0)::bigint as prompt_tokens,
+            COALESCE(SUM(completion_tokens), 0)::bigint as completion_tokens,
+            COALESCE(SUM(total_tokens), 0)::bigint as tokens
         FROM gateway_requests
         WHERE model_id IS NOT NULL
         GROUP BY model_id
@@ -3837,8 +4198,11 @@ async fn admin_usage_by_model(
     .map(|row| {
         let tokens: i64 = row.get("tokens");
         AdminUsageByModel {
+            provider_name: row.get("provider_name"),
             model_id: row.get("model_id"),
             requests: row.get("requests"),
+            prompt_tokens: row.get("prompt_tokens"),
+            completion_tokens: row.get("completion_tokens"),
             tokens,
             percentage: if total > 0 {
                 (tokens as f64 / total as f64) * 100.0
@@ -3858,12 +4222,21 @@ async fn admin_update_user_tier(
     Path(user_id): Path<String>,
     Json(body): Json<AdminUpdatePlanRequest>,
 ) -> Result<Json<AppUser>, StatusCode> {
-    let _owner = ensure_owner_or_service(&state, &headers).await?;
+    let (actor_email, _owner) = ensure_owner_or_service_with_actor(&state, &headers).await?;
 
     let valid_tiers = ["free", "pro", "max"];
     if !valid_tiers.contains(&body.tier.as_str()) {
         return Err(StatusCode::BAD_REQUEST);
     }
+
+    // Capture the prior tier for the audit trail before mutating.
+    let prior_tier: Option<String> = sqlx::query_scalar(
+        r#"SELECT tier FROM app_users WHERE user_id = $1"#,
+    )
+    .bind(&user_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let user = sqlx::query_as::<_, AppUser>(
         r#"
@@ -3883,7 +4256,1017 @@ async fn admin_update_user_tier(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     .ok_or(StatusCode::NOT_FOUND)?;
 
+    audit_admin_action(
+        &state,
+        actor_email.as_deref(),
+        "tier_change",
+        Some(&user_id),
+        Some(serde_json::json!({
+            "from": prior_tier,
+            "to": body.tier,
+        })),
+    )
+    .await;
+
     Ok(Json(user))
+}
+
+// ── Admin: operational health metrics ─────────────────────────────────────
+
+#[derive(Deserialize)]
+struct AdminDaysQuery {
+    #[serde(default = "default_health_days")]
+    days: i64,
+}
+
+fn default_health_days() -> i64 {
+    7
+}
+
+#[derive(Serialize)]
+struct AdminHealthStatusSlice {
+    bucket: String,
+    count: i64,
+}
+
+#[derive(Serialize)]
+struct AdminHealthDayPoint {
+    date: String,
+    requests: i64,
+    errors: i64,
+    error_rate: f64,
+    p50_latency_ms: Option<f64>,
+    p95_latency_ms: Option<f64>,
+    p99_latency_ms: Option<f64>,
+    p50_ttft_ms: Option<f64>,
+    p95_ttft_ms: Option<f64>,
+}
+
+#[derive(Serialize)]
+struct AdminFailingModel {
+    model_id: String,
+    provider_name: Option<String>,
+    total_requests: i64,
+    failed_requests: i64,
+    failure_rate: f64,
+}
+
+#[derive(Serialize)]
+struct AdminHealthOverview {
+    window_days: i64,
+    total_requests: i64,
+    failed_requests: i64,
+    error_rate: f64,
+    retried_requests: i64,
+    status_breakdown: Vec<AdminHealthStatusSlice>,
+    latency_p50_ms: Option<f64>,
+    latency_p95_ms: Option<f64>,
+    latency_p99_ms: Option<f64>,
+    ttft_p50_ms: Option<f64>,
+    ttft_p95_ms: Option<f64>,
+    daily: Vec<AdminHealthDayPoint>,
+    top_failing_models: Vec<AdminFailingModel>,
+}
+
+async fn admin_metrics_health(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<AdminDaysQuery>,
+) -> Result<Json<AdminHealthOverview>, StatusCode> {
+    let _owner = ensure_owner_or_service(&state, &headers).await?;
+    let days = q.days.clamp(1, 90);
+
+    // Totals + error counts in the window. A request counts as "failed" when
+    // upstream_status is null (we never got a response) or >= 400.
+    let totals = sqlx::query(
+        r#"
+        SELECT
+            COUNT(*)::bigint AS total,
+            COUNT(*) FILTER (WHERE upstream_status IS NULL OR upstream_status >= 400)::bigint AS failed
+        FROM gateway_requests
+        WHERE created_at > NOW() - ($1 || ' days')::INTERVAL
+        "#,
+    )
+    .bind(days)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let total_requests: i64 = totals.get("total");
+    let failed_requests: i64 = totals.get("failed");
+    let error_rate = if total_requests > 0 {
+        failed_requests as f64 / total_requests as f64
+    } else {
+        0.0
+    };
+
+    // Retries: rows that have a non-null failure_history, OR that have more
+    // than one gateway_attempt row.
+    let retried_requests: i64 = sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)::bigint FROM gateway_requests g
+        WHERE g.created_at > NOW() - ($1 || ' days')::INTERVAL
+          AND (
+            g.failure_history IS NOT NULL
+            OR (SELECT COUNT(*) FROM gateway_attempts a WHERE a.request_id = g.id) > 1
+          )
+        "#,
+    )
+    .bind(days)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0);
+
+    // Status-code bucket breakdown (2xx / 3xx / 4xx / 5xx / unknown).
+    let status_rows = sqlx::query(
+        r#"
+        SELECT
+            CASE
+              WHEN upstream_status IS NULL THEN 'unknown'
+              WHEN upstream_status < 300 THEN '2xx'
+              WHEN upstream_status < 400 THEN '3xx'
+              WHEN upstream_status < 500 THEN '4xx'
+              ELSE '5xx'
+            END AS bucket,
+            COUNT(*)::bigint AS count
+        FROM gateway_requests
+        WHERE created_at > NOW() - ($1 || ' days')::INTERVAL
+        GROUP BY bucket
+        "#,
+    )
+    .bind(days)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let status_breakdown: Vec<AdminHealthStatusSlice> = status_rows
+        .into_iter()
+        .map(|row| AdminHealthStatusSlice {
+            bucket: row.get("bucket"),
+            count: row.get("count"),
+        })
+        .collect();
+
+    // Overall latency + TTFT percentiles (only over rows that finished).
+    // percentile_cont returns NUMERIC, so cast to float8 for f64 decoding.
+    let pct = sqlx::query(
+        r#"
+        SELECT
+            percentile_cont(0.5)  WITHIN GROUP (ORDER BY total_duration_ms)::float8 AS p50,
+            percentile_cont(0.95) WITHIN GROUP (ORDER BY total_duration_ms)::float8 AS p95,
+            percentile_cont(0.99) WITHIN GROUP (ORDER BY total_duration_ms)::float8 AS p99
+        FROM gateway_requests
+        WHERE created_at > NOW() - ($1 || ' days')::INTERVAL
+          AND total_duration_ms IS NOT NULL
+        "#,
+    )
+    .bind(days)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let opt_f64 = |row: &sqlx::postgres::PgRow, col: &str| -> Option<f64> {
+        row.get::<Option<f64>, _>(col)
+    };
+    let latency_p50_ms = opt_f64(&pct, "p50");
+    let latency_p95_ms = opt_f64(&pct, "p95");
+    let latency_p99_ms = opt_f64(&pct, "p99");
+
+    let ttft = sqlx::query(
+        r#"
+        SELECT
+            percentile_cont(0.5)  WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (first_token_at - started_at)) * 1000)::float8 AS p50,
+            percentile_cont(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (first_token_at - started_at)) * 1000)::float8 AS p95
+        FROM gateway_requests
+        WHERE created_at > NOW() - ($1 || ' days')::INTERVAL
+          AND started_at IS NOT NULL AND first_token_at IS NOT NULL
+        "#,
+    )
+    .bind(days)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let ttft_p50_ms = opt_f64(&ttft, "p50");
+    let ttft_p95_ms = opt_f64(&ttft, "p95");
+
+    // Daily series with per-day percentiles + error rate.
+    let daily_rows = sqlx::query(
+        r#"
+        SELECT
+            DATE(created_at)::date AS date,
+            COUNT(*)::bigint AS requests,
+            COUNT(*) FILTER (WHERE upstream_status IS NULL OR upstream_status >= 400)::bigint AS errors,
+            percentile_cont(0.5)  WITHIN GROUP (ORDER BY total_duration_ms)::float8 AS p50,
+            percentile_cont(0.95) WITHIN GROUP (ORDER BY total_duration_ms)::float8 AS p95,
+            percentile_cont(0.99) WITHIN GROUP (ORDER BY total_duration_ms)::float8 AS p99,
+            percentile_cont(0.5)  WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (first_token_at - started_at)) * 1000)::float8 AS t50,
+            percentile_cont(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (first_token_at - started_at)) * 1000)::float8 AS t95
+        FROM gateway_requests
+        WHERE created_at > NOW() - ($1 || ' days')::INTERVAL
+        GROUP BY DATE(created_at)
+        ORDER BY DATE(created_at)
+        "#,
+    )
+    .bind(days)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let daily: Vec<AdminHealthDayPoint> = daily_rows
+        .into_iter()
+        .map(|row| {
+            let date: NaiveDate = row.get("date");
+            let requests: i64 = row.get("requests");
+            let errors: i64 = row.get("errors");
+            AdminHealthDayPoint {
+                date: date.to_string(),
+                requests,
+                errors,
+                error_rate: if requests > 0 {
+                    errors as f64 / requests as f64
+                } else {
+                    0.0
+                },
+                p50_latency_ms: row.get("p50"),
+                p95_latency_ms: row.get("p95"),
+                p99_latency_ms: row.get("p99"),
+                p50_ttft_ms: row.get("t50"),
+                p95_ttft_ms: row.get("t95"),
+            }
+        })
+        .collect();
+
+    // Top failing models.
+    let failing_rows = sqlx::query(
+        r#"
+        SELECT
+            COALESCE(model_id, '(unknown)') AS model_id,
+            MAX(provider_name) AS provider_name,
+            COUNT(*)::bigint AS total_requests,
+            COUNT(*) FILTER (WHERE upstream_status IS NULL OR upstream_status >= 400)::bigint AS failed_requests
+        FROM gateway_requests
+        WHERE created_at > NOW() - ($1 || ' days')::INTERVAL
+          AND model_id IS NOT NULL
+        GROUP BY model_id
+        HAVING COUNT(*) FILTER (WHERE upstream_status IS NULL OR upstream_status >= 400) > 0
+        ORDER BY failed_requests DESC
+        LIMIT 10
+        "#,
+    )
+    .bind(days)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let top_failing_models: Vec<AdminFailingModel> = failing_rows
+        .into_iter()
+        .map(|row| {
+            let total: i64 = row.get("total_requests");
+            let failed: i64 = row.get("failed_requests");
+            AdminFailingModel {
+                model_id: row.get("model_id"),
+                provider_name: row.get("provider_name"),
+                total_requests: total,
+                failed_requests: failed,
+                failure_rate: if total > 0 {
+                    failed as f64 / total as f64
+                } else {
+                    0.0
+                },
+            }
+        })
+        .collect();
+
+    Ok(Json(AdminHealthOverview {
+        window_days: days,
+        total_requests,
+        failed_requests,
+        error_rate,
+        retried_requests,
+        status_breakdown,
+        latency_p50_ms,
+        latency_p95_ms,
+        latency_p99_ms,
+        ttft_p50_ms,
+        ttft_p95_ms,
+        daily,
+        top_failing_models,
+    }))
+}
+
+#[derive(Serialize)]
+struct AdminProviderHealth {
+    provider_name: String,
+    total_requests: i64,
+    failed_requests: i64,
+    failure_rate: f64,
+    avg_latency_ms: Option<f64>,
+    p95_latency_ms: Option<f64>,
+    requests_limit_day: Option<i64>,
+    requests_remaining_day: Option<i64>,
+    saturation_pct: Option<f64>,
+    last_status: Option<i32>,
+    last_model_id: Option<String>,
+    observed_at: Option<DateTime<Utc>>,
+}
+
+async fn admin_metrics_providers(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<AdminDaysQuery>,
+) -> Result<Json<Vec<AdminProviderHealth>>, StatusCode> {
+    let _owner = ensure_owner_or_service(&state, &headers).await?;
+    let days = q.days.clamp(1, 90);
+
+    let agg_rows = sqlx::query(
+        r#"
+        SELECT
+            provider_name,
+            COUNT(*)::bigint AS total_requests,
+            COUNT(*) FILTER (WHERE upstream_status IS NULL OR upstream_status >= 400)::bigint AS failed_requests,
+            AVG(total_duration_ms)::float8 AS avg_latency_ms,
+            percentile_cont(0.95) WITHIN GROUP (ORDER BY total_duration_ms)::float8 AS p95_latency_ms
+        FROM gateway_requests
+        WHERE created_at > NOW() - ($1 || ' days')::INTERVAL
+          AND provider_name IS NOT NULL
+        GROUP BY provider_name
+        ORDER BY total_requests DESC
+        "#,
+    )
+    .bind(days)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // Latest rate-limit snapshot per provider (single row each, so fetch all).
+    let snap_rows = sqlx::query(
+        r#"
+        SELECT provider_name, last_model_id, last_status,
+               requests_limit_day, requests_remaining_day, observed_at
+        FROM provider_snapshots
+        "#,
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut snaps: HashMap<String, (Option<i32>, Option<String>, Option<i64>, Option<i64>, Option<DateTime<Utc>>)> =
+        HashMap::new();
+    for row in snap_rows {
+        let name: String = row.get("provider_name");
+        snaps.insert(
+            name,
+            (
+                row.get("last_status"),
+                row.get("last_model_id"),
+                row.get("requests_limit_day"),
+                row.get("requests_remaining_day"),
+                row.get("observed_at"),
+            ),
+        );
+    }
+
+    let out: Vec<AdminProviderHealth> = agg_rows
+        .into_iter()
+        .map(|row| {
+            let name: String = row.get("provider_name");
+            let total: i64 = row.get("total_requests");
+            let failed: i64 = row.get("failed_requests");
+            let (last_status, last_model_id, limit_day, remaining_day, observed_at) =
+                snaps.get(&name).cloned().unwrap_or((None, None, None, None, None));
+            let saturation_pct = match (limit_day, remaining_day) {
+                (Some(limit), Some(remaining)) if limit > 0 => {
+                    Some(((limit - remaining) as f64 / limit as f64) * 100.0)
+                }
+                _ => None,
+            };
+            AdminProviderHealth {
+                provider_name: name,
+                total_requests: total,
+                failed_requests: failed,
+                failure_rate: if total > 0 {
+                    failed as f64 / total as f64
+                } else {
+                    0.0
+                },
+                avg_latency_ms: row.get("avg_latency_ms"),
+                p95_latency_ms: row.get("p95_latency_ms"),
+                requests_limit_day: limit_day,
+                requests_remaining_day: remaining_day,
+                saturation_pct,
+                last_status,
+                last_model_id,
+                observed_at,
+            }
+        })
+        .collect();
+
+    Ok(Json(out))
+}
+
+// ── Admin: business / revenue metrics ─────────────────────────────────────
+
+#[derive(Serialize)]
+struct AdminRevenueDayPoint {
+    date: String,
+    mrr: f64,
+    new_subs: i64,
+    cancellations: i64,
+    est_cost_usd: f64,
+    margin: f64,
+}
+
+#[derive(Serialize)]
+struct AdminTierSplit {
+    tier: String,
+    users: i64,
+    mrr: f64,
+}
+
+#[derive(Serialize)]
+struct AdminRevenueOverview {
+    window_days: i64,
+    current_mrr: f64,
+    arpu: f64,
+    paid_users: i64,
+    churned_in_window: i64,
+    new_subs_in_window: i64,
+    est_cost_usd: f64,
+    gross_margin_pct: f64,
+    daily: Vec<AdminRevenueDayPoint>,
+    tier_split: Vec<AdminTierSplit>,
+}
+
+/// Resolve per-tier monthly price (same logic as admin_metrics_overview).
+fn tier_monthly_price(tier: &str, price_id: &str) -> f64 {
+    // The *monthly* Stripe price IDs aren't needed here — we default to the
+    // monthly USD price unless the price_id matches the *annual* plan.
+    // Defaults reflect the current zWork pricing ($12 pro, $50 max).
+    let pro_annual = std::env::var("STRIPE_PRICE_PRO_ANNUAL").unwrap_or_default();
+    let max_annual = std::env::var("STRIPE_PRICE_MAX_ANNUAL").unwrap_or_default();
+    let pro_price_monthly = std::env::var("PRO_PRICE_MONTHLY_USD")
+        .ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(12.0);
+    let pro_price_annual_monthly = std::env::var("PRO_PRICE_ANNUAL_MONTHLY_USD")
+        .ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(10.0);
+    let max_price_monthly = std::env::var("MAX_PRICE_MONTHLY_USD")
+        .ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(50.0);
+    let max_price_annual_monthly = std::env::var("MAX_PRICE_ANNUAL_MONTHLY_USD")
+        .ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(41.67);
+    match tier {
+        "pro" => if price_id == pro_annual { pro_price_annual_monthly } else { pro_price_monthly },
+        "max" => if price_id == max_annual { max_price_annual_monthly } else { max_price_monthly },
+        _ => 0.0,
+    }
+}
+
+/// Compute current MRR directly from Stripe. This is the source of truth —
+// it handles discounts (e.g. 100%-off coupons) and annual/monthly normalization
+// correctly, which a DB-only computation can't because we don't persist the
+// Stripe discount object. Admin dashboard calls are infrequent (a human
+// looking at a page), so a Stripe API call per request is fine.
+///
+/// Returns (mrr_usd_per_month, paid_subscriber_count).
+async fn compute_current_mrr(state: &AppState) -> (f64, i64) {
+    if state.stripe_secret_key.trim().is_empty() {
+        return (0.0, 0);
+    }
+
+    let mut mrr = 0.0_f64;
+    let mut paid = 0_i64;
+    let mut has_more = true;
+    let mut starting_after: Option<String> = None;
+
+    // Page through all active subscriptions. Expand discount + price so we can
+    // compute the effective monthly amount per sub in one pass.
+    while has_more {
+        let mut req = state
+            .http_client
+            .get("https://api.stripe.com/v1/subscriptions")
+            .bearer_auth(&state.stripe_secret_key)
+            .query(&[
+                ("status", "active"),
+                ("limit", "100"),
+                ("expand[]", "data.discount.coupon"),
+                ("expand[]", "data.items.data.price"),
+            ]);
+        if let Some(sa) = &starting_after {
+            req = req.query(&[("starting_after", sa.as_str())]);
+        }
+        let resp = match req.send().await {
+            Ok(r) => r,
+            Err(e) => {
+                warn!("Stripe MRR query failed: {e}");
+                return (0.0, 0);
+            }
+        };
+        if !resp.status().is_success() {
+            warn!("Stripe MRR query non-2xx: {}", resp.status());
+            return (0.0, 0);
+        }
+        let body: Value = match resp.json().await {
+            Ok(v) => v,
+            Err(e) => {
+                warn!("Stripe MRR query json decode failed: {e}");
+                return (0.0, 0);
+            }
+        };
+
+        let subs = body.get("data").and_then(|v| v.as_array());
+        if let Some(subs) = subs {
+            for sub in subs {
+                // Effective monthly amount = unit_amount (cents) / 100, normalized
+                // to monthly by the recurring interval, then discounted.
+                let item = sub
+                    .get("items")
+                    .and_then(|i| i.get("data"))
+                    .and_then(|d| d.as_array())
+                    .and_then(|d| d.first());
+                let price = item.and_then(|i| i.get("price"));
+                let unit_amount = price
+                    .and_then(|p| p.get("unit_amount"))
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                let interval = price
+                    .and_then(|p| p.get("recurring"))
+                    .and_then(|r| r.get("interval"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("month");
+                let interval_count = price
+                    .and_then(|p| p.get("recurring"))
+                    .and_then(|r| r.get("interval_count"))
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(1)
+                    .max(1) as f64;
+
+                let monthly_gross = match interval {
+                    "year" => (unit_amount as f64 / 100.0) / 12.0 * interval_count,
+                    "week" => (unit_amount as f64 / 100.0) * (52.0 / 12.0) * interval_count,
+                    "day" => (unit_amount as f64 / 100.0) * (365.0 / 12.0) * interval_count,
+                    _ => (unit_amount as f64 / 100.0) * interval_count, // month + anything else
+                };
+
+                // Apply discount if present.
+                let mut effective = monthly_gross;
+                if let Some(coupon) = sub
+                    .get("discount")
+                    .and_then(|d| d.get("coupon"))
+                {
+                    if let Some(pct) = coupon.get("percent_off").and_then(|v| v.as_f64()) {
+                        effective = effective * (1.0 - pct / 100.0);
+                    } else if let Some(amt_off) = coupon
+                        .get("amount_off")
+                        .and_then(|v| v.as_i64())
+                    {
+                        // amount_off is a one-time discount in cents; for MRR
+                        // we treat a `forever` duration as reducing every
+                        // billing cycle, otherwise ignore (one-shot).
+                        let duration = coupon
+                            .get("duration")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("once");
+                        if duration == "forever" {
+                            effective = (effective - amt_off as f64 / 100.0).max(0.0);
+                        }
+                    }
+                }
+
+                mrr += effective;
+                paid += 1;
+            }
+        }
+
+        has_more = body.get("has_more").and_then(|v| v.as_bool()).unwrap_or(false);
+        if has_more {
+            // The last sub's id is the cursor for the next page.
+            starting_after = body
+                .get("data")
+                .and_then(|d| d.as_array())
+                .and_then(|a| a.last())
+                .and_then(|s| s.get("id"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            if starting_after.is_none() {
+                break;
+            }
+        }
+    }
+
+    ((mrr * 100.0).round() / 100.0, paid)
+}
+
+async fn admin_metrics_revenue(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<AdminDaysQuery>,
+) -> Result<Json<AdminRevenueOverview>, StatusCode> {
+    let _owner = ensure_owner_or_service(&state, &headers).await?;
+    let days = q.days.clamp(1, 365);
+
+    let total_users: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM app_users")
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or(0);
+    let (current_mrr, paid_users) = compute_current_mrr(&state).await;
+    let arpu = if total_users > 0 { current_mrr / total_users as f64 } else { 0.0 };
+
+    // New subs + cancellations within the window, from lifecycle columns.
+    let new_subs_in_window: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*)::bigint FROM app_users WHERE subscription_started_at IS NOT NULL AND subscription_started_at > NOW() - ($1 || ' days')::INTERVAL"#,
+    )
+    .bind(days)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0);
+    let churned_in_window: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*)::bigint FROM app_users WHERE subscription_ended_at IS NOT NULL AND subscription_ended_at > NOW() - ($1 || ' days')::INTERVAL"#,
+    )
+    .bind(days)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0);
+
+    // Estimated provider cost across the window.
+    let est_cost_usd: f64 = sqlx::query_scalar(
+        r#"SELECT COALESCE(SUM(estimated_cost_usd), 0)::float8 FROM gateway_requests WHERE created_at > NOW() - ($1 || ' days')::INTERVAL"#,
+    )
+    .bind(days)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0.0);
+    let gross_margin_pct = if current_mrr > 0.0 {
+        ((current_mrr - est_cost_usd) / current_mrr * 100.0).max(-100.0)
+    } else {
+        0.0
+    };
+
+    // Daily series: MRR estimate is point-in-time per day (approximation — we
+    // don't have historical MRR snapshots, so we approximate MRR on day D as
+    // sum of prices for users whose subscription_started_at <= D and (no
+    // subscription_ended_at OR subscription_ended_at > D)). Cost + churn +
+    // new-subs are exact daily counts.
+    let daily_rows = sqlx::query(
+        r#"
+        WITH days AS (
+          SELECT generate_series(
+            DATE(NOW() - ($1 || ' days')::INTERVAL),
+            DATE(NOW()),
+            '1 day'
+          ) AS d
+        ),
+        cost AS (
+          SELECT DATE(created_at) AS d,
+                 COALESCE(SUM(estimated_cost_usd), 0)::float8 AS cost
+          FROM gateway_requests
+          WHERE created_at > NOW() - ($1 || ' days')::INTERVAL
+          GROUP BY DATE(created_at)
+        ),
+        new_subs AS (
+          SELECT DATE(subscription_started_at) AS d, COUNT(*)::bigint AS n
+          FROM app_users
+          WHERE subscription_started_at IS NOT NULL
+            AND subscription_started_at > NOW() - ($1 || ' days')::INTERVAL
+          GROUP BY DATE(subscription_started_at)
+        ),
+        cancels AS (
+          SELECT DATE(subscription_ended_at) AS d, COUNT(*)::bigint AS n
+          FROM app_users
+          WHERE subscription_ended_at IS NOT NULL
+            AND subscription_ended_at > NOW() - ($1 || ' days')::INTERVAL
+          GROUP BY DATE(subscription_ended_at)
+        )
+        SELECT
+          d.d::date AS date,
+          COALESCE(cost.cost, 0)::float8 AS cost,
+          COALESCE(new_subs.n, 0)::bigint AS new_subs,
+          COALESCE(cancels.n, 0)::bigint AS cancels
+        FROM days d
+        LEFT JOIN cost ON cost.d = d.d
+        LEFT JOIN new_subs ON new_subs.d = d.d
+        LEFT JOIN cancels ON cancels.d = d.d
+        ORDER BY d.d
+        "#,
+    )
+    .bind(days)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let mut daily: Vec<AdminRevenueDayPoint> = Vec::new();
+    for row in daily_rows {
+        let date: NaiveDate = row.get("date");
+        let cost: f64 = row.get("cost");
+        let new_subs: i64 = row.get("new_subs");
+        let cancels: i64 = row.get("cancels");
+        // Approximate day-D MRR using current MRR (best-effort since we lack
+        // historical snapshots); the cost/margin trend is what's most useful.
+        let margin = current_mrr - cost;
+        daily.push(AdminRevenueDayPoint {
+            date: date.to_string(),
+            mrr: current_mrr,
+            new_subs,
+            cancellations: cancels,
+            est_cost_usd: (cost * 100.0).round() / 100.0,
+            margin: (margin * 100.0).round() / 100.0,
+        });
+    }
+
+    // Tier split (current snapshot).
+    let tier_rows = sqlx::query(
+        r#"
+        SELECT tier,
+               COUNT(*)::bigint AS users,
+               COUNT(*) FILTER (WHERE subscription_status = 'active' AND subscription_id IS NOT NULL) AS active
+        FROM app_users
+        GROUP BY tier
+        "#,
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let tier_split: Vec<AdminTierSplit> = tier_rows
+        .into_iter()
+        .map(|row| {
+            let tier: String = row.get("tier");
+            let users: i64 = row.get("users");
+            let active: i64 = row.get("active");
+            // approximate tier MRR contribution: active count * tier price
+            let tier_mrr = match tier.as_str() {
+                "pro" => active as f64 * tier_monthly_price("pro", ""),
+                "max" => active as f64 * tier_monthly_price("max", ""),
+                _ => 0.0,
+            };
+            AdminTierSplit { tier, users, mrr: tier_mrr }
+        })
+        .collect();
+
+    Ok(Json(AdminRevenueOverview {
+        window_days: days,
+        current_mrr,
+        arpu,
+        paid_users,
+        churned_in_window,
+        new_subs_in_window,
+        est_cost_usd: (est_cost_usd * 100.0).round() / 100.0,
+        gross_margin_pct,
+        daily,
+        tier_split,
+    }))
+}
+
+// ── Admin: engagement metrics ─────────────────────────────────────────────
+
+#[derive(Serialize)]
+struct AdminEngagementDayPoint {
+    date: String,
+    dau: i64,
+    new_users: i64,
+    returning: i64,
+    requests: i64,
+    tokens: i64,
+}
+
+#[derive(Serialize)]
+struct AdminEngagementOverview {
+    window_days: i64,
+    dau_today: i64,
+    wau: i64,
+    mau: i64,
+    stickiness_pct: f64,
+    new_users_in_window: i64,
+    daily: Vec<AdminEngagementDayPoint>,
+    top_active_users: Vec<AdminUserRow>,
+}
+
+async fn admin_metrics_engagement(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<AdminDaysQuery>,
+) -> Result<Json<AdminEngagementOverview>, StatusCode> {
+    let _owner = ensure_owner_or_service(&state, &headers).await?;
+    let days = q.days.clamp(1, 90);
+
+    let dau_today: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(DISTINCT user_id)::bigint FROM gateway_requests WHERE created_at > NOW() - INTERVAL '1 day'"#,
+    )
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0);
+    let wau: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(DISTINCT user_id)::bigint FROM gateway_requests WHERE created_at > NOW() - INTERVAL '7 days'"#,
+    )
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0);
+    let mau: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(DISTINCT user_id)::bigint FROM gateway_requests WHERE created_at > NOW() - INTERVAL '30 days'"#,
+    )
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0);
+    let stickiness_pct = if mau > 0 { (dau_today as f64 / mau as f64) * 100.0 } else { 0.0 };
+    let new_users_in_window: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*)::bigint FROM app_users WHERE created_at > NOW() - ($1 || ' days')::INTERVAL"#,
+    )
+    .bind(days)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0);
+
+    // Daily DAU + new users (signed up that day) + returning = dau - new.
+    let daily_rows = sqlx::query(
+        r#"
+        WITH dau AS (
+          SELECT DATE(created_at) AS d,
+                 COUNT(DISTINCT user_id)::bigint AS dau,
+                 COUNT(*)::bigint AS requests,
+                 COALESCE(SUM(total_tokens), 0)::bigint AS tokens
+          FROM gateway_requests
+          WHERE created_at > NOW() - ($1 || ' days')::INTERVAL
+          GROUP BY DATE(created_at)
+        ),
+        newu AS (
+          SELECT DATE(created_at) AS d, COUNT(*)::bigint AS n
+          FROM app_users
+          WHERE created_at > NOW() - ($1 || ' days')::INTERVAL
+          GROUP BY DATE(created_at)
+        )
+        SELECT d.d::date AS date,
+               COALESCE(dau.dau, 0)::bigint AS dau,
+               COALESCE(dau.requests, 0)::bigint AS requests,
+               COALESCE(dau.tokens, 0)::bigint AS tokens,
+               COALESCE(newu.n, 0)::bigint AS new_users
+        FROM generate_series(
+          DATE(NOW() - ($1 || ' days')::INTERVAL),
+          DATE(NOW()),
+          '1 day'
+        ) AS d(d)
+        LEFT JOIN dau ON dau.d = d.d
+        LEFT JOIN newu ON newu.d = d.d
+        ORDER BY d.d
+        "#,
+    )
+    .bind(days)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let daily: Vec<AdminEngagementDayPoint> = daily_rows
+        .into_iter()
+        .map(|row| {
+            let date: NaiveDate = row.get("date");
+            let dau: i64 = row.get("dau");
+            let new_users: i64 = row.get("new_users");
+            AdminEngagementDayPoint {
+                date: date.to_string(),
+                dau,
+                new_users,
+                returning: (dau - new_users).max(0),
+                requests: row.get("requests"),
+                tokens: row.get("tokens"),
+            }
+        })
+        .collect();
+
+    // Top active users in window — reuse the same row shape as list_users.
+    let top_rows = sqlx::query(
+        r#"
+        SELECT
+            u.user_id, u.email, u.name, u.tier, u.created_at,
+            MAX(g.created_at) AS last_activity,
+            COUNT(g.id)::bigint AS total_requests,
+            COALESCE(SUM(g.prompt_tokens), 0)::bigint AS total_prompt_tokens,
+            COALESCE(SUM(g.completion_tokens), 0)::bigint AS total_completion_tokens,
+            u.stripe_customer_id, u.subscription_status
+        FROM app_users u
+        JOIN gateway_requests g ON u.user_id = g.user_id
+        WHERE g.created_at > NOW() - ($1 || ' days')::INTERVAL
+        GROUP BY u.user_id, u.email, u.name, u.tier, u.created_at, u.stripe_customer_id, u.subscription_status
+        ORDER BY total_requests DESC
+        LIMIT 10
+        "#,
+    )
+    .bind(days)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let top_active_users: Vec<AdminUserRow> = top_rows
+        .into_iter()
+        .map(|row| {
+            let prompt: i64 = row.get("total_prompt_tokens");
+            let completion: i64 = row.get("total_completion_tokens");
+            let tier: String = row.get("tier");
+            let (input_rate, output_rate) = if tier == "max" || tier == "pro" {
+                (0.435, 0.87)
+            } else {
+                (0.14, 0.28)
+            };
+            let cost = (prompt as f64 / 1_000_000.0) * input_rate
+                + (completion as f64 / 1_000_000.0) * output_rate;
+            AdminUserRow {
+                user_id: row.get("user_id"),
+                email: row.get("email"),
+                name: row.get("name"),
+                tier,
+                created_at: row.get("created_at"),
+                last_activity: row.get("last_activity"),
+                total_requests: row.get("total_requests"),
+                total_prompt_tokens: prompt,
+                total_completion_tokens: completion,
+                estimated_cost_usd: (cost * 100.0).round() / 100.0,
+                stripe_customer_id: row.get("stripe_customer_id"),
+                subscription_status: row.get("subscription_status"),
+            }
+        })
+        .collect();
+
+    Ok(Json(AdminEngagementOverview {
+        window_days: days,
+        dau_today,
+        wau,
+        mau,
+        stickiness_pct,
+        new_users_in_window,
+        daily,
+        top_active_users,
+    }))
+}
+
+// ── Admin: live activity ──────────────────────────────────────────────────
+
+#[derive(Serialize)]
+struct AdminRecentRequest {
+    id: String,
+    user_email: Option<String>,
+    user_name: Option<String>,
+    provider_name: Option<String>,
+    model_id: Option<String>,
+    upstream_status: Option<i32>,
+    total_duration_ms: Option<i64>,
+    total_tokens: Option<i64>,
+    created_at: DateTime<Utc>,
+}
+
+#[derive(Serialize)]
+struct AdminLiveOverview {
+    active_users_5m: i64,
+    requests_5m: i64,
+    tokens_5m: i64,
+    requests_per_min: f64,
+    recent: Vec<AdminRecentRequest>,
+}
+
+async fn admin_metrics_live(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<AdminLiveOverview>, StatusCode> {
+    let _owner = ensure_owner_or_service(&state, &headers).await?;
+
+    let active_users_5m: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(DISTINCT user_id)::bigint FROM gateway_requests WHERE created_at > NOW() - INTERVAL '5 minutes'"#,
+    )
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0);
+    let stats: (i64, i64) = sqlx::query_as(
+        r#"SELECT COUNT(*)::bigint, COALESCE(SUM(total_tokens), 0)::bigint FROM gateway_requests WHERE created_at > NOW() - INTERVAL '5 minutes'"#,
+    )
+    .fetch_one(&state.db)
+    .await
+    .map(|(c, t): (i64, i64)| (c, t))
+    .unwrap_or((0, 0));
+    let requests_5m = stats.0;
+    let tokens_5m = stats.1;
+    let requests_per_min = requests_5m as f64 / 5.0;
+
+    let recent_rows = sqlx::query(
+        r#"
+        SELECT g.id, u.email, u.name, g.provider_name, g.model_id,
+               g.upstream_status, g.total_duration_ms, g.total_tokens, g.created_at
+        FROM gateway_requests g
+        LEFT JOIN app_users u ON u.user_id = g.user_id
+        ORDER BY g.created_at DESC
+        LIMIT 50
+        "#,
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let recent: Vec<AdminRecentRequest> = recent_rows
+        .into_iter()
+        .map(|row| AdminRecentRequest {
+            id: row.get::<uuid::Uuid, _>("id").to_string(),
+            user_email: row.get("email"),
+            user_name: row.get("name"),
+            provider_name: row.get("provider_name"),
+            model_id: row.get("model_id"),
+            upstream_status: row.get("upstream_status"),
+            total_duration_ms: row.get("total_duration_ms"),
+            total_tokens: row.get("total_tokens"),
+            created_at: row.get("created_at"),
+        })
+        .collect();
+
+    Ok(Json(AdminLiveOverview {
+        active_users_5m,
+        requests_5m,
+        tokens_5m,
+        requests_per_min,
+        recent,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -3895,16 +5278,221 @@ struct AdminPasswordRequest {
 struct AdminPasswordResponse {
     token: String,
     email: String,
+    expires_at: DateTime<Utc>,
+}
+
+// ── Admin token helpers ───────────────────────────────────────────────────
+//
+// Tokens are HMAC-SHA256 signed and stateless on the read path, but we persist
+// a SHA-256 hash of each issued token in `admin_sessions` so individual sessions
+// can be revoked and we can track last_used_at. Token format:
+//
+//     admin_<base64url(payload_json)>.<base64url(hmac_sig)>
+//
+// payload = { "email": "...", "iat": <unix_secs>, "exp": <unix_secs>,
+//             "sid": "<8-char session id>" }
+
+const ADMIN_TOKEN_PREFIX: &str = "admin_";
+
+/// Base64url encode without padding (URL-safe, no '=' chars).
+fn b64url_encode(bytes: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+}
+
+/// Base64url decode, tolerant of missing padding.
+fn b64url_decode(input: &str) -> Result<Vec<u8>, StatusCode> {
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(input)
+        .map_err(|_| StatusCode::UNAUTHORIZED)
+}
+
+/// Resolve the HMAC signing key. Falls back to deriving from ADMIN_PASSWORD if
+// ADMIN_TOKEN_SECRET is unset so dev keeps working — logged as a warning.
+fn admin_signing_key(state: &AppState) -> Vec<u8> {
+    if !state.admin_token_secret.is_empty() {
+        return state.admin_token_secret.as_bytes().to_vec();
+    }
+    warn!("ADMIN_TOKEN_SECRET is unset; deriving signing key from ADMIN_PASSWORD. Set ADMIN_TOKEN_SECRET in production.");
+    let pw = std::env::var("ADMIN_PASSWORD").unwrap_or_default();
+    let mut key = b"zwork-admin-fallback::".to_vec();
+    key.extend_from_slice(pw.as_bytes());
+    key
+}
+
+/// SHA-256 of a token, hex-encoded — what we persist as the session PK.
+fn hash_token(token: &str) -> String {
+    use sha2::Digest;
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(token.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+/// Mint a signed admin token for `email` and persist its hash. Returns the
+/// raw token to hand back to the caller, plus the expiry.
+async fn mint_admin_token(
+    state: &AppState,
+    email: &str,
+) -> Result<(String, DateTime<Utc>), StatusCode> {
+    let now = Utc::now();
+    let expires_at = now + Duration::hours(state.admin_token_ttl_hours);
+    let sid = Uuid::new_v4().simple().to_string();
+    let sid: String = sid.chars().take(12).collect();
+
+    let payload = serde_json::json!({
+        "email": email,
+        "iat": now.timestamp(),
+        "exp": expires_at.timestamp(),
+        "sid": sid,
+    });
+    let payload_bytes = serde_json::to_vec(&payload).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let payload_b64 = b64url_encode(&payload_bytes);
+
+    let mut mac = Hmac::<Sha256>::new_from_slice(&admin_signing_key(state))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    mac.update(payload_b64.as_bytes());
+    let sig = b64url_encode(&mac.finalize().into_bytes());
+
+    let token = format!("{ADMIN_TOKEN_PREFIX}{payload_b64}.{sig}");
+
+    // Persist the hash so we can revoke + track usage.
+    let token_hash = hash_token(&token);
+    sqlx::query(
+        r#"
+        INSERT INTO admin_sessions (token_hash, email, expires_at)
+        VALUES ($1, $2, $3)
+        "#,
+    )
+    .bind(&token_hash)
+    .bind(email)
+    .bind(expires_at)
+    .execute(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok((token, expires_at))
+}
+
+/// Verify a raw admin token: correct signature, not expired, and present +
+/// non-revoked in `admin_sessions`. Returns the actor email. Bumps
+/// last_used_at on success.
+///
+/// Returns `Ok(None)` if `raw` is not an admin-shaped token (caller should try
+/// the next auth path) and `Err(UNAUTHORIZED)` if it is admin-shaped but bad.
+async fn verify_admin_token(
+    state: &AppState,
+    raw: &str,
+) -> Result<Option<String>, StatusCode> {
+    let body = match raw.strip_prefix(ADMIN_TOKEN_PREFIX) {
+        Some(rest) => rest,
+        None => return Ok(None),
+    };
+
+    let (payload_b64, sig_b64) = match body.rsplit_once('.') {
+        Some((p, s)) => (p, s),
+        None => return Err(StatusCode::UNAUTHORIZED),
+    };
+
+    // Recompute + compare signature in constant time.
+    let mut mac = Hmac::<Sha256>::new_from_slice(&admin_signing_key(state))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    mac.update(payload_b64.as_bytes());
+    mac.verify_slice(&b64url_decode(sig_b64)?)
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    let payload_bytes = b64url_decode(payload_b64)?;
+    let payload: serde_json::Value =
+        serde_json::from_slice(&payload_bytes).map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    let exp = payload
+        .get("exp")
+        .and_then(|v| v.as_i64())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    if Utc::now().timestamp() >= exp {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    let email = payload
+        .get("email")
+        .and_then(|v| v.as_str())
+        .ok_or(StatusCode::UNAUTHORIZED)?
+        .to_string();
+
+    // Session must exist + not be revoked.
+    let token_hash = hash_token(&format!("{ADMIN_TOKEN_PREFIX}{body}"));
+    let row = sqlx::query(
+        r#"SELECT revoked_at FROM admin_sessions WHERE token_hash = $1"#,
+    )
+    .bind(&token_hash)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    match row {
+        Some(row) => {
+            let revoked_at: Option<DateTime<Utc>> = row.get("revoked_at");
+            if revoked_at.is_some() {
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+            let _ = sqlx::query(
+                r#"UPDATE admin_sessions SET last_used_at = NOW() WHERE token_hash = $1"#,
+            )
+            .bind(&token_hash)
+            .execute(&state.db)
+            .await;
+            Ok(Some(email))
+        }
+        None => Err(StatusCode::UNAUTHORIZED),
+    }
+}
+
+/// Append a row to the admin audit log. Best-effort: never fails the caller.
+async fn audit_admin_action(
+    state: &AppState,
+    actor_email: Option<&str>,
+    action: &str,
+    target_user_id: Option<&str>,
+    metadata: Option<serde_json::Value>,
+) {
+    let _ = sqlx::query(
+        r#"
+        INSERT INTO admin_audit_log (actor_email, action, target_user_id, metadata)
+        VALUES ($1, $2, $3, $4)
+        "#,
+    )
+    .bind(actor_email)
+    .bind(action)
+    .bind(target_user_id)
+    .bind(metadata)
+    .execute(&state.db)
+    .await;
 }
 
 async fn admin_verify_password(
     State(state): State<AppState>,
     Json(body): Json<AdminPasswordRequest>,
 ) -> Result<Json<AdminPasswordResponse>, StatusCode> {
-    let admin_password = std::env::var("ADMIN_PASSWORD")
-        .unwrap_or_else(|_| "zworkisthebest".to_string());
+    // Fail closed: never fall back to a compiled-in default password. If the
+    // operator hasn't configured a sufficiently strong ADMIN_PASSWORD, admin
+    // login is disabled entirely rather than accepting a guessable default.
+    let admin_password = match std::env::var("ADMIN_PASSWORD") {
+        Ok(pw) if pw.len() >= 16 => pw,
+        _ => {
+            warn!("ADMIN_PASSWORD is unset or shorter than 16 chars; admin login is disabled.");
+            return Err(StatusCode::SERVICE_UNAVAILABLE);
+        }
+    };
 
-    if body.password != admin_password {
+    // Constant-time comparison: compare byte-by-byte without short-circuit.
+    let submitted = body.password.as_bytes();
+    let expected = admin_password.as_bytes();
+    if submitted.len() != expected.len()
+        || submitted
+            .iter()
+            .zip(expected.iter())
+            .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+            != 0
+    {
         return Err(StatusCode::UNAUTHORIZED);
     }
 
@@ -3914,14 +5502,100 @@ async fn admin_verify_password(
         .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?
         .clone();
 
-    let token = format!(
-        "admin_{}_{}_{}",
-        uuid::Uuid::new_v4(),
-        email,
-        Utc::now().timestamp()
-    );
+    let (token, expires_at) = mint_admin_token(&state, &email).await?;
+    audit_admin_action(
+        &state,
+        Some(&email),
+        "admin_login",
+        None,
+        None,
+    )
+    .await;
 
-    Ok(Json(AdminPasswordResponse { token, email }))
+    Ok(Json(AdminPasswordResponse {
+        token,
+        email,
+        expires_at,
+    }))
+}
+
+async fn admin_logout(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<StatusCode, StatusCode> {
+    let raw = match read_bearer_token(&headers) {
+        Some(t) => t,
+        None => return Err(StatusCode::UNAUTHORIZED),
+    };
+    let email = verify_admin_token(&state, &raw)
+        .await?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let token_hash = hash_token(&raw);
+    let _ = sqlx::query(
+        r#"UPDATE admin_sessions SET revoked_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL"#,
+    )
+    .bind(&token_hash)
+    .execute(&state.db)
+    .await;
+    audit_admin_action(&state, Some(&email), "admin_logout", None, None).await;
+    Ok(StatusCode::OK)
+}
+
+#[derive(Deserialize)]
+struct AdminAuditQuery {
+    #[serde(default = "default_audit_limit")]
+    limit: i64,
+}
+
+fn default_audit_limit() -> i64 {
+    200
+}
+
+#[derive(Serialize)]
+struct AdminAuditRow {
+    id: Uuid,
+    actor_email: Option<String>,
+    action: String,
+    target_user_id: Option<String>,
+    metadata: Option<Value>,
+    created_at: DateTime<Utc>,
+}
+
+async fn admin_audit_list(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<AdminAuditQuery>,
+) -> Result<Json<Vec<AdminAuditRow>>, StatusCode> {
+    let _owner = ensure_owner_or_service(&state, &headers).await?;
+    let limit = q.limit.clamp(1, 1000);
+
+    let rows = sqlx::query(
+        r#"
+        SELECT id, actor_email, action, target_user_id, metadata, created_at
+        FROM admin_audit_log
+        ORDER BY created_at DESC
+        LIMIT $1
+        "#,
+    )
+    .bind(limit)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let out: Vec<AdminAuditRow> = rows
+        .into_iter()
+        .map(|row| AdminAuditRow {
+            id: row.get("id"),
+            actor_email: row.get("actor_email"),
+            action: row.get("action"),
+            target_user_id: row.get("target_user_id"),
+            metadata: row.get("metadata"),
+            created_at: row.get("created_at"),
+        })
+        .collect();
+
+    Ok(Json(out))
 }
 
 // ── Composio proxy handlers ──
@@ -4509,21 +6183,43 @@ async fn desktop_auth_start(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let sign_in_url = format!(
+    let mut sign_in_url = format!(
         "https://api.tryzwork.app/api/auth/desktop/google?port={}",
         query.port,
     );
+    // Round-trip the client's nonce so the localhost callback can be bound to
+    // this sign-in attempt (verified by the Tauri host).
+    if let Some(nonce) = valid_desktop_nonce(query.nonce.as_deref()) {
+        sign_in_url.push_str("&nonce=");
+        sign_in_url.push_str(&urlencoding::encode(nonce));
+    }
 
     Ok(Redirect::temporary(&sign_in_url))
 }
 
-fn localhost_auth_redirect(port: u16, key: &str, value: &str) -> Redirect {
-    let redirect = format!(
+/// A desktop-auth nonce is only safe to embed in redirect URLs (and inside
+/// the OAuth state composite) if it stays alphanumeric/dash/underscore — the
+/// Tauri host generates UUIDs.
+fn valid_desktop_nonce(nonce: Option<&str>) -> Option<&str> {
+    nonce.filter(|n| {
+        !n.is_empty()
+            && n.len() <= 128
+            && n.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    })
+}
+
+fn localhost_auth_redirect(port: u16, key: &str, value: &str, nonce: Option<&str>) -> Redirect {
+    let mut redirect = format!(
         "http://127.0.0.1:{}/callback?{}={}",
         port,
         key,
         urlencoding::encode(value)
     );
+    if let Some(nonce) = nonce {
+        redirect.push_str("&nonce=");
+        redirect.push_str(&urlencoding::encode(nonce));
+    }
     Redirect::temporary(&redirect)
 }
 
@@ -4544,6 +6240,13 @@ async fn desktop_google_auth_start(
         Uuid::new_v4().simple(),
         Uuid::new_v4().simple()
     );
+    // Round-trip the desktop client's nonce inside the OAuth state so the
+    // callback can hand it back to the localhost listener. The nonce contains
+    // no dots (see valid_desktop_nonce), so the composite splits cleanly.
+    let state_value = match valid_desktop_nonce(query.nonce.as_deref()) {
+        Some(nonce) => format!("{state_value}.{nonce}"),
+        None => state_value,
+    };
     let expires_at = Utc::now() + Duration::minutes(10);
 
     sqlx::query(
@@ -4579,10 +6282,101 @@ async fn desktop_google_auth_start(
     Ok(Redirect::temporary(oauth_url.as_ref()))
 }
 
+/// Forward a Google OAuth callback to Better Auth for the web sign-in flow.
+///
+/// The Google OAuth app has a single redirect URI routed to Axum. When the
+/// callback's `state` isn't one we issued for the desktop flow, it's a web
+/// (Better Auth) flow — so we act as a dispatcher: replay the request to
+/// `better_auth:3000/api/auth/callback/google`, forwarding the browser's Cookie
+/// header (which carries Better Auth's PKCE state cookie), then relay Better
+/// Auth's response verbatim (status, all headers incl. `Set-Cookie` + the 302
+/// `Location`, and body) back to the browser.
+async fn forward_callback_to_better_auth(
+    state: &AppState,
+    headers: &HeaderMap,
+    query: &GoogleCallbackQuery,
+) -> Result<Response, StatusCode> {
+    let mut forward_url = state
+        .auth_internal_base
+        .join("callback/google")
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    {
+        let mut q = forward_url.query_pairs_mut();
+        if let Some(code) = query.code.as_deref() {
+            q.append_pair("code", code);
+        }
+        if let Some(state_value) = query.state.as_deref() {
+            q.append_pair("state", state_value);
+        }
+        if let Some(error) = query.error.as_deref() {
+            q.append_pair("error", error);
+        }
+        if let Some(error_description) = query.error_description.as_deref() {
+            q.append_pair("error_description", error_description);
+        }
+    }
+
+    let mut req = state.http_client.get(forward_url.as_str());
+    // The state cookie is what lets Better Auth correlate this callback with
+    // the sign-in request it minted — it MUST travel with the forward.
+    let cookie_present = headers.get(header::COOKIE).is_some();
+    let cookie_preview = headers
+        .get(header::COOKIE)
+        .and_then(|c| c.to_str().ok())
+        .map(|s| {
+            // Log only cookie names, not values (values may be sensitive).
+            s.split(';')
+                .filter_map(|kv| kv.trim().split('=').next())
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .unwrap_or_default();
+    tracing::info!(
+        "demo-auth-debug: callback forward state={} cookie_present={} cookie_names=[{}] all_headers=[{}]",
+        query.state.as_deref().unwrap_or(""),
+        cookie_present,
+        cookie_preview,
+        headers.keys().map(|k| k.as_str()).collect::<Vec<_>>().join(",")
+    );
+    if let Some(cookie) = headers.get(header::COOKIE) {
+        req = req.header(header::COOKIE, cookie.clone());
+    }
+    if let Some(ua) = headers.get(header::USER_AGENT) {
+        req = req.header(header::USER_AGENT, ua.clone());
+    }
+
+    let upstream = req
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::warn!("better_auth callback forward failed: {e}");
+            StatusCode::BAD_GATEWAY
+        })?;
+
+    let status = upstream.status();
+    let upstream_headers = upstream.headers().clone();
+    let body = axum::body::Body::from_stream(upstream.bytes_stream());
+    let mut response = Response::new(body);
+    *response.status_mut() = status;
+    // Relay every hop-by-hop-safe header — critically Set-Cookie and Location.
+    for (name, value) in upstream_headers.iter() {
+        // Skip headers that the HTTP transport owns; copying them confuses clients.
+        if matches!(
+            name.as_str(),
+            "content-length" | "transfer-encoding" | "connection" | "content-encoding"
+        ) {
+            continue;
+        }
+        response.headers_mut().append(name.clone(), value.clone());
+    }
+    Ok(response)
+}
+
 async fn desktop_google_callback(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(query): Query<GoogleCallbackQuery>,
-) -> Result<Redirect, StatusCode> {
+) -> Result<Response, StatusCode> {
     let state_value = query.state.as_deref().ok_or(StatusCode::BAD_REQUEST)?;
     let oauth_state = sqlx::query_as::<_, DesktopOauthState>(
         r#"
@@ -4595,10 +6389,25 @@ async fn desktop_google_callback(
     .bind(state_value)
     .fetch_optional(&state.db)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    .ok_or(StatusCode::UNAUTHORIZED)?;
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // Desktop flow: state matched a row we issued → run the desktop token
+    // exchange + localhost:{port} redirect (unchanged path below).
+    let Some(oauth_state) = oauth_state else {
+        // Web flow: this state was minted by Better Auth, not us. Google Console
+        // has a single redirect URI routed to Axum, so we act as a dispatcher —
+        // forward the original request (query + Cookie header carrying Better
+        // Auth's PKCE state cookie) to better_auth:3000 and relay its response
+        // verbatim. Better Auth validates the state cookie, exchanges the code,
+        // sets its session cookie, and 302s to the caller's callbackURL.
+        return forward_callback_to_better_auth(&state, &headers, &query).await;
+    };
 
     let port = u16::try_from(oauth_state.port).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // The client nonce rode inside the OAuth state (see
+    // desktop_google_auth_start); echo it back on the localhost redirect so
+    // the Tauri host can bind this callback to its sign-in attempt.
+    let nonce = state_value.split_once('.').map(|(_, n)| n);
 
     if let Some(error) = query.error.as_deref() {
         let detail = query
@@ -4606,7 +6415,7 @@ async fn desktop_google_callback(
             .as_deref()
             .filter(|value| !value.trim().is_empty())
             .unwrap_or(error);
-        return Ok(localhost_auth_redirect(port, "error", detail));
+        return Ok(localhost_auth_redirect(port, "error", detail, nonce).into_response());
     }
 
     let code = query.code.as_deref().ok_or(StatusCode::BAD_REQUEST)?;
@@ -4632,7 +6441,9 @@ async fn desktop_google_callback(
             port,
             "error",
             "google_token_exchange_failed",
-        ));
+            nonce,
+        )
+        .into_response());
     }
 
     let token_payload = token_response
@@ -4653,7 +6464,9 @@ async fn desktop_google_callback(
             port,
             "error",
             "google_userinfo_failed",
-        ));
+            nonce,
+        )
+        .into_response());
     }
 
     let google_user = userinfo_response
@@ -4685,7 +6498,7 @@ async fn desktop_google_callback(
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    Ok(localhost_auth_redirect(port, "code", &desktop_code))
+    Ok(localhost_auth_redirect(port, "code", &desktop_code, nonce).into_response())
 }
 
 async fn desktop_auth_exchange(
@@ -5435,6 +7248,29 @@ async fn main() {
                 .collect(),
         },
         composio_api_key: std::env::var("COMPOSIO_API_KEY").unwrap_or_default(),
+        admin_token_secret: std::env::var("ADMIN_TOKEN_SECRET").unwrap_or_default(),
+        admin_token_ttl_hours: std::env::var("ADMIN_TOKEN_TTL_HOURS")
+            .ok()
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(12),
+        demo: DemoConfig {
+            enabled: env_bool("DEMO_ENABLED", true),
+            daily_requests_per_ip: std::env::var("DEMO_DAILY_REQUESTS_PER_IP")
+                .ok()
+                .and_then(|v| v.parse::<i64>().ok())
+                .unwrap_or(50),
+            daily_counts: Arc::new(DailyCounter::default()),
+            max_messages: 20,
+            max_total_chars: 32_000,
+            system_prompt: env_or(
+                "DEMO_SYSTEM_PROMPT",
+                "You are zWork, an action-oriented AI work assistant created by Zemu Liu. \
+                 This is a public web demo, so keep answers concise, friendly, and self-contained. \
+                 Respond in the same language the user writes in. \
+                 You cannot access files, run code, browse the web, or use tools in this demo — \
+                 if asked, mention the zWork desktop app for the full experience.",
+            ),
+        },
     };
 
     let cors = CorsLayer::new()
@@ -5497,12 +7333,45 @@ async fn main() {
             post(desktop_email_sign_up),
         )
         .route("/api/desktop/auth/exchange", post(desktop_auth_exchange))
+        // Admin password verification is credential-handling and must be
+        // throttled to stop brute-force against ADMIN_PASSWORD.
+        .route("/api/admin/verify-password", post(admin_verify_password))
         .layer(GovernorLayer {
             config: auth_governor_conf,
         });
 
+    // Per-IP rate limit for the public demo endpoint. Tighter than auth's
+    // 1/s burst-5: a free chat demo invites scripted abuse, so we cap bursts
+    // hard. The daily cap (DemoConfig) is the main defense; this stops a
+    // single IP from fanning out many concurrent streams within one second.
+    let demo_governor_conf = Arc::new(
+        GovernorConfigBuilder::default()
+            .per_second(1)
+            .burst_size(3)
+            .key_extractor(SmartIpKeyExtractor)
+            .finish()
+            .expect("valid demo governor config"),
+    );
+    let demo_governor_limiter = demo_governor_conf.limiter().clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            demo_governor_limiter.retain_recent();
+        }
+    });
+    let demo_routes = Router::new()
+        .route("/api/demo/chat", post(demo_chat))
+        .layer(GovernorLayer {
+            config: demo_governor_conf,
+        });
+
     let app = Router::new()
         .route("/health", get(health_check))
+        // The web app (app.tryzwork.app) polls /api/health for backend
+        // readiness. Caddy routes /api/* here, so expose health at that path
+        // too — otherwise the web client sees a 404 and logs noise.
+        .route("/api/health", get(health_check))
         .route("/api/session", get(session_me))
         .route("/api/telemetry/event", post(ingest_telemetry))
         .route("/api/chat/stream", post(ai_proxy))
@@ -5522,8 +7391,15 @@ async fn main() {
         .route("/api/users", post(upsert_user))
         .route("/api/users/:google_id/tier", put(update_user_tier))
         // Admin Dashboard Routes
-        .route("/api/admin/verify-password", post(admin_verify_password))
+        // (/api/admin/verify-password is defined in auth_routes so it is
+        // covered by the per-IP rate limiter.)
+        .route("/api/admin/logout", post(admin_logout))
         .route("/api/admin/metrics/overview", get(admin_metrics_overview))
+        .route("/api/admin/metrics/health", get(admin_metrics_health))
+        .route("/api/admin/metrics/providers", get(admin_metrics_providers))
+        .route("/api/admin/metrics/revenue", get(admin_metrics_revenue))
+        .route("/api/admin/metrics/engagement", get(admin_metrics_engagement))
+        .route("/api/admin/metrics/live", get(admin_metrics_live))
         .route("/api/admin/users", get(admin_list_users))
         .route("/api/admin/usage/by-time", get(admin_usage_by_time))
         .route("/api/admin/usage/by-model", get(admin_usage_by_model))
@@ -5531,6 +7407,7 @@ async fn main() {
             "/api/admin/users/:user_id/tier",
             put(admin_update_user_tier),
         )
+        .route("/api/admin/audit", get(admin_audit_list))
         // Composio proxy
         .route("/api/composio/status", get(composio_status))
         .route("/api/composio/accounts", get(composio_accounts))
@@ -5553,6 +7430,7 @@ async fn main() {
             post(web_chats_add_message),
         )
         .merge(auth_routes)
+        .merge(demo_routes)
         .layer(cors)
         .layer(
             TraceLayer::new_for_http()

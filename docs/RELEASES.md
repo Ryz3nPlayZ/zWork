@@ -1,6 +1,6 @@
 # Releases and packaging
 
-zWork ships as a Tauri desktop app with a Python backend.
+zWork ships as a Tauri desktop app with a bundled Rust backend sidecar.
 
 ## Goals
 
@@ -79,7 +79,8 @@ Build flow (run on a Windows machine):
 
 That script:
 
-1. builds the Python backend into a single `.exe` via PyInstaller
+1. builds the Rust backend sidecar (`rwork-backend.exe` from `sidecar-rust/`) and
+   stages it as `zwork-backend-<target-triple>.exe`
 2. runs `tauri build --bundles nsis`
 3. copies the release bundle to `dist/zWork-windows-<arch>-setup.exe`
 
@@ -97,9 +98,10 @@ Windows may show a SmartScreen warning for unsigned binaries. Users can click
 ## Backend bundling
 
 The desktop shell prefers a packaged backend binary in release builds and falls
-back to the local Python server in development.
+back to running the Rust sidecar from source in development.
 
-The backend binary is staged under:
+The backend is built by `scripts/build-rust-backend.sh`, which compiles
+`sidecar-rust/` (binary name `rwork-backend`) and stages it as:
 
 ```text
 app/src-tauri/binaries/zwork-backend-<target-triple>

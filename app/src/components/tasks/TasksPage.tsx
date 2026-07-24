@@ -110,7 +110,7 @@ export function TasksPage() {
                 type="button"
                 onClick={() => setViewMode("board")}
                 className={cn(
-                  "press rounded-md px-2.5 py-1.5 text-[12px] font-medium transition-colors",
+                  "press ring-focus rounded-md px-2.5 py-1.5 text-[12px] font-medium transition-colors",
                   viewMode === "board" ? "bg-ink text-paper" : "text-ink-muted hover:text-ink"
                 )}
               >
@@ -121,7 +121,7 @@ export function TasksPage() {
                 type="button"
                 onClick={() => setViewMode("list")}
                 className={cn(
-                  "press rounded-md px-2.5 py-1.5 text-[12px] font-medium transition-colors",
+                  "press ring-focus rounded-md px-2.5 py-1.5 text-[12px] font-medium transition-colors",
                   viewMode === "list" ? "bg-ink text-paper" : "text-ink-muted hover:text-ink"
                 )}
               >
@@ -132,7 +132,7 @@ export function TasksPage() {
                 type="button"
                 onClick={() => setViewMode("calendar")}
                 className={cn(
-                  "press rounded-md px-2.5 py-1.5 text-[12px] font-medium transition-colors",
+                  "press ring-focus rounded-md px-2.5 py-1.5 text-[12px] font-medium transition-colors",
                   viewMode === "calendar" ? "bg-ink text-paper" : "text-ink-muted hover:text-ink"
                 )}
               >
@@ -143,7 +143,7 @@ export function TasksPage() {
             <button
               type="button"
               onClick={() => { setEditingTask(null); setModalOpen(true); }}
-              className="press inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-paper hover:bg-ink-soft transition-colors"
+              className="press ring-focus inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-paper hover:bg-ink-soft transition-colors"
             >
               <Plus className="h-3.5 w-3.5" />
               New task
@@ -239,7 +239,7 @@ export function TasksPage() {
                         <button
                           type="button"
                           onClick={() => void deleteTask(task.id)}
-                          className="rounded p-1 text-ink-faint hover:text-red-500 hover:bg-red-500/10 transition-colors"
+                          className="press ring-focus rounded p-1 text-ink-faint hover:text-error hover:bg-error/10 transition-colors"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -290,7 +290,7 @@ function TaskCard({
         <button
           type="button"
           onClick={onEdit}
-          className="min-w-0 flex-1 text-left"
+          className="ring-focus min-w-0 flex-1 rounded-lg text-left"
         >
           <div className="text-[12.5px] font-medium text-ink leading-snug">{task.title}</div>
           {task.description && (

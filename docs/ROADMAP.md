@@ -49,7 +49,7 @@ Building zWork Cloud (Pro) — zero-config AI endpoints, cross-device sync, and 
 | API Proxy | Rust (Axum), Postgres | Deployed |
 | Auth | Better Auth (Node/Bun) | Deployed |
 | Infrastructure | Caddy reverse proxy, Docker Compose | Deployed |
-| Billing | Stripe integration | Planned |
+| Billing | Stripe checkout, customer portal, and webhooks | Implemented (flag-gated behind `ENABLE_BILLING`) |
 | Analytics | PostHog | Planned |
 
 ---

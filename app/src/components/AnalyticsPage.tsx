@@ -84,7 +84,7 @@ export function AnalyticsPage() {
             <h1 className="font-serif text-[42px] font-bold tracking-tight text-ink">Analytics</h1>
             <span className={cn(
               "rounded-full px-2.5 py-0.5 text-[12px] font-semibold",
-              tier === "max" ? "bg-amber-500/10 text-amber-600" :
+              tier === "max" ? "bg-warning/10 text-warning" :
               tier === "pro" ? "bg-accent/10 text-ink" :
               "bg-ink/5 text-ink-soft"
             )}>
@@ -140,7 +140,7 @@ export function AnalyticsPage() {
                 <button
                   type="button"
                   onClick={() => setView("plan")}
-                  className="font-semibold text-ink-muted hover:text-ink hover:underline underline-offset-2 transition-all"
+                  className="press ring-focus font-semibold text-ink-muted hover:text-ink hover:underline underline-offset-2 transition-all"
                 >
                   Upgrade to Pro or Max
                 </button>
@@ -292,7 +292,7 @@ function UsageBar({
         <div
           className={cn(
             "h-full rounded-full transition-all duration-500",
-            isCritical ? "bg-red-500" : isHigh ? "bg-amber-500" : "bg-accent/60"
+            isCritical ? "bg-error" : isHigh ? "bg-warning" : "bg-accent/60"
           )}
           style={{ width: `${Math.max(pct, 0.5)}%` }}
         />
