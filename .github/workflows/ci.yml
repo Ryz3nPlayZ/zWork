@@ -75,6 +75,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
         with:
@@ -83,6 +89,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libssl-dev pkg-config
+      # Build the frontend BEFORE cargo check. Tauri's `generate_context!()`
+      # macro (main.rs) embeds the frontend at compile time and hard-fails if
+      # `frontendDist` ("../dist" from src-tauri/, i.e. app/dist/) doesn't exist:
+      # "proc macro panicked: The `frontendDist` configuration is set to
+      # \"../dist\" but this path doesn't exist". This mirrors what
+      # `npm run tauri build` does locally (vite build → cargo build).
+      - name: Build frontend
+        working-directory: ./app
+        run: |
+          npm ci
+          npm run build
       # Tauri's build script globs several bundled resources (tauri.conf.json)
       # and hard-fails if ANY glob matches nothing: binaries/cua-driver*,
       # zWork-Skills/**/*, CuaDriver.app/**/*. The real artifacts are
