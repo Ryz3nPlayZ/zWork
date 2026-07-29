@@ -19,9 +19,45 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Fetch the tag's target commit explicitly and refuse to build
+          # from a stale HEAD. Without this, a force-pushed/moved tag can
+          # race and ship binaries built from the previous commit (the
+          # v0.5.0 release shipped beta.12 binaries for exactly this reason).
+          fetch-depth: 0
+
+      - name: Verify tag points to the checked-out commit
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          TAGGED_SHA="$(git rev-list -n 1 "$TAG_NAME")"
+          CHECKED_OUT_SHA="$(git rev-parse HEAD)"
+          echo "tag $TAG_NAME points to: $TAGGED_SHA"
+          echo "checked-out HEAD:       $CHECKED_OUT_SHA"
+          if [ "$TAGGED_SHA" != "$CHECKED_OUT_SHA" ]; then
+            echo "::error::Refusing to release: tag $TAG_NAME points to $TAGGED_SHA but the workflow checked out $CHECKED_OUT_SHA. This happens when a tag is deleted and recreated while an old release run is still in flight. Re-trigger the release workflow on the current tag." >&2
+            exit 1
+          fi
 
       - name: Verify version sync
         run: python3 scripts/check-version-sync.py
+
+      - name: Verify version matches release tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          TAG_VERSION="${TAG_NAME#v}"
+          REPO_VERSION="$(python3 scripts/check-version-sync.py)"
+          echo "tag version:    $TAG_VERSION"
+          echo "repo version:   $REPO_VERSION"
+          if [ "$TAG_VERSION" != "$REPO_VERSION" ]; then
+            echo "::error::Refusing to release: tag $TAG_NAME (version $TAG_VERSION) does not match the in-repo version ($REPO_VERSION). Bump all version files to $TAG_VERSION before tagging." >&2
+            exit 1
+          fi
 
       - name: Verify updater signing secret
         shell: bash
@@ -316,6 +352,46 @@ jobs:
 
       - name: Build updater manifest
         run: python3 scripts/generate-updater-manifest.py --dist dist --tag "${{ steps.version.outputs.tag }}" --repo "Ryz3nPlayZ/zWork"
+
+      - name: Verify shipped artifacts match the release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Defense-in-depth: the Verify job already checks the in-repo
+          # version matches the tag, and each build job stamps that version
+          # into its binary. Re-check the stamped version here so a stale
+          # build artifact (from a moved tag or a re-used cache) can never
+          # be published under a tag it disagrees with. The v0.5.0 release
+          # shipped beta.12 binaries; this check would have caught it.
+          TAG_NAME="${{ steps.version.outputs.tag }}"
+          EXPECTED="${TAG_NAME#v}"
+          echo "Release tag: $TAG_NAME (expecting embedded version $EXPECTED)"
+          echo
+          # macOS: read CFBundleShortVersionString from the .app.tar.gz
+          MACOS_TGZ="$(ls dist/zWork-macos-*.app.tar.gz 2>/dev/null | head -n1 || true)"
+          if [ -n "$MACOS_TGZ" ]; then
+            PLIST_VER="$(tar -xzOf "$MACOS_TGZ" '**/Info.plist' 2>/dev/null \
+              | grep -A1 'CFBundleShortVersionString' | grep '<string>' | head -n1 \
+              | sed 's/.*<string>\([^<]*\)<\/string>.*/\1/' || true)"
+            echo "macOS Info.plist version: ${PLIST_VER:-<not found>}"
+            if [ -n "$PLIST_VER" ] && [ "$PLIST_VER" != "$EXPECTED" ]; then
+              echo "::error::macOS app bundle reports version '$PLIST_VER' but release tag is '$EXPECTED'. Refusing to publish a mislabeled binary." >&2
+              exit 1
+            fi
+          fi
+          # Windows: the NSIS .sig's trusted-comment line embeds the
+          # installer filename, which Tauri derives from tauri.conf.json
+          # at build time (zWork_<version>_x64-setup.exe).
+          WIN_SIG="$(ls dist/zWork-windows-*-setup.exe.sig 2>/dev/null | head -n1 || true)"
+          if [ -n "$WIN_SIG" ]; then
+            SIG_NAME="$(grep -oE 'file:zWork_[^ ]+_x64-setup\.exe' "$WIN_SIG" | head -n1 || true)"
+            echo "Windows .sig embedded filename: ${SIG_NAME:-<not found>}"
+            if [ -n "$SIG_NAME" ] && ! printf '%s' "$SIG_NAME" | grep -q "zWork_${EXPECTED}_"; then
+              echo "::error::Windows installer signature references '$SIG_NAME' but release tag expects version '$EXPECTED'. The binary was built from a different version. Refusing to publish." >&2
+              exit 1
+            fi
+          fi
+          echo "All shipped artifacts report version $EXPECTED."
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
