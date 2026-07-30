@@ -1,0 +1,38 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "zWork",
+        "width": 1180,
+        "height": 760,
+        "minWidth": 860,
+        "minHeight": 560,
+        "decorations": true,
+        "transparent": false,
+        "resizable": true,
+        "fullscreen": false
+      },
+      {
+        "label": "overlay",
+        "title": "zWork Overlay",
+        "width": 720,
+        "height": 76,
+        "minWidth": 480,
+        "minHeight": 76,
+        "maxHeight": 900,
+        "transparent": true,
+        "shadow": false,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "visible": false,
+        "resizable": true,
+        "maximizable": false,
+        "minimizable": false,
+        "fullscreen": false,
+        "skipTaskbar": true
+      }
+    ]
+  }
+}

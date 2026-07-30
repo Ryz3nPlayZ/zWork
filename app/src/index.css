@@ -1,4 +1,9 @@
 @import "katex/dist/katex.min.css";
+/* Inter (variable) is bundled so every platform renders the same typeface.
+   Without this, font-sans resolved to SF Pro on macOS but Segoe UI on
+   Windows — different metrics shifted every layout by a pixel or two, and
+   the Inter-specific font-feature-settings below were silently ignored. */
+@import "@fontsource-variable/inter";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -269,22 +274,25 @@ html.sidebar-translucent aside.native-glass .bg-paper-raised {
   background: transparent;
 }
 
-/* Tauri v2 draggable region — the invisible top strip that lets users
-   drag the frameless window. With titleBarStyle: Overlay + hiddenTitle,
-   macOS paints traffic lights on top of this strip; Tauri automatically
-   excludes them from the drag hit-test.
-
-   The attribute selector is the canonical Tauri 2 approach. The JS
-   startDragging() fallback in Sidebar handles the sidebar's own strip. */
-[data-tauri-drag-region] {
-  -webkit-app-region: drag;
-  app-region: drag;
+/* Windows: hover-only thumbs give zero scroll affordance (no overlay
+   scrollbars, no elastic bounce there) — keep a faint thumb visible at
+   rest and strengthen it on hover. `plat-windows` is set in main.tsx. */
+html.plat-windows *::-webkit-scrollbar-thumb {
+  background: rgb(var(--line-strong) / 0.55);
+  background-clip: padding-box;
 }
 
-[data-tauri-drag-region="no-drag"] {
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
+html.plat-windows *:hover::-webkit-scrollbar-thumb {
+  background: rgb(var(--line-strong));
+  background-clip: padding-box;
 }
+
+/* Tauri v2 draggable regions are handled by the `data-tauri-drag-region`
+   ATTRIBUTE alone (wry injects a native-layer mousedown handler for it).
+   Do NOT re-add `app-region: drag` CSS here: WKWebView ignores it, but
+   WebView2 (Windows) honors it and treats the element as window caption —
+   swallowing ALL mouse input over it, including wheel events. That made
+   drag-region areas scroll-dead zones on Windows only. */
 
 /* Subtle interactive press */
 .press {

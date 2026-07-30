@@ -33,6 +33,7 @@ import {
   setTranslucencyPref,
   useTranslucencyPref,
   nativeVibrancySupported,
+  translucencySupported,
 } from "../lib/translucency";
 import {
   loadSchemePref,
@@ -781,38 +782,42 @@ function AppearancePanel() {
         </Field>
       </section>
 
-      <section className="rounded-xl border border-line bg-paper-raised p-4">
-        <Field
-          label="Sidebar translucency"
-          description={
-            translucencyNative
-              ? "Frosted-glass sidebar that blurs the desktop behind the window."
-              : "A lighter, glassy sidebar. Best on macOS, where it shows real desktop blur."
-          }
-        >
-          <button
-            type="button"
-            role="switch"
-            aria-checked={translucencyPref === "on"}
-            onClick={() =>
-              setTranslucencyPref(translucencyPref === "on" ? "off" : "on")
+      {/* No compositor blur behind the window on Tauri Windows/Linux — the
+          effect can't render there, so don't offer a dead toggle. */}
+      {translucencySupported() && (
+        <section className="rounded-xl border border-line bg-paper-raised p-4">
+          <Field
+            label="Sidebar translucency"
+            description={
+              translucencyNative
+                ? "Frosted-glass sidebar that blurs the desktop behind the window."
+                : "A lighter, glassy sidebar. Best on macOS, where it shows real desktop blur."
             }
-            className={cn(
-              "press ring-focus relative mt-2 inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors",
-              translucencyPref === "on"
-                ? "border-transparent bg-accent"
-                : "border-line bg-paper-sunken",
-            )}
           >
-            <span
+            <button
+              type="button"
+              role="switch"
+              aria-checked={translucencyPref === "on"}
+              onClick={() =>
+                setTranslucencyPref(translucencyPref === "on" ? "off" : "on")
+              }
               className={cn(
-                "pointer-events-none h-[1.125rem] w-[1.125rem] rounded-full bg-paper-raised shadow-sm transition-transform",
-                translucencyPref === "on" ? "translate-x-5" : "translate-x-0.5",
+                "press ring-focus relative mt-2 inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors",
+                translucencyPref === "on"
+                  ? "border-transparent bg-accent"
+                  : "border-line bg-paper-sunken",
               )}
-            />
-          </button>
-        </Field>
-      </section>
+            >
+              <span
+                className={cn(
+                  "pointer-events-none h-[1.125rem] w-[1.125rem] rounded-full bg-paper-raised shadow-sm transition-transform",
+                  translucencyPref === "on" ? "translate-x-5" : "translate-x-0.5",
+                )}
+              />
+            </button>
+          </Field>
+        </section>
+      )}
     </div>
   );
 }

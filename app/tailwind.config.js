@@ -55,11 +55,15 @@ export default {
         },
       },
       fontFamily: {
+        // "Inter Variable" is bundled via @fontsource-variable/inter (see
+        // index.css) so macOS/Windows/Linux all render identical metrics.
+        // The rest of the stack is a fallback for font-load failure only.
         sans: [
+          "'Inter Variable'",
+          "Inter",
           "ui-sans-serif",
           "-apple-system",
           "BlinkMacSystemFont",
-          "Inter",
           "Segoe UI",
           "system-ui",
           "sans-serif",

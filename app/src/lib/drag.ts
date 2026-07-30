@@ -1,10 +1,13 @@
 /**
- * Window drag — threshold-based "drag everywhere" pattern for the overlay.
+ * Window drag — threshold-based drag pattern for the overlay and main panes.
  *
- * The overlay pill must be draggable from ANYWHERE on it — textarea, send
- * button, +button — but a plain click must still register as a click (focus
- * the textarea, send the message, open the menu). This is the standard
- * "click vs drag distinguished by movement threshold" pattern:
+ * The overlay pill must be draggable from its non-interactive surface (the
+ * bar chrome, gutters, empty header space) while a plain click still
+ * registers as a click. Interactive children (textarea, buttons — see
+ * INTERACTIVE_SELECTOR) keep their own mouse behavior: dragging there is
+ * text selection / click-cancel, never a window move. For everything else
+ * this is the standard "click vs drag distinguished by movement threshold"
+ * pattern:
  *
  *  1. On `mousedown`: record start coords, attach a `pointermove` listener.
  *  2. On `pointermove`: if distance from start > DRAG_THRESHOLD (4px), call
@@ -28,6 +31,26 @@ import { IS_TAURI } from "./platform";
 /** Pixels of movement before a mousedown becomes a drag. */
 const DRAG_THRESHOLD = 4;
 
+/**
+ * Elements whose own mouse interactions must never turn into a window drag:
+ * dragging inside a textarea is text selection, dragging off a button is a
+ * cancelled click, and `[data-no-drag]` is the explicit opt-out used by
+ * headers (Settings, ChatView) around their interactive clusters. Without
+ * this walk, mousedowns bubbling up from e.g. sidebar buttons through the
+ * full-window base layer (App.tsx) turned drag-selects into window moves.
+ */
+const INTERACTIVE_SELECTOR = [
+  "button",
+  "a",
+  "input",
+  "textarea",
+  "select",
+  "[role='button']",
+  "[role='menuitem']",
+  "[contenteditable='true']",
+  "[data-no-drag]",
+].join(", ");
+
 /** Attribute to spread onto draggable elements: `<div {...dragRegionAttrs()}`> */
 export function dragRegionAttrs(): { "data-tauri-drag-region": true } {
   return { "data-tauri-drag-region": true };
@@ -42,15 +65,17 @@ let didDragThisInteraction = false;
 
 /**
  * onMouseDown handler that initiates a native window drag on Tauri when the
- * pointer moves beyond the threshold. No-op in the browser. Works on ALL
- * children (no interactive-child exclusion) — the threshold distinguishes
- * clicks from drags.
+ * pointer moves beyond the threshold. No-op in the browser and on interactive
+ * children (see INTERACTIVE_SELECTOR) — for everything else the threshold
+ * distinguishes clicks from drags.
  *
  * Also attaches a one-shot click swallower on capture so a drag doesn't
  * accidentally trigger a button's onClick.
  */
 export function onDragMouseDown(e: ReactMouseEvent<HTMLElement>): void {
   if (!IS_TAURI || e.button !== 0) return;
+  const target = e.target as HTMLElement | null;
+  if (target?.closest?.(INTERACTIVE_SELECTOR)) return;
 
   const startX = e.clientX;
   const startY = e.clientY;

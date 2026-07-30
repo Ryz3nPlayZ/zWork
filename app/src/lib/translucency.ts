@@ -39,6 +39,15 @@ export function nativeVibrancySupported(): boolean {
   return IS_TAURI && isMacOS();
 }
 
+/** True when the translucency toggle should exist at all.
+ *  On Tauri Windows/Linux there is no compositor blur behind the window, so
+ *  the CSS backdrop-blur fallback has nothing to sample — it renders as a
+ *  flat grey slab (or black under VM/software rendering). Treat those
+ *  platforms as unsupported; the web preview keeps the CSS fallback. */
+export function translucencySupported(): boolean {
+  return !IS_TAURI || isMacOS();
+}
+
 async function setNativeEffect(on: boolean): Promise<void> {
   if (!nativeVibrancySupported()) return;
   try {
@@ -79,7 +88,7 @@ function setHtmlClass(on: boolean) {
  * Returns immediately; the native effect is applied asynchronously.
  */
 export function applyTranslucency(pref: TranslucencyPref): void {
-  const on = pref === "on";
+  const on = pref === "on" && translucencySupported();
   setHtmlClass(on);
   void setNativeEffect(on);
 }
@@ -92,12 +101,19 @@ export function setTranslucencyPref(pref: TranslucencyPref): void {
 }
 
 /**
- * React hook: returns the current preference and re-renders when it changes.
- * Components (Sidebar, Settings) use this so they stay in sync with toggles
- * made anywhere in the app.
+ * React hook: returns the current EFFECTIVE translucency (the applied <html>
+ * class, not the raw stored pref) and re-renders when it changes. Components
+ * (Sidebar, Settings) use this so they stay in sync with toggles made
+ * anywhere in the app — and so a stored "on" pref on a platform where the
+ * effect is unsupported (Tauri Windows/Linux) reads as "off".
  */
 export function useTranslucencyPref(): TranslucencyPref {
-  const [pref, setPref] = useState<TranslucencyPref>(loadTranslucencyPref);
+  const [pref, setPref] = useState<TranslucencyPref>(() =>
+    typeof document !== "undefined" &&
+    document.documentElement.classList.contains(HTML_CLASS)
+      ? "on"
+      : "off",
+  );
 
   useEffect(() => {
     const root = document.documentElement;

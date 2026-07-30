@@ -7,6 +7,13 @@ export function isMacOS(): boolean {
   return /Mac|iPhone|iPad|iPod/i.test(platform) || /Mac OS X/i.test(ua);
 }
 
+export function isWindows(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const platform = navigator.platform || "";
+  const ua = navigator.userAgent || "";
+  return /^Win/i.test(platform) || /Windows/i.test(ua);
+}
+
 let softwareRenderingCache: boolean | null = null;
 
 /** Detect whether the browser is using a software (CPU) WebGL renderer.

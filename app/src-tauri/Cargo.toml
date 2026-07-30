@@ -1,6 +1,6 @@
 [package]
 name = "zwork"
-version = "0.5.0"
+version = "0.5.1"
 description = "zWork desktop assistant"
 authors = ["Sidecar"]
 edition = "2021"
@@ -23,6 +23,9 @@ dirs = "6"
 tokio = { version = "1", features = ["net", "time"] }
 tauri-plugin-global-shortcut = "2"
 uuid = { version = "1", features = ["v4"] }
+# PNG -> base64 data_url for Share Window screenshots (matches the frontend's
+# existing { data_url, mime } contract from the cua-driver path).
+base64 = "0.22"
 
 [features]
 default = ["custom-protocol"]

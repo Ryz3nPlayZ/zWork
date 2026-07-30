@@ -2,6 +2,23 @@
 
 All notable changes to zWork are documented in this file.
 
+## v0.5.1
+
+**Windows parity pass + native Share Window capture.**
+
+### New
+- **Share Window (macOS).** The overlay's window picker now captures windows natively through the Tauri host (CoreGraphics) using zWork's own Screen Recording grant — no cua-driver dependency — and routes the screenshot to zwork-vision.
+
+### Fixes (Windows)
+- **Scroll-dead zones removed.** The `app-region: drag` CSS rules were dropped: WKWebView ignores them, but WebView2 treats such elements as window caption and swallows all mouse input over them — including wheel events — which made drag-region areas (Settings header, top bands, sidebar base layer) unscrollable on Windows. Dragging still works via the `data-tauri-drag-region` attribute, which wry handles natively.
+- **Consistent typography.** Inter (variable) is now bundled and leads the `font-sans` stack, so Windows/Linux render the same typeface and metrics as macOS instead of falling back to Segoe UI (which also ignored the Inter-specific `ss01`/`cv11` feature settings).
+- **Opaque main window on Windows.** A `tauri.windows.conf.json` overlay disables main-window transparency there — transparency cost the native DWM frame (no drop shadow, no Win11 rounded corners) and existed only to serve macOS vibrancy.
+- **Sidebar translucency gated to macOS.** On Tauri Windows/Linux there is no compositor blur behind the window; the CSS `backdrop-blur` fallback rendered as a flat slab (black under VMs). The toggle is hidden and the effect forced off on those platforms.
+- **Visible scrollbars.** Windows now keeps a faint scrollbar thumb at rest instead of the macOS-style hover-only thumb, restoring scroll affordance.
+
+### Fixes (all platforms)
+- **Window drag no longer hijacks interactive children.** `onDragMouseDown` now walks `closest()` past buttons, inputs, textareas, and `[data-no-drag]` before starting a native drag, so drag-selecting text or pressing-and-moving on sidebar items no longer moves the window.
+
 ## v0.5.0-beta.12
 
 **Fix: friendly agent error messages instead of bare upstream HTTP status.**

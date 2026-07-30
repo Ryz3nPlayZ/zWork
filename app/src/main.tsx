@@ -5,8 +5,15 @@ import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import "./index.css";
 import { posthogOptions, posthogProjectToken } from "./lib/posthog";
+import { isMacOS, isWindows } from "./lib/platform";
 import { initTheme } from "./lib/theme";
 import { applyTranslucency, loadTranslucencyPref } from "./lib/translucency";
+
+// Platform class on <html> for the few CSS rules that must diverge per-OS
+// (e.g. persistent scrollbar thumbs on Windows — see index.css).
+document.documentElement.classList.add(
+  isMacOS() ? "plat-mac" : isWindows() ? "plat-windows" : "plat-linux",
+);
 
 initTheme();
 // Apply the saved sidebar-translucency pref before first paint so the sidebar
