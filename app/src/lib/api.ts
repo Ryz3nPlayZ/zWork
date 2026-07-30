@@ -709,17 +709,50 @@ export const api = {
       j<DesktopStatus>(r),
     ),
 
-  /** List on-screen windows for the "Share Window" picker (macOS only). */
-  listWindows: () =>
-    localFetch("/api/desktop/windows").then((r) =>
-      j<{ windows: Array<{ window_id: number; pid: number; app_name: string; title: string; bounds?: { x: number; y: number; width: number; height: number } }>; error?: string }>(r),
-    ),
+  /** List on-screen windows for the "Share Window" picker (macOS only).
+   *  Routes through the Tauri host (CoreGraphics FFI) so zWork uses its OWN
+   *  Screen Recording grant — no cua-driver dependency. Returns empty list off
+   *  Tauri / non-macOS. */
+  listWindows: async () => {
+    if (!IS_TAURI) return { windows: [] };
+    try {
+      const windows = await invoke<Array<{ window_id: number; pid: number; app_name: string; title: string }>>(
+        "list_windows_native",
+      );
+      return { windows };
+    } catch (e) {
+      return { windows: [], error: e instanceof Error ? e.message : String(e) };
+    }
+  },
 
-  /** Capture a screenshot of a specific window (macOS only, needs Screen Recording). */
-  captureWindow: (windowId: number) =>
-    localFetch(`/api/desktop/windows/${windowId}/screenshot`, { method: "POST" }).then((r) =>
-      j<{ data_url?: string; mime?: string; error?: string }>(r),
-    ),
+  /** Whether zWork itself has Screen Recording permission (macOS only). Used by
+   *  the Share Window picker to decide whether to prompt for the grant. */
+  screenCapturePreflight: () =>
+    IS_TAURI
+      ? invoke<boolean>("screen_capture_preflight").catch(() => false)
+      : Promise.resolve(false),
+
+  /** Open the macOS Screen Recording privacy pane so the user can grant zWork.
+   *  No-op off Tauri / non-macOS. */
+  openScreenRecordingSettings: () =>
+    IS_TAURI
+      ? invoke("open_macos_privacy_pane", { pane: "screen_recording" }).catch(() => {})
+      : Promise.resolve(),
+
+  /** Capture a screenshot of a specific window (macOS only, needs Screen
+   *  Recording granted to zWork). Returns `{ data_url, mime }` or `{ error }`. */
+  captureWindow: async (windowId: number) => {
+    if (!IS_TAURI) return { error: "Desktop capture is only available in the app." };
+    try {
+      const result = await invoke<{ data_url: string; mime?: string }>(
+        "capture_window_native",
+        { windowId },
+      );
+      return { data_url: result.data_url, mime: result.mime || "image/png" };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) };
+    }
+  },
 
   browserBridgeStatus: () =>
     localFetch("/api/browser-bridge/status").then((r) =>

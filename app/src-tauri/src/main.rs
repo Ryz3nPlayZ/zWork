@@ -1,6 +1,10 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(target_os = "macos")]
+#[path = "capture.rs"]
+mod capture;
+
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::PathBuf;
@@ -457,6 +461,62 @@ fn ax_is_trusted(prompt: Option<bool>) -> bool {
     }
 }
 
+/// List on-screen, layer-0 windows for the Share Window picker. macOS-only;
+/// returns empty on other platforms. Uses CoreGraphics FFI directly so zWork
+/// reads the window list under its own identity — no cua-driver dependency.
+#[tauri::command]
+fn list_windows_native() -> Vec<serde_json::Value> {
+    #[cfg(target_os = "macos")]
+    {
+        capture::list_windows()
+            .into_iter()
+            .map(|w| {
+                serde_json::json!({
+                    "window_id": w.window_id,
+                    "pid": w.pid,
+                    "app_name": w.app_name,
+                    "title": w.title,
+                })
+            })
+            .collect()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Vec::new()
+    }
+}
+
+/// Capture a screenshot of a specific window (by CoreGraphics window_id) as a
+/// base64 PNG data_url. macOS-only. Requires Screen Recording granted to zWork
+/// itself. Returns `{ data_url, mime }` on success, `{ error }` on failure.
+#[tauri::command]
+fn capture_window_native(window_id: i64) -> Result<serde_json::Value, String> {
+    #[cfg(target_os = "macos")]
+    {
+        capture::capture_window(window_id)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = window_id;
+        Err("Desktop capture is only available on macOS.".to_string())
+    }
+}
+
+/// Whether zWork itself has Screen Recording permission (non-prompting). The UI
+/// uses this to decide whether to prompt the user to open System Settings.
+/// Distinct from the cua-driver's Screen Recording grant.
+#[tauri::command]
+fn screen_capture_preflight() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        capture::screen_capture_granted()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
 #[tauri::command]
 fn ensure_backend(app: tauri::AppHandle, backend: tauri::State<Backend>) -> Result<bool, String> {
     ensure_backend_running(&app, &backend)
@@ -895,6 +955,9 @@ fn main() {
             begin_desktop_auth,
             open_macos_privacy_pane,
             ax_is_trusted,
+            list_windows_native,
+            capture_window_native,
+            screen_capture_preflight,
             register_overlay_shortcut,
             get_overlay_shortcut,
             get_sidecar_token

@@ -658,9 +658,10 @@ export function ChatInput({
   };
 
   /**
-   * Share Window flow: capture a specific window's screenshot via the sidecar
-   * (cua-driver), inject it as an image attachment, and auto-switch to
-   * zwork-vision so the model can see it. macOS-only; needs Screen Recording.
+   * Share Window flow: capture a specific window's screenshot via the Tauri
+   * host (native CoreGraphics capture, zWork's own Screen Recording grant),
+   * inject it as an image attachment, and auto-switch to zwork-vision so the
+   * model can see it. macOS-only; needs Screen Recording granted to zWork.
    */
   const shareWindow = async (windowId: number) => {
     setShareWindowLoading(true);
@@ -1341,21 +1342,63 @@ function ShareWindowPicker({
 }) {
   const [windows, setWindows] = useState<Array<{ window_id: number; app_name: string; title: string }>>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // null = still checking, true = granted, false = missing.
+  const [permission, setPermission] = useState<boolean | null>(null);
+  const [rechecking, setRechecking] = useState(false);
+
+  const loadWindows = async () => {
+    const result = await api.listWindows();
+    if (result.error) {
+      setLoadError(result.error);
+    } else {
+      setWindows(result.windows);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
-    api.listWindows().then((result) => {
+    (async () => {
+      // Preflight zWork's OWN Screen Recording grant first. Without it, the
+      // window list has no titles and captures come back blank — so route the
+      // user to System Settings instead of showing an empty/broken picker.
+      const granted = await api.screenCapturePreflight();
       if (cancelled) return;
-      if (result.error) {
-        setLoadError(result.error);
-      } else {
-        setWindows(result.windows);
+      setPermission(granted);
+      if (granted) {
+        await loadWindows();
       }
-    }).catch((e) => {
+    })().catch((e) => {
       if (!cancelled) setLoadError(e instanceof Error ? e.message : "Failed to list windows");
     });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Open the macOS Screen Recording pane. The user toggles zWork on, then clicks
+  // "Re-check" — the grant only takes effect after zWork is restarted, so the
+  // recheck will likely still show missing, but the instructions make that clear.
+  const handleOpenSettings = async () => {
+    setRechecking(true);
+    try {
+      await api.openScreenRecordingSettings();
+    } finally {
+      setRechecking(false);
+    }
+  };
+
+  const handleRecheck = async () => {
+    setRechecking(true);
+    try {
+      const granted = await api.screenCapturePreflight();
+      setPermission(granted);
+      if (granted) {
+        setLoadError(null);
+        await loadWindows();
+      }
+    } finally {
+      setRechecking(false);
+    }
+  };
 
   return (
     <div
@@ -1380,10 +1423,37 @@ function ShareWindowPicker({
         <p className="mb-3 text-[12px] leading-relaxed text-ink-muted">
           Pick a window to share. zWork will capture a screenshot and send it to the vision model.
         </p>
+        {permission === false && (
+          <div className="mb-3 rounded-lg border border-warning/20 bg-warning/5 px-3 py-3 text-[12px] leading-relaxed text-ink">
+            <div className="font-medium">Screen Recording permission required</div>
+            <p className="mt-1 text-ink-muted">
+              zWork needs Screen Recording access to capture windows. Open System Settings,
+              enable zWork under <span className="font-medium">Screen Recording</span>, then restart
+              zWork and try again.
+            </p>
+            <div className="mt-3 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleOpenSettings}
+                disabled={rechecking}
+                className="press rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-paper hover:bg-ink/90 disabled:opacity-50"
+              >
+                Open Settings
+              </button>
+              <button
+                type="button"
+                onClick={handleRecheck}
+                disabled={rechecking}
+                className="press rounded-lg border border-line px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-paper-sunken disabled:opacity-50"
+              >
+                {rechecking ? "Checking…" : "Re-check"}
+              </button>
+            </div>
+          </div>
+        )}
         {loadError && (
           <div className="mb-3 rounded-lg border border-error/20 bg-error/5 px-3 py-2 text-[12px] text-error">
             {loadError}
-            <div className="mt-1 text-ink-muted">Screen Recording permission may be required.</div>
           </div>
         )}
         {error && (
@@ -1391,7 +1461,7 @@ function ShareWindowPicker({
             {error}
           </div>
         )}
-        {loading ? (
+        {permission === false ? null : loading ? (
           <div className="flex items-center justify-center gap-2 py-6 text-[13px] text-ink-muted">
             <Loader2 className="h-4 w-4 animate-spin" />
             Capturing…

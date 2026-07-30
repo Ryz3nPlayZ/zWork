@@ -62,10 +62,26 @@ impl McpClient {
         }
 
         // 4. User install (e.g. ~/.local/bin/cua-driver → CuaDriver.app) on PATH.
+        // NOTE: a dangling symlink (target uninstalled) returns `exists() ==
+        // false`, which is correct — but we check `symlink_metadata` first so a
+        // broken link is reported clearly instead of silently falling through
+        // to the bare `cua-driver` name (which then fails spawn with a
+        // misleading "No such file or directory").
         if let Some(home) = dirs::home_dir() {
             let local = home.join(".local").join("bin").join("cua-driver");
-            if local.exists() {
-                return local.to_string_lossy().to_string();
+            match std::fs::symlink_metadata(&local) {
+                Ok(_) if local.exists() => return local.to_string_lossy().to_string(),
+                Ok(_) => {
+                    // Symlink exists but its target does not — the user (or an
+                    // uninstaller) removed CuaDriver.app but left the link.
+                    // Surface this explicitly so the fix is obvious.
+                    tracing::warn!(
+                        "[cua-driver] {} is a broken symlink (its target is missing); \
+                         install CuaDriver.app or remove the link",
+                        local.display()
+                    );
+                }
+                Err(_) => {}
             }
         }
         "cua-driver".to_string()

@@ -94,7 +94,7 @@ export default function App() {
   // state that flipped false→true mid-lifecycle, skipping later hooks.
   if (isOverlayWindow()) {
     return (
-      <Suspense fallback={<div className="h-screen w-screen bg-paper/10 backdrop-blur-xl" />}>
+      <Suspense fallback={<div className="h-screen w-screen bg-transparent" />}>
         <OverlayChatView />
       </Suspense>
     );
