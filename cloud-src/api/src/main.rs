@@ -234,6 +234,7 @@ const ALLOWED_MODELS: &[&str] = &[
     "zwork-flash",
     "zwork-pro",
     "zwork-vision",
+    "zwork-ultimate",
     "gemma4:31b",
     "llama-3.2-90b-vision",
     "meta-llama/llama-4-scout-17b-16e-instruct",
@@ -246,6 +247,11 @@ const PRO_ONLY_MODELS: &[&str] = &[
     "gemma4:31b",
     "meta-llama/llama-4-scout-17b-16e-instruct",
 ];
+/// Models restricted to the max tier only (frontier models).
+/// Checked in BOTH gateway handlers; the OpenAI-shape path (`ai_proxy`) did not
+/// previously validate models at all, so this gate is added there alongside
+/// the allowlist check.
+const MAX_ONLY_MODELS: &[&str] = &["zwork-ultimate"];
 
 /// Resolve app-facing model aliases to the actual upstream model ID.
 fn resolve_upstream_model(model: &str) -> &str {
@@ -253,6 +259,8 @@ fn resolve_upstream_model(model: &str) -> &str {
         "zwork-flash" => "deepseek-v4-flash",
         "zwork-pro" => "deepseek-v4-pro",
         "zwork-vision" => "gemma4:31b",
+        // "zWork Ultimate" — frontier tier, served via OpenRouter as z-ai/glm-5.2.
+        "zwork-ultimate" => "z-ai/glm-5.2",
         other => other,
     }
 }
@@ -317,6 +325,22 @@ fn load_gateway_providers() -> Vec<GatewayProvider> {
             api_key: groq_key,
             primary_model: env_or("GROQ_MODEL_PRIMARY", "meta-llama/llama-4-scout-17b-16e-instruct"),
             fallback_model: env_or("GROQ_MODEL_FALLBACK", "meta-llama/llama-4-scout-17b-16e-instruct"),
+            protocol: GatewayProtocol::OpenAi,
+        });
+    }
+
+    // Load OpenRouter provider (powers "zWork Ultimate" / z-ai/glm-5.2).
+    // OpenRouter is OpenAI-compatible: POST {base_url}/chat/completions with
+    // `Authorization: Bearer {key}`. The X-Title and HTTP-Referer headers are
+    // optional but set them for attribution/ranking on the OpenRouter dashboard.
+    let openrouter_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
+    if !openrouter_key.trim().is_empty() {
+        providers.push(GatewayProvider {
+            name: "OpenRouter".to_string(),
+            base_url: env_or("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
+            api_key: openrouter_key,
+            primary_model: env_or("OPENROUTER_MODEL", "z-ai/glm-5.2"),
+            fallback_model: env_or("OPENROUTER_MODEL", "z-ai/glm-5.2"),
             protocol: GatewayProtocol::OpenAi,
         });
     }
@@ -1936,6 +1960,8 @@ fn estimate_cost(provider: &str, model: &str, input: Option<i64>, output: Option
         ("DeepSeek", "deepseek-v4-flash") => (0.14, 0.28),
         ("Groq", _) => (0.15, 0.30),
         ("OllamaCloud_1", _) => (0.0, 0.0),
+        // z-ai/glm-5.2 on OpenRouter (zWork Ultimate). Per 1M tokens.
+        ("OpenRouter", "z-ai/glm-5.2") => (1.25, 9.0),
         _ => return None,
     };
     match (input, output) {
@@ -2405,6 +2431,35 @@ async fn ai_proxy(
         .unwrap_or("")
         .to_string();
 
+    // Validate requested model (OpenAI-shape path previously did no validation).
+    // Mirrors ai_proxy_anthropic: allowlist + tier gating.
+    if !ALLOWED_MODELS.contains(&openai_model.as_str()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("unsupported_model: {openai_model}"),
+        ));
+    }
+    {
+        let user_tier = app_user
+            .as_ref()
+            .map(|u| u.tier.as_str())
+            .unwrap_or("free");
+        if MAX_ONLY_MODELS.contains(&openai_model.as_str()) && user_tier != "max" {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "model_requires_max_tier".to_string(),
+            ));
+        }
+        if PRO_ONLY_MODELS.contains(&openai_model.as_str())
+            && !matches!(user_tier, "pro" | "max")
+        {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "model_requires_pro_tier".to_string(),
+            ));
+        }
+    }
+
     if let (Some(user), RequestKind::Root) = (&app_user, request_kind) {
         enforce_root_rate_limit(&state, &user.user_id, &user.tier, &openai_model)
             .await
@@ -2516,6 +2571,10 @@ async fn ai_proxy(
                 .post(endpoint)
                 .header("Content-Type", "application/json")
                 .header("Authorization", format!("Bearer {}", provider.api_key))
+                // OpenRouter attribution headers (harmless for other providers;
+                // OpenRouter uses them for app ranking on its dashboard).
+                .header("X-Title", "zWork Router")
+                .header("HTTP-Referer", "https://tryzwork.app")
                 .json(&attempt_body);
 
             let resp = match builder.send().await {
@@ -2761,6 +2820,12 @@ async fn ai_proxy_anthropic(
         .as_ref()
         .map(|u| u.tier.as_str())
         .unwrap_or("free");
+    if MAX_ONLY_MODELS.contains(&requested_model.as_str()) && user_tier != "max" {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "model_requires_max_tier".to_string(),
+        ));
+    }
     if PRO_ONLY_MODELS.contains(&requested_model.as_str())
         && !matches!(user_tier, "pro" | "max")
     {

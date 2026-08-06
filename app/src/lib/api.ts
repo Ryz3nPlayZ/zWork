@@ -207,8 +207,10 @@ export function whitelabelModelName(upstreamId: string | null | undefined): stri
   if (id.includes("deepseek-v4-flash") || id.includes("deepseek-flash") || id.includes("deepseek-chat")) return "zwork-flash";
   // Vision family (Gemma 4 31B cloud)
   if (id.includes("gemma4") || id.includes("gemma-4") || id.includes("gemma")) return "zwork-vision";
+  // Ultimate family (z-ai/glm-5.2 via OpenRouter — zWork Ultimate, Max tier)
+  if (id.includes("glm-5.2") || id === "z-ai/glm-5.2") return "zwork-ultimate";
   // Already-friendly ids pass through.
-  if (id === "zwork-flash" || id === "zwork-pro" || id === "zwork-vision") return upstreamId;
+  if (id === "zwork-flash" || id === "zwork-pro" || id === "zwork-vision" || id === "zwork-ultimate") return upstreamId;
   return undefined;
 }
 
@@ -993,11 +995,20 @@ async function streamChatWeb(
 
   const isPro = body.model === "zwork-pro";
   const isVision = body.model === "zwork-vision";
+  const isUltimate = body.model === "zwork-ultimate";
   // Upstream model id sent to the router (never shown to the user).
-  const upstreamModel = isPro ? "deepseek-v4-pro" : isVision ? "zwork-vision" : "deepseek-v4-flash";
+  const upstreamModel = isPro
+    ? "deepseek-v4-pro"
+    : isVision
+      ? "zwork-vision"
+      : isUltimate
+        ? "zwork-ultimate"
+        : "deepseek-v4-flash";
   // Friendly display name (whitelabel — never expose the upstream id).
   const friendlyModel = body.model;
-  const useOpenAi = isVision;
+  // Ultimate is OpenAI-shape (served via OpenRouter on the router's
+  // /api/v1/chat/completions path), as is Vision.
+  const useOpenAi = isVision || isUltimate;
 
   const headers: Record<string, string> = {
     "content-type": "application/json",
