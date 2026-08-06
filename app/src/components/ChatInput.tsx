@@ -6,7 +6,6 @@ import {
   useState,
   type ClipboardEvent,
   type KeyboardEvent,
-  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
 import {
@@ -26,7 +25,6 @@ import {
   CheckCircle2,
   XCircle,
   Monitor,
-  Loader2,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { needsLightweightRendering } from "../lib/platform";
@@ -44,7 +42,7 @@ import {
 } from "../lib/templates";
 import { IconButton } from "./IconButton";
 import { classifyFile } from "../lib/files";
-import { onDragMouseDown } from "../lib/drag";
+import { dragRegionAttrs } from "../lib/drag";
 import { ModelPicker } from "./ModelPicker";
 import { SlashMenu } from "./SlashMenu";
 
@@ -249,9 +247,6 @@ export function ChatInput({
   const [uploading, setUploading] = useState(false);
   const [composing, setComposing] = useState(false);
   const [dragOver, setDragOver] = useState(false);
-  const [shareWindowOpen, setShareWindowOpen] = useState(false);
-  const [shareWindowLoading, setShareWindowLoading] = useState(false);
-  const [shareWindowError, setShareWindowError] = useState<string | null>(null);
   const dragCounter = useRef(0);
   const [templates, setTemplates] = useState<PromptTemplate[]>(() => loadTemplates());
   const [slashState, setSlashState] = useState<
@@ -281,6 +276,8 @@ export function ChatInput({
   });
   const model = useApp((s) => s.model);
   const providers = useApp((s) => s.providers);
+  const pendingShareImage = useApp((s) => s.pendingShareImage);
+  const clearPendingShareImage = useApp((s) => s.clearPendingShareImage);
   const currentModel = providers?.models.find((m) => m.id === model);
   const modelLabel = currentModel?.name ?? (providers?.models.length ? "Model" : "No models");
 
@@ -297,9 +294,10 @@ export function ChatInput({
     el.style.height = Math.min(el.scrollHeight, 200) + "px";
     setMultiline(el.scrollHeight > 28);
     // Report the overlay bar's height so the overlay window grows with the draft.
-    // When the + tools menu or the share-window picker is open, we also reserve
-    // room ABOVE the bar for the upward-opening menu — otherwise it's clipped by
-    // the idle window's 76px height (the original "+ menu is cut off" bug).
+    // When the + tools menu is open, reserve room ABOVE the bar for the upward-
+    // opening menu — otherwise it's clipped by the idle window's 76px height.
+    // (The Share Window picker is now its own OS window and doesn't affect the
+    // overlay's geometry at all.)
     if (isOverlay && onHeightChange) {
       const bar = toolsRef.current;
       if (bar) {
@@ -309,18 +307,53 @@ export function ChatInput({
           // plus margin). Reserve enough vertical space so it isn't clipped.
           h += 260;
         }
-        if (shareWindowOpen) {
-          // The picker is a centered modal; reserve enough for the dialog too.
-          h += 420;
-        }
         onHeightChange(h);
       }
     }
-  }, [value, isOverlay, onHeightChange, setMultiline, toolsOpen, shareWindowOpen]);
+  }, [value, isOverlay, onHeightChange, setMultiline, toolsOpen]);
 
   useEffect(() => {
     if (autoFocus) areaRef.current?.focus();
   }, [autoFocus]);
+
+  // Consume an image pushed from the standalone Share Window picker (its own OS
+  // window) via the store. Drain it into the local attachment list so it shows
+  // up as a thumbnail the user can send. The model switch to zwork-vision is
+  // done by the emitter (OverlayChatView); here we just attach the bytes.
+  useEffect(() => {
+    if (!pendingShareImage) return;
+    const { dataUrl, mime, name } = pendingShareImage;
+    clearPendingShareImage();
+    let active = true;
+    (async () => {
+      try {
+        const previewUrl = URL.createObjectURL(await (await fetch(dataUrl)).blob());
+        if (!active) {
+          URL.revokeObjectURL(previewUrl);
+          return;
+        }
+        const id = `${Date.now().toString(36)}-share`;
+        setAttachments((prev) => [
+          ...prev,
+          {
+            id,
+            name: name || "Shared window",
+            mime: mime || "image/png",
+            kind: "image" as const,
+            size: 0,
+            previewUrl,
+            dataUrl,
+            uploadedPath: dataUrl,
+          },
+        ]);
+      } catch {
+        /* ignore — the image is dropped */
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [pendingShareImage, clearPendingShareImage]);
 
   useEffect(() => {
     if (focusChatInput > 0) areaRef.current?.focus();
@@ -658,61 +691,49 @@ export function ChatInput({
   };
 
   /**
-   * Share Window flow: capture a specific window's screenshot via the Tauri
-   * host (native CoreGraphics capture, zWork's own Screen Recording grant),
-   * inject it as an image attachment, and auto-switch to zwork-vision so the
-   * model can see it. macOS-only; needs Screen Recording granted to zWork.
+   * Open the standalone Share Window picker (its own OS window, label "share").
+   * The picker handles permission preflight, window listing, and capture; on a
+   * successful capture it emits a "share-window-captured" event, which the
+   * overlay (OverlayChatView) listens for to inject the image + switch to the
+   * vision model. This keeps the overlay's geometry untouched — the picker no
+   * longer lives inside the 76px-tall overlay frame.
    */
-  const shareWindow = async (windowId: number) => {
-    setShareWindowLoading(true);
-    setShareWindowError(null);
+  const openShareWindow = async () => {
+    setToolsOpen(false);
     try {
-      const result = await api.captureWindow(windowId);
-      if (result.error || !result.data_url) {
-        setShareWindowError(result.error || "Capture failed");
-        return;
+      const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
+      // Reuse the existing window if it was created earlier; otherwise create
+      // it. The window is declared in tauri.conf.json (visible:false), so on
+      // first open we just show it; if the config window isn't found (e.g. the
+      // build predates it), fall back to creating it at runtime.
+      let win = await WebviewWindow.getByLabel("share").catch(() => null);
+      if (!win) {
+        win = new WebviewWindow("share", {
+          url: "index.html",
+          title: "Share a Window",
+          width: 520,
+          height: 560,
+          resizable: false,
+          maximizable: false,
+          minimizable: false,
+          fullscreen: false,
+          center: true,
+          transparent: false,
+          decorations: false,
+          alwaysOnTop: true,
+          shadow: true,
+          visible: true,
+          skipTaskbar: true,
+        });
+        // The constructor returns before the window is ready; once it's created
+        // it shows itself (visible:true above).
+      } else {
+        await win.show();
+        await win.setFocus();
       }
-      // Inject the screenshot as an image attachment.
-      const id = `${Date.now().toString(36)}-share`;
-      const previewUrl = URL.createObjectURL(
-        await (await fetch(result.data_url)).blob(),
-      );
-      setAttachments((prev) => [
-        ...prev,
-        {
-          id,
-          name: "Shared window",
-          mime: result.mime || "image/png",
-          kind: "image" as const,
-          size: 0,
-          previewUrl,
-          dataUrl: result.data_url,
-          uploadedPath: result.data_url,
-        },
-      ]);
-      // Auto-switch to zwork-vision so the model can process the image.
-      useApp.getState().setModel("zwork-vision");
-      setShareWindowOpen(false);
     } catch (e) {
-      setShareWindowError(e instanceof Error ? e.message : "Capture failed");
-    } finally {
-      setShareWindowLoading(false);
+      console.warn("[share-window] failed to open picker:", e);
     }
-  };
-
-  // Drag the overlay window by grabbing the chatbar (not the textarea/buttons).
-  // Two mechanisms are attached because macOS eats the first mousedown on an
-  // unfocused always-on-top window to activate it, which races the imperative
-  // `startDragging()` IPC and cancels the drag:
-  //  1. `data-tauri-drag-region` on the wrapper (declarative) — Tauri hooks this
-  //     at the native layer BEFORE the focus event interferes, so the first
-  //     click both focuses AND drags. This is the primary mechanism.
-  //  2. `onDragMouseDown` (imperative fallback) — calls `startDragging()` for
-  //     environments where the declarative region isn't honored. No-op on
-  //     interactive children (textarea, buttons) via the closest() check.
-  const onBarMouseDown = (e: ReactMouseEvent<HTMLDivElement>) => {
-    if (!isOverlay) return;
-    onDragMouseDown(e);
   };
 
   const attachmentList = attachments.length > 0 && (
@@ -841,7 +862,17 @@ export function ChatInput({
 
       <div
         ref={isOverlay ? toolsRef : undefined}
-        onMouseDown={isOverlay ? onBarMouseDown : undefined}
+        // The pill is a SINGLE drag mechanism: the declarative
+        // `data-tauri-drag-region`. Tauri hooks it at the native layer BEFORE
+        // the macOS first-click-focus event on the always-on-top window, so the
+        // first grab both focuses AND drags — this is why we can't rely on the
+        // imperative `startDragging()` fallback here (it loses that race).
+        // Previously the wrapper ALSO carried the imperative `onBarMouseDown`,
+        // which fired mid-drag and fought the native drag → jittery/inconsistent
+        // drags on the non-interactive chrome. Tauri's declarative handler
+        // natively skips interactive elements (textarea/buttons/select), so text
+        // selection and clicks still work; [data-no-drag] clusters opt out too.
+        {...(isOverlay ? dragRegionAttrs() : {})}
         className={cn(
           // Main-window input: OpenCode-style fill matches the page (bg-paper,
           // not raised), elevation faked via a hairline ring + soft shadow. On
@@ -1072,8 +1103,7 @@ export function ChatInput({
             label="Share window"
             onClick={() => {
               setToolsOpen(false);
-              setShareWindowOpen(true);
-              setShareWindowError(null);
+              void openShareWindow();
             }}
           />
           <OverlayToolItem
@@ -1104,16 +1134,6 @@ export function ChatInput({
         </div>
       )}
 
-      {/* Share Window picker — lists on-screen windows, captures the selected
-          one as a screenshot, and routes to zwork-vision. */}
-      {isOverlay && shareWindowOpen && (
-        <ShareWindowPicker
-          loading={shareWindowLoading}
-          error={shareWindowError}
-          onPick={shareWindow}
-          onClose={() => setShareWindowOpen(false)}
-        />
-      )}
       <input
         ref={fileInputRef}
         type="file"
@@ -1320,179 +1340,6 @@ function PermissionCardBody({
           </button>
         </div>
       )}
-    </div>
-  );
-}
-
-/**
- * Share Window picker — fetches the list of on-screen windows from the sidecar
- * (via cua-driver's list_windows), lets the user pick one, and calls back with
- * the window_id. The parent captures the screenshot and injects it.
- */
-function ShareWindowPicker({
-  loading,
-  error,
-  onPick,
-  onClose,
-}: {
-  loading: boolean;
-  error: string | null;
-  onPick: (windowId: number) => void;
-  onClose: () => void;
-}) {
-  const [windows, setWindows] = useState<Array<{ window_id: number; app_name: string; title: string }>>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  // null = still checking, true = granted, false = missing.
-  const [permission, setPermission] = useState<boolean | null>(null);
-  const [rechecking, setRechecking] = useState(false);
-
-  const loadWindows = async () => {
-    const result = await api.listWindows();
-    if (result.error) {
-      setLoadError(result.error);
-    } else {
-      setWindows(result.windows);
-    }
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      // Preflight zWork's OWN Screen Recording grant first. Without it, the
-      // window list has no titles and captures come back blank — so route the
-      // user to System Settings instead of showing an empty/broken picker.
-      const granted = await api.screenCapturePreflight();
-      if (cancelled) return;
-      setPermission(granted);
-      if (granted) {
-        await loadWindows();
-      }
-    })().catch((e) => {
-      if (!cancelled) setLoadError(e instanceof Error ? e.message : "Failed to list windows");
-    });
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Open the macOS Screen Recording pane. The user toggles zWork on, then clicks
-  // "Re-check" — the grant only takes effect after zWork is restarted, so the
-  // recheck will likely still show missing, but the instructions make that clear.
-  const handleOpenSettings = async () => {
-    setRechecking(true);
-    try {
-      await api.openScreenRecordingSettings();
-    } finally {
-      setRechecking(false);
-    }
-  };
-
-  const handleRecheck = async () => {
-    setRechecking(true);
-    try {
-      const granted = await api.screenCapturePreflight();
-      setPermission(granted);
-      if (granted) {
-        setLoadError(null);
-        await loadWindows();
-      }
-    } finally {
-      setRechecking(false);
-    }
-  };
-
-  return (
-    <div
-      className="fixed inset-0 z-[300] flex items-center justify-center bg-black/40 animate-fade-in"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-[420px] rounded-2xl border border-line bg-paper-raised p-4 shadow-lift"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-[14px] font-semibold text-ink">Share a window</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="press rounded-full p-1 text-ink-faint hover:bg-paper-sunken hover:text-ink"
-            aria-label="Close"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-        <p className="mb-3 text-[12px] leading-relaxed text-ink-muted">
-          Pick a window to share. zWork will capture a screenshot and send it to the vision model.
-        </p>
-        {permission === false && (
-          <div className="mb-3 rounded-lg border border-warning/20 bg-warning/5 px-3 py-3 text-[12px] leading-relaxed text-ink">
-            <div className="font-medium">Screen Recording permission required</div>
-            <p className="mt-1 text-ink-muted">
-              zWork needs Screen Recording access to capture windows. Open System Settings,
-              enable zWork under <span className="font-medium">Screen Recording</span>, then restart
-              zWork and try again.
-            </p>
-            <div className="mt-3 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleOpenSettings}
-                disabled={rechecking}
-                className="press rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-paper hover:bg-ink/90 disabled:opacity-50"
-              >
-                Open Settings
-              </button>
-              <button
-                type="button"
-                onClick={handleRecheck}
-                disabled={rechecking}
-                className="press rounded-lg border border-line px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-paper-sunken disabled:opacity-50"
-              >
-                {rechecking ? "Checking…" : "Re-check"}
-              </button>
-            </div>
-          </div>
-        )}
-        {loadError && (
-          <div className="mb-3 rounded-lg border border-error/20 bg-error/5 px-3 py-2 text-[12px] text-error">
-            {loadError}
-          </div>
-        )}
-        {error && (
-          <div className="mb-3 rounded-lg border border-error/20 bg-error/5 px-3 py-2 text-[12px] text-error">
-            {error}
-          </div>
-        )}
-        {permission === false ? null : loading ? (
-          <div className="flex items-center justify-center gap-2 py-6 text-[13px] text-ink-muted">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Capturing…
-          </div>
-        ) : (
-          <div className="max-h-[320px] overflow-y-auto">
-            {windows.length === 0 && !loadError ? (
-              <p className="py-6 text-center text-[13px] text-ink-faint">No windows found.</p>
-            ) : (
-              <div className="flex flex-col gap-1">
-                {windows.map((w) => (
-                  <button
-                    key={w.window_id}
-                    type="button"
-                    onClick={() => onPick(w.window_id)}
-                    className="press flex items-center gap-2.5 rounded-xl border border-line bg-paper px-3 py-2 text-left transition-colors hover:bg-paper-sunken"
-                  >
-                    <Monitor className="h-4 w-4 shrink-0 text-ink-muted" />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-[13px] font-medium text-ink">{w.app_name}</div>
-                      {w.title && (
-                        <div className="truncate text-[11px] text-ink-muted">{w.title}</div>
-                      )}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

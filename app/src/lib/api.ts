@@ -732,6 +732,14 @@ export const api = {
       ? invoke<boolean>("screen_capture_preflight").catch(() => false)
       : Promise.resolve(false),
 
+  /** Trigger the native macOS "allow Screen Recording" prompt (prompting). macOS
+   *  only honors it on first launch; pair with openScreenRecordingSettings for
+   *  re-grants. Returns the post-prompt permission state. */
+  requestScreenCapture: () =>
+    IS_TAURI
+      ? invoke<boolean>("request_screen_capture").catch(() => false)
+      : Promise.resolve(false),
+
   /** Open the macOS Screen Recording privacy pane so the user can grant zWork.
    *  No-op off Tauri / non-macOS. */
   openScreenRecordingSettings: () =>
@@ -746,7 +754,10 @@ export const api = {
     try {
       const result = await invoke<{ data_url: string; mime?: string }>(
         "capture_window_native",
-        { windowId },
+        // Tauri v2 binds invoke args by the Rust parameter name (snake_case).
+        // The Rust command is `fn capture_window_native(window_id: i64)`, so
+        // the arg key MUST be `window_id` — `windowId` silently fails to bind.
+        { window_id: windowId },
       );
       return { data_url: result.data_url, mime: result.mime || "image/png" };
     } catch (e) {

@@ -91,26 +91,63 @@ function fitsOnScreen(x: number, y: number, width: number, height: number, wa: {
  * listener in attachPositionPersistence. */
 let userDragged = false;
 
+/** True while we're driving setSize/setPosition programmatically. The onMoved
+ * listener checks this and skips markUserDragged() so our own geometry writes
+ * don't get mistaken for a user drag (which would flip the overlay into
+ * "preserve position" mode and make the + menu open move the pill). */
+let programmaticMove = false;
+
+/** How long programmaticMove stays true after a geometry write — long enough
+ * to absorb the IPC round-trip of the onMoved event our setSize/setPosition
+ * triggers, so the persistence listener reliably skips it. */
+const PROGRAMMATIC_MOVE_HOLD_MS = 80;
+
+/** Monotonically increasing token used to coalesce rapid fitOverlayWindow
+ * calls. Each call captures the current value; if a newer call has started by
+ * the time this one is ready to write geometry, this one bails. That stops
+ * fast barHeight changes (typing, menu toggles) from stacking overlapping
+ * writes that fought each other and made the overlay visibly jitter. */
+let applyToken = 0;
+
+/** The overlay's pinned edges (logical work-area coords): the X of the
+ * window's left edge, and the Y of its bottom edge. Idle/chat height changes
+ * keep these pinned and grow the window along the other axis only, so the
+ * pill never shifts when the draft grows or the + menu opens. Updated on
+ * genuine user drags; seeded on first placement. Modal mode doesn't touch
+ * them, so closing a modal restores the pre-modal position. */
+let pinnedX: number | null = null;
+let pinnedBottom: number | null = null;
+
 /** Mark that the user has dragged — called from the position-persistence
  * listener. Once true, fitOverlayWindow preserves the user's position. */
 export function markUserDragged(): void {
+  if (programmaticMove) return; // ignore geometry changes WE caused
   userDragged = true;
 }
 
-/** Reset the drag flag — call when the overlay is hidden so the next show
- * defaults to bottom-center again (unless the user drags). */
+/** Reset the drag/pinned state — call when the overlay is hidden so the next
+ * show defaults to bottom-center again (unless the user drags). */
 export function resetOverlayPlacement(): void {
   userDragged = false;
+  pinnedX = null;
+  pinnedBottom = null;
 }
 
 /**
  * Size + position the overlay. Called on mount and whenever the mode or the
  * chatbar's content height changes.
  *
- * - First call: restore the saved position if it's still on-screen, else place
- *   at bottom-center. Either way, clamp into the work area.
- * - Later calls: keep the window's current position (so dragging sticks), only
- *   adjusting so a height change never pushes the bar off-screen.
+ * Modes:
+ *  - "idle": the chatbar only. Grows upward with the draft / + menu, bottom
+ *    edge pinned so the pill never shifts vertically.
+ *  - "chat": the expanded conversation panel + chatbar, bottom pinned.
+ *
+ * (The Share Window picker is now its own OS window and never drives the
+ * overlay's geometry — there is no "modal" mode anymore.)
+ *
+ * The bottom edge is tracked across height changes so opening the + menu,
+ * typing a multi-line draft, or growing the panel never moves the pill. Only
+ * a genuine user drag updates the pinned bottom.
  */
 export async function fitOverlayWindow(
   mode: OverlayMode,
@@ -119,107 +156,67 @@ export async function fitOverlayWindow(
   const win = getCurrentWindow();
   const monitor = (await currentMonitor()) ?? (await primaryMonitor());
   const wa = workAreaOf(monitor);
+
   const width = IDLE_WIDTH;
   const height =
     mode === "chat"
       ? CHAT_HEIGHT
       : clamp(opts?.contentHeight ?? IDLE_MIN_HEIGHT, IDLE_MIN_HEIGHT, IDLE_MAX_HEIGHT);
 
-  let x: number;
-  let y: number;
-
-  if (!userDragged) {
-    // The user hasn't explicitly moved the overlay this session. Default to
-    // bottom-center on the current monitor — the expected position for a
-    // global chat overlay. (A saved position is only honored if the user
-    // dragged in a prior session AND it still fits.)
-    const saved = loadSavedPos();
-    if (saved && fitsOnScreen(saved.x, saved.y, width, height, wa)) {
-      x = saved.x;
-      y = saved.y;
+  // Seed the pinned edges on first placement (or after a hide → reset). After
+  // this, every height change keeps these edges and grows along the other
+  // axis, so the pill never moves. We do NOT read live window geometry here:
+  // post-modal it points at the work-area origin (meaningless), and reading
+  // it was the source of "snap back" jitter when barHeight fired repeatedly.
+  if (pinnedBottom === null) {
+    const defaultY = wa.workY + wa.workH - height - BOTTOM_MARGIN;
+    pinnedBottom = defaultY + height; // i.e. work-area bottom − margin
+  }
+  if (pinnedX === null) {
+    if (!userDragged) {
+      const saved = loadSavedPos();
+      pinnedX =
+        saved && fitsOnScreen(saved.x, saved.y, width, height, wa)
+          ? saved.x
+          : wa.workX + (wa.workW - width) / 2;
     } else {
-      x = wa.workX + (wa.workW - width) / 2;
-      y = wa.workY + wa.workH - height - BOTTOM_MARGIN;
-    }
-  } else {
-    // The user dragged — preserve where they put it.
-    const pos = await win.outerPosition().catch(() => null);
-    if (pos) {
-      x = pos.x / wa.scale;
-      y = pos.y / wa.scale;
-    } else {
-      x = wa.workX + (wa.workW - width) / 2;
-      y = wa.workY + wa.workH - height - BOTTOM_MARGIN;
+      // User dragged this session but we have no pinned X yet — fall back to
+      // horizontal center; the next genuine-drag onMoved will refresh it.
+      pinnedX = wa.workX + (wa.workW - width) / 2;
     }
   }
 
-  // Clamp horizontally into the work area.
+  // Derive the window's top-left from the pinned edges. This is the crux of
+  // the jitter fix: the target is a pure function of (pinnedX, pinnedBottom,
+  // width, height) — independent of any live read — so rapid height changes
+  // never read a half-written intermediate position and fight each other.
+  let x = pinnedX;
+  let y = pinnedBottom - height;
+
+  // Clamp into the work area so the overlay never escapes the screen.
   x = clamp(x, wa.workX + EDGE_MARGIN, wa.workX + wa.workW - width - EDGE_MARGIN);
-  // Vertically: keep the bottom pinned. If growing pushed the bottom past the
-  // work area, shift up; never above the top.
+  if (y < wa.workY + EDGE_MARGIN) y = wa.workY + EDGE_MARGIN;
   if (y + height > wa.workY + wa.workH - EDGE_MARGIN) {
     y = wa.workY + wa.workH - height - EDGE_MARGIN;
   }
-  if (y < wa.workY + EDGE_MARGIN) {
-    y = wa.workY + EDGE_MARGIN;
-  }
 
-  // Smoothly animate the size/position transition instead of snapping. The
-  // bottom is pinned (y shifts up as height grows) so the pill appears to
-  // stay put while the panel expands above it.
-  await animateOverlayTo(win, width, height, x, y, wa.scale);
-}
-
-/**
- * Tween the overlay window from its current size/position to the target over
- * ~180ms using requestAnimationFrame. The bottom edge stays pinned (y moves
- * up as height grows). Tauri v2 setSize/setPosition are instant, so we step
- * through intermediate values to fake an animation. Coarse steps (~10) keep
- * IPC overhead low; the CSS opacity fade on the conversation panel masks any
- * stair-stepping.
- */
-async function animateOverlayTo(
-  win: ReturnType<typeof getCurrentWindow>,
-  targetW: number,
-  targetH: number,
-  targetX: number,
-  targetY: number,
-  scale: number,
-): Promise<void> {
-  const startPos = await win.outerPosition().catch(() => null);
-  const startSize = await win.outerSize().catch(() => null);
-  if (!startPos || !startSize) {
-    // Can't read current geometry — just snap.
-    await win.setSize(new LogicalSize(targetW, targetH));
-    await win.setPosition(new LogicalPosition(Math.round(targetX), Math.round(targetY)));
-    return;
-  }
-
-  const startW = startSize.width / scale;
-  const startH = startSize.height / scale;
-  const start_X = startPos.x / scale;
-  const start_Y = startPos.y / scale;
-
-  // If we're already at the target (within 1px), skip the animation.
-  if (Math.abs(startH - targetH) < 2 && Math.abs(startW - targetW) < 2) {
-    await win.setSize(new LogicalSize(targetW, targetH));
-    await win.setPosition(new LogicalPosition(Math.round(targetX), Math.round(targetY)));
-    return;
-  }
-
-  const STEPS = 10;
-  const STEP_MS = 18; // ~180ms total
-  const ease = (t: number) => 1 - Math.pow(1 - t, 3); // ease-out-cubic
-
-  for (let i = 1; i <= STEPS; i++) {
-    const t = ease(i / STEPS);
-    const w = Math.round(startW + (targetW - startW) * t);
-    const h = Math.round(startH + (targetH - startH) * t);
-    const px = Math.round(start_X + (targetX - start_X) * t);
-    const py = Math.round(start_Y + (targetY - start_Y) * t);
-    await win.setSize(new LogicalSize(w, h));
-    await win.setPosition(new LogicalPosition(px, py));
-    if (i < STEPS) await new Promise((r) => setTimeout(r, STEP_MS));
+  // Coalesced snap. Each call bumps applyToken; before writing we re-check
+  // it — if a newer call has started, this one bails (its target is stale).
+  // This is what stops overlapping writes from fighting: only the newest
+  // target's writes ever land. Snapping (no tween) means no intermediate
+  // frames to jitter; the CSS opacity fade on the conversation panel covers
+  // the instant size jump.
+  const token = ++applyToken;
+  programmaticMove = true;
+  try {
+    // If a newer call superseded us while we were waiting on the monitor
+    // query above, drop this write entirely — its target is already stale.
+    if (token !== applyToken) return;
+    await win.setSize(new LogicalSize(width, height));
+    if (token !== applyToken) return; // re-check after the first IPC
+    await win.setPosition(new LogicalPosition(Math.round(x), Math.round(y)));
+  } finally {
+    setTimeout(() => { programmaticMove = false; }, PROGRAMMATIC_MOVE_HOLD_MS);
   }
 }
 
@@ -231,7 +228,8 @@ async function animateOverlayTo(
 export async function attachPositionPersistence(): Promise<() => void> {
   const win = getCurrentWindow();
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const unlisten = await win.onMoved(({ payload }) => {
+  const unlisten = await win.onMoved(async ({ payload }) => {
+    if (programmaticMove) return; // ignore geometry changes WE caused
     // payload is a PhysicalPosition; convert to logical using devicePixelRatio.
     // (Exact precision isn't required — restore clamps into the work area.)
     const scale = window.devicePixelRatio || 1;
@@ -239,6 +237,13 @@ export async function attachPositionPersistence(): Promise<() => void> {
     const y = payload.y / scale;
     // The user explicitly moved the overlay — stop defaulting to bottom-center.
     markUserDragged();
+    // Refresh BOTH pinned edges from this drag so the next idle height change
+    // keeps the pill at this X and this bottom. Reading the live size here is
+    // safe: this listener only fires for user moves, which are always settled.
+    const size = await win.outerSize().catch(() => null);
+    const curH = size ? size.height / scale : 0;
+    pinnedX = x;
+    pinnedBottom = y + curH;
     clearTimeout(timer);
     timer = setTimeout(() => savePos(x, y), 250);
   });

@@ -517,6 +517,22 @@ fn screen_capture_preflight() -> bool {
     }
 }
 
+/// Trigger the native macOS "allow Screen Recording" prompt (prompting). macOS
+/// only honors this on the app's first launch; the UI pairs it with a deep-link
+/// to System Settings for re-grants. Returns the post-prompt permission state.
+/// macOS-only; always false elsewhere.
+#[tauri::command]
+fn request_screen_capture() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        capture::request_screen_capture()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
 #[tauri::command]
 fn ensure_backend(app: tauri::AppHandle, backend: tauri::State<Backend>) -> Result<bool, String> {
     ensure_backend_running(&app, &backend)
@@ -958,6 +974,7 @@ fn main() {
             list_windows_native,
             capture_window_native,
             screen_capture_preflight,
+            request_screen_capture,
             register_overlay_shortcut,
             get_overlay_shortcut,
             get_sidecar_token

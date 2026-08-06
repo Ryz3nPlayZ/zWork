@@ -20,6 +20,22 @@ initTheme();
 // doesn't flash opaque before the effect resolves.
 applyTranslucency(loadTranslucencyPref());
 
+// Overlay window transparency — applied synchronously, BEFORE first paint. The
+// global `body { @apply bg-paper }` paints an opaque background; the
+// `overlay-window` <html> class overrides html/body/#root to transparent (see
+// index.css). Adding it here (rather than in a React useEffect inside
+// OverlayChatView) eliminates the opaque "box around the pill" that flashed on
+// every summon: the effect ran after first paint, so macOS showed the bg-paper
+// body for at least one frame — and window.show() can retrigger that repaint.
+// The window label is constant for the process lifetime (injected by Tauri
+// before any app JS runs), so this synchronous read is safe at boot.
+if (typeof window !== "undefined") {
+  const label = (window as any).__TAURI_INTERNALS__?.metadata?.currentWindow?.label;
+  if (label === "overlay") {
+    document.documentElement.classList.add("overlay-window");
+  }
+}
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ErrorBoundary>

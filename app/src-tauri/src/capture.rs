@@ -1,13 +1,21 @@
 //! Native macOS window capture for "Share Window".
 //!
-//! Uses CoreGraphics + CoreFoundation FFI directly so zWork captures with its
-//! OWN Screen Recording TCC grant, removing the hard dependency on the external
-//! cua-driver daemon for this feature. The window list enumerates on-screen
-//! layer-0 windows; the screenshot itself shells out to the system
-//! `screencapture` CLI (child processes inherit zWork's Screen Recording
-//! grant), which avoids a large ImageIO FFI surface.
+//! Uses CoreGraphics + CoreFoundation + ImageIO FFI directly so zWork captures
+//! with its OWN Screen Recording TCC grant, **in-process**. The previous design
+//! shelled out to the system `screencapture` CLI, but that is a *separate* TCC
+//! binary — granting zWork.app did not grant `/usr/sbin/screencapture`, so
+//! captures came back empty on modern macOS. Capturing in-process via
+//! `CGWindowListCreateImage` + `CGImageDestination` runs entirely under zWork's
+//! own grant and returns the PNG bytes directly (no temp file, no child
+//! process).
 //!
-//! See the beta.14 plan (item E1) for the design rationale.
+//! Permission flow:
+//!  - `screen_capture_granted()` wraps `CGPreflightScreenCaptureAccess` — the
+//!    non-prompting check the UI uses to route to System Settings.
+//!  - `request_screen_capture()` wraps `CGRequestScreenCaptureAccess` — the
+//!    PROMPTING call that triggers the native "allow Screen Recording" dialog
+//!    on first use. macOS only honors the prompt on first launch, so the UI
+//!    pairs it with a deep-link to System Settings for subsequent grants.
 
 #![cfg(target_os = "macos")]
 
@@ -16,24 +24,29 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
-use std::process::Command;
 use std::ptr;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::Duration;
 
-// ---- CoreFoundation / CoreGraphics opaque types ----
+// ---- CoreFoundation / CoreGraphics opaque types (all `*const c_void`) ----
 type CVoid = std::ffi::c_void;
 type CFAllocatorRef = *const CVoid;
 type CFStringRef = *const CVoid;
 type CFArrayRef = *const CVoid;
 type CFDictionaryRef = *const CVoid;
 type CFNumberRef = *const CVoid;
+type CFMutableDataRef = *const CVoid;
 type CFTypeID = usize;
 type CFIndex = isize;
 type CFStringEncoding = u32;
 type CFNumberType = u32;
 
+// CoreGraphics types for image capture.
+type CGDirectDisplayID = u32;
 type CGWindowID = u32;
 type CGWindowListOption = u32;
+type CGImageRef = *const CVoid;
+type CGImageDestinationRef = *const CVoid;
 
 // kCGWindowListOptionOnScreenOnly = (1 << 0). See CGWindow.h.
 const WINDOW_LIST_ON_SCREEN_ONLY: CGWindowListOption = 1;
@@ -47,12 +60,35 @@ const ENCODING_UTF8: CFStringEncoding = 0x08000100;
 // SInt64 handles both SInt32 (PID, layer) and the rare SInt64 window id.
 const NUMBER_SINT_64_TYPE: CFNumberType = 4;
 
+#[derive(Serialize)]
+pub struct WindowInfo {
+    pub window_id: i64,
+    pub pid: i64,
+    pub app_name: String,
+    #[allow(dead_code)]
+    pub title: String,
+}
+
+// CoreGraphics + CoreFoundation symbols. These frameworks are linked
+// transitively via Tauri's macOS deps, so no explicit `#[link]` is needed.
 extern "C" {
     fn CGWindowListCopyWindowInfo(
         option: CGWindowListOption,
         relative_to_window: CGWindowID,
     ) -> CFArrayRef;
     fn CGPreflightScreenCaptureAccess() -> bool;
+    fn CGRequestScreenCaptureAccess() -> bool;
+
+    // CGWindowListCreateImage(displayID, listOption, windowID, imageOption).
+    // Capture a single window: displayID = kCGNullDirectDisplay (0),
+    // listOption = kCGWindowListOptionIncludingWindow (1<<3),
+    // imageOption = kCGWindowImageDefault (0) → full window at native res.
+    fn CGWindowListCreateImage(
+        display: CGDirectDisplayID,
+        list_option: CGWindowListOption,
+        window_id: CGWindowID,
+        image_option: u32,
+    ) -> CGImageRef;
 
     fn CFArrayGetCount(array: CFArrayRef) -> CFIndex;
     fn CFArrayGetValueAtIndex(array: CFArrayRef, idx: CFIndex) -> *const CVoid;
@@ -82,15 +118,34 @@ extern "C" {
     fn CFGetTypeID(cf: *const CVoid) -> CFTypeID;
     fn CFNumberGetTypeID() -> CFTypeID;
     fn CFStringGetTypeID() -> CFTypeID;
+
+    fn CFDataCreateMutable(alloc: CFAllocatorRef, capacity: CFIndex) -> CFMutableDataRef;
+    fn CFDataGetBytePtr(data: CFMutableDataRef) -> *const u8;
+    fn CFDataGetLength(data: CFMutableDataRef) -> CFIndex;
 }
 
-#[derive(Serialize)]
-pub struct WindowInfo {
-    pub window_id: i64,
-    pub pid: i64,
-    pub app_name: String,
-    #[allow(dead_code)]
-    pub title: String,
+// ImageIO symbols. ImageIO is NOT linked transitively, so we link it
+// explicitly as a framework.
+#[link(name = "ImageIO", kind = "framework")]
+extern "C" {
+    // Create an image destination that writes into a CFMutableData. `type_id`
+    // is the UTI string (e.g. "public.png") — despite the param name in older
+    // docs, it's the UTI constant, not a typeID number.
+    fn CGImageDestinationCreateWithData(
+        data: CFMutableDataRef,
+        type_id: CFStringRef,
+        count: CFIndex,
+        options: CFDictionaryRef,
+    ) -> CGImageDestinationRef;
+    // Add a CGImage to the destination. (Returns void in the SDK we target.)
+    fn CGImageDestinationAddImage(
+        dest: CGImageDestinationRef,
+        image: CGImageRef,
+        properties: CFDictionaryRef,
+    );
+    // Finalize → flush the encoded bytes into the backing CFData. Returns false
+    // on encoding failure.
+    fn CGImageDestinationFinalize(dest: CGImageDestinationRef) -> bool;
 }
 
 /// Create a CFString from a Rust string. Caller must `CFRelease` the result.
@@ -154,6 +209,13 @@ unsafe fn dict_i64(dict: CFDictionaryRef, key: &str) -> Option<i64> {
     }
 }
 
+/// A short sleep so macOS's TCC permission cache can update after a grant or
+/// prompt before the caller re-preflights. CoreGraphics sometimes defers the
+/// re-evaluation until the run loop yields.
+fn yield_run_loop_once() {
+    thread::sleep(Duration::from_millis(50));
+}
+
 /// Enumerate on-screen, layer-0 desktop windows for the Share Window picker.
 /// Excludes zWork's own windows (so the user doesn't screenshot the overlay or
 /// main window) and the Dock/menu bar (layer != 0). Window titles are absent
@@ -202,53 +264,55 @@ pub fn list_windows() -> Vec<WindowInfo> {
     }
 }
 
-/// Capture a screenshot of `window_id` as a base64 PNG data_url.
+/// Capture a screenshot of `window_id` as a base64 PNG data_url, IN-PROCESS.
 ///
-/// Shells out to the system `screencapture` CLI (`-l<id>` selects a window,
-/// `-o` drops the shadow, `-x` silences the shutter sound). Child processes
-/// inherit zWork's Screen Recording TCC grant, so this works once zWork itself
-/// is granted. The PNG is written to a temp file, read, base64-encoded, then
-/// deleted — matching the frontend's existing `{ data_url, mime }` contract.
+/// Uses `CGWindowListCreateImage` (single-window, full content, default image
+/// options) so the capture runs entirely under zWork's own Screen Recording
+/// grant — no child process, no separate TCC binary. The CGImage is encoded to
+/// PNG bytes via ImageIO's `CGImageDestination`, then base64-encoded to match
+/// the frontend's existing `{ data_url, mime }` contract.
 pub fn capture_window(window_id: i64) -> Result<Value, String> {
+    // Preflight — give a clear error before touching CoreGraphics. Pump the run
+    // loop once first in case a grant just landed and the cache is stale.
     if !unsafe { CGPreflightScreenCaptureAccess() } {
-        return Err(
-            "Screen Recording permission is required. Grant it to zWork in System Settings."
-                .to_string(),
-        );
+        yield_run_loop_once();
+        if !unsafe { CGPreflightScreenCaptureAccess() } {
+            return Err(
+                "Screen Recording permission is required. Grant it to zWork in System Settings."
+                    .to_string(),
+            );
+        }
     }
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let tmp = format!(
-        "{}/zwork-share-{}-{}.png",
-        std::env::temp_dir().to_string_lossy(),
-        std::process::id(),
-        nanos
-    );
-    let output = Command::new("screencapture")
-        .arg(format!("-l{window_id}"))
-        .arg("-o")
-        .arg("-x")
-        .arg(&tmp)
-        .output()
-        .map_err(|e| format!("failed to run screencapture: {e}"))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+
+    const NULL_DISPLAY: CGDirectDisplayID = 0;
+    // kCGWindowListOptionIncludingWindow = (1 << 3). Capture just this window.
+    const LIST_OPTION_SINGLE_WINDOW: u32 = 1 << 3;
+    // kCGWindowImageDefault = 0. Full window at native resolution.
+    const IMAGE_OPTION_DEFAULT: u32 = 0;
+
+    let image = unsafe {
+        CGWindowListCreateImage(
+            NULL_DISPLAY,
+            LIST_OPTION_SINGLE_WINDOW,
+            window_id as CGWindowID,
+            IMAGE_OPTION_DEFAULT,
+        )
+    };
+    if image.is_null() {
         return Err(format!(
-            "screencapture exited {}: {}",
-            output.status,
-            stderr.trim()
+            "No window found with id {window_id} (it may have closed)."
         ));
     }
-    let bytes = std::fs::read(&tmp).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        format!("failed to read capture: {e}")
-    })?;
-    let _ = std::fs::remove_file(&tmp);
+
+    // Encode the CGImage to PNG bytes via ImageIO (in-process, no temp file).
+    let png_bytes = encode_image_to_png(image);
+    unsafe { CFRelease(image) };
+
+    let bytes = png_bytes.map_err(|e| format!("failed to encode screenshot: {e}"))?;
     if bytes.len() < 64 {
-        return Err("screenshot was empty — Screen Recording may not be granted to zWork."
-            .to_string());
+        return Err(
+            "screenshot was empty — Screen Recording may not be granted to zWork.".to_string(),
+        );
     }
     let b64 = STANDARD.encode(&bytes);
     Ok(json!({
@@ -257,8 +321,66 @@ pub fn capture_window(window_id: i64) -> Result<Value, String> {
     }))
 }
 
+/// Encode a CGImageRef to PNG bytes via an in-memory ImageIO destination.
+///
+/// Creates a `CFMutableData`, an image destination over it with the
+/// `public.png` UTI, adds the image, finalizes, then copies the bytes out.
+/// All intermediate CF objects are released.
+fn encode_image_to_png(image: CGImageRef) -> Result<Vec<u8>, String> {
+    unsafe {
+        let data = CFDataCreateMutable(ptr::null(), 0);
+        if data.is_null() {
+            return Err("CFDataCreateMutable returned null".to_string());
+        }
+
+        // "public.png" is the PNG UTI. Despite the `type_id` param name in
+        // legacy docs, CGImageDestinationCreateWithData takes the UTI string.
+        let png_type = cf_string("public.png");
+        if png_type.is_null() {
+            CFRelease(data);
+            return Err("could not create PNG UTI string".to_string());
+        }
+
+        let dest = CGImageDestinationCreateWithData(data, png_type, 1, ptr::null());
+        CFRelease(png_type);
+        if dest.is_null() {
+            CFRelease(data);
+            return Err("CGImageDestinationCreateWithData returned null".to_string());
+        }
+
+        CGImageDestinationAddImage(dest, image, ptr::null());
+        let ok = CGImageDestinationFinalize(dest);
+        CFRelease(dest);
+
+        if !ok {
+            CFRelease(data);
+            return Err("CGImageDestinationFinalize failed".to_string());
+        }
+
+        let ptr_bytes = CFDataGetBytePtr(data);
+        let len = CFDataGetLength(data) as usize;
+        let bytes = std::slice::from_raw_parts(ptr_bytes, len).to_vec();
+        CFRelease(data);
+        Ok(bytes)
+    }
+}
+
 /// Whether zWork itself has Screen Recording permission (non-prompting). Use
 /// before listing/capturing so the UI can route the user to System Settings.
 pub fn screen_capture_granted() -> bool {
+    unsafe { CGPreflightScreenCaptureAccess() }
+}
+
+/// Trigger the native macOS "allow Screen Recording" prompt (prompting). macOS
+/// only honors this on the app's first launch; subsequent calls return the
+/// cached state. The UI pairs this with a deep-link to System Settings for
+/// re-grants. Returns the (post-prompt) permission state.
+pub fn request_screen_capture() -> bool {
+    // The prompting call. Pump the run loop once so the TCC cache updates
+    // before the caller immediately re-preflights.
+    let _ = unsafe { CGRequestScreenCaptureAccess() };
+    yield_run_loop_once();
+    // CGRequestScreenCaptureAccess's return value is unreliable across macOS
+    // versions; re-preflight to report a consistent state.
     unsafe { CGPreflightScreenCaptureAccess() }
 }

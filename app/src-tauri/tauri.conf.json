@@ -45,6 +45,25 @@
         "minimizable": false,
         "fullscreen": false,
         "skipTaskbar": true
+      },
+      {
+        "label": "share",
+        "title": "Share a Window",
+        "width": 520,
+        "height": 560,
+        "minWidth": 420,
+        "minHeight": 440,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "fullscreen": false,
+        "center": true,
+        "transparent": false,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "shadow": true,
+        "visible": false,
+        "skipTaskbar": true
       }
     ],
     "security": {

@@ -664,6 +664,12 @@ interface AppState {
   toggleWeb: () => void;
   focusChatInput: number;
   triggerFocusChatInput: () => void;
+  /** An image pushed from the standalone Share Window picker (its own OS window)
+   *  for the active ChatInput to consume as an attachment. ChatInput watches this
+   *  and drains it via clearPendingShareImage once injected. Null when idle. */
+  pendingShareImage: { dataUrl: string; mime: string; name?: string } | null;
+  pushPendingShareImage: (img: { dataUrl: string; mime: string; name?: string }) => void;
+  clearPendingShareImage: () => void;
 
   // Per-chat runtime cache
   chats: Record<string, Chat>;
@@ -946,6 +952,9 @@ export const useApp = create<AppState>((set, get) => ({
   toggleWeb: () => set((s) => ({ webSearch: !s.webSearch })),
   focusChatInput: 0,
   triggerFocusChatInput: () => set((s) => ({ focusChatInput: s.focusChatInput + 1 })),
+  pendingShareImage: null,
+  pushPendingShareImage: (img) => set({ pendingShareImage: img }),
+  clearPendingShareImage: () => set({ pendingShareImage: null }),
 
   chats: {},
   activeChatId: null,
