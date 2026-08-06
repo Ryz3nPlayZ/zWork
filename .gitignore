@@ -82,3 +82,7 @@ research/
 .cargo_cache/
 app/dist_old/
 
+# ===== Local reference transcripts (not part of the app) =====
+# Large agent/browser run transcripts kept locally as reference, not committed.
+.planning/codexbrowseruserun.md
+
