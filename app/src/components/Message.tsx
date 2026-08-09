@@ -37,7 +37,7 @@ import { useApp } from "../lib/store";
 import { Logo } from "./Logo";
 import { IconButton } from "./IconButton";
 import type { Message as Msg } from "../lib/store";
-import { api, whitelabelModelName } from "../lib/api";
+import { api } from "../lib/api";
 
 function formatTime(ts: number): string {
   if (!ts) return "";
@@ -727,11 +727,6 @@ export function Message({
           "mt-1 flex items-center gap-0.5 transition-opacity",
           message.resolvedModel ? "opacity-100" : "opacity-0 group-hover:opacity-100",
         )}>
-          {message.resolvedModel && (
-            <span className="inline-flex items-center rounded-full border border-line bg-paper-sunken px-2 py-0.5 text-[10.5px] text-ink-muted">
-              {message.providerLabel || "Model"}: {whitelabelModelName(message.resolvedModel) ?? message.resolvedModel}
-            </span>
-          )}
           <IconButton
             icon={copied ? <CheckIcon className="h-3.5 w-3.5 text-success" /> : <Copy />}
             label={copied ? "Copied" : "Copy"}

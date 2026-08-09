@@ -33,6 +33,7 @@ const TasksPage = lazy(() => import("./components/tasks/TasksPage").then((m) => 
 const InboxPage = lazy(() => import("./components/InboxPage").then((m) => ({ default: m.InboxPage })));
 const ScheduledTasksPage = lazy(() => import("./components/scheduled/ScheduledTasksPage").then((m) => ({ default: m.ScheduledTasksPage })));
 const OverlayChatView = lazy(() => import("./components/OverlayChatView").then((m) => ({ default: m.OverlayChatView })));
+const ShareWindowApp = lazy(() => import("./components/ShareWindowApp").then((m) => ({ default: m.ShareWindowApp })));
 import { KeybindingsModal } from "./components/KeybindingsModal";
 import { PermissionPrompt } from "./components/PermissionPrompt";
 import { BootProgress } from "./components/BootProgress";
@@ -86,6 +87,16 @@ function isOverlayWindow(): boolean {
   return internals?.metadata?.currentWindow?.label === "overlay";
 }
 
+/**
+ * Detect whether this webview is the standalone Share Window picker
+ * (label "share"). Same synchronous metadata lookup as isOverlayWindow.
+ */
+function isShareWindow(): boolean {
+  if (typeof window === "undefined") return false;
+  const internals = (window as any).__TAURI_INTERNALS__;
+  return internals?.metadata?.currentWindow?.label === "share";
+}
+
 export default function App() {
   // Detect the overlay window SYNCHRONOUSLY — this must happen before any
   // hooks are called. The window label is constant for the process lifetime,
@@ -96,6 +107,15 @@ export default function App() {
     return (
       <Suspense fallback={<div className="h-screen w-screen bg-transparent" />}>
         <OverlayChatView />
+      </Suspense>
+    );
+  }
+  // The Share Window picker is its own OS window. It renders ONLY the picker,
+  // independent of the overlay's 76px frame, so it gets a proper-sized surface.
+  if (isShareWindow()) {
+    return (
+      <Suspense fallback={<div className="h-screen w-screen bg-paper" />}>
+        <ShareWindowApp />
       </Suspense>
     );
   }

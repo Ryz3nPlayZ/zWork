@@ -60,6 +60,11 @@ fn max_tokens_for(model_id: &str) -> u64 {
     if mid.contains("deepseek-v4-flash") {
         return 65536;
     }
+    // z-ai/glm-5.2 ("zWork Ultimate" via OpenRouter) supports a large output
+    // window; cap at a generous default like other frontier models.
+    if mid.contains("glm-5.2") || mid.contains("zwork-ultimate") {
+        return 16384;
+    }
     // OpenAI / OpenAI-compatible: a safe general default.
     16384
 }
@@ -73,6 +78,10 @@ fn router_real_model(model_id: &str) -> String {
     match model_id {
         "zwork-pro" | "deepseek-v4-pro" => "deepseek-v4-pro".to_string(),
         "zwork-flash" | "deepseek-v4-flash" => "deepseek-v4-flash".to_string(),
+        // "zWork Ultimate" — the router resolves this alias to z-ai/glm-5.2 on
+        // OpenRouter. The sidecar sends the alias (never the raw upstream id) so
+        // the router's allowlist + Max-tier gate apply.
+        "zwork-ultimate" => "zwork-ultimate".to_string(),
         other => {
             tracing::warn!(
                 "[agent] unknown router model id '{other}' — falling back to deepseek-v4-flash"

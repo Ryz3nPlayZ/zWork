@@ -69,8 +69,41 @@ export function OverlayChatView() {
     void bootstrap();
   }, [bootstrap]);
 
+  // Listen for captures from the standalone Share Window picker (its own OS
+  // window). On capture, push the image to the store for the active ChatInput
+  // to consume as an attachment, and switch to zwork-vision so the model can
+  // process the image. (This logic used to live in ChatInput's in-overlay
+  // picker; it moved here when the picker became a separate window.)
+  useEffect(() => {
+    if (!IS_TAURI) return;
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    void import("@tauri-apps/api/event").then(({ listen }) => {
+      if (cancelled) return;
+      listen<{ dataUrl: string; mime: string }>("share-window-captured", (event) => {
+        const payload = event.payload;
+        if (!payload?.dataUrl) return;
+        useApp.getState().pushPendingShareImage({
+          dataUrl: payload.dataUrl,
+          mime: payload.mime || "image/png",
+          name: "Shared window",
+        });
+        useApp.getState().setModel("zwork-vision");
+      }).then((u) => {
+        if (cancelled) u();
+        else unlisten = u;
+      });
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
   // Position/resize the overlay window: idle chatbar (growing with the typed
   // draft) when empty, expanded chat panel when a conversation is active.
+  // (The Share Window picker is now its own OS window and doesn't touch the
+  // overlay's geometry.)
   useEffect(() => {
     void fitOverlayWindow(hasMessages ? "chat" : "idle", { contentHeight: barHeight || undefined });
   }, [hasMessages, barHeight]);
@@ -135,46 +168,71 @@ export function OverlayChatView() {
     if (!IS_TAURI) return;
     e.preventDefault();
     e.stopPropagation();
-    const startY = e.clientY;
+    // Capture the window's height and top position ONCE at mousedown, then
+    // derive every subsequent size from these fixed starts. Two correctness
+    // invariants, both fixed here:
+    //  1. Reference the captured starts, never the live size — otherwise the
+    //     cumulative delta compounds and the panel walks downward.
+    //  2. Do NOT attach the pointermove listener until `begin()` resolves.
+    //     The previous code attached the listener synchronously and dispatched
+    //     the async `begin()` afterwards, so early pointermove events ran with
+    //     the starts still 0 → newY = -(newH) → the window jumped up, then
+    //     snapped back when begin() resolved. That was the "pill moves then
+    //     corrects itself" jitter. The `ready` flag + late attach close the race.
+    let startH = 0;
+    let startWindowY = 0;
+    let startW = 0;
+    let startX = 0;
+    let scale = 1;
     let active = false;
+    let ready = false;
+    const startY = e.clientY;
 
     const onMove = async (ev: PointerEvent) => {
+      if (!ready) return; // begin() hasn't populated the starts yet
       const delta = startY - ev.clientY; // up = positive
       if (!active && Math.abs(delta) < 3) return;
       active = true;
       try {
         const { getCurrentWindow } = await import("@tauri-apps/api/window");
         const win = getCurrentWindow();
-        const size = await win.outerSize();
-        const scale = window.devicePixelRatio || 1;
-        const curH = size.height / scale;
-        const newH = Math.max(76, Math.min(900, curH + delta));
-        const curW = size.width / scale;
-        // Keep bottom pinned: move Y up by the same delta we grew.
-        const pos = await win.outerPosition();
-        const newY = pos.y / scale - (newH - curH);
-        await win.setSize(new LogicalSize(curW, newH));
-        await win.setPosition(new LogicalPosition(pos.x / scale, newY));
+        const newH = Math.max(76, Math.min(900, startH + delta));
+        const newY = startWindowY - (newH - startH);
+        await win.setSize(new LogicalSize(startW, newH));
+        await win.setPosition(new LogicalPosition(Math.round(startX), Math.round(newY)));
       } catch { /* noop */ }
-      // Update startY so the delta is incremental per move event.
-      // (We don't reset startY — the delta is cumulative from drag start,
-      // but since we apply it each frame, we reset to current to avoid
-      // runaway growth.)
     };
     const onUp = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    const begin = async () => {
+      try {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        const win = getCurrentWindow();
+        const size = await win.outerSize();
+        const pos = await win.outerPosition();
+        scale = window.devicePixelRatio || 1;
+        startH = size.height / scale;
+        startW = size.width / scale;
+        startWindowY = pos.y / scale;
+        startX = pos.x / scale;
+        ready = true;
+        // Attach listeners ONLY after the starts are captured, so no move ever
+        // fires against zeroed values.
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onUp);
+      } catch {
+        // Couldn't read geometry — nothing to resize. No listeners attached.
+      }
+    };
+    void begin();
   };
-  // Two grips exist:
-  //   1. The pill's left edge (the GripVertical button in ChatInput) — works
-  //      in both idle and expanded states.
-  //   2. A drag header strip at the top of the expanded conversation panel
-  //      (below) — a generous target for moving the window once it's grown.
-  // The root div is intentionally NOT a drag region, so users can select and
-  // copy message text without the window following the cursor.
+  // The pill itself is the primary drag grip (its whole non-interactive chrome
+  // is a data-tauri-drag-region — see ChatInput). The expanded panel adds a
+  // dedicated drag-header strip (below) as a generous grab target once it has
+  // grown. The root div is intentionally NOT a drag region, so users can
+  // select and copy message text without the window following the cursor.
 
   return (
     <div className="h-screen w-screen overflow-hidden bg-transparent">
@@ -187,6 +245,10 @@ export function OverlayChatView() {
         {hasMessages && chat && (
           <div
             className={cn(
+              // The panel floats above the pill with an mb-3 gap, so it reads
+              // as its own card — all four corners rounded. (A flush join with
+              // the pill would need square bottom corners, but the gap makes
+              // that look like a clipped edge instead.)
               "mb-3 w-full max-w-[720px] flex-1 min-h-0 overflow-hidden rounded-2xl border border-line shadow-float",
               // NOTE: no backdrop-blur here. On a fully-transparent Tauri
               // overlay window, `backdrop-filter` has nothing behind it to
@@ -223,9 +285,9 @@ export function OverlayChatView() {
             <div
               ref={scrollRef}
               data-no-drag
-              className="h-full overflow-y-auto overflow-x-hidden px-5 pb-5"
+              className="h-full overflow-y-auto overflow-x-hidden px-5 pb-6"
             >
-              <div className="mx-auto flex max-w-[640px] flex-col gap-4 pb-2">
+              <div className="mx-auto flex max-w-[640px] flex-col gap-4 pb-6">
                 {chat.messages.map((m, idx) => {
                   const isLast = idx === chat.messages.length - 1;
                   const isStreaming = !!chat.working && isLast;

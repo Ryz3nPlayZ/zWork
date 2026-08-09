@@ -207,8 +207,10 @@ export function whitelabelModelName(upstreamId: string | null | undefined): stri
   if (id.includes("deepseek-v4-flash") || id.includes("deepseek-flash") || id.includes("deepseek-chat")) return "zwork-flash";
   // Vision family (Gemma 4 31B cloud)
   if (id.includes("gemma4") || id.includes("gemma-4") || id.includes("gemma")) return "zwork-vision";
+  // Ultimate family (z-ai/glm-5.2 via OpenRouter — zWork Ultimate, Max tier)
+  if (id.includes("glm-5.2") || id === "z-ai/glm-5.2") return "zwork-ultimate";
   // Already-friendly ids pass through.
-  if (id === "zwork-flash" || id === "zwork-pro" || id === "zwork-vision") return upstreamId;
+  if (id === "zwork-flash" || id === "zwork-pro" || id === "zwork-vision" || id === "zwork-ultimate") return upstreamId;
   return undefined;
 }
 
@@ -732,6 +734,14 @@ export const api = {
       ? invoke<boolean>("screen_capture_preflight").catch(() => false)
       : Promise.resolve(false),
 
+  /** Trigger the native macOS "allow Screen Recording" prompt (prompting). macOS
+   *  only honors it on first launch; pair with openScreenRecordingSettings for
+   *  re-grants. Returns the post-prompt permission state. */
+  requestScreenCapture: () =>
+    IS_TAURI
+      ? invoke<boolean>("request_screen_capture").catch(() => false)
+      : Promise.resolve(false),
+
   /** Open the macOS Screen Recording privacy pane so the user can grant zWork.
    *  No-op off Tauri / non-macOS. */
   openScreenRecordingSettings: () =>
@@ -746,7 +756,10 @@ export const api = {
     try {
       const result = await invoke<{ data_url: string; mime?: string }>(
         "capture_window_native",
-        { windowId },
+        // Tauri v2 binds invoke args by the Rust parameter name (snake_case).
+        // The Rust command is `fn capture_window_native(window_id: i64)`, so
+        // the arg key MUST be `window_id` — `windowId` silently fails to bind.
+        { window_id: windowId },
       );
       return { data_url: result.data_url, mime: result.mime || "image/png" };
     } catch (e) {
@@ -982,11 +995,20 @@ async function streamChatWeb(
 
   const isPro = body.model === "zwork-pro";
   const isVision = body.model === "zwork-vision";
+  const isUltimate = body.model === "zwork-ultimate";
   // Upstream model id sent to the router (never shown to the user).
-  const upstreamModel = isPro ? "deepseek-v4-pro" : isVision ? "zwork-vision" : "deepseek-v4-flash";
+  const upstreamModel = isPro
+    ? "deepseek-v4-pro"
+    : isVision
+      ? "zwork-vision"
+      : isUltimate
+        ? "zwork-ultimate"
+        : "deepseek-v4-flash";
   // Friendly display name (whitelabel — never expose the upstream id).
   const friendlyModel = body.model;
-  const useOpenAi = isVision;
+  // Ultimate is OpenAI-shape (served via OpenRouter on the router's
+  // /api/v1/chat/completions path), as is Vision.
+  const useOpenAi = isVision || isUltimate;
 
   const headers: Record<string, string> = {
     "content-type": "application/json",

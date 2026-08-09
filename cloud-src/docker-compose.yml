@@ -95,6 +95,9 @@ services:
       - OLLAMA_API_KEY_1=${OLLAMA_API_KEY_1}
       - OLLAMA_BASE_URL_1=${OLLAMA_BASE_URL_1}
       - OLLAMA_MODEL_1=${OLLAMA_MODEL_1}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL}
     depends_on:
       - postgres
       - better_auth

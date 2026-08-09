@@ -12,7 +12,7 @@
  *  1. A `<html>.sidebar-translucent` class drives the CSS (transparent sidebar
  *     region + a backdrop-blur fallback for non-vibrancy platforms).
  *  2. On macOS + Tauri, the native window effect (NSVisualEffectMaterial
- *     "hudWindow") is toggled via Tauri v2's runtime setEffects/clearEffects.
+ *     "sidebar") is toggled via Tauri v2's runtime setEffects/clearEffects.
  */
 
 import { useEffect, useState } from "react";
@@ -53,6 +53,12 @@ async function setNativeEffect(on: boolean): Promise<void> {
   try {
     const { getCurrentWindow, EffectState, Effect } = await import("@tauri-apps/api/window");
     const win = getCurrentWindow();
+    // Translucency is a window-wide NSVisualEffectView. Applying it to the
+    // borderless overlay window fills the entire surface behind the chatbar —
+    // a frosted-glass "box around the pill". Translucency is a main-window
+    // feature (sidebar only); skip it here so the overlay stays a true
+    // floating pill.
+    if (win.label === "overlay") return;
     if (on) {
       // Sidebar (NSVisualEffectMaterial.sidebar) is the most-muted material —
       // it's what macOS itself uses for app sidebars (Finder, Mail, Notes).
@@ -78,6 +84,14 @@ async function setNativeEffect(on: boolean): Promise<void> {
 }
 
 function setHtmlClass(on: boolean) {
+  // The overlay window has no sidebar, so the `sidebar-translucent` class has
+  // nothing to target there except the `body { background: transparent }` rule
+  // — which would expose a window-wide vibrancy layer as a frosted "box around
+  // the pill". Never apply translucency state to the overlay.
+  if (typeof window !== "undefined") {
+    const label = (window as any).__TAURI_INTERNALS__?.metadata?.currentWindow?.label;
+    if (label === "overlay") return;
+  }
   const root = document.documentElement;
   if (on) root.classList.add(HTML_CLASS);
   else root.classList.remove(HTML_CLASS);

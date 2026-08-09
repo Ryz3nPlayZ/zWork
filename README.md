@@ -4,7 +4,7 @@
 
 # zWork
 
-**A desktop AI agent that runs on your schedule and works across your apps — not just another chat box.**
+**A desktop AI agent that does the work on a schedule, inside your apps. It does things. It doesn't just talk.**
 
 [![Release](https://img.shields.io/github/v/release/Ryz3nPlayZ/zWork?style=flat-square&color=171716&labelColor=2a2a2a)](https://github.com/Ryz3nPlayZ/zWork/releases)
 [![Platforms](https://img.shields.io/badge/runs%20on-macOS%20%7C%20Windows%20%7C%20Linux-171716?style=flat-square&labelColor=2a2a2a)](#install)
@@ -19,35 +19,13 @@
 
 ## What it does
 
-Tell zWork what you want done. It does it.
+You tell zWork what you want done, and it does it. A few examples:
 
-<table>
-<tr>
-<td width="33%" valign="top">
+- **Compare three vacuum cleaners** → you get a side-by-side comparison sheet. Not a lecture about "features and reviews."
+- **Yesterday's meeting notes** → a follow-up email draft you can actually send.
+- **Your Downloads folder is a mess** → it sorts it into subfolders while you watch.
 
-**Compare three vacuum cleaners**
-
-You get a side-by-side sheet — not a paragraph telling you to "consider features and reviews."
-
-</td>
-<td width="33%" valign="top">
-
-**Turn yesterday's notes into a follow-up email**
-
-You get a real draft, not advice on how to write one.
-
-</td>
-<td width="33%" valign="top">
-
-**Clean up your downloads folder**
-
-It moves the files. You watch it happen.
-
-</td>
-</tr>
-</table>
-
-zWork is for people who want the thing done, not another app to master.
+So instead of advice, you get the result. That's the idea, anyway.
 
 ---
 
@@ -95,70 +73,29 @@ irm https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install-wind
 curl -fsSL https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install.sh | bash
 ```
 
-Open it, sign in, ask for something.
+Open it, sign in, and ask for something. No prompt engineering required.
 
 ---
 
-## What works today
+## Stuff that works today
 
-<table>
-<tr>
-<td width="50%" valign="top">
+**Scheduled agents.** You set up a recurring job (daily digest, inbox sweep, checking a site) and it runs on its own and emails you the results. You can walk away, nobody has to watch it.
 
-**Scheduled agents**
+**App integrations (Composio + MCP).** It can reach into Gmail, Calendar, Slack and hundreds of other apps through Composio, or you can hook up your own MCP server. It reads your actual apps, not just local files.
 
-Set a recurring job — daily digest, inbox sweep, monitor a site — and zWork runs it on its own schedule, posting results to your inbox. No one watching, no chat window open.
+**Desktop & browser control.** It can click around macOS apps (via cua-driver) and drive a browser through an embedded Chrome bridge. Real element-level clicking, not screenshot guessing.
 
-</td>
-<td width="50%" valign="top">
+**Real deliverables.** It can export `.docx`/`.xlsx`/`.pdf` files, spin up a small web app on a localhost URL, that kind of thing. Actual files you can use, not just text in a chat.
 
-**App integrations (Composio + MCP)**
+**Files, shell, web research.** It can edit files, run local commands, and look stuff up online.
 
-Connect Gmail, Calendar, Slack, and hundreds more via Composio, or plug in any MCP server. The agent can read and act on your actual apps, not just files.
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-**Desktop & browser control**
-
-Drive macOS apps (capture, click, type) via cua-driver and automate the browser through an embedded Chrome bridge — element-level, not screenshots-and-pray.
-
-</td>
-<td width="50%" valign="top">
-
-**Real deliverables**
-
-Generate and export `.docx`/`.xlsx`/`.pdf`, serve a local web app on a localhost URL, and produce structured documents — not just text in a chat.
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-**Files, shell, web research**
-
-Read/write/reorganise files, run local commands, and pull live sources from the web.
-
-</td>
-<td width="50%" valign="top">
-
-**Skills library + auto-updates**
-
-Save what works once, reuse it any time. The app updates itself between releases.
-
-</td>
-</tr>
-</table>
+**Skills library + auto-updates.** If a workflow works well once, you can save it and reuse it later. It also updates itself between releases so you don't have to.
 
 ---
 
 ## What's next
 
-zWork already runs jobs on demand and on a schedule. The next version turns the output of those jobs into a persistent workspace — a document, a spreadsheet, a chart, a to-do list — that sits next to the conversation that produced it, where you can edit and keep it.
-
-See the [roadmap](docs/ROADMAP.md) for the order of work.
+On-demand and scheduled jobs already work. As for the rest, I'm too lazy to rewrite this section, so just go check the [roadmap](docs/ROADMAP.md).
 
 ---
 
