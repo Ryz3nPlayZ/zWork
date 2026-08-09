@@ -15,8 +15,6 @@
 
 </div>
 
----
-
 ## What it does
 
 You tell zWork what you want done, and it does it. A few examples:
@@ -26,8 +24,6 @@ You tell zWork what you want done, and it does it. A few examples:
 - **Your Downloads folder is a mess** → it sorts it into subfolders while you watch.
 
 So instead of advice, you get the result. That's the idea, anyway.
-
----
 
 ## Install
 
@@ -55,7 +51,7 @@ So instead of advice, you get the result. That's the idea, anyway.
 
 </div>
 
-### Command-line Installation
+Or via command line:
 
 #### macOS (Homebrew)
 ```bash
@@ -75,7 +71,11 @@ curl -fsSL https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/insta
 
 Open it, sign in, and ask for something. No prompt engineering required.
 
----
+#### Run from source
+```bash
+./run.sh
+```
+That builds the Rust sidecar, installs frontend deps, and opens the desktop app in dev mode.
 
 ## Stuff that works today
 
@@ -91,13 +91,7 @@ Open it, sign in, and ask for something. No prompt engineering required.
 
 **Skills library + auto-updates.** If a workflow works well once, you can save it and reuse it later. It also updates itself between releases so you don't have to.
 
----
-
-## What's next
-
 On-demand and scheduled jobs already work. As for the rest, I'm too lazy to rewrite this section, so just go check the [roadmap](docs/ROADMAP.md).
-
----
 
 ## How it's built
 
@@ -108,16 +102,6 @@ On-demand and scheduled jobs already work. As for the rest, I'm too lazy to rewr
 | **Cloud** | Rust (Axum) + Better Auth + Postgres | Sign-in, usage, managed model routing |
 
 [Architecture](docs/ARCHITECTURE.md) &nbsp;·&nbsp; [Auth](docs/AUTH.md) &nbsp;·&nbsp; [Cloud](docs/CLOUD.md) &nbsp;·&nbsp; [Releases](docs/RELEASES.md) &nbsp;·&nbsp; [Contributing](CONTRIBUTING.md)
-
-### Run from source
-
-```bash
-./run.sh
-```
-
-That builds the Rust sidecar, installs frontend deps, and opens the desktop app in dev mode.
-
----
 
 <div align="center">
 <sub>
