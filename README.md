@@ -15,6 +15,7 @@
 
 </div>
 
+
 ## What it does
 
 You tell zWork what you want done, and it does it. A few examples:
@@ -24,6 +25,7 @@ You tell zWork what you want done, and it does it. A few examples:
 - **Your Downloads folder is a mess** → it sorts it into subfolders while you watch.
 
 So instead of advice, you get the result. That's the idea, anyway.
+
 
 ## Install
 
@@ -77,6 +79,7 @@ Open it, sign in, and ask for something. No prompt engineering required.
 ```
 That builds the Rust sidecar, installs frontend deps, and opens the desktop app in dev mode.
 
+
 ## Stuff that works today
 
 - **Scheduled agents.** You set up a recurring job (daily digest, inbox sweep, checking a site) and it runs on its own and emails you the results. You can walk away, nobody has to watch it.
@@ -88,6 +91,7 @@ That builds the Rust sidecar, installs frontend deps, and opens the desktop app 
 
 On-demand and scheduled jobs already work. As for the rest, I'm too lazy to rewrite this section, so just go check the [roadmap](docs/ROADMAP.md).
 
+
 ## How it's built
 
 | Layer | Stack | What it does |
@@ -97,6 +101,7 @@ On-demand and scheduled jobs already work. As for the rest, I'm too lazy to rewr
 | **Cloud** | Rust (Axum) + Better Auth + Postgres | Sign-in, usage, managed model routing |
 
 [Architecture](docs/ARCHITECTURE.md) &nbsp;·&nbsp; [Auth](docs/AUTH.md) &nbsp;·&nbsp; [Cloud](docs/CLOUD.md) &nbsp;·&nbsp; [Releases](docs/RELEASES.md) &nbsp;·&nbsp; [Contributing](CONTRIBUTING.md)
+
 
 <div align="center">
 <sub>
