@@ -233,9 +233,11 @@ pub fn build_connected_apps_block(schemas: &[Value], connected_apps: &[String]) 
     let mut examples: Vec<&str> = Vec::new();
     if lower.iter().any(|a| a == "gmail") {
         examples.extend(&[
-            "  - \"check my email\" / \"any new emails?\" → a `composio__GMAIL_FETCH_EMAILS` (or `GMAIL_SEARCH_*`) tool; with no args it returns the latest messages",
-            "  - \"send an email to X about Y\" → a `composio__GMAIL_SEND_*` tool",
+            "  - \"check my email\" / \"any new emails?\" → a `composio__GMAIL_FETCH_EMAILS` tool; an empty `{}` returns the latest ~25 inbox messages (metadata + snippet only)",
+            "  - to find SPECIFIC emails, pass a `query` (Gmail syntax: `from:alice`, `subject:invoice`, `is:unread`, `after:2026/08/01`, `has:attachment`) and/or `label_ids`",
+            "  - to be THOROUGH (\"did I miss anything important today?\", \"summarize everything from X\"), keep paging: re-call `GMAIL_FETCH_EMAILS` with the previous call's `page_token` until `nextPageToken` is absent. Do NOT stop after the first page.",
             "  - to read one full message body, use `composio__GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID` with the messageId from a FETCH_EMAILS result",
+            "  - \"send an email to X about Y\" → a `composio__GMAIL_SEND_*` tool",
         ]);
     }
     if lower.iter().any(|a| a == "googlecalendar") {
@@ -286,6 +288,13 @@ pub fn build_connected_apps_block(schemas: &[Value], connected_apps: &[String]) 
         \"give me the latest reasonable batch\" — never re-call them with the same empty input \
         twice; if the first result didn't answer the question, narrow the query or read a specific \
         item by ID instead.\n  \
+        - For Gmail specifically: an empty `{}` returns at most ~25 INBOX messages with metadata \
+        and a short snippet only — no full bodies. If the response contains a `nextPageToken`, \
+        MORE messages exist beyond this page — pass it back as `page_token` (same query) to fetch \
+        the next page. KEEP PAGING until there is no `nextPageToken` whenever you need to be \
+        thorough (\"did I miss anything?\", \"summarize all of X's emails\"). To narrow to specific \
+        emails, pass a `query` (e.g. `from:alice after:2026/08/01`). Only call \
+        `GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID` for a message whose full body you actually need.\n  \
         - Write/create tools (SEND_EMAIL, CREATE_PAGE, CREATE_EVENT, CREATE_TASK) REQUIRE real \
         arguments. Do not call them with `{}`. Infer each required field from the user's request, \
         and if a required field genuinely isn't knowable, ASK the user instead of calling with \
@@ -350,6 +359,88 @@ pub async fn all_tool_schemas() -> Vec<Value> {
 /// comfortably and we only ever trim the long tail.
 const SHAPED_RESULT_CAP: usize = 8_000;
 
+/// Default page size for a Gmail list/search when the model didn't supply one
+/// (or supplied an absurd one). With `include_payload: false` (enforced below)
+/// each message is ~0.5–2 KB of headers + snippet, so 25/page is cheap and
+/// gives good coverage. The model PAGINATES via `page_token` (surfaced from
+/// the response's `nextPageToken` by `shape_email_list`) when it needs to be
+/// thorough — see the prompt rule in `connected_apps_block`.
+const GMAIL_DEFAULT_MAX_RESULTS: i64 = 25;
+/// Hard ceiling we'll forward even if the model asked for more. Composio's own
+/// cap is 500/page; anything above ~100 risks a slow upstream transfer on a
+/// heavy mailbox. The model can always page for more instead.
+const GMAIL_MAX_MAX_RESULTS: i64 = 100;
+
+/// Inject Gmail-safe defaults into the model's arguments BEFORE forwarding
+/// them to the cloud proxy. Composio's `GMAIL_FETCH_EMAILS` returns full HTML
+/// bodies + attachment metadata per message (90–170 KB routinely) when called
+/// with empty `{}` — for a user with thousands of emails that overflows the
+/// 30s request budget and re-triggers the duplicate-`{}` doom loop.
+///
+/// Only list/search tools are bounded here. Write tools (`SEND_*`) are passed
+/// through unchanged, and explicit model-supplied values are preserved when
+/// they are smaller than our cap (the model may ask for fewer).
+fn apply_gmail_defaults(slug: &str, params: Value) -> Value {
+    let upper = slug.to_uppercase();
+    let is_gmail_list = upper.contains("GMAIL_FETCH_EMAILS") || upper.contains("GMAIL_SEARCH");
+    if !is_gmail_list {
+        return params;
+    }
+
+    // Coerce to an object. The model usually sends `{}`; if it sent a non-
+    // object by mistake, start from a clean object rather than failing.
+    let mut obj = match params {
+        Value::Object(m) => m,
+        other => {
+            if other == Value::Null {
+                serde_json::Map::new()
+            } else {
+                // Unexpected but non-null: leave untouched rather than discard
+                // the model's intent.
+                return other;
+            }
+        }
+    };
+
+    // Bound `max_results`: default 25 if absent, clamp to 100 if the model
+    // asked for an absurd page. With `include_payload: false` (below) each
+    // message is small, so we don't need to be stingy — but unbounded pages
+    // on a heavy mailbox are exactly what caused the original doom loop.
+    let capped = match obj.get("max_results").and_then(|v| v.as_i64()) {
+        Some(n) => n.clamp(1, GMAIL_MAX_MAX_RESULTS),
+        None => GMAIL_DEFAULT_MAX_RESULTS,
+    };
+    obj.insert("max_results".to_string(), json!(capped));
+
+    // Metadata-only by default. Full payloads (`include_payload: true`) are
+    // the dominant size contributor and the model rarely needs them from a
+    // list call — it follows up with `FETCH_MESSAGE_BY_MESSAGE_ID` for any
+    // body it actually wants. Preserve an explicit model choice.
+    if !obj.contains_key("include_payload") {
+        obj.insert("include_payload".to_string(), json!(false));
+    }
+
+    // Scope an unqualified fetch to INBOX so "check my email" doesn't pull
+    // from All Mail / Sent / Drafts etc. Skip if the model already narrowed
+    // via `query`/`label_ids`, OR is paginating (`page_token` continues the
+    // previous search — injecting `label_ids` there would restart from page 1
+    // instead of advancing).
+    let has_page = obj.contains_key("page_token");
+    let has_query = obj
+        .get("query")
+        .map(|v| v.as_str().map_or(true, |s| !s.trim().is_empty()))
+        .unwrap_or(false);
+    let has_labels = obj
+        .get("label_ids")
+        .and_then(|v| v.as_array())
+        .map_or(false, |a| !a.is_empty());
+    if !has_page && !has_query && !has_labels {
+        obj.insert("label_ids".to_string(), json!(["INBOX"]));
+    }
+
+    Value::Object(obj)
+}
+
 /// Execute a `composio__<slug>` tool against the cloud proxy. The result is
 /// shaped like a tool result (`{ "isError": bool, "content": [...] }`) so the
 /// agent loop can forward it directly.
@@ -383,6 +474,9 @@ pub async fn call_tool(prefixed_name: &str, params: Value) -> Value {
         });
     };
     let endpoint = format!("{}/tools/execute/{}", cloud_base(), slug);
+
+    // Bound Gmail list/search args before forwarding (see apply_gmail_defaults).
+    let params = apply_gmail_defaults(slug, params);
 
     let raw = match client.post(&endpoint).json(&params).send().await {
         Ok(resp) if resp.status().is_success() => match resp.json::<Value>().await {
@@ -596,10 +690,12 @@ fn shape_email_list(raw: &Value) -> Shaped {
         return shape_json(raw, &raw.to_string());
     };
 
-    let count = messages.len();
     let envelopes: Vec<Value> = messages
         .iter()
-        .take(50) // hard ceiling on listed messages; past 50 the model should refine the query
+        // Safety net: `apply_gmail_defaults` already caps the page size at
+        // GMAIL_MAX_MAX_RESULTS (100), so this take rarely fires — it's here
+        // so a malformed/oversized upstream response can't blow the context.
+        .take(120)
         .map(|m| {
             let snippet = m
                 .get("messageText")
@@ -626,28 +722,50 @@ fn shape_email_list(raw: &Value) -> Shaped {
         .collect();
 
     let total = envelopes.len();
-    let note = if count > total {
-        format!(
-            "\n\nNote: {count} messages matched; showing first {total}. Refine the query \
-             (date range, sender, subject) to see the rest. Call \
-             `composio__GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID` with a `messageId` above to read \
-             a full message body."
-        )
-    } else if total > 0 {
-        format!(
-            "\n\nNote: bodies were stripped to save context. Call \
-             `composio__GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID` with a `messageId` above to read \
-             the full message body."
-        )
-    } else {
-        String::new()
-    };
+
+    // Surface Composio's pagination token so the model can keep paging when
+    // there are more matches — this is how "did I miss anything?" gets answered
+    // thoroughly on a busy inbox instead of the model being stuck on page 1.
+    // The token is nested under a few possible shapes depending on Composio's
+    // response version, so probe defensively.
+    let next_page_token = raw
+        .get("data")
+        .and_then(|d| {
+            d.get("nextPageToken")
+                .or_else(|| d.get("next_page_token"))
+                .or_else(|| d.get("page_token"))
+        })
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty());
+
+    let mut note = String::new();
+    if total > 0 {
+        note.push_str("\n\nNote: bodies were stripped to save context. Call \
+            `composio__GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID` with a `messageId` above to read \
+            the full message body.");
+    }
+    if let Some(tok) = &next_page_token {
+        // More results exist. Tell the model exactly how to get them.
+        note.push_str(&format!(
+            "\n\nMORE RESULTS EXIST. To see the next page, call \
+             `composio__GMAIL_FETCH_EMAILS` again with the SAME query/label_ids \
+             plus `page_token`: \"{}\". Keep paging until there is no \
+             nextPageToken if you need to be thorough (e.g. 'did I miss \
+             anything important today?').",
+            tok
+        ));
+    }
 
     Shaped {
         text: format!(
-            "{{\"messages\":{},\"count\":{}}}",
+            "{{\"messages\":{},\"count\":{}{}}}",
             serde_json::to_string(&envelopes).unwrap_or_else(|_| "[]".into()),
-            total
+            total,
+            next_page_token
+                .as_deref()
+                .map(|t| format!(",\"nextPageToken\":{}", serde_json::Value::String(t.to_string())))
+                .unwrap_or_default()
         ) + &note,
         is_error: false,
     }

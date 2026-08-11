@@ -27,7 +27,7 @@ import {
   Monitor,
 } from "lucide-react";
 import { cn } from "../lib/cn";
-import { needsLightweightRendering } from "../lib/platform";
+import { needsLightweightRendering, isMacOS } from "../lib/platform";
 import { useApp } from "../lib/store";
 import type { SecurityPreset } from "../lib/store";
 import { api, IS_WEB, type UploadedFile } from "../lib/api";
@@ -1098,14 +1098,16 @@ export function ChatInput({
               fileInputRef.current?.click();
             }}
           />
-          <OverlayToolItem
-            icon={<Monitor className="h-4 w-4" />}
-            label="Share window"
-            onClick={() => {
-              setToolsOpen(false);
-              void openShareWindow();
-            }}
-          />
+          {isMacOS() && (
+            <OverlayToolItem
+              icon={<Monitor className="h-4 w-4" />}
+              label="Share window"
+              onClick={() => {
+                setToolsOpen(false);
+                void openShareWindow();
+              }}
+            />
+          )}
           <OverlayToolItem
             icon={<FileText className="h-4 w-4" />}
             label={artifactMode ? "Artifact: on" : "Artifact"}

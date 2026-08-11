@@ -1,5 +1,5 @@
 cask "zwork" do
-  version "0.5.1"
+  version "0.5.2"
   sha256 :no_check
 
   url "https://github.com/Ryz3nPlayZ/zWork/releases/download/v#{version}/zWork-macos-universal.dmg"

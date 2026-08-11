@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Hardened runtime is REQUIRED for notarization. These entitlements
+         whitelist the specific capabilities zWork actually needs, keeping
+         the runtime hardened for everything else. -->
+
+    <!-- Allow loading unsigned kernel extensions (none today, but the cua-driver
+         bridge may need this in future). Leave permissive=false in practice. -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <false/>
+
+    <!-- Allow JIT in the webview (Tauri/WKWebView needs this for JS JIT). -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+
+    <!-- Allow dyld env vars so DYLD_INSERT_LIBRARIES works for debugging and
+         the cua-driver injection path. Required for the desktop-control stack. -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <!-- Audio/video capture for future screen-recording / share-window features. -->
+    <key>com.apple.security.device.camera</key>
+    <true/>
+    <key>com.apple.security.device.microphone</key>
+    <true/>
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+
+    <!-- Screen capture (Share Window, desktop screenshots). -->
+    <key>com.apple.security.screen-recording</key>
+    <true/>
+
+    <!-- Accessibility automation — the core of desktop control. -->
+    <key>com.apple.security.accessibility-events</key>
+    <true/>
+
+    <!-- Network: unrestricted outgoing connections (LLM API, Composio, etc.). -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <key>com.apple.security.network.server</key>
+    <true/>
+
+    <!-- File system access for the user's own files (the agent reads/writes
+         code, docs, etc. on the user's behalf). -->
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+</dict>
+</plist>

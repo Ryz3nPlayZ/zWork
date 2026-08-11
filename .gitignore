@@ -65,7 +65,14 @@ benchmark-sandbox/
 # ===== Scratch projects (generated during testing) =====
 portfolio-demo/
 todo-app/
-bench/
+# Keep the benchmark harness source (bench/zwork_bench/, bench/README.md,
+# bench/pyproject.toml) tracked; only ignore run outputs.
+bench/runs/
+bench/.venv/
+bench/*.egg-info/
+bench/__pycache__/
+bench/.pytest_cache/
+bench/.ruff_cache/
 intro-page/
 
 # Local agent scratch / workspace dirs (not part of the app)

@@ -1,7 +1,7 @@
 use axum::{
     extract::{Path, Query},
     response::sse::{Event, Sse},
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     Json,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
@@ -129,6 +129,8 @@ pub async fn desktop_status() -> impl IntoResponse {
                     CuaDriver accessibility daemon). On this platform, use the \
                     browser_* tools or run_command instead."
                 .to_string(),
+            wrong_identity_hint: None,
+            zwork_self_trusted: None,
         });
     }
     Json(crate::cua::check_permissions(false).await.unwrap_or_else(|e| {
@@ -138,6 +140,8 @@ pub async fn desktop_status() -> impl IntoResponse {
             screen_recording: false,
             source: String::new(),
             error: e,
+            wrong_identity_hint: None,
+            zwork_self_trusted: None,
         }
     }))
 }
@@ -155,6 +159,8 @@ pub async fn desktop_grant() -> impl IntoResponse {
             screen_recording: false,
             source: String::new(),
             error: "Desktop control is only available on macOS.".to_string(),
+            wrong_identity_hint: None,
+            zwork_self_trusted: None,
         });
     }
     Json(crate::cua::check_permissions(true).await.unwrap_or_else(|e| {
@@ -164,6 +170,8 @@ pub async fn desktop_grant() -> impl IntoResponse {
             screen_recording: false,
             source: String::new(),
             error: e,
+            wrong_identity_hint: None,
+            zwork_self_trusted: None,
         }
     }))
 }
@@ -2596,6 +2604,20 @@ pub struct OllamaModelsRequest {
     pub api_key: String,
 }
 
+#[derive(serde::Deserialize)]
+pub struct OllamaPullRequest {
+    pub model: String,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key: String,
+}
+
+/// Default Ollama daemon address. Both the model-list and pull paths fall back
+/// to this when the user hasn't supplied an explicit base_url — so the common
+/// case (Ollama running locally on its default port) works with zero config.
+const OLLAMA_DEFAULT_BASE: &str = "http://localhost:11434";
+
 /// Check if an Ollama URL is safe to proxy (SSRF protection).
 fn is_safe_ollama_url(url: &str) -> bool {
     let url = url.trim().trim_end_matches('/');
@@ -2625,18 +2647,45 @@ fn is_safe_ollama_url(url: &str) -> bool {
     false
 }
 
+/// Resolve the user-supplied base_url to a canonical Ollama API root (no
+/// trailing slash, no `/v1` suffix). Empty input → default localhost. Any
+/// `/v1` suffix is stripped because we use the *native* Ollama API
+/// (`/api/tags`, `/api/pull`), not the OpenAI-compat layer — this avoids the
+/// double-`/v1` trap where `{base}/v1` + `/v1/models` produced a 404.
+fn ollama_api_base(raw: &str) -> String {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return OLLAMA_DEFAULT_BASE.to_string();
+    }
+    // Strip a trailing /v1 or /v1/ so callers can safely append /api/... below.
+    trimmed
+        .strip_suffix("/v1")
+        .unwrap_or(trimmed)
+        .to_string()
+}
+
 pub async fn ollama_models(
     Json(req): Json<OllamaModelsRequest>,
 ) -> impl IntoResponse {
-    if !is_safe_ollama_url(&req.base_url) {
-        return (
-            axum::http::StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "URL not allowed. Only localhost, private IPs, and ollama.com are permitted." })),
-        ).into_response();
-    }
+    // Empty base_url is the common case — default it instead of rejecting.
+    // The SSRF guard only runs on an explicitly-provided URL.
+    let base = if req.base_url.trim().is_empty() {
+        OLLAMA_DEFAULT_BASE.to_string()
+    } else {
+        if !is_safe_ollama_url(&req.base_url) {
+            return (
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "URL not allowed. Only localhost, private IPs, and ollama.com are permitted." })),
+            ).into_response();
+        }
+        ollama_api_base(&req.base_url)
+    };
 
-    let base = req.base_url.trim().trim_end_matches('/');
-    let models_url = format!("{}/v1/models", base);
+    // Use the NATIVE Ollama list endpoint (/api/tags). The previous code used
+    // /v1/models, which (a) double-suffixed when the user typed the /v1
+    // placeholder, and (b) returns {data:[...]} while the frontend expects
+    // {models:[...]}. /api/tags returns {models:[{name, ...}]} directly.
+    let models_url = format!("{base}/api/tags");
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
@@ -2653,14 +2702,50 @@ pub async fn ollama_models(
             let status = resp.status();
             match resp.text().await {
                 Ok(body) => {
-                    if status.is_success() {
-                        // Try to parse and return the models
-                        if let Ok(val) = serde_json::from_str::<Value>(&body) {
-                            return Json(val).into_response();
-                        }
-                        return Json(json!({ "raw": body })).into_response();
+                    if !status.is_success() {
+                        return (status, Json(json!({ "error": body }))).into_response();
                     }
-                    (status, Json(json!({ "error": body }))).into_response()
+                    // Map Ollama's {models:[{name,...}]} → {models:[{id,name}]}.
+                    // `name` is the canonical tag (e.g. "llama3.2:latest"); copy
+                    // it to `id` so the frontend's chip list keys on it. Drop
+                    // embedding models (capability "embedding") since they
+                    // can't drive a chat.
+                    let mapped = serde_json::from_str::<Value>(&body)
+                        .ok()
+                        .and_then(|v| v.get("models").cloned())
+                        .and_then(|models| models.as_array().cloned())
+                        .map(|arr| {
+                            let ids: Vec<Value> = arr
+                                .iter()
+                                .filter(|m| {
+                                    // Skip embedding-only models — they can't chat.
+                                    let caps = m
+                                        .get("capabilities")
+                                        .and_then(|c| c.as_array())
+                                        .map(|a| {
+                                            a.iter().any(|x| {
+                                                x.as_str()
+                                                    .map(|s| s == "completion" || s == "tools")
+                                                    .unwrap_or(false)
+                                            })
+                                        })
+                                        .unwrap_or(true); // keep if capabilities absent
+                                    caps
+                                })
+                                .map(|m| {
+                                    let name = m
+                                        .get("name")
+                                        .and_then(|n| n.as_str())
+                                        .unwrap_or("")
+                                        .to_string();
+                                    json!({ "id": name, "name": name })
+                                })
+                                .filter(|m| !m["id"].as_str().unwrap_or("").is_empty())
+                                .collect();
+                            json!({ "models": ids })
+                        })
+                        .unwrap_or_else(|| json!({ "models": [] }));
+                    Json(mapped).into_response()
                 }
                 Err(e) => (
                     axum::http::StatusCode::BAD_GATEWAY,
@@ -2670,7 +2755,102 @@ pub async fn ollama_models(
         }
         Err(e) => (
             axum::http::StatusCode::BAD_GATEWAY,
-            Json(json!({ "error": format!("Failed to connect to Ollama: {e}. Is Ollama running at {}?", req.base_url) })),
+            Json(json!({ "error": format!("Failed to connect to Ollama: {e}. Is Ollama running at {base}?") })),
         ).into_response(),
     }
+}
+
+/// Pull an Ollama model. Streams NDJSON progress lines from Ollama's
+/// `/api/pull` as Server-Sent-Events so the frontend can show live download
+/// progress. This is the "auto-pull" capability — the user types a model name
+/// (or it's triggered by a "model not found" detection) and the model is
+/// fetched without leaving zWork.
+pub async fn ollama_pull(
+    Json(req): Json<OllamaPullRequest>,
+) -> Response {
+    let base = if req.base_url.trim().is_empty() {
+        OLLAMA_DEFAULT_BASE.to_string()
+    } else {
+        if !is_safe_ollama_url(&req.base_url) {
+            return (
+                axum::http::StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "URL not allowed. Only localhost, private IPs, and ollama.com are permitted." })),
+            ).into_response();
+        }
+        ollama_api_base(&req.base_url)
+    };
+
+    let pull_url = format!("{base}/api/pull");
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3600)) // pulls can be long
+        .build()
+        .unwrap_or_default();
+
+    let mut post = client
+        .post(&pull_url)
+        .json(&json!({ "name": req.model, "stream": true }));
+    if !req.api_key.is_empty() {
+        post = post.header("authorization", format!("Bearer {}", req.api_key));
+    }
+
+    let resp = match post.send().await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                axum::http::StatusCode::BAD_GATEWAY,
+                Json(json!({ "error": format!("Failed to connect to Ollama: {e}. Is Ollama running at {base}?") })),
+            ).into_response();
+        }
+    };
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return (
+            status,
+            Json(json!({ "error": body.chars().take(400).collect::<String>() })),
+        ).into_response();
+    }
+
+    // Ollama streams newline-delimited JSON: {"status":"pulling manifest"},
+    // {"status":"downloading","digest":"...","total":N,"completed":M}, ...,
+    // {"status":"success"}. Re-emit each parsed record as an axum SSE `Event`
+    // so the frontend's fetch reader can parse progress incrementally.
+    // reqwest's chunk boundaries don't align with newlines, so we buffer and
+    // split on '\n'.
+    let body_stream = resp.bytes_stream().map(|chunk| {
+        let bytes = chunk.unwrap_or_default();
+        Ok::<_, std::convert::Infallible>(String::from_utf8_lossy(&bytes).to_string())
+    });
+
+    let sse_stream = tokio_stream::wrappers::ReceiverStream::new({
+        let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, std::convert::Infallible>>(32);
+        tokio::spawn(async move {
+            let mut buf = String::new();
+            let mut s = Box::pin(body_stream);
+            while let Some(chunk) = s.next().await {
+                buf.push_str(&chunk.unwrap_or_default());
+                while let Some(idx) = buf.find('\n') {
+                    let line: String = buf.drain(..=idx).collect();
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        continue;
+                    }
+                    let event = Event::default().data(trimmed);
+                    if tx.send(Ok(event)).await.is_err() {
+                        return; // client disconnected
+                    }
+                }
+            }
+            let trailing = buf.trim();
+            if !trailing.is_empty() {
+                let _ = tx.send(Ok(Event::default().data(trailing))).await;
+            }
+            let _ = tx.send(Ok(Event::default().data("[DONE]"))).await;
+        });
+        rx
+    });
+
+    Sse::new(sse_stream).into_response()
 }

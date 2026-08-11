@@ -42,6 +42,7 @@ export function Sidebar() {
   const view = useApp((s) => s.view);
   const setView = useApp((s) => s.setView);
   const setActiveProject = useApp((s) => s.setActiveProject);
+  const inboxUnread = useApp((s) => s.inboxUnreadCount);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   // Exclude chats that belong to any project from the sidebar
@@ -139,6 +140,7 @@ export function Sidebar() {
             <SidebarButton
               icon={<Inbox />}
               label="Inbox"
+              badge={inboxUnread}
               onClick={() => setView("inbox")}
               active={view === "inbox"}
             />
@@ -341,12 +343,14 @@ function SidebarButton({
   icon,
   label,
   shortcut,
+  badge,
   active,
   onClick,
 }: {
   icon: React.ReactNode;
   label: string;
   shortcut?: string;
+  badge?: number;
   active?: boolean;
   onClick?: () => void;
 }) {
@@ -364,9 +368,13 @@ function SidebarButton({
         {icon}
       </span>
       <span className="flex-1 text-left">{label}</span>
-      {shortcut && (
+      {badge && badge > 0 ? (
+        <span className="min-w-[18px] rounded-full bg-accent/15 px-1.5 text-center text-[10px] font-semibold leading-[18px] text-accent">
+          {badge > 99 ? "99+" : badge}
+        </span>
+      ) : shortcut ? (
         <span className="font-mono text-[10.5px] text-ink-faint">{shortcut}</span>
-      )}
+      ) : null}
     </button>
   );
 }

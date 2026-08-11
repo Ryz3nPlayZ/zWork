@@ -56,4 +56,20 @@ pub struct PermissionStatus {
     /// Human-readable error if the driver couldn't be reached.
     #[serde(default)]
     pub error: String,
+
+    /// Set when the booleans look like they were measured against the wrong
+    /// TCC identity — e.g. the driver reports its grant is missing while zWork
+    /// itself is trusted. This is the classic "user granted Accessibility to
+    /// zWork, not to CuaDriver" trap. Holds a ready-to-render message the UI
+    /// can show verbatim. Absent when the state is healthy or unambiguous.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wrong_identity_hint: Option<String>,
+
+    /// Whether zWork's *own* process holds the Accessibility grant (a separate
+    /// TCC identity from the driver). Surfaced so the UI can phrase the
+    /// wrong-identity hint precisely ("you granted to zWork, not CuaDriver").
+    /// Absent if the frontend hasn't reported it via the `ax_self_trusted`
+    /// Tauri command or the backend hasn't been asked to include it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zwork_self_trusted: Option<bool>,
 }

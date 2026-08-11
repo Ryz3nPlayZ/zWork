@@ -60,6 +60,15 @@ function getSidecarToken(): Promise<string> {
 
 const API_BASE = IS_TAURI ? "http://127.0.0.1:8787" : "";
 
+/** One progress record from Ollama's /api/pull stream. */
+export interface OllamaPullProgress {
+  status: string; // "pulling manifest", "downloading", "verifying", "success", "error"
+  digest?: string;
+  total?: number;
+  completed?: number;
+  error?: string;
+}
+
 function u(path: string): string {
   // `path` always starts with "/api/..."
   return API_BASE + path;
@@ -326,6 +335,11 @@ export interface OnboardingStatus {
  * actually performs Accessibility + CGEvent work, so its grants are the source
  * of truth for whether desktop control will work. `driver_ok` is false when
  * CuaDriver.app isn't installed or the daemon can't be reached.
+ *
+ * `wrong_identity_hint`, when present, signals the classic "granted
+ * Accessibility to zWork, not CuaDriver" trap: the driver reports a missing
+ * grant while the TCC identity measured doesn't look like the driver's. The
+ * UI renders this verbatim as an amber banner.
  */
 export interface DesktopStatus {
   driver_ok: boolean;
@@ -333,6 +347,8 @@ export interface DesktopStatus {
   screen_recording: boolean;
   source?: string;
   error?: string;
+  /** Ready-to-render message when the grant looks mis-attributed (zWork not CuaDriver). */
+  wrong_identity_hint?: string | null;
 }
 
 export interface OnboardingAnswer {
@@ -870,6 +886,61 @@ export const api = {
       j<{ models: { id: string; name: string }[]; error?: string }>(r),
     ),
 
+  /**
+   * Pull an Ollama model with streaming progress. Calls POST /api/ollama/pull
+   * and reads the SSE stream, invoking `onProgress` for each status record
+   * (e.g. {status:"downloading", total, completed}, {status:"success"}).
+   * Resolves when the stream ends ([DONE]); rejects on connection error.
+   */
+  ollamaPull: async (
+    model: string,
+    base_url: string,
+    api_key: string,
+    onProgress: (rec: OllamaPullProgress) => void,
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    const resp = await localFetch(`/api/ollama/pull`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model, base_url, api_key }),
+      signal,
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || `Pull failed (${resp.status})`);
+    }
+    if (!resp.body) throw new Error("No response stream");
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      // SSE events are separated by blank lines; each has `data: <payload>`.
+      let idx: number;
+      while ((idx = buf.indexOf("\n\n")) !== -1) {
+        const block = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const dataLine = block
+          .split("\n")
+          .find((l) => l.startsWith("data:"));
+        if (!dataLine) continue;
+        const payload = dataLine.slice(5).trim();
+        if (payload === "[DONE]") return;
+        try {
+          const rec = JSON.parse(payload) as OllamaPullProgress;
+          onProgress(rec);
+          if (rec.status === "success") return;
+          if (rec.error) throw new Error(rec.error);
+        } catch (e) {
+          if (e instanceof Error && e.message) throw e;
+          // Non-JSON line — ignore (keepalive etc.)
+        }
+      }
+    }
+  },
+
   putProjectContext: (id: string, content: string) =>
     localFetch(`/api/projects/${id}/context`, {
       method: "PUT",
@@ -962,6 +1033,7 @@ export type StreamEvent =
   | { type: "subagent_activity"; task_id: string; event: StreamEvent }
   | { type: "subagent_done"; task_id: string; result?: string; error?: string }
   | { type: "ask_question"; chat_id: string; question_id?: string; question: string; options: string[] }
+  | { type: "permission_recovery"; tool_use_id?: string; kind?: string; message: string }
   | { type: "todo_update"; todos: Array<{ id: string; content: string; status: "pending" | "in_progress" | "completed" }> };
 
 /** Web-mode streaming: sends Anthropic-format request to the Axum API and

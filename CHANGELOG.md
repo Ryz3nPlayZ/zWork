@@ -2,6 +2,43 @@
 
 All notable changes to zWork are documented in this file.
 
+## v0.5.2
+
+**Ship-readiness pass: stability, security, Ollama, and permission UX.**
+
+### New
+- **Ollama integration works end-to-end.** Model discovery was broken in three independent ways (SSRF guard rejected the default empty URL, double-`/v1` path, response-shape mismatch) — clicking "Load models" always errored or showed an empty list. Rewritten to use Ollama's native `/api/tags` endpoint with a correct response mapping. Models now **auto-load** the moment you pick the Ollama credential. Embedding-only models are filtered out.
+- **Pull Ollama models in-app.** New `POST /api/ollama/pull` endpoint streams download progress from Ollama's `/api/pull` as SSE. The Settings panel has a pull input with live progress (`downloading — 42%`, `success`) and auto-refreshes the model list on completion. Zero-config: empty base URL defaults to `http://localhost:11434`.
+- **Crash reporting foundation.** Panic hooks in both the sidecar backend (`~/.zwork/logs/crashes.jsonl`) and the Tauri host (`host-crashes.jsonl`) capture payload, location, thread, and backtrace. Previously, native crashes vanished silently.
+- **macOS Keychain for secrets.** BYOK API keys now store in the system Keychain (encrypted at rest) with transparent migration from the legacy plaintext file and full fallback on Linux/Windows.
+- **Legal docs.** Privacy Policy and Terms of Service added (`legal/`), with in-app links in Settings.
+
+### Fixes (permissions — the "granted but shows Required" bug)
+- **Permission status now updates after you grant.** The `LAST_PERMS` cache was write-once and never invalidated, so granting in System Settings and returning to zWork kept showing the old "not granted" state until restart. Now has an 8s TTL with live re-read when the driver is up.
+- **Warm-up no longer poisons on slow driver start.** A transient failure on first contact permanently returned "CuaDriver isn't running" until manual re-click. The guard now resets on failure so later polls retry.
+- **Accessibility grant deep-links to System Settings.** Previously the AX grant button relied on macOS re-raising the driver's prompt, which it won't after first launch — so it could silently do nothing. Now opens the Accessibility pane directly.
+- **Stale-cache fix on driver restart.** `teardown_driver` now invalidates the permission cache so a fresh read happens on the next poll.
+
+### Fixes (stability)
+- **Mutex poison immunity.** 22 `std::sync::Mutex` lock sites across the agent loop, watchdog, and CUA cache converted to poison-tolerant access. A single panicked thread no longer cascades into permanent process-wide deadlock.
+- **Agent no longer crashes on transient chatstore read failure.** `chatstore::get().unwrap()` → graceful fallback with a warning.
+- **Context-overflow recovery wired in.** `is_context_overflow_error` and `force_compact_conversation_history` were written to recover from `context_length_exceeded` 400s but never called. A long conversation no longer dead-ends when it crosses a model's real window — it force-compacts and retries once.
+
+### Fixes (overlay)
+- **Custom shortcut now works on every launch.** Previously reverted to `Ctrl+Alt+Space` until you opened Settings, because Rust can't read localStorage. Now re-registered on main-window boot.
+- **Keybindings cheatsheet shows your actual shortcut** instead of the hardcoded default.
+
+### Fixes (Composio / Gmail)
+- **Gmail pagination.** "Check my email" no longer drowns the model on a busy inbox. Default page is 25 (metadata-only, no HTML bodies), `nextPageToken` is surfaced, and the prompt teaches the model to keep paging until exhausted — so nothing gets missed. Paging is scope-aware (doesn't restart at page 1).
+
+### Fixes (Share Window)
+- **"Share window" button hidden on Windows/Linux** where it returned "No windows found" (capture is macOS-only via CoreGraphics).
+
+### Infrastructure
+- **Code-signing + notarization CI scaffolding.** The release workflow now wires `APPLE_SIGNING_IDENTITY` / `APPLE_ID` / `APPLE_PASSWORD` / `APPLE_TEAM_ID` for macOS (notarytool submit + staple) and `WINDOWS_CERTIFICATE_THUMBPRINT` for Windows Authenticode. Entitlements plist added. All optional — unsigned builds still work; reviewers see warnings when secrets are missing.
+- **Version bumped to 0.5.2** across `package.json`, `tauri.conf.json`, `Cargo.toml`, `Casks/zwork.rb`.
+- **4 cargo warnings eliminated** (dead code, needless mut).
+
 ## v0.5.1
 
 **Windows parity pass + native Share Window capture.**

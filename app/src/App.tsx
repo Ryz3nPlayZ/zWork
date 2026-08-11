@@ -222,6 +222,26 @@ export default function App() {
     void bootstrap();
   }, [bootstrap]);
 
+  // Re-register the saved overlay shortcut on every main-window launch.
+  // Rust can't read webview localStorage, so the Tauri boot path hardcodes the
+  // default shortcut — without this, a user's custom binding only gets restored
+  // when they happen to open Settings (where GlobalShortcutSection re-applies
+  // it). Running this on the main window's boot means the saved shortcut works
+  // from the moment the app launches, regardless of which view is shown.
+  useEffect(() => {
+    if (!(window as any).__TAURI_INTERNALS__) return;
+    const saved = localStorage.getItem("zwork:overlay-shortcut");
+    if (!saved) return;
+    (async () => {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        await invoke("register_overlay_shortcut", { shortcutStr: saved });
+      } catch (e) {
+        console.warn("Boot: failed to re-register saved overlay shortcut:", e);
+      }
+    })();
+  }, []);
+
   // Seed Zustand store with stub user in browser dev mode so components
   // that read `useApp(s => s.me)` work without a real cloud session.
   useEffect(() => {

@@ -269,9 +269,10 @@ function ProjectCard({ project }: { project: { id: string; name: string; descrip
   const updateProject = useApp((s) => s.updateProject);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  // Task 3: fix date — backend returns Unix seconds, Date.now() is ms
+  // Backend writes created_at/updated_at as milliseconds (timestamp_millis),
+  // so diff directly against Date.now() — no extra *1000.
   const timeAgo = (ts: number) => {
-    const diff = Date.now() - ts * 1000;
+    const diff = Date.now() - ts;
     const mins = Math.floor(diff / 60000);
     if (mins < 1) return "just now";
     if (mins < 60) return `${mins}m ago`;
@@ -402,6 +403,11 @@ function ProjectDetail() {
   // Instructions (project.md) Modal and State
   const [instructions, setInstructions] = useState<string>("");
   const [editModalType, setEditModalType] = useState<"instructions" | null>(null);
+  // Memory + Timeline are read-only project-scoped notes the agent maintains.
+  // Backend routes exist (server.rs) and the API wrappers exist (api.ts), but
+  // they were never surfaced — rendered here as collapsed read-only cards.
+  const [memory, setMemory] = useState<string>("");
+  const [timeline, setTimeline] = useState<string>("");
   const [projectFiles, setProjectFiles] = useState<Array<{ name: string; size: number; mime: string; path: string }>>([]);
   const [filesLoading, setFilesLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -491,6 +497,14 @@ function ProjectDetail() {
       .then((r) => {
         setInstructions(r.content || "");
       })
+      .catch(() => {});
+    void api
+      .getProjectMemory(activeId)
+      .then((r) => setMemory(r.content || ""))
+      .catch(() => {});
+    void api
+      .getProjectTimeline(activeId)
+      .then((r) => setTimeline(r.content || ""))
       .catch(() => {});
     void loadProjectFiles();
   }, [activeId]);
@@ -669,6 +683,48 @@ function ProjectDetail() {
               ) : (
                 <div className="mt-auto flex items-center justify-center py-6 text-[12px] text-ink-faint border border-dashed border-line rounded-lg flex-grow">
                   No instructions added yet.
+                </div>
+              )}
+            </section>
+
+            {/* Memory card (read-only) — agent-maintained notes for this project */}
+            <section className="flex-grow flex-shrink-0 min-h-[120px] rounded-2xl border border-line bg-paper-raised p-5 flex flex-col">
+              <div className="flex items-start justify-between gap-3 mb-2">
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-[14px] font-semibold text-ink">Memory</h3>
+                  <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
+                    Notes zWork remembers across chats in this project.
+                  </p>
+                </div>
+              </div>
+              {memory.trim() ? (
+                <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-paper-sunken p-3 font-mono text-[11.5px] leading-5 text-ink-muted overflow-y-auto max-h-[160px] flex-grow">
+                  {memory}
+                </pre>
+              ) : (
+                <div className="mt-auto flex items-center justify-center py-4 text-[12px] text-ink-faint border border-dashed border-line rounded-lg flex-grow">
+                  Nothing remembered yet.
+                </div>
+              )}
+            </section>
+
+            {/* Timeline card (read-only) — agent-maintained activity log */}
+            <section className="flex-grow flex-shrink-0 min-h-[120px] rounded-2xl border border-line bg-paper-raised p-5 flex flex-col">
+              <div className="flex items-start justify-between gap-3 mb-2">
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-[14px] font-semibold text-ink">Timeline</h3>
+                  <p className="mt-1 text-[12.5px] leading-5 text-ink-muted">
+                    Key events zWork has logged for this project.
+                  </p>
+                </div>
+              </div>
+              {timeline.trim() ? (
+                <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-paper-sunken p-3 font-mono text-[11.5px] leading-5 text-ink-muted overflow-y-auto max-h-[160px] flex-grow">
+                  {timeline}
+                </pre>
+              ) : (
+                <div className="mt-auto flex items-center justify-center py-4 text-[12px] text-ink-faint border border-dashed border-line rounded-lg flex-grow">
+                  No events logged yet.
                 </div>
               )}
             </section>
