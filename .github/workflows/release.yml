@@ -229,18 +229,36 @@ jobs:
     env:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-      # macOS code signing + notarization. When APPLE_SIGNING_IDENTITY is set,
-      # Tauri's bundler signs the .app/.dmg with that Developer ID identity
-      # automatically. Notarization (xcrun notarytool) runs in a step below so
-      # we can staple the ticket and fail the build if Apple rejects the app.
-      # All four secrets are optional — if unset, the build proceeds UNSIGNED
-      # (same as today) so dev/preview builds aren't blocked on credentials.
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      # NOTE: APPLE_SIGNING_IDENTITY is intentionally NOT set here. GitHub
+      # Actions resolves an unset secret to an empty string, and Tauri treats a
+      # *present but empty* APPLE_SIGNING_IDENTITY as "sign with this (empty)
+      # identity" — which fails codesign with "item could not be found in the
+      # keychain". Instead the signing env vars are exported conditionally in
+      # the "Configure signing environment" step below, so they are genuinely
+      # ABSENT from the environment when no Apple secrets are configured. Only
+      # then does Tauri correctly skip signing and produce an unsigned build.
     steps:
       - uses: actions/checkout@v4
+
+      - name: Configure signing environment
+        # Export the Apple signing env vars ONLY when the secret is present, so
+        # they are genuinely ABSENT (not empty-string) when unset. This is what
+        # tells Tauri to skip signing on an unsigned build — see the env block
+        # comment above. Also sets a has_signing output for downstream gating.
+        id: signing
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.APPLE_SIGNING_IDENTITY }}" ]; then
+            echo "APPLE_SIGNING_IDENTITY=${{ secrets.APPLE_SIGNING_IDENTITY }}" >> "$GITHUB_ENV"
+            echo "APPLE_ID=${{ secrets.APPLE_ID }}" >> "$GITHUB_ENV"
+            echo "APPLE_PASSWORD=${{ secrets.APPLE_PASSWORD }}" >> "$GITHUB_ENV"
+            echo "APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID }}" >> "$GITHUB_ENV"
+            echo "has_signing=true" >> "$GITHUB_OUTPUT"
+            echo "Signing configured."
+          else
+            echo "has_signing=false" >> "$GITHUB_OUTPUT"
+            echo "No Apple signing secrets — building unsigned."
+          fi
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -297,12 +315,9 @@ jobs:
 
       - name: Inject signing config (when secrets present)
         # Patch tauri.conf.json to add signingIdentity + entitlements ONLY when
-        # APPLE_SIGNING_IDENTITY is configured. Without this conditional, a hard-
-        # coded signingIdentity in the static config breaks unsigned builds
-        # (Tauri passes the literal/unresolved value to codesign, which fails).
-        # When the secret is absent, the config stays clean and the build ships
-        # unsigned — exactly as before.
-        if: ${{ env.APPLE_SIGNING_IDENTITY != '' }}
+        # APPLE_SIGNING_IDENTITY is configured. Gate on the signing step's
+        # output (env var is absent, not empty, when no secret is set).
+        if: steps.signing.outputs.has_signing == 'true'
         shell: bash
         run: |
           python3 - <<'PY'
@@ -320,11 +335,11 @@ jobs:
         run: bash scripts/build-macos-universal-release.sh
 
       - name: Notarize & staple macOS app
-        # Only run when Apple notarization credentials are configured. Dev and
-        # preview builds (no secrets) skip this and ship unsigned, same as
-        # today. `--keychain-profile` stores the credentials in the CI runner's
+        # Only run when Apple notarization credentials are configured (gated on
+        # the signing step's output). Dev/preview builds skip this and ship
+        # unsigned. `--keychain-profile` stores credentials in the runner's
         # keychain so the password isn't passed on every invocation.
-        if: ${{ env.APPLE_ID != '' && env.APPLE_PASSWORD != '' && env.APPLE_TEAM_ID != '' }}
+        if: steps.signing.outputs.has_signing == 'true'
         env:
           NOTARY_PROFILE: zwork-notarize
         shell: bash
