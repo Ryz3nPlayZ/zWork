@@ -74,9 +74,7 @@
     "active": true,
     "createUpdaterArtifacts": true,
     "macOS": {
-      "minimumSystemVersion": "10.13",
-      "signingIdentity": "${APPLE_SIGNING_IDENTITY}",
-      "entitlements": "entitlements.plist"
+      "minimumSystemVersion": "10.13"
     },
     "externalBin": [
       "binaries/zwork-backend"

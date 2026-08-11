@@ -295,6 +295,27 @@ jobs:
           # the first-run auto-install is silently broken.
           echo "ZWORK_CUADRIVER_APP=/tmp/cua-driver-rs-${CUA_VERSION}-darwin-universal/CuaDriver.app" >> "$GITHUB_ENV"
 
+      - name: Inject signing config (when secrets present)
+        # Patch tauri.conf.json to add signingIdentity + entitlements ONLY when
+        # APPLE_SIGNING_IDENTITY is configured. Without this conditional, a hard-
+        # coded signingIdentity in the static config breaks unsigned builds
+        # (Tauri passes the literal/unresolved value to codesign, which fails).
+        # When the secret is absent, the config stays clean and the build ships
+        # unsigned — exactly as before.
+        if: ${{ env.APPLE_SIGNING_IDENTITY != '' }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("app/src-tauri/tauri.conf.json")
+          conf = json.loads(p.read_text())
+          conf["bundle"]["macOS"]["signingIdentity"] = "${APPLE_SIGNING_IDENTITY}"
+          conf["bundle"]["macOS"]["entitlements"] = "entitlements.plist"
+          p.write_text(json.dumps(conf, indent=2) + "\n")
+          print("Injected signingIdentity + entitlements into tauri.conf.json")
+          PY
+
       - name: Build universal macOS app
         run: bash scripts/build-macos-universal-release.sh
 
