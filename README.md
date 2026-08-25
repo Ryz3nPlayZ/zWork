@@ -15,62 +15,59 @@
 
 </div>
 
-## Install
+zWork is a desktop AI agent that runs scheduled jobs and integrates with your apps. It can browse the web, edit files, run commands, and create deliverables like documents and spreadsheets.
 
-Download from releases: https://github.com/Ryz3nPlayZ/zWork/releases/latest
+## How to use
+
+Download from https://github.com/Ryz3nPlayZ/zWork/releases/latest
 
 macOS: .dmg, Windows: .exe, Linux: .AppImage
 
-Command line:
+Or install via command line:
 
-macOS (Homebrew):
+macOS:
 ```bash
 brew install Ryz3nPlayZ/tap/zwork
 ```
 
-Windows (PowerShell):
+Windows:
 ```powershell
 irm https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install-windows.ps1 | iex
 ```
 
-Linux (bash):
+Linux:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install.sh | bash
 ```
 
-Open it, sign in, and ask for something. No prompt engineering required.
+Open the app, sign in, and ask it to do something. No prompt engineering needed.
 
 Run from source:
 ```bash
 ./run.sh
 ```
 
-## Features
+## What it can do
 
-Scheduled agents - set up recurring jobs and it runs on its own and emails you results
+- Scheduled agents: set up recurring jobs (daily digest, inbox sweep, checking sites) and it runs automatically and emails results
+- App integrations: connects to Gmail, Calendar, Slack and hundreds of other apps via Composio or MCP
+- Desktop & browser control: clicks around macOS apps and drives a browser through an embedded Chrome bridge
+- Creates real files: exports .docx/.xlsx/.pdf files, spins up web apps on localhost
+- Files, shell, web research: edits files, runs commands, looks things up online
+- Skills library: save workflows you like and reuse them later
 
-App integrations (Composio + MCP) - can reach into Gmail, Calendar, Slack and hundreds of other apps
+On-demand and scheduled jobs already work. For more details check docs/ROADMAP.md
 
-Desktop & browser control - can click around macOS apps and drive a browser through an embedded Chrome bridge
-
-Real deliverables - can export .docx/.xlsx/.pdf files, spin up a small web app on a localhost URL
-
-Files, shell, web research - can edit files, run local commands, and look stuff up online
-
-Skills library + auto-updates - if a workflow works well once, you can save it and reuse it later
-
-On-demand and scheduled jobs already work. For the rest, check the roadmap: docs/ROADMAP.md
-
-## How it's built
+## Tech stack
 
 Desktop: Tauri + React
 Local engine: Rust (Axum) sidecar
 Cloud: Rust (Axum) + Better Auth + Postgres
 
-Architecture: docs/ARCHITECTURE.md Auth: docs/AUTH.md Cloud: docs/CLOUD.md Releases: docs/RELEASES.md Contributing: CONTRIBUTING.md
+More docs: docs/ARCHITECTURE.md docs/AUTH.md docs/CLOUD.md docs/RELEASES.md CONTRIBUTING.md
 
 ---
 
 v0.5.x · install · sign in · finish a job · update
 
-Releases: https://github.com/Ryz3nPlayZ/zWork/releases Issues: https://github.com/Ryz3nPlayZ/zWork/issues Discussions: https://github.com/Ryz3nPlayZ/zWork/discussions
+https://github.com/Ryz3nPlayZ/zWork/releases · https://github.com/Ryz3nPlayZ/zWork/issues · https://github.com/Ryz3nPlayZ/zWork/discussions
