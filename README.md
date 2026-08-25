@@ -113,6 +113,8 @@ On-demand and scheduled jobs already work. As for the rest, I'm too lazy to rewr
 [Architecture](docs/ARCHITECTURE.md) &nbsp;·&nbsp; [Auth](docs/AUTH.md) &nbsp;·&nbsp; [Cloud](docs/CLOUD.md) &nbsp;·&nbsp; [Releases](docs/RELEASES.md) &nbsp;·&nbsp; [Contributing](CONTRIBUTING.md)
 
 
+<br>
+
 <div align="center">
 <sub>
 
