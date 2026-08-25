@@ -26,11 +26,30 @@ export function KeybindingsModal() {
 
   const cmdKey = isMac ? "⌘" : "Ctrl";
 
+  // Show the user's actually-configured overlay shortcut rather than a hardcoded
+  // default — the binding is persisted in localStorage by GlobalShortcutSection.
+  const overlayShortcutStr =
+    (typeof localStorage !== "undefined" && localStorage.getItem("zwork:overlay-shortcut")) ||
+    "Control+Alt+Space";
+  // Convert a Tauri shortcut string ("Control+Alt+Space") into display glyphs.
+  const overlayKeys = overlayShortcutStr
+    .split("+")
+    .map((k) => k.trim())
+    .map((k) => {
+      const lower = k.toLowerCase();
+      if (lower === "command" || lower === "meta" || lower === "cmd") return "⌘";
+      if (lower === "control" || lower === "ctrl") return isMac ? "⌃" : "Ctrl";
+      if (lower === "option" || lower === "alt" || lower === "opt") return isMac ? "⌥" : "Alt";
+      if (lower === "shift") return "⇧";
+      if (lower === "space") return "Space";
+      return k;
+    });
+
   const categories = [
     {
       title: "Global Navigation",
       shortcuts: [
-        { keys: [isMac ? "⌃" : "Ctrl", isMac ? "⌥" : "Alt", "Space"], desc: "Toggle chatbox overlay", note: "Opens AI overlay over any app" },
+        { keys: overlayKeys, desc: "Toggle chatbox overlay", note: "Opens AI overlay over any app" },
         { keys: [`${cmdKey}`, "K"], desc: "Open command bar" },
         { keys: [`${cmdKey}`, "S"], desc: "Toggle sidebar" },
         { keys: [`${cmdKey}`, "\\"], desc: "Toggle sidebar (alt)" },

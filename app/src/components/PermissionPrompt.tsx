@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { Check, ChevronRight, Keyboard, Camera, RotateCw } from "lucide-react";
+import { Check, ChevronRight, Keyboard, Camera, RotateCw, AlertTriangle } from "lucide-react";
 import { api } from "../lib/api";
+import { invoke } from "@tauri-apps/api/core";
 
 const IS_TAURI = typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
 const DISMISS_KEY = "zwork:permission-prompt-dismissed";
@@ -12,6 +13,10 @@ export function PermissionPrompt() {
   const [screen, setScreen] = useState<Status>("checking");
   // null = unchecked, true = driver reachable, false = CuaDriver not installed.
   const [driverOk, setDriverOk] = useState<boolean | null>(null);
+  // The wrong-identity signal: shown when zWork itself is trusted but the
+  // driver's grant is missing — i.e. the user granted Accessibility to zWork,
+  // not CuaDriver. Drives the prominent banner below.
+  const [wrongIdentity, setWrongIdentity] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(() => {
     if (!IS_TAURI) return true;
     return localStorage.getItem(DISMISS_KEY) === "true";
@@ -23,10 +28,21 @@ export function PermissionPrompt() {
     try {
       // Source of truth = cua-driver daemon identity (com.trycua.driver),
       // the process that actually performs Accessibility + CGEvent work.
-      const st = await api.desktopStatus();
+      const [st, selfTrusted] = await Promise.all([
+        api.desktopStatus(),
+        invoke<boolean>("ax_self_trusted").catch(() => null),
+      ]);
       setDriverOk(st.driver_ok);
       setA11y(st.accessibility ? "granted" : "missing");
       setScreen(st.screen_recording ? "granted" : "missing");
+      // Wrong-identity detection: backend may flag it via wrong_identity_hint,
+      // or we infer it locally (zWork trusted + driver grant missing). Either
+      // signal is enough to show the banner — both is even stronger.
+      const inferred =
+        selfTrusted === true && st.driver_ok && (!st.accessibility || !st.screen_recording)
+          ? "macOS shows Accessibility granted to zWork, but automation needs it on CuaDriver — grant to CuaDriver below."
+          : null;
+      setWrongIdentity(st.wrong_identity_hint ?? inferred);
       if (st.driver_ok && st.accessibility && st.screen_recording) {
         localStorage.setItem(DISMISS_KEY, "true");
         setDismissed(true);
@@ -35,6 +51,7 @@ export function PermissionPrompt() {
       setDriverOk(false);
       setA11y("missing");
       setScreen("missing");
+      setWrongIdentity(null);
     }
   };
 
@@ -86,12 +103,12 @@ export function PermissionPrompt() {
             System Access
           </div>
           <h2 className="text-[16px] font-semibold text-ink leading-tight">
-            {driverOk === false ? "Install CuaDriver" : "Grant permissions"}
+            {driverOk === false ? "Install CuaDriver" : "Grant permissions to CuaDriver"}
           </h2>
           <p className="text-[12px] text-ink-muted mt-1 leading-relaxed">
             {driverOk === false
               ? "Desktop control runs through CuaDriver.app. Install it, then relaunch zWork to grant permissions."
-              : "zWork drives your desktop through CuaDriver, which needs these macOS permissions."}
+              : "Desktop automation runs through CuaDriver.app — grant these macOS permissions to CuaDriver, not zWork. (zWork's own grant is separate and only covers its hotkey.)"}
           </p>
         </div>
 
@@ -110,25 +127,37 @@ export function PermissionPrompt() {
             </div>
           </div>
         ) : (
-          /* Permission rows */
-          <div className="px-3">
-            <PermissionRow
-              icon={<Keyboard className="h-4 w-4" />}
-              name="Accessibility"
-              hint="Read & control app windows"
-              status={a11y}
-              busy={busy === "a11y"}
-              onGrant={() => grant("a11y")}
-            />
-            <PermissionRow
-              icon={<Camera className="h-4 w-4" />}
-              name="Screen Recording"
-              hint="See on-screen content"
-              status={screen}
-              busy={busy === "screen"}
-              onGrant={() => grant("screen")}
-            />
-          </div>
+          <>
+            {/* Wrong-identity banner — the core fix. Shown when the grant looks
+                mis-attributed (granted to zWork, not CuaDriver). Puts the most
+                common cause of "permission granted but automation dead" in front
+                of the user instead of leaving them to discover it. */}
+            {wrongIdentity && (
+              <div className="mx-5 mb-1 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3.5 py-3 flex gap-2.5">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
+                <p className="text-[12px] text-ink leading-relaxed">{wrongIdentity}</p>
+              </div>
+            )}
+            {/* Permission rows */}
+            <div className="px-3">
+              <PermissionRow
+                icon={<Keyboard className="h-4 w-4" />}
+                name="Accessibility"
+                hint="Read & control app windows · grant to CuaDriver"
+                status={a11y}
+                busy={busy === "a11y"}
+                onGrant={() => grant("a11y")}
+              />
+              <PermissionRow
+                icon={<Camera className="h-4 w-4" />}
+                name="Screen Recording"
+                hint="See on-screen content · grant to CuaDriver"
+                status={screen}
+                busy={busy === "screen"}
+                onGrant={() => grant("screen")}
+              />
+            </div>
+          </>
         )}
 
         {/* Footer */}
@@ -190,7 +219,7 @@ function PermissionRow({
           disabled={busy}
           className="inline-flex items-center gap-0.5 rounded-lg border border-line bg-paper px-2.5 py-1.5 text-[11.5px] font-medium text-ink hover:bg-paper-sunken transition-colors disabled:opacity-60"
         >
-          {busy ? "…" : "Enable"}
+          {busy ? "…" : "Grant"}
           {!busy && <ChevronRight className="h-3 w-3" />}
         </button>
       )}

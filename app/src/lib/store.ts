@@ -66,6 +66,22 @@ function rememberOnboardingDone(done: boolean) {
   }
 }
 
+/**
+ * Read whether zWork's OWN process holds the Accessibility grant — a separate
+ * TCC identity from CuaDriver's. Used to detect the classic "granted to zWork,
+ * not CuaDriver" trap: if zWork is trusted but the driver reports its grant is
+ * missing, the user granted to the wrong app. Returns null off-Tauri or on
+ * failure so the UI degrades gracefully (never blocks on this read).
+ */
+async function readZworkSelfTrusted(): Promise<boolean | null> {
+  if (IS_WEB) return null;
+  try {
+    return await invoke<boolean>("ax_self_trusted");
+  } catch {
+    return null;
+  }
+}
+
 export type Role = "user" | "assistant";
 
 export interface Task {
@@ -124,6 +140,16 @@ export type MessagePart =
       /** Set while a destructive-tool permission gate is awaiting the user's
        *  Allow/Deny decision. Carries the gate_id the backend is waiting on. */
       pendingGate?: { gateId: string; reason: string };
+    }
+  | {
+      /** A user-facing recovery hint surfaced when automation failed due to a
+       *  macOS permission problem (the classic "granted to zWork, not CuaDriver"
+       *  trap). Rendered as a distinct amber card with an action button. */
+      kind: "permission_recovery";
+      id: string;
+      /** Discriminator for the recovery type — currently "cuadriver_permissions". */
+      recoveryKind: string;
+      message: string;
     };
 
 export interface Message {
@@ -751,6 +777,20 @@ interface AppState {
    * driverOk distinguishes "permissions missing" from "driver not installed".
    */
   driverOk: boolean | null;
+  /**
+   * Ready-to-render message when the TCC grant looks mis-attributed — i.e. the
+   * driver reports its grant missing while the permission check wasn't measured
+   * against CuaDriver's identity. The classic "granted to zWork, not CuaDriver"
+   * trap. null when the state is healthy or ambiguous.
+   */
+  wrongIdentityHint: string | null;
+  /**
+   * Whether zWork's OWN process holds the Accessibility grant (a separate TCC
+   * identity from CuaDriver). Read via the Tauri host's `ax_self_trusted`
+   * command. When true while `accessibilityPermissionGranted` is false, the UI
+   * shows the wrong-identity banner — the user granted to zWork, not CuaDriver.
+   */
+  zworkSelfTrusted: boolean | null;
   checkMacOSPermissions: () => Promise<void>;
   requestAccessibility: () => Promise<void>;
   requestScreenRecording: () => Promise<void>;
@@ -1076,6 +1116,8 @@ export const useApp = create<AppState>((set, get) => ({
   accessibilityPermissionGranted: null,
   screenRecordingPermissionGranted: null,
   driverOk: null,
+  wrongIdentityHint: null,
+  zworkSelfTrusted: null,
   extensionConnected: null,
   webSearchEnabled: false,
   setWebSearchEnabled: (v) => set({ webSearchEnabled: v }),
@@ -1110,11 +1152,16 @@ export const useApp = create<AppState>((set, get) => ({
     try {
       // Source of truth = the cua-driver daemon's identity (com.trycua.driver),
       // not zWork's own — the driver is what actually performs the AX work.
-      const st = await api.desktopStatus();
+      const [st, selfTrusted] = await Promise.all([
+        api.desktopStatus(),
+        readZworkSelfTrusted(),
+      ]);
       set({
         driverOk: st.driver_ok,
         accessibilityPermissionGranted: st.accessibility,
         screenRecordingPermissionGranted: st.screen_recording,
+        wrongIdentityHint: st.wrong_identity_hint ?? null,
+        zworkSelfTrusted: selfTrusted,
       });
     } catch (e) {
       // Backend itself unreachable — distinct from driver-not-installed.
@@ -1125,14 +1172,24 @@ export const useApp = create<AppState>((set, get) => ({
   requestAccessibility: async () => {
     if (IS_WEB) return;
     try {
-      // One endpoint raises prompts for ALL missing grants attributed to the
-      // driver identity — the correct grant path. Both buttons hit it; polling
-      // picks up the granted state.
-      const st = await api.desktopGrant();
+      // Two-pronged: ask the driver to raise its TCC prompt (the correct
+      // attribution path) AND deep-link to the Accessibility pane, because
+      // macOS does not reliably re-show a driver-attributed AX prompt after
+      // the first launch — without the deep-link, the button could appear to
+      // do nothing. The user lands in System Settings either way and can
+      // toggle CuaDriver on manually.
+      const { invoke } = await import("@tauri-apps/api/core");
+      const [st, selfTrusted] = await Promise.all([
+        api.desktopGrant(),
+        readZworkSelfTrusted(),
+        invoke("open_macos_privacy_pane", { pane: "accessibility" }).catch(() => {}),
+      ]);
       set({
         driverOk: st.driver_ok,
         accessibilityPermissionGranted: st.accessibility,
         screenRecordingPermissionGranted: st.screen_recording,
+        wrongIdentityHint: st.wrong_identity_hint ?? null,
+        zworkSelfTrusted: selfTrusted,
       });
     } catch (e) {
       console.error("Failed to grant driver permissions:", e);
@@ -1477,6 +1534,11 @@ export const useApp = create<AppState>((set, get) => ({
       get().refreshMe(),
       get().refreshProjects(),
       get().checkMacOSPermissions().catch(() => {}),
+      // Inbox + Scheduled are polled by their own pages, but we also seed them
+      // at bootstrap so the Inbox unread badge and the Scheduled sidebar state
+      // are correct from first paint instead of going stale until opened.
+      get().fetchInbox().catch(() => {}),
+      get().fetchSchedules().catch(() => {}),
       get().fetchTasks().catch(() => {}),
       get().fetchEvents().catch(() => {}),
       api
@@ -2317,6 +2379,34 @@ export const useApp = create<AppState>((set, get) => ({
                       options: evt.options,
                     },
                   },
+                },
+              };
+            });
+          } else if (evt.type === "permission_recovery") {
+            // A desktop_* tool failed with a CuaDriver permission-shaped error.
+            // Surface a user-facing recovery card so the user can fix the grant
+            // without parsing the model-facing tool error — closes the loop on
+            // "automation failed, nothing happens".
+            set((s) => {
+              const c = s.chats[localId];
+              if (!c) return s;
+              const partId = `recovery-${evt.tool_use_id ?? crypto.randomUUID()}`;
+              const msgs = c.messages.map((m) => {
+                if (m.id !== asstId) return m;
+                // De-duplicate: one recovery card per tool_use_id.
+                if (m.parts.some((p) => p.kind === "permission_recovery" && p.id === partId)) return m;
+                const recoveryPart: MessagePart = {
+                  kind: "permission_recovery",
+                  id: partId,
+                  recoveryKind: evt.kind ?? "cuadriver_permissions",
+                  message: evt.message,
+                };
+                return withParts(m, [...m.parts, recoveryPart]);
+              });
+              return {
+                chats: {
+                  ...s.chats,
+                  [localId]: { ...c, messages: msgs },
                 },
               };
             });

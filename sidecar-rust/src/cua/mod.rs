@@ -7,9 +7,11 @@ use mcp_client::McpClient;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
+use crate::sync_util::Unpoison;
 
 /// Cached cua-driver connection. Held in a `Mutex<Option<..>>` (not a
 /// `OnceCell`) so we can drop it on idle — see [`teardown_driver`].
@@ -76,6 +78,10 @@ pub async fn teardown_driver() {
         *guard = None; // drop the Arc → kill_on_drop kills the mcp proxy
     }
     stop_driver_process().await;
+    // Invalidate the permission cache so the next status poll can't serve a
+    // stale "granted" from before the restart. The poll path will re-warm.
+    *LAST_PERMS.lock().await = None;
+    PERMS_WARMED.store(false, Ordering::SeqCst);
 }
 
 /// Begin a desktop-control session: ensure the cua-driver daemon is up and
@@ -309,7 +315,7 @@ pub async fn capture(app: Option<&str>) -> Result<CaptureResult, String> {
     // Cache the resolved (pid, window_id) so subsequent element-index actions
     // reuse the same window's element map without re-resolving.
     {
-        let mut cache = cache().lock().unwrap();
+        let mut cache = cache().lock_unpoisoned();
         cache.by_app.insert(app_name.clone(), (pid, window_id));
         cache.last_app = Some(app_name.clone());
     }
@@ -605,7 +611,7 @@ pub async fn launch_app(app: &str) -> Result<ActionResult, String> {
         })
         .unwrap_or(0);
     if pid > 0 {
-        let mut cache = cache().lock().unwrap();
+        let mut cache = cache().lock_unpoisoned();
         cache.by_app.insert(app.to_string(), (pid, first_window));
         cache.last_app = Some(app.to_string());
     }
@@ -825,7 +831,24 @@ pub async fn wait(seconds: f64) -> Result<ActionResult, String> {
 /// an infinite "record screen and audio" prompt loop. The daemon is now
 /// launched only by an explicit Grant (`check_permissions(true)`) or a real
 /// desktop-control session, each of which refreshes this cache.
-static LAST_PERMS: Mutex<Option<PermissionStatus>> = Mutex::const_new(None);
+static LAST_PERMS: Mutex<Option<(PermissionStatus, std::time::Instant)>> =
+    Mutex::const_new(None);
+
+/// Process-once guard so the cold-start warm-up (below) only ever launches the
+/// driver a single time to read live TCC state. Without this, a poll-every-2s
+/// Settings page could race multiple warm-ups on the very first paint.
+static PERMS_WARMED: AtomicBool = AtomicBool::new(false);
+
+/// How long a cached permission read stays fresh. The cache exists to stop the
+/// Settings poller from re-prompting Screen Recording on every tick — but a
+/// cache that never expires also hides a user's just-granted permission until
+/// they manually re-click Grant or restart the backend (the original "granted
+/// but still shows Required" bug). 8s is short enough that a user who toggles
+/// a TCC permission and returns to zWork sees the update within ~2 poll cycles,
+/// and long enough that the 2s Settings poller doesn't become a steady driver
+/// load. Re-reads only happen when the driver is already up (`CUA.is_some()`),
+/// so this never launches the daemon on its own.
+const PERMS_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(8);
 
 /// Read the driver's permission state via a live MCP `check_permissions` call
 /// and cache it. Only called from the Grant path and [`start_session`], where
@@ -835,33 +858,82 @@ async fn read_and_cache_perms(prompt: bool) -> Result<PermissionStatus, String> 
     let result = c
         .call("check_permissions", json!({ "prompt": prompt }))
         .await?;
+    let accessibility = result
+        .get("accessibility")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let screen_recording = result
+        .get("screen_recording")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let source = result
+        .get("source")
+        .map(|s| match s.as_str() {
+            // Some driver versions send source as a bare string.
+            Some(text) => text.to_string(),
+            // 0.5.x sends an object: {attribution, executable, pid, ...}.
+            None => s
+                .get("attribution")
+                .and_then(|a| a.as_str())
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| s.to_string()),
+        })
+        .unwrap_or_default();
+
+    // Detect the classic "granted to zWork, not CuaDriver" trap: the driver
+    // reports a missing grant while the TCC identity we read does not look like
+    // the driver's. The hint is heuristic (driver versions format `source`
+    // differently), so we only set it when something is genuinely missing and
+    // the source is ambiguous/non-driver — never on a healthy read.
+    let missing = !accessibility || !screen_recording;
+    let wrong_identity_hint = if missing && !source_looks_like_driver(&source) {
+        Some(wrong_identity_message(accessibility, screen_recording))
+    } else {
+        None
+    };
+
     let st = PermissionStatus {
         driver_ok: true,
-        accessibility: result
-            .get("accessibility")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false),
-        screen_recording: result
-            .get("screen_recording")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false),
-        source: result
-            .get("source")
-            .map(|s| match s.as_str() {
-                // Some driver versions send source as a bare string.
-                Some(text) => text.to_string(),
-                // 0.5.x sends an object: {attribution, executable, pid, ...}.
-                None => s
-                    .get("attribution")
-                    .and_then(|a| a.as_str())
-                    .map(|a| a.to_string())
-                    .unwrap_or_else(|| s.to_string()),
-            })
-            .unwrap_or_default(),
+        accessibility,
+        screen_recording,
+        source,
         error: String::new(),
+        wrong_identity_hint,
+        zwork_self_trusted: None,
     };
-    *LAST_PERMS.lock().await = Some(st.clone());
+    *LAST_PERMS.lock().await = Some((st.clone(), std::time::Instant::now()));
     Ok(st)
+}
+
+/// Heuristic: does `source` (the TCC identity the permission check was
+/// attributed to) look like the CuaDriver daemon rather than zWork or an
+/// unknown launcher? The driver's bundle id is `com.trycua.driver`; some
+/// versions report a human attribution like "CuaDriver" or the executable
+/// name `cua-driver`. zWork's own identity is `com.zwork.desktop` / `zwork`.
+fn source_looks_like_driver(source: &str) -> bool {
+    let s = source.to_ascii_lowercase();
+    if s.is_empty() {
+        return false;
+    }
+    s.contains("trycua") || s.contains("cua-driver") || s.contains("cuadriver")
+}
+
+/// Build the ready-to-render wrong-identity message. Kept here so backend and
+/// (optionally) the recovery-event path share identical copy.
+fn wrong_identity_message(accessibility: bool, screen_recording: bool) -> String {
+    // List which grant(s) still need to go on CuaDriver so the user knows what
+    // to toggle without having to re-derive it.
+    let missing: Vec<&str> = (!accessibility)
+        .then_some("Accessibility")
+        .into_iter()
+        .chain((!screen_recording).then_some("Screen Recording"))
+        .collect();
+    format!(
+        "macOS permissions are granted to zWork, but desktop automation runs through \
+         CuaDriver.app — so the grant must be on CuaDriver, not zWork. In System Settings \
+         → Privacy & Security, toggle on CuaDriver for: {}.",
+        missing.join(" and ")
+    )
 }
 
 /// TCC permission status reported by the driver's own identity
@@ -871,22 +943,80 @@ async fn read_and_cache_perms(prompt: bool) -> Result<PermissionStatus, String> 
 /// state WITHOUT launching the daemon; polling must never keep the daemon alive
 /// (see [`LAST_PERMS`]). Always returns a uniform shape.
 pub async fn check_permissions(prompt: bool) -> Result<PermissionStatus, String> {
-    // Read-only: never launch the daemon. Return the cached state, or a clear
-    // "not running" status if we've never checked.
+    // Read-only: never launch the daemon on a plain poll. But on the very
+    // FIRST poll of a process (before Grant / a desktop session has populated
+    // the cache), do a single best-effort live read so the Settings page shows
+    // the user's real TCC state instead of a hardcoded "not granted". The
+    // PERMS_WARMED guard ensures the daemon is touched at most once per
+    // process — subsequent polls keep returning the cache, exactly as before,
+    // so we never re-introduce the screen-recording prompt loop the cache was
+    // built to prevent (see LAST_PERMS).
     if !prompt {
-        return Ok(LAST_PERMS
-            .lock()
-            .await
-            .clone()
-            .unwrap_or(PermissionStatus {
-                driver_ok: false,
-                accessibility: false,
-                screen_recording: false,
-                source: String::new(),
-                error: "CuaDriver isn't running. It starts when you use desktop control \
-                        or click Grant."
-                    .to_string(),
-            }));
+        // Cache-first, but staleness-aware. The original cache was write-once
+        // and never invalidated, which meant a user who granted a TCC permission
+        // in System Settings and returned to zWork kept seeing "Required" until
+        // they manually re-clicked Grant or restarted the backend — the bug
+        // reported as "already granted but still shows not granted". Now:
+        //
+        //   • fresh cache (within PERMS_CACHE_TTL) → return it, no driver contact
+        //   • stale cache AND driver already up    → re-read live + update cache
+        //   • stale cache AND driver down          → return the stale value
+        //     (better to show last-known state than "not running"), unless there
+        //     is no cache at all, in which case the cold-start warm-up runs
+        //
+        // The re-read is gated on `CUA.is_some()` so polling never launches the
+        // daemon on its own — the TTL only triggers a live check when the driver
+        // is legitimately up (started by Grant or a desktop session).
+        let now = std::time::Instant::now();
+        let cached = LAST_PERMS.lock().await.clone();
+        if let Some((st, read_at)) = cached {
+            let fresh = now.duration_since(read_at) < PERMS_CACHE_TTL;
+            if fresh {
+                return Ok(st);
+            }
+            // Stale. Re-read only if the driver is already up — never launch it
+            // from a poll. If the driver is down, return the last-known state
+            // (which may be "all granted" — correct and stable) rather than
+            // degrading to a misleading "not running".
+            if CUA.lock().await.is_some() {
+                if let Ok(fresh_st) = read_and_cache_perms(false).await {
+                    return Ok(fresh_st);
+                }
+                // Driver was up but the read failed (IPC hiccup) — fall back to
+                // the stale value rather than masking it with "not running".
+                return Ok(st);
+            }
+            return Ok(st);
+        }
+
+        // Cold-start one-shot warm-up. Only the first caller across all pollers
+        // wins the compare_exchange; everyone else falls through. If the warm-up
+        // fails to reach the driver, RESET the guard so a later poll (after the
+        // driver has had time to start) can retry — otherwise the first transient
+        // failure permanently poisoned the flag and every later poll returned
+        // "not running" forever.
+        let already_warmed = PERMS_WARMED.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err();
+        if !already_warmed {
+            match read_and_cache_perms(false).await {
+                Ok(st) => return Ok(st),
+                Err(_) => {
+                    // Release the guard so the next poll can retry the warm-up.
+                    PERMS_WARMED.store(false, Ordering::SeqCst);
+                }
+            }
+        }
+
+        return Ok(PermissionStatus {
+            driver_ok: false,
+            accessibility: false,
+            screen_recording: false,
+            source: String::new(),
+            error: "CuaDriver isn't running. It starts when you use desktop control \
+                    or click Grant."
+                .to_string(),
+            wrong_identity_hint: None,
+            zwork_self_trusted: None,
+        });
     }
 
     // Grant path: launch the daemon, raise its prompts, read + cache the state.
@@ -898,6 +1028,8 @@ pub async fn check_permissions(prompt: bool) -> Result<PermissionStatus, String>
             screen_recording: false,
             source: String::new(),
             error: e,
+            wrong_identity_hint: None,
+            zwork_self_trusted: None,
         }),
     }
 }

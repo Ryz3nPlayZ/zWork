@@ -1,6 +1,6 @@
 [package]
 name = "zwork"
-version = "0.5.1"
+version = "0.5.2"
 description = "zWork desktop assistant"
 authors = ["Sidecar"]
 edition = "2021"

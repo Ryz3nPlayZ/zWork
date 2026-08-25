@@ -90,6 +90,8 @@ fn cors_layer() -> CorsLayer {
 }
 
 mod paths;
+mod sync_util;
+mod crash;
 mod secretstore;
 mod settings;
 mod chatstore;
@@ -115,6 +117,10 @@ mod office;
 
 #[tokio::main]
 async fn main() {
+    // Install the crash-capturing panic hook BEFORE anything else so a panic
+    // during setup is captured to ~/.zwork/logs/crashes.jsonl.
+    crash::install();
+
     // Initialize logging
     tracing_subscriber::fmt::init();
 
@@ -184,6 +190,7 @@ async fn main() {
         .route("/api/composio/disconnect", post(server::composio_disconnect))
         .route("/api/composio/apps", get(server::composio_apps))
         .route("/api/ollama/models", post(server::ollama_models))
+        .route("/api/ollama/pull", post(server::ollama_pull))
         .route("/api/memory", get(server::get_memory).put(server::put_memory))
         .route("/api/user-md", get(server::get_user_md).put(server::put_user_md))
         .route("/api/telemetry/event", post(server::telemetry_event))

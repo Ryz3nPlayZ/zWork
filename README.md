@@ -15,7 +15,6 @@
 
 </div>
 
----
 
 ## What it does
 
@@ -55,27 +54,31 @@ So instead of advice, you get the result. That's the idea, anyway.
 
 </div>
 
-### Command-line Installation
+Or via command line:
 
-#### macOS (Homebrew)
+**macOS (Homebrew)**
 ```bash
-brew tap ryz3nplayz/zwork https://github.com/Ryz3nPlayZ/zWork
-brew install --cask zwork
+brew install Ryz3nPlayZ/tap/zwork
 ```
 
-#### Windows (PowerShell)
+**Windows (PowerShell)**
 ```powershell
 irm https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install-windows.ps1 | iex
 ```
 
-#### Linux (bash)
+**Linux (bash)**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install.sh | bash
 ```
 
 Open it, sign in, and ask for something. No prompt engineering required.
 
----
+**Run from source**
+```bash
+./run.sh
+```
+That builds the Rust sidecar, installs frontend deps, and opens the desktop app in dev mode.
+
 
 ## Stuff that works today
 
@@ -109,21 +112,11 @@ On-demand and scheduled jobs already work. As for the rest, I'm too lazy to rewr
 
 [Architecture](docs/ARCHITECTURE.md) &nbsp;·&nbsp; [Auth](docs/AUTH.md) &nbsp;·&nbsp; [Cloud](docs/CLOUD.md) &nbsp;·&nbsp; [Releases](docs/RELEASES.md) &nbsp;·&nbsp; [Contributing](CONTRIBUTING.md)
 
-### Run from source
-
-```bash
-./run.sh
-```
-
-That builds the Rust sidecar, installs frontend deps, and opens the desktop app in dev mode.
-
----
 
 <div align="center">
 <sub>
 
-**v0.5.x** &nbsp;·&nbsp; the bar before anything new ships:<br>
-install · sign in · finish a real job · update
+**v0.5.x** &nbsp;·&nbsp; install · sign in · finish a job · update
 
 [Releases](https://github.com/Ryz3nPlayZ/zWork/releases) &nbsp;·&nbsp; [Issues](https://github.com/Ryz3nPlayZ/zWork/issues) &nbsp;·&nbsp; [Discussions](https://github.com/Ryz3nPlayZ/zWork/discussions)
 

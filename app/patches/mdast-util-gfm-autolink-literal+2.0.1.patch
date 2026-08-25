@@ -1,0 +1,18 @@
+diff --git a/node_modules/mdast-util-gfm-autolink-literal/lib/index.js b/node_modules/mdast-util-gfm-autolink-literal/lib/index.js
+index c5ca771..de574c6 100644
+--- a/node_modules/mdast-util-gfm-autolink-literal/lib/index.js
++++ b/node_modules/mdast-util-gfm-autolink-literal/lib/index.js
+@@ -132,7 +132,12 @@ function transformGfmAutolinkLiterals(tree) {
+     tree,
+     [
+       [/(https?:\/\/|www(?=\.))([-.\w]+)([^ \t\r\n]*)/gi, findUrl],
+-      [/(?<=^|\s|\p{P}|\p{S})([-.\w+]+)@([-\w]+(?:\.[-\w]+)+)/gu, findEmail]
++      // zWork patch: drop the `(?<=^|\s|\p{P}|\p{S})` lookbehind. Old macOS
++      // WebKit (Safari < 16.4, used by Tauri's WebView) has no lookbehind
++      // support and throws "invalid group specifier name" on module load,
++      // crashing the chat route. Redundant anyway — `findEmail` re-checks the
++      // preceding char via `previous(match, true)` (same constraint, no `/`).
++      [/([-.\w+]+)@([-\w]+(?:\.[-\w]+)+)/gu, findEmail]
+     ],
+     {ignore: ['link', 'linkReference']}
+   )

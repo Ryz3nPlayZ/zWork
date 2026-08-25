@@ -738,6 +738,32 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
         }));
     }
 
+    // Benchmark / coding-only mode: when ZWORK_CODING_ONLY is set (by the
+    // SWE-bench harness), restrict the advertised toolset to a fixed coding
+    // allowlist. This is an allowlist (not a denylist) on purpose — a
+    // benchmark must be deterministic, so a newly-added tool can't silently
+    // widen the harness's capabilities between runs. No-op in normal product
+    // use; the env var is never set outside the benchmark driver.
+    if std::env::var("ZWORK_CODING_ONLY").is_ok() {
+        const CODING_ALLOWLIST: &[&str] = &[
+            "read_file",
+            "list_dir",
+            "grep_search",
+            "write_file",
+            "replace_file_content",
+            "run_command",
+            "web_search",
+            "update_todos",
+            "save_memory",
+        ];
+        schemas.retain(|s| {
+            s.get("name")
+                .and_then(|n| n.as_str())
+                .map(|n| CODING_ALLOWLIST.contains(&n))
+                .unwrap_or(true)
+        });
+    }
+
     schemas
 }
 

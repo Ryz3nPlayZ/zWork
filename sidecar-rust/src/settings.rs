@@ -445,6 +445,71 @@ You have powerful local access to this computer through your tools. There is no 
 {permission_block}
 ";
 
+/// System prompt used when `ZWORK_CODING_ONLY` is set (the SWE-bench / coding
+/// benchmark path). It is intentionally self-contained and deterministic: no
+/// personalization, memory, skills, desktop/browser, sidebar-artifact, or
+/// connected-app steering — all of which would either poison reproducibility
+/// or are irrelevant in a headless coding container. Frames zWork as an
+/// autonomous software-engineering agent operating on the repository at the
+/// current working directory. Only the coding toolset is advertised
+/// (enforced separately in `tools::get_tool_schemas` under the same flag).
+const CODING_SYSTEM_PROMPT_TEMPLATE: &str = "\
+You are zWork, an autonomous software-engineering agent. \
+Under the hood you are {model_name} from {provider_name}. \
+You are operating on a code repository checked out at `{cwd}`.
+
+## Objective
+
+You will be given a task describing a bug report, feature request, or issue in \
+this repository. Your job is to make the minimal, correct code change that \
+resolves the task, such that the repository's test suite passes — including \
+tests that were failing before your change and should pass after it.
+
+## Workflow
+
+1. **Reproduce / locate first.** Read the task carefully. Use `grep_search` \
+and `read_file` to find the relevant code. Reproduce the reported behavior \
+with `run_command` when feasible. Do not edit until you understand the cause.
+2. **Make minimal, targeted edits.** Prefer `replace_file_content` for surgical \
+changes to existing files; use `write_file` only for new files. Do not \
+reformat, rename, or refactor unrelated code. The correct change is usually \
+small and localized.
+3. **Verify before stopping.** Run the repository's test suite (or the most \
+specific relevant subset) with `run_command` and confirm your change makes \
+the failing cases pass without breaking previously-passing cases. If a test \
+fails, read the failure, fix your change, and re-run — iterate until green.
+4. **Stop when done.** Once tests pass, give a brief summary of the change. \
+Do not commit, push, or open a PR — leave the working tree with your edit \
+applied; the harness captures the diff.
+
+## Tools
+
+You have a coding-only toolset: `read_file`, `list_dir`, `grep_search`, \
+`write_file`, `replace_file_content`, `run_command`, `web_search`, \
+`update_todos`, `save_memory`. No desktop, browser, or app-integration tools \
+are available.
+
+### Tool rules
+
+- Call tools directly. Never fake JSON or describe what a tool call would do.
+- Read a file before editing it. Never edit blind.
+- In `write_file`, always write the COMPLETE file contents — never elide with \
+\"// ...\" or \"…existing code…\".
+- Batch independent reads/edits in a single turn.
+- If a tool fails, read the error, fix your input, and retry. Do not claim \
+success unless a tool result confirms it.
+- You have full, pre-approved, autonomous permission to read/write files and \
+run commands. Do not ask for confirmation. Do not narrate — act.
+
+## Style
+
+- Terse and direct. No \"I'll now…\" filler.
+- Reference files and symbols with backticks.
+- Never claim a test passes unless `run_command` output confirms it.
+
+{extra_block}
+";
+
 pub fn build_system_prompt(
     model_name: &str,
     provider_name: &str,
@@ -461,6 +526,33 @@ pub fn build_system_prompt(
     include_academic: bool,
     connected_apps_block: &str,
 ) -> String {
+    // Benchmark / coding-only fast path. When ZWORK_CODING_ONLY is set, render
+    // the deterministic coding-focused prompt and skip every block that would
+    // make the prompt non-reproducible across machines (personalization,
+    // memory, project context, skills) or is irrelevant in a headless coding
+    // container (desktop/browser/skills/connected-apps). Only the coding
+    // toolset is advertised — enforced separately under the same flag.
+    if std::env::var("ZWORK_CODING_ONLY").is_ok() {
+        let permission_block = if auto_approve_destructive {
+            "## Autonomy\n\n\
+             You are running autonomously with full pre-approved permission to \
+             read/write files and run any command. Do not ask for confirmation \
+             before acting. Make all decisions silently and proceed."
+        } else {
+            "## Autonomy\n\n\
+             Make all non-destructive decisions silently. Destructive commands \
+             may require approval."
+        };
+        return CODING_SYSTEM_PROMPT_TEMPLATE
+            .replace("{model_name}", model_name)
+            .replace("{provider_name}", provider_name)
+            .replace(
+                "{cwd}",
+                if cwd.is_empty() { "(unknown)" } else { cwd },
+            )
+            .replace("{extra_block}", permission_block);
+    }
+
     let zwork_md_block = match fs::read_to_string(zwork_md_path()) {
         Ok(content) => {
             let content = content.trim();
@@ -628,7 +720,7 @@ pub fn build_system_prompt(
 
         priority.push("".to_string());
         priority.push("**Common mistakes to avoid:**".to_string());
-        priority.push("- \"check my email\" → do NOT use `run_command`, browser tools, or `web_search`. Use `composio__GMAIL_READ_EMAILS` or `composio__GMAIL_SEARCH_EMAILS`.".to_string());
+        priority.push("- \"check my email\" → do NOT use `run_command`, browser tools, or `web_search`. Use `composio__GMAIL_FETCH_EMAILS`; pass a `query` (e.g. `from:alice`, `is:unread`, `after:2026/08/01`) to find specific emails, and `composio__GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID` to read a full body.".to_string());
         priority.push("- \"what's on my calendar\" → do NOT open a browser. Use `composio__GOOGLECALENDAR_GET_EVENTS`.".to_string());
         if include_academic {
             priority.push("- \"search for papers on X\" → do NOT use `web_search`. Use `search_papers`.".to_string());

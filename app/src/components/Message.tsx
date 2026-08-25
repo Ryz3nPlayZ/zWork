@@ -29,6 +29,7 @@ import {
   CheckCircle2,
   XCircle,
   Loader2,
+  ShieldAlert,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { getIcon } from "./ActivityBlocks";
@@ -615,6 +616,13 @@ export function Message({
     });
     return entries;
   }, [parts]);
+  // Permission-recovery cards live on the same parts list as text/tool parts.
+  // Rendered inline after the text body so the user sees the action hint in
+  // the flow of the conversation, right where the failure happened.
+  const recoveryEntries = useMemo(
+    () => parts.filter((p): p is Extract<MessagePart, { kind: "permission_recovery" }> => p.kind === "permission_recovery"),
+    [parts],
+  );
 
   if (!isUser && !showWorkingPlaceholder && message.parts.length === 0 && (!activities || activities.length === 0)) {
     return null;
@@ -686,6 +694,9 @@ export function Message({
           {streaming && !showWorkingPlaceholder && trailingIsText && (
             <span className="inline-block h-[1em] w-[2px] align-middle bg-ink animate-typing-cursor ml-0.5" />
           )}
+          {recoveryEntries.map((r) => (
+            <PermissionRecoveryCard key={r.id} message={r.message} />
+          ))}
         </div>
 
         {artifacts && artifacts.length > 0 && (
@@ -890,5 +901,39 @@ function WorkingLabel({ status }: { status?: string }) {
         {label}
       </span>
     </span>
+  );
+}
+
+/** A user-facing recovery card shown when desktop automation failed due to a
+ *  macOS permission problem. Turns the silent "nothing happens" failure into
+ *  an actionable hint — the #1 reported cause is "granted Accessibility to
+ *  zWork, not CuaDriver". The button deep-links to the right System Settings
+ *  pane so the user can fix it without leaving the chat. */
+function PermissionRecoveryCard({ message }: { message: string }) {
+  const openSettings = useCallback(async () => {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core");
+      // Open Accessibility first — it's the more common missing grant. The
+      // user can navigate to Screen Recording from the sidebar if needed.
+      await invoke("open_macos_privacy_pane", { pane: "accessibility" });
+    } catch {
+      // Non-Tauri or command missing — the message already names the path.
+    }
+  }, []);
+
+  return (
+    <div className="mt-2 flex items-start gap-2.5 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2.5">
+      <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+      <div className="min-w-0 flex-1">
+        <div className="text-[12.5px] font-medium text-ink">Permission needed for desktop control</div>
+        <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-muted">{message}</p>
+        <button
+          onClick={openSettings}
+          className="mt-2 inline-flex items-center gap-1 rounded-lg border border-amber-500/40 bg-paper-raised px-2.5 py-1 text-[11px] font-medium text-ink hover:bg-paper-sunken transition-colors"
+        >
+          Open System Settings
+        </button>
+      </div>
+    </div>
   );
 }

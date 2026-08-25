@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 use tokio::task::JoinHandle;
+use crate::sync_util::Unpoison;
 
 fn active_processes() -> &'static Mutex<HashMap<String, HashSet<u32>>> {
     static INSTANCE: OnceLock<Mutex<HashMap<String, HashSet<u32>>>> = OnceLock::new();
@@ -16,12 +17,12 @@ fn active_runs() -> &'static Mutex<HashMap<String, JoinHandle<()>>> {
 }
 
 pub fn register_process(chat_id: &str, pid: u32) {
-    let mut map = active_processes().lock().unwrap();
+    let mut map = active_processes().lock_unpoisoned();
     map.entry(chat_id.to_string()).or_default().insert(pid);
 }
 
 pub fn unregister_process(chat_id: &str, pid: u32) {
-    let mut map = active_processes().lock().unwrap();
+    let mut map = active_processes().lock_unpoisoned();
     if let Some(set) = map.get_mut(chat_id) {
         set.remove(&pid);
     }
@@ -31,12 +32,12 @@ pub fn unregister_process(chat_id: &str, pid: u32) {
 /// chat. The handle is removed automatically when the turn finishes (the
 /// caller drops it via `unregister_run`).
 pub fn register_run(chat_id: &str, handle: JoinHandle<()>) {
-    let mut map = active_runs().lock().unwrap();
+    let mut map = active_runs().lock_unpoisoned();
     map.insert(chat_id.to_string(), handle);
 }
 
 pub fn unregister_run(chat_id: &str) {
-    let mut map = active_runs().lock().unwrap();
+    let mut map = active_runs().lock_unpoisoned();
     map.remove(chat_id);
 }
 
@@ -45,7 +46,7 @@ pub fn cancel_run(chat_id: &str) -> bool {
 
     // 1. Abort the agent turn itself so it stops spawning further tool/LLM calls.
     {
-        let mut map = active_runs().lock().unwrap();
+        let mut map = active_runs().lock_unpoisoned();
         if let Some(handle) = map.remove(chat_id) {
             handle.abort();
             cancelled_any = true;
@@ -54,7 +55,7 @@ pub fn cancel_run(chat_id: &str) -> bool {
 
     // 2. Terminate any registered subprocess trees spawned by the turn.
     let pids = {
-        let mut map = active_processes().lock().unwrap();
+        let mut map = active_processes().lock_unpoisoned();
         map.remove(chat_id).unwrap_or_default()
     };
 

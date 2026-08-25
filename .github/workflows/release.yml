@@ -67,11 +67,32 @@ jobs:
             exit 1
           fi
 
+      - name: Warn if code-signing secrets are missing
+        # NOT a hard failure — unsigned dev/preview builds are legitimate.
+        # Warn so a "stable" tag never ships unsigned by accident: the release
+        # notes below mention signing only when the secrets are present, and
+        # reviewers see a clear signal here.
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.APPLE_SIGNING_IDENTITY }}" ]; then
+            echo "::warning::APPLE_SIGNING_IDENTITY not set — macOS build will ship UNSIGNED (Gatekeeper prompt on every install)."
+          fi
+          if [ -z "${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}" ]; then
+            echo "::warning::WINDOWS_CERTIFICATE_THUMBPRINT not set — Windows build will ship UNSIGNED (SmartScreen warning on every install)."
+          fi
+
   build:
     needs: verify
     env:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      # Windows Authenticode signing. When set, Tauri's NSIS bundler signs the
+      # installer (.exe) with the matching certificate — clears SmartScreen
+      # warnings. Optional: if unset, the build ships unsigned (same as today).
+      # WINDOWS_CERTIFICATE_THUMBPRINT must point at a cert installed into the
+      # runner's cert store (imported in a step below).
+      WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
     strategy:
       matrix:
         include:
@@ -117,6 +138,21 @@ jobs:
       - name: Install frontend deps
         run: npm ci
         working-directory: app
+
+      - name: Import Windows code-signing certificate
+        # Only on Windows AND when a cert base64 is configured. Installs the
+        # PFX into the CurrentUser\My store so the NSIS bundler can find it by
+        # thumbprint. Skip entirely on Linux/other matrix entries.
+        if: runner.os == 'Windows' && env.WINDOWS_CERTIFICATE_BASE64 != ''
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+        shell: pwsh
+        run: |
+          $pfxBytes = [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64)
+          $pfxPath = Join-Path $env:RUNNER_TEMP "zwork-cert.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, $pfxBytes)
+          $securePass = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $securePass
 
       - name: Download cua-driver (${{ matrix.platform }})
         shell: bash
@@ -193,8 +229,36 @@ jobs:
     env:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      # NOTE: APPLE_SIGNING_IDENTITY is intentionally NOT set here. GitHub
+      # Actions resolves an unset secret to an empty string, and Tauri treats a
+      # *present but empty* APPLE_SIGNING_IDENTITY as "sign with this (empty)
+      # identity" — which fails codesign with "item could not be found in the
+      # keychain". Instead the signing env vars are exported conditionally in
+      # the "Configure signing environment" step below, so they are genuinely
+      # ABSENT from the environment when no Apple secrets are configured. Only
+      # then does Tauri correctly skip signing and produce an unsigned build.
     steps:
       - uses: actions/checkout@v4
+
+      - name: Configure signing environment
+        # Export the Apple signing env vars ONLY when the secret is present, so
+        # they are genuinely ABSENT (not empty-string) when unset. This is what
+        # tells Tauri to skip signing on an unsigned build — see the env block
+        # comment above. Also sets a has_signing output for downstream gating.
+        id: signing
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.APPLE_SIGNING_IDENTITY }}" ]; then
+            echo "APPLE_SIGNING_IDENTITY=${{ secrets.APPLE_SIGNING_IDENTITY }}" >> "$GITHUB_ENV"
+            echo "APPLE_ID=${{ secrets.APPLE_ID }}" >> "$GITHUB_ENV"
+            echo "APPLE_PASSWORD=${{ secrets.APPLE_PASSWORD }}" >> "$GITHUB_ENV"
+            echo "APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID }}" >> "$GITHUB_ENV"
+            echo "has_signing=true" >> "$GITHUB_OUTPUT"
+            echo "Signing configured."
+          else
+            echo "has_signing=false" >> "$GITHUB_OUTPUT"
+            echo "No Apple signing secrets — building unsigned."
+          fi
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -249,8 +313,64 @@ jobs:
           # the first-run auto-install is silently broken.
           echo "ZWORK_CUADRIVER_APP=/tmp/cua-driver-rs-${CUA_VERSION}-darwin-universal/CuaDriver.app" >> "$GITHUB_ENV"
 
+      - name: Inject signing config (when secrets present)
+        # Patch tauri.conf.json to add signingIdentity + entitlements ONLY when
+        # APPLE_SIGNING_IDENTITY is configured. Gate on the signing step's
+        # output (env var is absent, not empty, when no secret is set).
+        if: steps.signing.outputs.has_signing == 'true'
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("app/src-tauri/tauri.conf.json")
+          conf = json.loads(p.read_text())
+          conf["bundle"]["macOS"]["signingIdentity"] = "${APPLE_SIGNING_IDENTITY}"
+          conf["bundle"]["macOS"]["entitlements"] = "entitlements.plist"
+          p.write_text(json.dumps(conf, indent=2) + "\n")
+          print("Injected signingIdentity + entitlements into tauri.conf.json")
+          PY
+
       - name: Build universal macOS app
         run: bash scripts/build-macos-universal-release.sh
+
+      - name: Notarize & staple macOS app
+        # Only run when Apple notarization credentials are configured (gated on
+        # the signing step's output). Dev/preview builds skip this and ship
+        # unsigned. `--keychain-profile` stores credentials in the runner's
+        # keychain so the password isn't passed on every invocation.
+        if: steps.signing.outputs.has_signing == 'true'
+        env:
+          NOTARY_PROFILE: zwork-notarize
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT_DIR="$GITHUB_WORKSPACE"
+          APP_PATH="$(ls "$ROOT_DIR"/app/src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app 2>/dev/null | head -n1)"
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::No .app bundle found to notarize." >&2
+            exit 1
+          fi
+          echo "Notarizing $APP_PATH"
+          # Store credentials in the runner keychain (notarytool requirement
+          # since macOS 12 — the password can't be passed on each submit).
+          xcrun notarytool store-credentials "$NOTARY_PROFILE" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID"
+          # notarytool needs a zip of the .app bundle for submission.
+          ditto -c -k --keepParent "$APP_PATH" "$APP_PATH.zip"
+          # Submit and wait — blocks until Apple finishes (usually <5 min).
+          # Exits non-zero if the notarization is REJECTED, failing the build
+          # so a bad binary never reaches users.
+          xcrun notarytool submit "$APP_PATH.zip" \
+            --keychain-profile "$NOTARY_PROFILE" \
+            --wait
+          # Staple the notarization ticket back onto the bundle so offline
+          # Gatekeeper checks pass without a round-trip to Apple's servers.
+          xcrun stapler staple "$APP_PATH"
+          rm -f "$APP_PATH.zip"
+          echo "Notarization + stapling complete."
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -283,6 +403,9 @@ jobs:
           fi
 
       - name: Build release body
+        env:
+          APPLE_SIGNED: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
+          WINDOWS_SIGNED: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT != '' }}
         run: |
           VERSION="${{ steps.version.outputs.tag }}"
           VERSION_NUM="${VERSION#v}"
@@ -293,6 +416,20 @@ jobs:
           else
             export ZWORK_RELEASE_CHANNEL="stable"
           fi
+          # Reflect actual signing status in the install notes so users aren't
+          # told to bypass Gatekeeper/SmartScreen on a signed build, and ARE
+          # warned on an unsigned one.
+          if [ "${APPLE_SIGNED}" = "true" ]; then
+            MACOS_NOTE='Signed & notarized — double-click the .dmg to install normally.'
+          else
+            MACOS_NOTE='Unsigned build — if macOS blocks the install, right-click → Open, or use the cURL installer below.'
+          fi
+          if [ "${WINDOWS_SIGNED}" = "true" ]; then
+            WINDOWS_NOTE='Signed installer — run normally.'
+          else
+            WINDOWS_NOTE='Unsigned build — if SmartScreen appears, click \"More info\" then \"Run anyway\".'
+          fi
+          export MACOS_NOTE WINDOWS_NOTE
           python3 -c "
           import os
           import re
@@ -329,17 +466,18 @@ jobs:
           ./zWork-linux-x86_64.AppImage
           \`\`\`
 
-          **macOS** (cURL - no GateKeeper prompt):
+          **macOS**:
+          ''' + os.environ.get('MACOS_NOTE', '') + '''
           \`\`\`bash
           curl -fsSL https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install-macos.sh | bash
           \`\`\`
           Or download \`zWork-macos-universal.dmg\`, open it, then drag zWork to Applications.
 
           **Windows**:
+          ''' + os.environ.get('WINDOWS_NOTE', '') + '''
           \`\`\`powershell
           irm https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install-windows.ps1 | iex
           \`\`\`
-          If SmartScreen appears, click \"More info\" then \"Run anyway\".
 
           ---
 

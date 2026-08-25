@@ -22,8 +22,10 @@ import {
   User,
   LogOut,
   ShieldAlert,
+  AlertTriangle,
   ChevronDown,
   Palette,
+  Download,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
@@ -298,6 +300,16 @@ function ModelsPanel({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [editId, setEditId] = useState<string | undefined>();
+  // Ollama local-model discovery + pull. The backend endpoint exists
+  // (POST /api/ollama/models) and the API wrapper exists (api.ollamaModels).
+  // This surfaces installed models as a clickable list and auto-loads on
+  // credential select so the user never has to hand-type a model ID.
+  const [ollamaModels, setOllamaModels] = useState<{ id: string; name: string }[] | null>(null);
+  const [ollamaLoading, setOllamaLoading] = useState(false);
+  const [ollamaError, setOllamaError] = useState("");
+  const [ollamaPullName, setOllamaPullName] = useState("");
+  const [ollamaPulling, setOllamaPulling] = useState(false);
+  const [ollamaPullProgress, setOllamaPullProgress] = useState("");
 
   const credMeta = CREDENTIAL_PLACEHOLDERS[form.credential] || CREDENTIAL_PLACEHOLDERS.openai;
   const credStatus = providers?.credentials?.[form.credential];
@@ -317,6 +329,78 @@ function ModelsPanel({
   useEffect(() => {
     setApiKey("");
   }, [form.credential]);
+
+  // Reset Ollama discovery when leaving the Ollama credential source so stale
+  // model lists don't leak into other provider forms.
+  useEffect(() => {
+    if (form.credential !== "ollama") {
+      setOllamaModels(null);
+      setOllamaError("");
+      setOllamaPullProgress("");
+    }
+  }, [form.credential]);
+
+  // Auto-load Ollama models the moment the user picks the Ollama credential —
+  // don't wait for a "Load models" click. This makes the common case (Ollama
+  // running locally on default port) work with zero manual steps: pick
+  // Ollama, see your models, click one, done.
+  useEffect(() => {
+    if (form.credential === "ollama" && ollamaModels === null && !ollamaLoading) {
+      void loadOllamaModels();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.credential]);
+
+  const loadOllamaModels = async () => {
+    setOllamaLoading(true);
+    setOllamaError("");
+    try {
+      const res = await api.ollamaModels(form.base_url_override, apiKey);
+      if (res.error) {
+        setOllamaError(res.error);
+        setOllamaModels([]);
+      } else {
+        setOllamaModels(res.models || []);
+      }
+    } catch (e) {
+      setOllamaError("Couldn't reach Ollama. Is it running on localhost:11434?");
+      setOllamaModels([]);
+    } finally {
+      setOllamaLoading(false);
+    }
+  };
+
+  const pullOllamaModel = async () => {
+    const name = ollamaPullName.trim();
+    if (!name || ollamaPulling) return;
+    setOllamaPulling(true);
+    setOllamaPullProgress("Starting pull…");
+    try {
+      await api.ollamaPull(
+        name,
+        form.base_url_override,
+        apiKey,
+        (rec) => {
+          if (rec.status === "success") {
+            setOllamaPullProgress("Done");
+          } else if (rec.total && rec.completed != null) {
+            const pct = rec.total > 0 ? Math.round((rec.completed / rec.total) * 100) : 0;
+            setOllamaPullProgress(`${rec.status} — ${pct}%`);
+          } else {
+            setOllamaPullProgress(rec.status);
+          }
+        },
+      );
+      // Refresh the installed-model list so the just-pulled model appears.
+      await loadOllamaModels();
+      setOllamaPullName("");
+      setOllamaPullProgress("");
+    } catch (e) {
+      setOllamaPullProgress(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setOllamaPulling(false);
+    }
+  };
 
   const startEdit = (id: string) => {
     const m = customModels.find((cm) => cm.id === id);
@@ -543,6 +627,88 @@ function ModelsPanel({
                 onChange={(e) => setForm((f) => ({ ...f, model_id: e.target.value }))}
               />
             </Field>
+            {form.credential === "ollama" && (
+              <div className="rounded-lg border border-line bg-paper-sunken/40 px-3 py-2.5 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[12px] text-ink-muted">
+                    {ollamaLoading
+                      ? "Detecting installed models…"
+                      : ollamaModels === null
+                        ? "Models auto-load when Ollama is running."
+                        : ollamaModels.length === 0
+                          ? ollamaError || "No models found."
+                          : `${ollamaModels.length} model${ollamaModels.length === 1 ? "" : "s"} found — click to use:`}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void loadOllamaModels()}
+                    disabled={ollamaLoading}
+                    className="press inline-flex items-center gap-1.5 rounded-md border border-line bg-paper px-2 py-1 text-[11.5px] font-semibold text-ink hover:border-line-strong disabled:opacity-50"
+                  >
+                    <RefreshCw className={cn("h-3 w-3", ollamaLoading && "animate-spin")} />
+                    {ollamaLoading ? "Loading…" : "Refresh"}
+                  </button>
+                </div>
+                {ollamaModels && ollamaModels.length > 0 && (
+                  <ul className="flex flex-wrap gap-1.5">
+                    {ollamaModels.map((m) => (
+                      <li key={m.id}>
+                        <button
+                          type="button"
+                          onClick={() => setForm((f) => ({ ...f, model_id: m.id }))}
+                          className={cn(
+                            "press rounded-md border px-2 py-1 font-mono text-[11px] transition-colors",
+                            form.model_id === m.id
+                              ? "border-accent/40 bg-accent/10 text-accent"
+                              : "border-line bg-paper text-ink-muted hover:border-line-strong hover:text-ink",
+                          )}
+                        >
+                          {m.id}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {/* Pull a new model without leaving zWork. Streams live progress
+                    from Ollama's /api/pull. Common names: llama3.2, qwen2.5, etc. */}
+                <div className="flex items-center gap-1.5 pt-1">
+                  <input
+                    type="text"
+                    value={ollamaPullName}
+                    onChange={(e) => setOllamaPullName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void pullOllamaModel();
+                      }
+                    }}
+                    placeholder="Pull a model — e.g. llama3.2"
+                    disabled={ollamaPulling}
+                    className="min-w-0 flex-1 rounded-md border border-line bg-paper px-2 py-1.5 font-mono text-[11.5px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none disabled:opacity-50"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void pullOllamaModel()}
+                    disabled={ollamaPulling || !ollamaPullName.trim()}
+                    className="press inline-flex shrink-0 items-center gap-1.5 rounded-md border border-line bg-paper px-2.5 py-1.5 text-[11.5px] font-semibold text-ink hover:border-line-strong disabled:opacity-50"
+                  >
+                    <Download className={cn("h-3 w-3", ollamaPulling && "animate-pulse")} />
+                    {ollamaPulling ? "Pulling…" : "Pull"}
+                  </button>
+                </div>
+                {ollamaPullProgress && (
+                  <p className="text-[11px] text-ink-muted font-mono">{ollamaPullProgress}</p>
+                )}
+                {ollamaError && (
+                  <p className="text-[11px] text-warning leading-relaxed">
+                    {ollamaError}{" "}
+                    <span className="text-ink-faint">
+                      Make sure Ollama is installed and running (the daemon listens on localhost:11434).
+                    </span>
+                  </p>
+                )}
+              </div>
+            )}
             <Field label="Base URL override (optional)" description="Per-model URL override. Use this for OpenAI-compatible gateways. Doesn't change the credential's saved base URL.">
               <input
                 className="block w-full rounded-lg border border-line bg-paper px-3 py-2 font-mono text-[12.5px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
@@ -838,6 +1004,8 @@ function GeneralPanel({
   const accessibilityPermissionGranted = useApp((s) => s.accessibilityPermissionGranted);
   const screenRecordingPermissionGranted = useApp((s) => s.screenRecordingPermissionGranted);
   const driverOk = useApp((s) => s.driverOk);
+  const wrongIdentityHint = useApp((s) => s.wrongIdentityHint);
+  const zworkSelfTrusted = useApp((s) => s.zworkSelfTrusted);
   const checkMacOSPermissions = useApp((s) => s.checkMacOSPermissions);
   const requestAccessibility = useApp((s) => s.requestAccessibility);
   const requestScreenRecording = useApp((s) => s.requestScreenRecording);
@@ -909,9 +1077,32 @@ function GeneralPanel({
               Desktop Control & System Permissions
             </h3>
             <p className="text-[12px] text-ink-muted mt-1 leading-relaxed">
-              Enable zWork to interact with your desktop and automate tasks. These are one-time OS permission requests.
+              Desktop automation runs through CuaDriver.app — grant these macOS permissions to <span className="font-medium text-ink">CuaDriver</span>, not zWork. (zWork's own grant only covers its hotkey.) These are one-time OS permission requests.
             </p>
           </div>
+
+          {/* Wrong-identity banner — the core fix. Shown when the TCC grant
+              looks mis-attributed (granted to zWork, not CuaDriver). The most
+              common cause of "permission granted but automation still dead". */}
+          {driverOk !== false &&
+            driverOk !== null &&
+            (wrongIdentityHint ||
+              (zworkSelfTrusted === true &&
+                (accessibilityPermissionGranted === false ||
+                  screenRecordingPermissionGranted === false))) && (
+              <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-[12px] font-medium text-ink">
+                    Granted to zWork, but automation needs CuaDriver
+                  </div>
+                  <p className="text-[11px] text-ink-muted leading-relaxed mt-0.5">
+                    {wrongIdentityHint ??
+                      "macOS shows Accessibility granted to zWork, but the automation runs through CuaDriver.app. In System Settings → Privacy & Security, toggle the permission on for CuaDriver (not zWork), then retry."}
+                  </p>
+                </div>
+              </div>
+            )}
 
           {/* Driver not reachable — the prerequisite to everything below.
               Permissions rows are pointless if CuaDriver.app isn't installed,
@@ -948,7 +1139,7 @@ function GeneralPanel({
                 </span>
               </div>
               <p className="text-[11.5px] text-ink-muted">
-                Allows reading standard application UI trees, clicking buttons, and filling input fields.
+                Read app UI trees, click, and type. Granted on the <span className="font-medium text-ink">CuaDriver</span> identity — not zWork.
               </p>
             </div>
             {!accessibilityPermissionGranted && (
@@ -956,7 +1147,7 @@ function GeneralPanel({
                 onClick={requestAccessibility}
                 className="press px-3 py-1.5 text-[11px] font-medium border border-line bg-paper-raised hover:bg-paper-sunken text-ink rounded-lg transition-colors cursor-pointer shrink-0"
               >
-                Grant
+                Grant to CuaDriver
               </button>
             )}
           </div>
@@ -978,7 +1169,7 @@ function GeneralPanel({
                 </span>
               </div>
               <p className="text-[11.5px] text-ink-muted">
-                Optional — only needed for future screenshot/vision mode. Current desktop control uses the accessibility tree and does not require this.
+                Optional — only needed for future screenshot/vision mode. Current desktop control uses the accessibility tree and does not require this. If enabled, grant on the <span className="font-medium text-ink">CuaDriver</span> identity.
               </p>
             </div>
             <button
@@ -1061,6 +1252,24 @@ function GeneralPanel({
             <span className="font-mono text-ink-muted">{backendVersion ?? "…"}</span>
           </div>
         </Field>
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] text-ink-muted">
+          <a
+            href="https://tryzwork.app/privacy"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline-offset-2 hover:text-ink hover:underline"
+          >
+            Privacy Policy
+          </a>
+          <a
+            href="https://tryzwork.app/terms"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline-offset-2 hover:text-ink hover:underline"
+          >
+            Terms of Service
+          </a>
+        </div>
       </section>
 
       {/* Privacy & Telemetry Dashboard */}

@@ -4,6 +4,7 @@ use tokio::sync::{mpsc, oneshot};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::convert::Infallible;
+use crate::sync_util::Unpoison;
 use futures_util::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 use crate::settings;
@@ -126,6 +127,68 @@ pub enum ErrorClass {
     Permanent,
 }
 
+/// Does this desktop-tool error message indicate a CuaDriver permission
+/// problem (the classic "granted to zWork, not CuaDriver" trap, or the driver
+/// being absent/blocked)? Used to decide whether to emit a user-facing
+/// `permission_recovery` event alongside the model-facing tool error.
+///
+/// Matches the telltale phrases produced across the Cua stack:
+/// - the empty-AX-tree error (`cua/mod.rs:350-359`: "missing the macOS
+///   Accessibility permission", "grant it to CuaDriver"),
+/// - the driver spawn/timeout errors (`mcp_client.rs`: "did not respond
+///   within 30s", "process exited without responding"),
+/// - the Share-Window "No content produced" / Screen-Recording errors.
+pub(crate) fn is_cuadriver_permission_error(message: &str) -> bool {
+    let h = message.to_ascii_lowercase();
+    h.contains("cuadriver")
+        || h.contains("cua-driver")
+        || h.contains("accessibility permission")
+        || h.contains("screen recording")
+        || h.contains("did not respond within")
+        || h.contains("process exited without responding")
+        || h.contains("no content produced")
+}
+
+/// Build a ready-to-render user-facing message for the `permission_recovery`
+/// event, derived from the model-facing tool error. Returns a short,
+/// actionable instruction rather than the raw (often verbose) tool error.
+pub(crate) fn cuadriver_recovery_message(tool_error: &str) -> String {
+    let h = tool_error.to_ascii_lowercase();
+    // The most common case: AX tree came back empty → Accessibility grant is
+    // missing on CuaDriver. This phrase is unique to that error.
+    if h.contains("accessibility permission") || h.contains("accessibility tree came back empty") {
+        return "Desktop automation needs Accessibility permission granted to \
+                CuaDriver (not zWork). Open System Settings → Privacy & Security \
+                → Accessibility and toggle CuaDriver on, then retry."
+            .to_string();
+    }
+    // Driver is absent or blocked from spawning — usually means it's not
+    // installed, or its grants were revoked.
+    if h.contains("did not respond within")
+        || h.contains("process exited without responding")
+        || h.contains("install cuadriver")
+    {
+        return "CuaDriver.app isn't running. Install it from trycua/cua on \
+                GitHub, or if it's installed, grant it Accessibility permission \
+                in System Settings → Privacy & Security, then retry."
+            .to_string();
+    }
+    if h.contains("screen recording") {
+        return "Desktop capture needs Screen Recording permission granted to \
+                CuaDriver (not zWork). Open System Settings → Privacy & Security \
+                → Screen Recording and toggle CuaDriver on, then retry."
+            .to_string();
+    }
+    // Generic fallback — still names CuaDriver, which is the key correction.
+    "Desktop automation failed — this is almost always a macOS permission \
+     issue on CuaDriver.app. In System Settings → Privacy & Security, grant \
+     Accessibility (and Screen Recording) to CuaDriver, not zWork, then retry."
+        .to_string()
+}
+
+/// Convenience wrapper used by tests (production callers always have a `raw`
+/// body and use `classify_provider_error_with_raw` directly).
+#[allow(dead_code)]
 pub fn classify_provider_error(message: &str) -> ErrorClass {
     classify_provider_error_with_raw(message, None)
 }
@@ -389,7 +452,7 @@ fn pending_permission_gates() -> &'static Mutex<HashMap<String, oneshot::Sender<
 }
 
 pub fn approve_gate(gate_id: &str) -> bool {
-    let mut map = pending_permission_gates().lock().unwrap();
+    let mut map = pending_permission_gates().lock_unpoisoned();
     if let Some(tx) = map.remove(gate_id) {
         let _ = tx.send(true);
         true
@@ -399,7 +462,7 @@ pub fn approve_gate(gate_id: &str) -> bool {
 }
 
 pub fn reject_gate(gate_id: &str) -> bool {
-    let mut map = pending_permission_gates().lock().unwrap();
+    let mut map = pending_permission_gates().lock_unpoisoned();
     if let Some(tx) = map.remove(gate_id) {
         let _ = tx.send(false);
         true
@@ -435,11 +498,11 @@ fn current_question_for_chat() -> &'static Mutex<HashMap<String, String>> {
 /// resolves the most-recently-registered question for the chat (the one the
 /// single-question frontend is displaying).
 pub fn answer_pending_question(chat_id: &str, answer: &str, question_id: Option<&str>) -> bool {
-    let mut map = pending_questions().lock().unwrap();
+    let mut map = pending_questions().lock_unpoisoned();
     let key = match question_id {
         Some(qid) => qid.to_string(),
         None => {
-            let cur = current_question_for_chat().lock().unwrap();
+            let cur = current_question_for_chat().lock_unpoisoned();
             match cur.get(chat_id) {
                 Some(qid) => qid.clone(),
                 None => return false,
@@ -449,7 +512,7 @@ pub fn answer_pending_question(chat_id: &str, answer: &str, question_id: Option<
     if let Some(tx) = map.remove(&key) {
         let _ = tx.send(answer.to_string());
         // Clean up the current-question pointer if it pointed at this one.
-        let mut cur = current_question_for_chat().lock().unwrap();
+        let mut cur = current_question_for_chat().lock_unpoisoned();
         if cur.get(chat_id).map(|s| s.as_str()) == Some(key.as_str()) {
             cur.remove(chat_id);
         }
@@ -465,13 +528,13 @@ pub fn answer_pending_question(chat_id: &str, answer: &str, question_id: Option<
 pub fn register_pending_question(chat_id: &str, tx: oneshot::Sender<String>) -> String {
     let question_id = format!("q_{}", uuid::Uuid::new_v4().simple());
     {
-        let mut map = pending_questions().lock().unwrap();
+        let mut map = pending_questions().lock_unpoisoned();
         map.insert(question_id.clone(), tx);
     }
     // Track this as the chat's current question so the legacy answer route
     // (no question_id) resolves it.
     {
-        let mut cur = current_question_for_chat().lock().unwrap();
+        let mut cur = current_question_for_chat().lock_unpoisoned();
         cur.insert(chat_id.to_string(), question_id.clone());
     }
     question_id
@@ -479,7 +542,7 @@ pub fn register_pending_question(chat_id: &str, tx: oneshot::Sender<String>) -> 
 
 /// Drop a pending question (e.g. on timeout).
 pub fn clear_pending_question(question_id: &str) {
-    let mut map = pending_questions().lock().unwrap();
+    let mut map = pending_questions().lock_unpoisoned();
     map.remove(question_id);
 }
 
@@ -495,14 +558,14 @@ fn approved_commands() -> &'static Mutex<HashMap<String, std::collections::HashS
 /// Add a command to the per-chat approved list.
 pub fn approve_command(chat_id: &str, command: &str) {
     let normalized = normalize_command(command);
-    let mut map = approved_commands().lock().unwrap();
+    let mut map = approved_commands().lock_unpoisoned();
     map.entry(chat_id.to_string()).or_default().insert(normalized);
 }
 
 /// Check whether a command was already approved for this chat.
 pub fn is_command_approved(chat_id: &str, command: &str) -> bool {
     let normalized = normalize_command(command);
-    let map = approved_commands().lock().unwrap();
+    let map = approved_commands().lock_unpoisoned();
     map.get(chat_id).map(|set| set.contains(&normalized)).unwrap_or(false)
 }
 
@@ -514,7 +577,7 @@ fn normalize_command(command: &str) -> String {
 
 /// Clear a chat's approved-commands (called when a run ends).
 pub fn clear_approved_commands(chat_id: &str) {
-    let mut map = approved_commands().lock().unwrap();
+    let mut map = approved_commands().lock_unpoisoned();
     map.remove(chat_id);
 }
 
@@ -572,7 +635,18 @@ pub fn run_agent_turn(
         });
         if !is_dup && (!user_message.is_empty() || !attachments.is_empty()) {
             chatstore::append_message(&chat.id, "user", json!(user_display));
-            chat = chatstore::get(&chat.id).unwrap();
+            // Re-read to pick up the appended row, but don't panic if the read
+            // transiently fails — keep the prior in-memory `chat` and continue
+            // rather than crashing the agent turn over a filesystem hiccup.
+            if let Some(refreshed) = chatstore::get(&chat.id) {
+                chat = refreshed;
+            } else {
+                tracing::warn!(
+                    target: "agent",
+                    chat_id = %chat.id,
+                    "chat re-read after append returned None; continuing with stale chat copy"
+                );
+            }
         }
 
         // Emit chat reconciliation event AFTER appending so the title — which
@@ -742,7 +816,7 @@ pub fn run_agent_turn(
         // guessing URLs or claiming it can't browse — even when the zbctl
         // bridge shows Connected in Settings.
         let browser_connected = crate::browser_bridge::extension_connected().await;
-        let mut system_prompt = format!(
+        let system_prompt = format!(
             "{system_prompt}\n\n## Live environment status\n{}",
             if browser_connected {
                 "- Chrome browser bridge: CONNECTED. Your browser_* tools are LIVE and drive the user's real Chrome (signed-in sessions, no login walls). For ANY task involving a website, web app, web form, login-gated page, or anything browser-based, USE the browser_* tools (browser_navigate / browser_snapshot / browser_click / browser_type / browser_eval). Do not claim you cannot browse, and do not guess URLs from memory — navigate to a real URL or snapshot and click real links."
@@ -890,6 +964,12 @@ pub fn run_agent_turn(
         // task — retry up to 3 times with exponential backoff (1s, 2s, 4s).
         let mut transient_retries = 0u32;
         const MAX_TRANSIENT_RETRIES: u32 = 3;
+
+        // Context-overflow recovery: forces a compaction pass once if the model
+        // rejects the request for exceeding its real context window (which can
+        // be smaller than our 800k-char opportunistic heuristic assumes). Bound
+        // to a single attempt so a pathological history can't loop forever.
+        let mut compacted_on_overflow = false;
         
         // Initialize the assistant response message
         let assistant_msg = chatstore::append_message(&chat.id, "assistant", json!(""));
@@ -1139,7 +1219,10 @@ pub fn run_agent_turn(
 
             // Call upstream via the unified streaming layer: one parser per
             // provider wire format, loud errors, no silent frame/arg drops.
-            let mut stream = stream_llm(endpoint, headers, body, shape.clone(), turn, chat_id.clone());
+            // Pass clones so the originals remain available for the
+            // context-overflow recovery branch below (which force-compacts and
+            // re-issues the request with the same endpoint/headers).
+            let mut stream = stream_llm(endpoint.clone(), headers.clone(), body, shape.clone(), turn, chat_id.clone());
             let mut assistant_content_blocks: Vec<serde_json::Value> = Vec::new();
             let mut tool_calls = Vec::new();
             let mut turn_error: Option<(String, Option<String>)> = None;
@@ -1314,7 +1397,65 @@ pub fn run_agent_turn(
                     }
                     continue;
                 }
-                // Permanent error, OR transient but retries exhausted: surface a
+                // Context-overflow recovery: a "context_length_exceeded" 400 is
+                // classified Permanent above (it's not a 5xx), but unlike a true
+                // permanent error it is recoverable — force-compacting history
+                // and retrying once is the right move. Without this branch the
+                // agent would dead-end on a long conversation the moment it
+                // crossed the model's real (smaller-than-heuristic) window.
+                // `force_compact_conversation_history` compacts regardless of
+                // size, so the retry sends a genuinely smaller payload.
+                if is_context_overflow_error(err_msg, raw_body.as_deref())
+                    && !compacted_on_overflow
+                {
+                    compacted_on_overflow = true;
+                    let pre_chars: usize =
+                        history_messages.iter().map(|m| m.to_string().len()).sum();
+                    match compaction::force_compact_conversation_history(
+                        &mut history_messages,
+                        &endpoint,
+                        &headers,
+                        &shape,
+                        &compaction_model,
+                    )
+                    .await
+                    {
+                        Ok(()) => {
+                            let post_chars: usize =
+                                history_messages.iter().map(|m| m.to_string().len()).sum();
+                            llm_trace(
+                                &chat_id,
+                                turn,
+                                "context_overflow_compacted",
+                                json!({
+                                    "before_chars": pre_chars,
+                                    "after_chars": post_chars,
+                                    "error": err_msg,
+                                }),
+                            );
+                            // Undo streamed partials (same reason as the
+                            // transient-retry path) and re-run this turn.
+                            accumulated_text.truncate(accumulated_text_len_snapshot);
+                            accumulated_activities.truncate(accumulated_activities_len_snapshot);
+                            if turn > 0 {
+                                turn -= 1;
+                            }
+                            continue;
+                        }
+                        Err(e) => {
+                            llm_trace(
+                                &chat_id,
+                                turn,
+                                "context_overflow_compaction_failed",
+                                json!({ "error": e }),
+                            );
+                            // Fall through to the permanent-error surface below.
+                        }
+                    }
+                }
+
+                // Permanent error, OR transient but retries exhausted, OR
+                // context-overflow compaction failed/already-tried: surface a
                 // user-friendly message to the UI and break. `friendly_error`
                 // translates the bare status / router error codes into text the
                 // user can act on (e.g. "All model providers are currently
@@ -1460,7 +1601,7 @@ pub fn run_agent_turn(
                             
                             let (gate_tx, gate_rx) = oneshot::channel();
                             {
-                                let mut map = pending_permission_gates().lock().unwrap();
+                                let mut map = pending_permission_gates().lock_unpoisoned();
                                 map.insert(gate_id.clone(), gate_tx);
                             }
                             
@@ -1514,7 +1655,7 @@ pub fn run_agent_turn(
                                 });
 
                                 let current_activities = {
-                                    let mut act_lock = accumulated_activities.lock().unwrap();
+                                    let mut act_lock = accumulated_activities.lock_unpoisoned();
                                     if let Some(pos) = act_lock.iter().position(|x| x["id"] == act_id) {
                                         act_lock[pos] = entry;
                                     } else {
@@ -1547,6 +1688,24 @@ pub fn run_agent_turn(
                                 let mut forwarded = t_evt;
                                 forwarded["tool_use_id"] = json!(tc_id);
                                 let _ = tx.send(forwarded).await;
+
+                                // CuaDriver permission-failure recovery hint. When a
+                                // desktop_* tool fails with a permission-shaped error,
+                                // surface a user-facing recovery card so the user can fix
+                                // the grant without having to read the model-facing tool
+                                // error. This closes the "automation failed, nothing
+                                // happens" loop — the #1 reported cause is "granted
+                                // Accessibility to zWork, not CuaDriver".
+                                if !final_result_ok && name.starts_with("desktop_")
+                                    && crate::agent::is_cuadriver_permission_error(&final_result_txt)
+                                {
+                                    let _ = tx.send(json!({
+                                        "type": "permission_recovery",
+                                        "tool_use_id": tc_id,
+                                        "kind": "cuadriver_permissions",
+                                        "message": crate::agent::cuadriver_recovery_message(&final_result_txt),
+                                    })).await;
+                                }
                             } else {
                                 let _ = tx.send(t_evt).await;
                             }
@@ -1661,7 +1820,7 @@ pub fn run_agent_turn(
             
             // Extract accumulated_activities back to local variable
             accumulated_activities = {
-                let lock = accumulated_activities_arc.lock().unwrap();
+                let lock = accumulated_activities_arc.lock_unpoisoned();
                 lock.clone()
             };
             

@@ -439,6 +439,22 @@ fn open_external(app: tauri::AppHandle, url: String) -> Result<(), String> {
 /// (the user sees the standard "allow accessibility" dialog).
 #[tauri::command]
 fn ax_is_trusted(prompt: Option<bool>) -> bool {
+    ax_self_trusted_impl(prompt)
+}
+
+/// Read whether zWork's own process holds the Accessibility grant — a pure
+/// read (never prompts). The frontend uses this to detect the classic
+/// "granted Accessibility to zWork, not CuaDriver" trap: if zWork is trusted
+/// but the driver reports its grant is missing, the user granted to the wrong
+/// app. This is a separate TCC identity from the driver's
+/// (`com.trycua.driver`), which is the one automation actually needs.
+#[tauri::command]
+fn ax_self_trusted() -> bool {
+    ax_self_trusted_impl(None)
+}
+
+/// Shared implementation for the two AX-trust command variants.
+fn ax_self_trusted_impl(prompt: Option<bool>) -> bool {
     #[cfg(target_os = "macos")]
     {
         // AXIsProcessTrustedWithOptions is in ApplicationServices.framework.
@@ -943,6 +959,62 @@ fn stop_cua_driver_on_quit() {
 fn stop_cua_driver_on_quit() {}
 
 fn main() {
+    // Install a panic hook so a crash in the Tauri host process (the GUI
+    // itself, not the sidecar) is captured to <data>/host-crashes.jsonl
+    // instead of vanishing. Chains to the default hook so stderr output is
+    // preserved. This is the foundation any future Sentry/minidump sink
+    // plugs into. Must run before anything that can panic.
+    {
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let payload = info.payload();
+            let msg = if let Some(s) = payload.downcast_ref::<&'static str>() {
+                (*s).to_string()
+            } else if let Some(s) = payload.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "Box<dyn Any> panic payload".to_string()
+            };
+            let location = info
+                .location()
+                .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+                .unwrap_or_default();
+            let thread = std::thread::current();
+            let thread_name = thread.name().unwrap_or("<unnamed>").to_string();
+            let backtrace = format!("{}", std::backtrace::Backtrace::force_capture());
+            // RFC3339-ish timestamp without a chrono dep. std::time gives unix
+            // seconds; we format the UTC wall-clock via SystemTime + a manual
+            // breakdown only if needed — for crash logs, unix + local iso is fine.
+            let ts_secs = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let record = serde_json::json!({
+                "ts": format!("{ts_secs}"),
+                "kind": "panic",
+                "process": "tauri-host",
+                "thread": thread_name,
+                "message": msg,
+                "location": location,
+                "backtrace": backtrace,
+                "version": env!("CARGO_PKG_VERSION"),
+            });
+            if let Ok(line) = serde_json::to_string(&record) {
+                let dir = zwork_data_dir();
+                let _ = std::fs::create_dir_all(&dir);
+                let path = dir.join("host-crashes.jsonl");
+                if let Ok(mut f) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&path)
+                {
+                    let _ = std::io::Write::write_all(&mut f, format!("{line}\n").as_bytes());
+                }
+            }
+            prev(info);
+        }));
+    }
+
     configure_linux_webview_env();
 
     let app = tauri::Builder::default()
@@ -971,6 +1043,7 @@ fn main() {
             begin_desktop_auth,
             open_macos_privacy_pane,
             ax_is_trusted,
+            ax_self_trusted,
             list_windows_native,
             capture_window_native,
             screen_capture_preflight,
