@@ -21,11 +21,25 @@ Download it from https://github.com/Ryz3nPlayZ/zWork/releases/latest
 
 Install:
 
-macOS: brew install Ryz3nPlayZ/tap/zwork
-Windows: irm https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install-windows.ps1 | iex
-Linux: curl -fsSL https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install.sh | bash
+macOS:
+```bash
+brew install Ryz3nPlayZ/tap/zwork
+```
 
-Run from source: ./run.sh
+Windows:
+```powershell
+irm https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install-windows.ps1 | iex
+```
+
+Linux:
+```bash
+curl -fsSL https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install.sh | bash
+```
+
+Run from source:
+```bash
+./run.sh
+```
 
 What it does:
 
