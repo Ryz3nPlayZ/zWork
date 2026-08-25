@@ -57,8 +57,7 @@ Or via command line:
 
 **macOS (Homebrew)**
 ```bash
-brew tap ry3nplayz/zwork https://github.com/Ryz3nPlayZ/zWork
-brew install --cask zwork
+brew install Ryz3nPlayZ/tap/zwork
 ```
 
 **Windows (PowerShell)**
@@ -106,8 +105,7 @@ On-demand and scheduled jobs already work. As for the rest, I'm too lazy to rewr
 <div align="center">
 <sub>
 
-**v0.5.x** &nbsp;·&nbsp; the bar before anything new ships:<br>
-install · sign in · finish a real job · update
+**v0.5.x** &nbsp;·&nbsp; install · sign in · finish a job · update
 
 [Releases](https://github.com/Ryz3nPlayZ/zWork/releases) &nbsp;·&nbsp; [Issues](https://github.com/Ryz3nPlayZ/zWork/issues) &nbsp;·&nbsp; [Discussions](https://github.com/Ryz3nPlayZ/zWork/discussions)
 
