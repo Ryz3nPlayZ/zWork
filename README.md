@@ -15,59 +15,31 @@
 
 </div>
 
-zWork is a desktop AI agent that runs scheduled jobs and integrates with your apps. It can browse the web, edit files, run commands, and create deliverables like documents and spreadsheets.
+zWork is an AI agent that runs on your desktop. It can do scheduled tasks, browse the web, edit files, and work with your apps like Gmail and Slack.
 
-## How to use
+Download it from https://github.com/Ryz3nPlayZ/zWork/releases/latest
 
-Download from https://github.com/Ryz3nPlayZ/zWork/releases/latest
+Install:
 
-macOS: .dmg, Windows: .exe, Linux: .AppImage
+macOS: brew install Ryz3nPlayZ/tap/zwork
+Windows: irm https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install-windows.ps1 | iex
+Linux: curl -fsSL https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install.sh | bash
 
-Or install via command line:
+Run from source: ./run.sh
 
-macOS:
-```bash
-brew install Ryz3nPlayZ/tap/zwork
-```
+What it does:
 
-Windows:
-```powershell
-irm https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install-windows.ps1 | iex
-```
+- Scheduled jobs that run automatically and email you results
+- Integrates with Gmail, Calendar, Slack, and other apps
+- Can control your desktop and browser
+- Creates real files (docs, spreadsheets, etc)
+- Edits files and runs commands
+- Save workflows to reuse later
 
-Linux:
-```bash
-curl -fsSL https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install.sh | bash
-```
+Tech: Tauri + React frontend, Rust backend, Postgres cloud
 
-Open the app, sign in, and ask it to do something. No prompt engineering needed.
+Docs: docs/ARCHITECTURE.md docs/AUTH.md docs/CLOUD.md docs/RELEASES.md CONTRIBUTING.md
 
-Run from source:
-```bash
-./run.sh
-```
-
-## What it can do
-
-- Scheduled agents: set up recurring jobs (daily digest, inbox sweep, checking sites) and it runs automatically and emails results
-- App integrations: connects to Gmail, Calendar, Slack and hundreds of other apps via Composio or MCP
-- Desktop & browser control: clicks around macOS apps and drives a browser through an embedded Chrome bridge
-- Creates real files: exports .docx/.xlsx/.pdf files, spins up web apps on localhost
-- Files, shell, web research: edits files, runs commands, looks things up online
-- Skills library: save workflows you like and reuse them later
-
-On-demand and scheduled jobs already work. For more details check docs/ROADMAP.md
-
-## Tech stack
-
-Desktop: Tauri + React
-Local engine: Rust (Axum) sidecar
-Cloud: Rust (Axum) + Better Auth + Postgres
-
-More docs: docs/ARCHITECTURE.md docs/AUTH.md docs/CLOUD.md docs/RELEASES.md CONTRIBUTING.md
-
----
-
-v0.5.x · install · sign in · finish a job · update
+v0.5.x
 
 https://github.com/Ryz3nPlayZ/zWork/releases · https://github.com/Ryz3nPlayZ/zWork/issues · https://github.com/Ryz3nPlayZ/zWork/discussions
