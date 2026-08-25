@@ -26,6 +26,7 @@ You tell zWork what you want done, and it does it. A few examples:
 
 So instead of advice, you get the result. That's the idea, anyway.
 
+---
 
 ## Install
 
@@ -81,15 +82,25 @@ That builds the Rust sidecar, installs frontend deps, and opens the desktop app 
 
 ## Stuff that works today
 
-- **Scheduled agents.** You set up a recurring job (daily digest, inbox sweep, checking a site) and it runs on its own and emails you the results. You can walk away, nobody has to watch it.
-- **App integrations (Composio + MCP).** It can reach into Gmail, Calendar, Slack and hundreds of other apps through Composio, or you can hook up your own MCP server. It reads your actual apps, not just local files.
-- **Desktop & browser control.** It can click around macOS apps (via cua-driver) and drive a browser through an embedded Chrome bridge. Real element-level clicking, not screenshot guessing.
-- **Real deliverables.** It can export `.docx`/`.xlsx`/`.pdf` files, spin up a small web app on a localhost URL, that kind of thing. Actual files you can use, not just text in a chat.
-- **Files, shell, web research.** It can edit files, run local commands, and look stuff up online.
-- **Skills library + auto-updates.** If a workflow works well once, you can save it and reuse it later. It also updates itself between releases so you don't have to.
+**Scheduled agents.** You set up a recurring job (daily digest, inbox sweep, checking a site) and it runs on its own and emails you the results. You can walk away, nobody has to watch it.
+
+**App integrations (Composio + MCP).** It can reach into Gmail, Calendar, Slack and hundreds of other apps through Composio, or you can hook up your own MCP server. It reads your actual apps, not just local files.
+
+**Desktop & browser control.** It can click around macOS apps (via cua-driver) and drive a browser through an embedded Chrome bridge. Real element-level clicking, not screenshot guessing.
+
+**Real deliverables.** It can export `.docx`/`.xlsx`/`.pdf` files, spin up a small web app on a localhost URL, that kind of thing. Actual files you can use, not just text in a chat.
+
+**Files, shell, web research.** It can edit files, run local commands, and look stuff up online.
+
+**Skills library + auto-updates.** If a workflow works well once, you can save it and reuse it later. It also updates itself between releases so you don't have to.
+
+---
+
+## What's next
 
 On-demand and scheduled jobs already work. As for the rest, I'm too lazy to rewrite this section, so just go check the [roadmap](docs/ROADMAP.md).
 
+---
 
 ## How it's built
 
