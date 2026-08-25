@@ -15,74 +15,116 @@
 
 </div>
 
+
 ## What it does
 
 You tell zWork what you want done, and it does it. A few examples:
 
-- Compare three vacuum cleaners → you get a side-by-side comparison sheet. Not a lecture about "features and reviews."
-- Yesterday's meeting notes → a follow-up email draft you can actually send.
-- Your Downloads folder is a mess → it sorts it into subfolders while you watch.
+- **Compare three vacuum cleaners** → you get a side-by-side comparison sheet. Not a lecture about "features and reviews."
+- **Yesterday's meeting notes** → a follow-up email draft you can actually send.
+- **Your Downloads folder is a mess** → it sorts it into subfolders while you watch.
 
 So instead of advice, you get the result. That's the idea, anyway.
 
+---
+
 ## Install
 
-Download the app for your platform:
+<div align="center">
 
-macOS: Download .dmg from [releases](https://github.com/Ryz3nPlayZ/zWork/releases/latest)
-Windows: Download .exe from [releases](https://github.com/Ryz3nPlayZ/zWork/releases/latest)
-Linux: Download .AppImage from [releases](https://github.com/Ryz3nPlayZ/zWork/releases/latest)
+<table>
+<tr>
+<td align="center" width="33%">
+<b>macOS</b><br>
+<sub>Intel &amp; Apple Silicon</sub><br><br>
+<a href="https://github.com/Ryz3nPlayZ/zWork/releases/latest">Download .dmg</a>
+</td>
+<td align="center" width="33%">
+<b>Windows</b><br>
+<sub>x86_64</sub><br><br>
+<a href="https://github.com/Ryz3nPlayZ/zWork/releases/latest">Download .exe</a>
+</td>
+<td align="center" width="33%">
+<b>Linux</b><br>
+<sub>AppImage, x86_64</sub><br><br>
+<a href="https://github.com/Ryz3nPlayZ/zWork/releases/latest">Download .AppImage</a>
+</td>
+</tr>
+</table>
 
-Or use command line:
+</div>
 
-macOS (Homebrew):
+Or via command line:
+
+**macOS (Homebrew)**
 ```bash
 brew install Ryz3nPlayZ/tap/zwork
 ```
 
-Windows (PowerShell):
+**Windows (PowerShell)**
 ```powershell
 irm https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install-windows.ps1 | iex
 ```
 
-Linux (bash):
+**Linux (bash)**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install.sh | bash
 ```
 
 Open it, sign in, and ask for something. No prompt engineering required.
 
-Run from source:
+**Run from source**
 ```bash
 ./run.sh
 ```
+That builds the Rust sidecar, installs frontend deps, and opens the desktop app in dev mode.
 
-## Features
 
-Scheduled agents - set up recurring jobs (daily digest, inbox sweep, checking a site) and it runs on its own and emails you the results. You can walk away, nobody has to watch it.
+## Stuff that works today
 
-App integrations (Composio + MCP) - can reach into Gmail, Calendar, Slack and hundreds of other apps through Composio, or you can hook up your own MCP server. It reads your actual apps, not just local files.
+**Scheduled agents.** You set up a recurring job (daily digest, inbox sweep, checking a site) and it runs on its own and emails you the results. You can walk away, nobody has to watch it.
 
-Desktop & browser control - can click around macOS apps (via cua-driver) and drive a browser through an embedded Chrome bridge. Real element-level clicking, not screenshot guessing.
+**App integrations (Composio + MCP).** It can reach into Gmail, Calendar, Slack and hundreds of other apps through Composio, or you can hook up your own MCP server. It reads your actual apps, not just local files.
 
-Real deliverables - can export .docx/.xlsx/.pdf files, spin up a small web app on a localhost URL, that kind of thing. Actual files you can use, not just text in a chat.
+**Desktop & browser control.** It can click around macOS apps (via cua-driver) and drive a browser through an embedded Chrome bridge. Real element-level clicking, not screenshot guessing.
 
-Files, shell, web research - can edit files, run local commands, and look stuff up online.
+**Real deliverables.** It can export `.docx`/`.xlsx`/`.pdf` files, spin up a small web app on a localhost URL, that kind of thing. Actual files you can use, not just text in a chat.
 
-Skills library + auto-updates - if a workflow works well once, you can save it and reuse it later. It also updates itself between releases so you don't have to.
+**Files, shell, web research.** It can edit files, run local commands, and look stuff up online.
 
-On-demand and scheduled jobs already work. For the rest, check the [roadmap](docs/ROADMAP.md).
-
-## How it's built
-
-Desktop: Tauri + React - the window you look at
-Local engine: Rust (Axum) sidecar - runs the agent on your machine
-Cloud: Rust (Axum) + Better Auth + Postgres - sign-in, usage, managed model routing
-
-[Architecture](docs/ARCHITECTURE.md) · [Auth](docs/AUTH.md) · [Cloud](docs/CLOUD.md) · [Releases](docs/RELEASES.md) · [Contributing](CONTRIBUTING.md)
+**Skills library + auto-updates.** If a workflow works well once, you can save it and reuse it later. It also updates itself between releases so you don't have to.
 
 ---
 
-v0.5.x · install · sign in · finish a job · update
+## What's next
 
-[Releases](https://github.com/Ryz3nPlayZ/zWork/releases) · [Issues](https://github.com/Ryz3nPlayZ/zWork/issues) · [Discussions](https://github.com/Ryz3nPlayZ/zWork/discussions)
+On-demand and scheduled jobs already work. As for the rest, I'm too lazy to rewrite this section, so just go check the [roadmap](docs/ROADMAP.md).
+
+---
+
+## How it's built
+
+| Layer | Stack | What it does |
+|---|---|---|
+| **Desktop** | Tauri + React | The window you look at |
+| **Local engine** | Rust (Axum) sidecar | Runs the agent on your machine |
+| **Cloud** | Rust (Axum) + Better Auth + Postgres | Sign-in, usage, managed model routing |
+
+<div align="center">
+
+[Architecture](docs/ARCHITECTURE.md) &nbsp;·&nbsp; [Auth](docs/AUTH.md) &nbsp;·&nbsp; [Cloud](docs/CLOUD.md) &nbsp;·&nbsp; [Releases](docs/RELEASES.md) &nbsp;·&nbsp; [Contributing](CONTRIBUTING.md)
+
+</div>
+
+<br>
+<br>
+
+<div align="center">
+<sub>
+
+**v0.5.x** &nbsp;·&nbsp; install · sign in · finish a job · update
+
+[Releases](https://github.com/Ryz3nPlayZ/zWork/releases) &nbsp;·&nbsp; [Issues](https://github.com/Ryz3nPlayZ/zWork/issues) &nbsp;·&nbsp; [Discussions](https://github.com/Ryz3nPlayZ/zWork/discussions)
+
+</sub>
+</div>
