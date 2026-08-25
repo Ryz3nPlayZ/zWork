@@ -110,9 +110,13 @@ On-demand and scheduled jobs already work. As for the rest, I'm too lazy to rewr
 | **Local engine** | Rust (Axum) sidecar | Runs the agent on your machine |
 | **Cloud** | Rust (Axum) + Better Auth + Postgres | Sign-in, usage, managed model routing |
 
+<div align="center">
+
 [Architecture](docs/ARCHITECTURE.md) &nbsp;·&nbsp; [Auth](docs/AUTH.md) &nbsp;·&nbsp; [Cloud](docs/CLOUD.md) &nbsp;·&nbsp; [Releases](docs/RELEASES.md) &nbsp;·&nbsp; [Contributing](CONTRIBUTING.md)
 
+</div>
 
+<br>
 <br>
 
 <div align="center">
