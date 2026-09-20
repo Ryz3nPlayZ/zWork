@@ -13,6 +13,8 @@
 
 #![allow(dead_code)]
 
+pub mod agent_loop;
+pub mod agent_types;
 pub mod estimate;
 pub mod json_parse;
 pub mod providers;
