@@ -100,6 +100,7 @@ mod academic;
 mod watchdog;
 mod tools;
 mod agent;
+mod harness;
 mod taskstore;
 mod schedulestore;
 mod inboxstore;
