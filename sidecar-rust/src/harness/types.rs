@@ -233,6 +233,22 @@ pub struct OpenAICompletionsCompat {
     pub send_session_affinity_headers: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supports_long_cache_retention: Option<bool>,
+
+    // --- anthropic-messages only (pi `AnthropicMessagesCompat`) ---
+    /// Adaptive thinking (`thinking: {type: "adaptive"}` + `output_config.effort`)
+    /// instead of budget-based thinking. True for Claude 4.7+ / 5.x.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub force_adaptive_thinking: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_eager_tool_input_streaming: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_cache_control_on_tools: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_temperature: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_empty_signature: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_strict_tools: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

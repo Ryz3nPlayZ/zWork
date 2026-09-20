@@ -13,6 +13,7 @@
 
 #![allow(dead_code)]
 
+pub mod estimate;
 pub mod json_parse;
 pub mod providers;
 pub mod retry;
