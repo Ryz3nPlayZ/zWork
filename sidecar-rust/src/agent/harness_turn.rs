@@ -44,10 +44,10 @@ use super::{
     prompts, router_real_model, web_search_grounding, DoomLoopDetector, ErrorClass, RunGuard,
 };
 
-/// Is the pi harness selected for chat turns? `ZWORK_HARNESS=pi` opts in,
-/// `ZWORK_HARNESS=legacy` opts out; anything else falls back to the default.
+/// Is the pi harness selected for chat turns? It is the default;
+/// `ZWORK_HARNESS=legacy` opts back into the old loop in `agent/mod.rs`.
 pub fn enabled() -> bool {
-    const DEFAULT: bool = false;
+    const DEFAULT: bool = true;
     match std::env::var("ZWORK_HARNESS") {
         Ok(v) if v.eq_ignore_ascii_case("pi") || v.eq_ignore_ascii_case("harness") => true,
         Ok(v) if v.eq_ignore_ascii_case("legacy") || v.eq_ignore_ascii_case("old") => false,
