@@ -25,8 +25,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use crate::harness::agent::{Agent, AgentListener, AgentOptions, InitialState};
 use crate::harness::agent_types::{
     AgentContext, AgentEvent, AgentHooks, AgentLoopTurnUpdate, AgentMessage, AgentTool, AgentToolResult,
-    AgentToolUpdateCallback, BeforeToolCallContext, BeforeToolCallResult, DynTool, StreamFn, ToolFuture,
-    TurnContext,
+    AgentToolUpdateCallback, BeforeToolCallContext, BeforeToolCallResult, DynTool, ReplayPolicy, StreamFn,
+    ToolExecutionMode, ToolFuture, TurnContext,
 };
 use crate::harness::compaction as hcompaction;
 use crate::harness::messages as hmessages;
@@ -324,6 +324,253 @@ impl AgentTool for LegacyTool {
         _on_update: AgentToolUpdateCallback,
     ) -> ToolFuture<'a> {
         Box::pin(self.run(tool_call_id, params, signal))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// pi core tools (read/bash/edit/write/grep/find/ls) with zWork gating
+// ---------------------------------------------------------------------------
+
+/// Legacy tools superseded by pi's core tools. Filtered out of the menu so
+/// the model sees exactly one way to touch files and the shell.
+const SUPERSEDED_LEGACY_TOOLS: &[&str] =
+    &["read_file", "write_file", "replace_file_content", "run_command", "grep_search", "list_dir"];
+
+/// Legacy → pi tool names, applied to the system prompt so its workflow
+/// guidance references the tools the model actually has.
+const TOOL_RENAMES: &[(&str, &str)] = &[
+    ("replace_file_content", "edit"),
+    ("run_command", "bash"),
+    ("write_file", "write"),
+    ("read_file", "read"),
+    ("grep_search", "grep"),
+    ("list_dir", "ls"),
+];
+
+/// Rewrite the legacy tool references in `prompt` for the pi toolset. The
+/// per-tool signature lines are replaced wholesale (their parameters differ);
+/// everything else is a plain name swap.
+fn rewrite_prompt_for_pi_tools(prompt: &str) -> String {
+    const LEGACY_LINES: &[&str] = &[
+        "- `read_file(path)` — read a text file. Always inspect existing code before editing.",
+        "- `replace_file_content(path, target_content, replacement_content, start_line?, end_line?)` — replace a target substring in a file. Preferred for edits.",
+        "- `grep_search(query, path?, is_regex?, case_insensitive?)` — search recursively for query or regex in files. Excludes build/dependency dirs.",
+        "- `list_dir(path)` — list immediate contents of a directory.",
+        "- `write_file(path, content)` — create or overwrite a file with the ENTIRE contents. Parent dirs auto-created.",
+        "- `run_command(command, cwd?, background?)` — run shell. Set `background=true` for servers; foreground has 180s timeout.",
+    ];
+    const PI_LINES: &str = "\
+- `read(path, offset?, limit?)` — read a file (text, or an image the model can see). Always inspect existing code before editing. Long files are truncated; use offset/limit to page.
+- `edit(path, oldText, newText)` — replace an exact, unique text span in a file. Preferred for targeted edits; `oldText` must match exactly once.
+- `grep(pattern, path?, glob?, ignoreCase?, literal?, context?, limit?)` — regex search across files (honours .gitignore).
+- `find(pattern, path?, limit?)` — find files by glob pattern (e.g. `**/*.rs`), honours .gitignore.
+- `ls(path?, limit?)` — list a directory's contents.
+- `write(path, content)` — create or overwrite a file with the ENTIRE contents. Parent dirs auto-created.
+- `bash(command, timeout?)` — run a shell command in the workspace; stdout+stderr are returned (tail-truncated, full output saved to a temp file). Long-lived servers: redirect output and background them (`nohup cmd > server.log 2>&1 &`) or use `deploy_web_app`.";
+    let mut out = prompt.to_string();
+    let mut first = true;
+    for line in LEGACY_LINES {
+        if out.contains(line) {
+            out = out.replace(line, if first { PI_LINES } else { "" });
+            first = false;
+        }
+    }
+    // Collapse the blank lines left by the removed signature lines.
+    while out.contains("\n\n\n") {
+        out = out.replace("\n\n\n", "\n\n");
+    }
+    out = out.replace(
+        "start it in the background with `run_command(..., background=true)` OR `deploy_web_app(...)`",
+        "start it in the background with `bash` (`nohup cmd > server.log 2>&1 &`) OR `deploy_web_app(...)`",
+    );
+    out = out.replace("read_file, list_dir, read_skill", "read, ls, grep, find, read_skill");
+    out = out.replace("foreground has 180s timeout", "pass `timeout` for long commands");
+    for (from, to) in TOOL_RENAMES {
+        out = out.replace(from, to);
+    }
+    out
+}
+
+/// A pi core tool run through zWork's permission gate and event plumbing:
+/// `activity` start/finish frames, streamed bash output as `status` lines,
+/// and a `tool_result` frame, all stamped with the tool-call id.
+struct GatedPiTool {
+    inner: DynTool,
+    shared: Arc<TurnShared>,
+}
+
+impl GatedPiTool {
+    /// Map a pi tool call onto the legacy risk evaluator's vocabulary.
+    fn risk(&self, params: &Value) -> Risk {
+        match self.inner.name() {
+            "bash" => evaluate_tool_risk("run_command", &json!({ "command": params.get("command").cloned().unwrap_or(Value::Null) })),
+            "write" | "edit" => evaluate_tool_risk("write_file", &json!({ "path": params.get("path").cloned().unwrap_or(Value::Null) })),
+            _ => Risk::Safe,
+        }
+    }
+
+    async fn permission_gate(&self, tc_id: &str, params: &Value) -> bool {
+        let shared = &self.shared;
+        let Risk::Destructive { reason } = self.risk(params) else {
+            return true;
+        };
+        let already_approved = self.inner.name() == "bash"
+            && params
+                .get("command")
+                .and_then(|v| v.as_str())
+                .map(|c| is_command_approved(&shared.chat_id, c))
+                .unwrap_or(false);
+        if shared.auto_approve || already_approved {
+            return true;
+        }
+        let gate_id = format!("gate_{}", uuid::Uuid::new_v4().simple());
+        shared
+            .send(json!({
+                "type": "permission",
+                "tool": self.inner.name(),
+                "reason": reason,
+                "blocked": true,
+                "gate_id": gate_id,
+                "tool_use_id": tc_id
+            }))
+            .await;
+        let (gate_tx, gate_rx) = oneshot::channel();
+        pending_permission_gates().lock_unpoisoned().insert(gate_id.clone(), gate_tx);
+        match tokio::time::timeout(GATE_TIMEOUT, gate_rx).await {
+            Ok(Ok(approved)) => approved,
+            Ok(Err(_)) => false,
+            Err(_) => {
+                shared
+                    .send(json!({
+                        "type": "status",
+                        "text": "Permission request timed out after 10 minutes and was auto-denied."
+                    }))
+                    .await;
+                false
+            }
+        }
+    }
+
+    async fn run(&self, tc_id: &str, params: Value, signal: Option<&AbortSignal>, _on_update: AgentToolUpdateCallback) -> Result<AgentToolResult, String> {
+        let shared = self.shared.clone();
+        let name = self.inner.name().to_string();
+        let turn = shared.turn();
+        llm_trace(&shared.chat_id, turn, "tool_dispatch", json!({ "id": tc_id, "name": name, "input": params }));
+
+        if !self.permission_gate(tc_id, &params).await {
+            let msg = "Permission denied by user. Action aborted.".to_string();
+            shared
+                .send(json!({ "type": "tool_result", "tool": name, "ok": false, "message": msg, "tool_use_id": tc_id }))
+                .await;
+            llm_trace(&shared.chat_id, turn, "tool_result", json!({ "name": name, "ok": false, "len": msg.len(), "preview": msg, "denied": true }));
+            return Err(msg);
+        }
+
+        let activity_id = format!("tool_{}_{}", name, uuid::Uuid::new_v4().simple());
+        let label = activity_label(&name, &params);
+        shared.upsert_activity(json!({ "id": activity_id, "label": label, "done": false }));
+        shared.persist().await;
+        shared
+            .send(json!({ "type": "activity", "id": activity_id, "label": label, "done": false, "tool_use_id": tc_id }))
+            .await;
+
+        // Stream bash output as `status` lines, the way run_command did:
+        // each update carries the full accumulated output, so only the
+        // newly completed lines are forwarded.
+        let tx = shared.tx.clone();
+        let seen = Arc::new(Mutex::new(0usize));
+        let forward: AgentToolUpdateCallback = Arc::new(move |partial: AgentToolResult| {
+            let text = partial.text_content();
+            let mut seen = seen.lock_unpoisoned();
+            if text.len() <= *seen {
+                return;
+            }
+            let fresh = &text[*seen..];
+            let Some(last_nl) = fresh.rfind('\n') else { return };
+            let complete = &fresh[..last_nl];
+            *seen += last_nl + 1;
+            for line in complete.lines() {
+                let line = line.trim_end();
+                if line.is_empty() {
+                    continue;
+                }
+                let _ = tx.try_send(json!({ "type": "status", "text": line }));
+            }
+        });
+        let outcome = self.inner.execute(tc_id, params, signal, forward).await;
+
+        let (ok, text) = match &outcome {
+            Ok(r) => (true, r.text_content()),
+            Err(e) => (false, e.clone()),
+        };
+        shared.upsert_activity(json!({ "id": activity_id, "label": format!("Finished {name}"), "done": true }));
+        shared.persist().await;
+        shared
+            .send(json!({ "type": "activity", "id": activity_id, "label": format!("Finished {name}"), "done": true, "tool_use_id": tc_id }))
+            .await;
+        shared
+            .send(json!({ "type": "tool_result", "tool": name, "ok": ok, "message": text, "tool_use_id": tc_id }))
+            .await;
+        llm_trace(
+            &shared.chat_id,
+            turn,
+            "tool_result",
+            json!({ "name": name, "ok": ok, "len": text.len(), "preview": text.chars().take(200).collect::<String>() }),
+        );
+        outcome
+    }
+}
+
+fn activity_label(name: &str, params: &Value) -> String {
+    let arg = |k: &str| params.get(k).and_then(|v| v.as_str()).unwrap_or("");
+    match name {
+        "bash" => format!("Running: {}", arg("command").lines().next().unwrap_or("").chars().take(80).collect::<String>()),
+        "read" => format!("Reading {}", arg("path")),
+        "write" => format!("Writing {}", arg("path")),
+        "edit" => format!("Editing {}", arg("path")),
+        "grep" => format!("Searching for {}", arg("pattern")),
+        "find" => format!("Finding {}", arg("pattern")),
+        "ls" => format!("Listing {}", if arg("path").is_empty() { "." } else { arg("path") }),
+        _ => format!("Running {name}"),
+    }
+}
+
+impl AgentTool for GatedPiTool {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+    fn label(&self) -> &str {
+        self.inner.label()
+    }
+    fn description(&self) -> &str {
+        self.inner.description()
+    }
+    fn parameters(&self) -> Value {
+        self.inner.parameters()
+    }
+    fn prepare_arguments(&self, args: Value) -> Result<Value, String> {
+        self.inner.prepare_arguments(args)
+    }
+    fn execute<'a>(
+        &'a self,
+        tool_call_id: &'a str,
+        params: Value,
+        signal: Option<&'a AbortSignal>,
+        on_update: AgentToolUpdateCallback,
+    ) -> ToolFuture<'a> {
+        Box::pin(self.run(tool_call_id, params, signal, on_update))
+    }
+    fn replay(&self) -> ReplayPolicy {
+        self.inner.replay()
+    }
+    fn execution_mode(&self) -> Option<ToolExecutionMode> {
+        self.inner.execution_mode()
+    }
+    fn prompt_snippet(&self) -> Option<&str> {
+        self.inner.prompt_snippet()
+    }
+    fn prompt_guidelines(&self) -> Vec<String> {
+        self.inner.prompt_guidelines()
     }
 }
 
@@ -807,6 +1054,7 @@ pub fn run_agent_turn(
             include_academic,
             &connected_apps_block,
         );
+        let system_prompt = rewrite_prompt_for_pi_tools(&system_prompt);
         let browser_connected = crate::browser_bridge::extension_connected().await;
         let system_prompt = format!(
             "{system_prompt}\n\n## Live environment status\n{}",
@@ -896,16 +1144,29 @@ pub fn run_agent_turn(
         let mut schemas = get_tool_schemas(plan_mode);
         schemas.extend(composio_schemas);
         schemas.extend(mcp_schemas);
-        // Stable name-sort so the tool list (and thus the tool-order
-        // sensitive prompt-cache prefix) doesn't reshuffle across turns.
-        schemas.sort_by(|a, b| {
-            a.get("name").and_then(|v| v.as_str()).unwrap_or("").cmp(b.get("name").and_then(|v| v.as_str()).unwrap_or(""))
+        schemas.retain(|s| {
+            let name = s.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            !SUPERSEDED_LEGACY_TOOLS.contains(&name)
         });
-        let tools: Vec<DynTool> = schemas
+        let mut tools: Vec<DynTool> = schemas
             .iter()
             .filter_map(|s| LegacyTool::from_schema(s, shared.clone()))
             .map(|t| Arc::new(t) as DynTool)
             .collect();
+        // pi core tools. Plan mode keeps only the read-only ones.
+        let supports_images: crate::harness::tools::SupportsImagesFn = {
+            let has_image = model.input.contains(&InputType::Image);
+            Arc::new(move || has_image)
+        };
+        for tool in crate::harness::tools::create_coding_tools(std::path::Path::new(&cwd), Some(supports_images)) {
+            if plan_mode && matches!(tool.name(), "bash" | "write" | "edit") {
+                continue;
+            }
+            tools.push(Arc::new(GatedPiTool { inner: tool, shared: shared.clone() }) as DynTool);
+        }
+        // Stable name-sort so the tool list (and thus the tool-order
+        // sensitive prompt-cache prefix) doesn't reshuffle across turns.
+        tools.sort_by(|a, b| a.name().cmp(b.name()));
 
         // ── Agent ───────────────────────────────────────────────────────
         let stream_fn: StreamFn = Arc::new(crate::harness::providers::stream);
@@ -1056,6 +1317,22 @@ mod tests {
         let out = blocks_to_user_content(&blocks);
         assert_eq!(out.len(), 2);
         assert!(matches!(&out[1], UserContent::Image(i) if i.mime_type == "image/jpeg" && i.data == "QUJD"));
+    }
+
+    #[test]
+    fn prompt_rewrite_swaps_tool_names_and_signatures() {
+        let prompt = "- `read_file(path)` — read a text file. Always inspect existing code before editing.\n\
+- `list_dir(path)` — list immediate contents of a directory.\n\
+Use `grep_search` to locate, `read_file` to read, then `write_file` or `replace_file_content`. Use `run_command` for shell.\n\
+Only read-only tools are available: read_file, list_dir, read_skill, extract_document, web_search.";
+        let out = rewrite_prompt_for_pi_tools(prompt);
+        for legacy in SUPERSEDED_LEGACY_TOOLS {
+            assert!(!out.contains(legacy), "{legacy} still referenced in:\n{out}");
+        }
+        assert!(out.contains("- `bash(command, timeout?)`"));
+        assert!(out.contains("Use `grep` to locate, `read` to read, then `write` or `edit`. Use `bash` for shell."));
+        assert!(out.contains("read, ls, grep, find, read_skill"));
+        assert!(!out.contains("\n\n\n"));
     }
 
     #[test]
