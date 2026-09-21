@@ -44,17 +44,6 @@ use super::{
     prompts, router_real_model, web_search_grounding, DoomLoopDetector, ErrorClass, RunGuard,
 };
 
-/// Is the pi harness selected for chat turns? It is the default;
-/// `ZWORK_HARNESS=legacy` opts back into the old loop in `agent/mod.rs`.
-pub fn enabled() -> bool {
-    const DEFAULT: bool = true;
-    match std::env::var("ZWORK_HARNESS") {
-        Ok(v) if v.eq_ignore_ascii_case("pi") || v.eq_ignore_ascii_case("harness") => true,
-        Ok(v) if v.eq_ignore_ascii_case("legacy") || v.eq_ignore_ascii_case("old") => false,
-        _ => DEFAULT,
-    }
-}
-
 const DEFAULT_MAX_TURNS: u32 = 80;
 const GATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 const MAX_TRANSIENT_RETRIES: u32 = 3;
@@ -1006,7 +995,7 @@ pub fn run_agent_turn(
         }
         let model = build_model(&resolved, &resolved.real_model_id);
         let compaction_model = {
-            let id = super::compaction::compaction_model_id(&resolved.shape, &resolved.real_model_id);
+            let id = compaction_model_id(&resolved.shape, &resolved.real_model_id);
             build_model(&resolved, &id)
         };
 
@@ -1445,6 +1434,49 @@ pub async fn spawn_subagent(
     Ok(result)
 }
 
+/// Pick the model id used for compaction summarization. Summarization is a
+/// background chore that re-runs whenever the conversation crosses ~200k tokens,
+/// so it should always run on a **cheap tier** rather than whatever expensive
+/// model the user is driving the chat with. The endpoint/headers passed to
+/// the summarizer are provider-level (one base_url + api_key
+/// serves every model on that provider), so swapping only the model id lands the
+/// request on the same provider's cheap tier — no new auth path, no new failure
+/// mode.
+///
+/// Resolution order:
+/// 1. `ZWORK_COMPACTION_MODEL` env override — pin an exact id if you want full
+///    control (e.g. only one model is provisioned).
+/// 2. The cheap tier of the main model's *family*, matched by keyword:
+///    - deepseek / zwork-router → `deepseek-flash`
+///    - claude / anthropic      → `claude-haiku-4-5-20251001`
+///    - gemini                  → `gemini-2.5-flash`
+///    - gpt                     → `gpt-4.1-mini`
+/// 3. Unknown family → fall back to the main model unchanged (compaction still
+///    works; it's just not cheaper). We never invent an id that might 404 on a
+///    provider we don't recognize.
+pub fn compaction_model_id(shape: &str, main_model: &str) -> String {
+    if let Ok(pinned) = std::env::var("ZWORK_COMPACTION_MODEL") {
+        let pinned = pinned.trim();
+        if !pinned.is_empty() {
+            return pinned.to_string();
+        }
+    }
+    let m = main_model.to_ascii_lowercase();
+    if m.contains("deepseek") || m.contains("v4-pro") || m.contains("v4-flash") {
+        "deepseek-flash".to_string()
+    } else if m.contains("claude") || shape == "anthropic" && m.is_empty() {
+        "claude-haiku-4-5-20251001".to_string()
+    } else if m.contains("gemini") {
+        "gemini-2.5-flash".to_string()
+    } else if m.contains("gpt") {
+        "gpt-4.1-mini".to_string()
+    } else {
+        // Unknown provider: keep the main model so the request can't 404 on
+        // a guessed id. Still correct, just not cheaper.
+        main_model.to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1520,5 +1552,31 @@ Only read-only tools are available: read_file, list_dir, read_skill, extract_doc
         assert_eq!(m.headers.unwrap()["authorization"], "Bearer zw_abc");
         let anthropic = Resolved { api_key: "sk-ant-x".into(), ..r };
         assert!(build_model(&anthropic, "claude-sonnet-4-5").headers.is_none());
+    }
+
+    #[test]
+    fn test_compaction_model_picks_cheap_tier() {
+        // Clear any leftover so the default-branch assertions are deterministic.
+        // (Env is process-global, so the override check below lives in THIS
+        // single test rather than a sibling, avoiding a parallel-test race on
+        // the shared var.)
+        std::env::remove_var("ZWORK_COMPACTION_MODEL");
+
+        // Each family maps to its cheap tier...
+        assert_eq!(compaction_model_id("openai", "deepseek-v4-pro"), "deepseek-flash");
+        assert_eq!(compaction_model_id("openai", "deepseek-flash"), "deepseek-flash");
+        assert_eq!(compaction_model_id("openai", "deepseek-v4-flash"), "deepseek-flash");
+        assert_eq!(compaction_model_id("anthropic", "claude-opus-4-8"), "claude-haiku-4-5-20251001");
+        assert_eq!(compaction_model_id("openai", "gemini-2.5-pro"), "gemini-2.5-flash");
+        assert_eq!(compaction_model_id("openai", "gpt-4.1"), "gpt-4.1-mini");
+        // ...never the expensive main model.
+        assert_ne!(compaction_model_id("anthropic", "claude-opus-4-8"), "claude-opus-4-8");
+        // Unknown family keeps the main model (no invented id that could 404).
+        assert_eq!(compaction_model_id("openai", "grok-4"), "grok-4");
+
+        // Env override wins over family detection, then we restore default.
+        std::env::set_var("ZWORK_COMPACTION_MODEL", "custom-flash-id");
+        assert_eq!(compaction_model_id("anthropic", "claude-opus-4-8"), "custom-flash-id");
+        std::env::remove_var("ZWORK_COMPACTION_MODEL");
     }
 }

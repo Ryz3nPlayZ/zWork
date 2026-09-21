@@ -5,11 +5,6 @@
 //! any failure can be diagnosed after the fact: the exact tool calls the model
 //! produced (name + parsed input), each tool dispatch + result, and every hard
 //! error with its raw payload.
-//!
-//! This is what lets us see "deepseek emitted tool_call X with input Y" — the
-//! diagnosis that the old code, with its silent drop / silent-empty-args
-//! paths, made impossible. Raw SSE frames are verbose, so they are gated
-//! behind `ZWORK_TRACE_SSE=1`; the high-signal events are always logged.
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -42,13 +37,6 @@ pub fn trace(chat_id: &str, turn: u32, kind: &str, payload: Value) {
             let _ = f.flush();
         }
     }
-}
-
-/// True iff the caller should also emit raw SSE frames. Verbose; opt-in.
-pub fn trace_sse_enabled() -> bool {
-    std::env::var("ZWORK_TRACE_SSE")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
 }
 
 fn log_path() -> Option<std::path::PathBuf> {

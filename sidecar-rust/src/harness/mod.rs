@@ -1,6 +1,6 @@
 //! zWork agent harness: a Rust port of pi (pi-agent-core + pi-ai, MIT,
-//! Mario Zechner). Landed behind `ZWORK_HARNESS=pi`; the legacy loop in
-//! `crate::agent` stays until this reaches parity.
+//! Mario Zechner). This is the only agent loop; `crate::agent::harness_turn`
+//! bridges it to zWork's wire events, chat store, permission gates and tools.
 //!
 //! Layout mirrors pi-mono:
 //! - `types`              — message/model/event contracts (`packages/ai/src/types.ts`)
