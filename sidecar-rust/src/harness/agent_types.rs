@@ -246,6 +246,14 @@ pub trait AgentTool: Send + Sync {
             parameters: self.parameters(),
         }
     }
+    /// One-line summary for the system prompt's tool list (pi `promptSnippet`).
+    fn prompt_snippet(&self) -> Option<&str> {
+        None
+    }
+    /// Usage guidelines for the system prompt (pi `promptGuidelines`).
+    fn prompt_guidelines(&self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 pub type DynTool = Arc<dyn AgentTool>;

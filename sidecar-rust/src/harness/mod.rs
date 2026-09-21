@@ -25,6 +25,7 @@ pub mod retry;
 pub mod skills;
 pub mod sse;
 pub mod system_prompt;
+pub mod tools;
 pub mod transcript;
 pub mod transform_messages;
 pub mod types;

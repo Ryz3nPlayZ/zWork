@@ -20,6 +20,7 @@ dirs = "5.0.1"
 base64 = "0.22"
 rusqlite = { version = "0.31.0", features = ["bundled"] }
 regex = "1.10"
+similar = "2.6"
 rand = "0.8"
 # Add nix for process signal control on Unix
 nix = { version = "0.29.0", features = ["signal"] }
