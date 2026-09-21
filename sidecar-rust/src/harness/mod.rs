@@ -16,8 +16,10 @@
 pub mod agent;
 pub mod agent_loop;
 pub mod agent_types;
+pub mod compaction;
 pub mod estimate;
 pub mod json_parse;
+pub mod messages;
 pub mod providers;
 pub mod retry;
 pub mod sse;

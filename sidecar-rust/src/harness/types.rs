@@ -660,6 +660,13 @@ impl Message {
         })
     }
 
+    pub fn as_user(&self) -> Option<&UserMessage> {
+        match self {
+            Message::User(m) => Some(m),
+            _ => None,
+        }
+    }
+
     pub fn as_assistant(&self) -> Option<&AssistantMessage> {
         match self {
             Message::Assistant(m) => Some(m),
