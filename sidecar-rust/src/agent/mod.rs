@@ -13,6 +13,7 @@ mod prompts;
 mod llm;
 mod compaction;
 mod orientation;
+mod harness_turn;
 
 use prompts::convert_input_messages;
 use llm::{stream_llm, trace as llm_trace, LlmEvent};
@@ -58,12 +59,12 @@ fn max_tokens_for(model_id: &str) -> u64 {
     if mid.contains("claude") {
         return 8192;
     }
-    if mid.contains("deepseek-v4-flash") {
+    if mid.contains("deepseek-flash") || mid.contains("deepseek-v4-flash") || mid.contains("deepseek-v4.1-flash") {
         return 65536;
     }
-    // z-ai/glm-5.2 ("zWork Ultimate" via OpenRouter) supports a large output
+    // z-ai/glm-5.x ("zWork Ultimate" via OpenRouter) supports a large output
     // window; cap at a generous default like other frontier models.
-    if mid.contains("glm-5.2") || mid.contains("zwork-ultimate") {
+    if mid.contains("glm-5.2") || mid.contains("glm-5.3") || mid.contains("zwork-ultimate") {
         return 16384;
     }
     // OpenAI / OpenAI-compatible: a safe general default.
@@ -77,17 +78,17 @@ fn max_tokens_for(model_id: &str) -> u64 {
 /// "grok-4-pro-fast" that happen to contain "pro").
 fn router_real_model(model_id: &str) -> String {
     match model_id {
-        "zwork-pro" | "deepseek-v4-pro" => "deepseek-v4-pro".to_string(),
-        "zwork-flash" | "deepseek-v4-flash" => "deepseek-v4-flash".to_string(),
-        // "zWork Ultimate" — the router resolves this alias to z-ai/glm-5.2 on
-        // OpenRouter. The sidecar sends the alias (never the raw upstream id) so
-        // the router's allowlist + Max-tier gate apply.
-        "zwork-ultimate" => "zwork-ultimate".to_string(),
+        // Hosted lineup (all served via OpenRouter on the router's OpenAI
+        // path). Legacy v4 spellings keep their PRODUCT TIER: v4-flash was
+        // flash, v4.1-flash/v4-pro were pro.
+        "zwork-pro" | "deepseek-v4-pro" | "deepseek-v4.1-flash" => "z-ai/glm-5.3-flash".to_string(),
+        "zwork-flash" | "deepseek-v4-flash" => "deepseek/deepseek-v4-flash-0731".to_string(),
+        "zwork-ultimate" => "deepseek/deepseek-v4.1-flash".to_string(),
         other => {
             tracing::warn!(
-                "[agent] unknown router model id '{other}' — falling back to deepseek-v4-flash"
+                "[agent] unknown router model id '{other}' — falling back to deepseek/deepseek-v4-flash-0731"
             );
-            "deepseek-v4-flash".to_string()
+            "deepseek/deepseek-v4-flash-0731".to_string()
         }
     }
 }
@@ -582,7 +583,38 @@ pub fn clear_approved_commands(chat_id: &str) {
 }
 
 
+/// Run one chat turn. Dispatches to the pi-harness runner
+/// (`harness_turn`) or the legacy loop below depending on `ZWORK_HARNESS`.
+/// Both produce the identical wire-event stream.
+#[allow(clippy::too_many_arguments)]
 pub fn run_agent_turn(
+    chat_id: String,
+    run_id: String,
+    model_id: String,
+    user_message: String,
+    attachments: Vec<crate::server::Attachment>,
+    project_id: String,
+    plan_mode: bool,
+    auto_approve: bool,
+    artifact_mode: bool,
+    web_search_enabled: bool,
+    extra_system_prompt: Option<String>,
+) -> std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<Value, Infallible>> + Send>> {
+    if harness_turn::enabled() {
+        Box::pin(harness_turn::run_agent_turn(
+            chat_id, run_id, model_id, user_message, attachments, project_id,
+            plan_mode, auto_approve, artifact_mode, web_search_enabled, extra_system_prompt,
+        ))
+    } else {
+        Box::pin(run_agent_turn_legacy(
+            chat_id, run_id, model_id, user_message, attachments, project_id,
+            plan_mode, auto_approve, artifact_mode, web_search_enabled, extra_system_prompt,
+        ))
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn run_agent_turn_legacy(
     chat_id: String,
     run_id: String,
     model_id: String,
