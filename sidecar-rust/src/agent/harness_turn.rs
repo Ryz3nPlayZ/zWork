@@ -1275,6 +1275,176 @@ pub fn run_agent_turn(
     ReceiverStream::new(rx).map(Ok)
 }
 
+// ---------------------------------------------------------------------------
+// Sub-agents (spawn_agent tool)
+// ---------------------------------------------------------------------------
+
+const MAX_SUBAGENT_TURNS: u32 = 12;
+
+/// Read-only zWork tools a sub-agent may call, executed directly (not via the
+/// streaming `execute_tool` dispatcher, which is what's running us).
+struct SubagentDirectTool {
+    schema: Value,
+    name: String,
+}
+
+impl AgentTool for SubagentDirectTool {
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn description(&self) -> &str {
+        self.schema.get("description").and_then(|d| d.as_str()).unwrap_or("")
+    }
+    fn parameters(&self) -> Value {
+        self.schema.get("parameters").cloned().unwrap_or_else(|| json!({ "type": "object", "properties": {} }))
+    }
+    fn execute<'a>(
+        &'a self,
+        _tool_call_id: &'a str,
+        params: Value,
+        _signal: Option<&'a AbortSignal>,
+        _on_update: AgentToolUpdateCallback,
+    ) -> ToolFuture<'a> {
+        Box::pin(async move {
+            let text = match self.name.as_str() {
+                "web_search" => crate::tools::search::execute_web_search(&params).await?,
+                "extract_document" => crate::tools::doc_extract::execute_extract_document(&params).await?,
+                "search_papers" => {
+                    let query = params.get("query").and_then(|v| v.as_str()).unwrap_or("");
+                    let max_results = params.get("max_results").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+                    let year_min = params.get("year_min").and_then(|v| v.as_u64()).map(|y| y as u32);
+                    let year_max = params.get("year_max").and_then(|v| v.as_u64()).map(|y| y as u32);
+                    let papers = crate::academic::search_academic_literature(query, max_results, year_min, year_max).await;
+                    serde_json::to_string_pretty(&papers).unwrap_or_default()
+                }
+                "format_citation" => {
+                    let paper = params.get("paper").unwrap_or(&Value::Null);
+                    let style = params.get("style").and_then(|v| v.as_str()).unwrap_or("apa");
+                    crate::academic::format_citation(paper, style)
+                }
+                other => return Err(format!("Sub-agents cannot use tool '{other}'")),
+            };
+            Ok(AgentToolResult::text(text))
+        })
+    }
+}
+
+struct SubagentHooks {
+    turns: AtomicU32,
+}
+
+impl AgentHooks for SubagentHooks {
+    fn convert_to_llm(&self, messages: &[AgentMessage]) -> Vec<Message> {
+        hmessages::convert_to_llm(messages)
+    }
+    fn should_stop_after_turn<'a>(&'a self, _ctx: TurnContext<'a>, _signal: Option<&'a AbortSignal>) -> BoxFuture<'a, bool> {
+        Box::pin(async move { self.turns.fetch_add(1, Ordering::SeqCst) + 1 >= MAX_SUBAGENT_TURNS })
+    }
+}
+
+/// Run a bounded, READ-ONLY sub-agent for `task` on the harness, streaming
+/// `subagent_started` / `subagent_delta` / `subagent_done` to the parent's
+/// SSE stream. Returns the sub-agent's full text output.
+///
+/// Rails: pi read/grep/find/ls plus web/document/academic lookups only; no
+/// bash/write/edit, no nested spawn_agent; hard cap of 12 turns.
+pub async fn spawn_subagent(
+    chat_id: &str,
+    parent_run_id: &str,
+    task: &str,
+    model_id: &str,
+    tx: &mpsc::Sender<Value>,
+) -> Result<String, String> {
+    let task_id = format!("subagent_{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
+    let _ = tx.send(json!({ "type": "subagent_started", "task_id": task_id, "description": task })).await;
+
+    let s = settings::load();
+    let resolved = resolve_model(model_id, &s);
+    if resolved.api_key.trim().is_empty() {
+        let _ = tx.send(json!({ "type": "subagent_done", "task_id": task_id, "error": "No credentials configured" })).await;
+        return Err("No credentials configured".to_string());
+    }
+    let model = build_model(&resolved, &resolved.real_model_id);
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let mut tools: Vec<DynTool> = crate::harness::tools::create_coding_tools(&cwd, None)
+        .into_iter()
+        .filter(|t| matches!(t.name(), "read" | "grep" | "find" | "ls"))
+        .collect();
+    for schema in get_tool_schemas(false) {
+        let name = schema.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        if matches!(name.as_str(), "web_search" | "extract_document" | "search_papers" | "format_citation") {
+            tools.push(Arc::new(SubagentDirectTool { schema, name }) as DynTool);
+        }
+    }
+    tools.sort_by(|a, b| a.name().cmp(b.name()));
+
+    let system = format!(
+        "You are a focused sub-agent. Complete this task: {task}\n\n\
+         You have READ-ONLY tools (read/ls/grep/find, web and document lookups). Do the task, then stop. \
+         Be concise — your full text output is returned to the parent agent."
+    );
+
+    let accumulated = Arc::new(Mutex::new(String::new()));
+    let agent = Agent::new(AgentOptions {
+        initial_state: InitialState {
+            system_prompt: Some(system),
+            model: Some(model),
+            thinking_level: None,
+            tools,
+            messages: Vec::new(),
+        },
+        hooks: Arc::new(SubagentHooks { turns: AtomicU32::new(0) }),
+        stream_fn: Some(Arc::new(crate::harness::providers::stream)),
+        session_id: Some(format!("{chat_id}:{task_id}")),
+        max_retries: Some(2),
+        api_key: Some(resolved.api_key.clone()),
+        ..AgentOptions::default()
+    });
+    {
+        let tx = tx.clone();
+        let task_id = task_id.clone();
+        let accumulated = accumulated.clone();
+        agent.subscribe(Arc::new(move |event: AgentEvent, _sig: AbortSignal| {
+            let tx = tx.clone();
+            let task_id = task_id.clone();
+            let accumulated = accumulated.clone();
+            Box::pin(async move {
+                if let AgentEvent::MessageUpdate {
+                    assistant_message_event: AssistantMessageEvent::TextDelta { delta, .. },
+                    ..
+                } = event
+                {
+                    if delta.is_empty() {
+                        return;
+                    }
+                    accumulated.lock_unpoisoned().push_str(&delta);
+                    let _ = tx.send(json!({ "type": "subagent_delta", "task_id": task_id, "text": delta })).await;
+                }
+            })
+        }));
+    }
+
+    let run = agent.prompt(task.to_string()).await;
+    let last_error = agent.with_state(|st| {
+        st.messages.last().and_then(|m| m.as_assistant()).and_then(|am| {
+            (am.stop_reason == StopReason::Error).then(|| am.error_message.clone().unwrap_or_default())
+        })
+    });
+    let result = accumulated.lock_unpoisoned().clone();
+    if let Some(err) = run.err().or(last_error) {
+        if result.is_empty() {
+            let friendly = friendly_upstream_error(&err, None, true);
+            let _ = tx.send(json!({ "type": "subagent_done", "task_id": task_id, "error": friendly })).await;
+            return Err(friendly);
+        }
+        llm_trace(chat_id, 0, "subagent_error", json!({ "task_id": task_id, "error": err }));
+    }
+    log_agent_event(chat_id, parent_run_id, "subagent_done", json!({ "task_id": task_id, "chars": result.len() }));
+    let _ = tx.send(json!({ "type": "subagent_done", "task_id": task_id, "result": result })).await;
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

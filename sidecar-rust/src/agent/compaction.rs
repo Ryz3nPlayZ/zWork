@@ -152,7 +152,7 @@ pub fn evict_stale_bulky_results(history: &mut Vec<Value>) {
 /// 1. `ZWORK_COMPACTION_MODEL` env override — pin an exact id if you want full
 ///    control (e.g. only one model is provisioned).
 /// 2. The cheap tier of the main model's *family*, matched by keyword:
-///    - deepseek / zwork-router → `deepseek-v4-flash`
+///    - deepseek / zwork-router → `deepseek-flash`
 ///    - claude / anthropic      → `claude-haiku-4-5-20251001`
 ///    - gemini                  → `gemini-2.5-flash`
 ///    - gpt                     → `gpt-4.1-mini`
@@ -168,7 +168,7 @@ pub fn compaction_model_id(shape: &str, main_model: &str) -> String {
     }
     let m = main_model.to_ascii_lowercase();
     if m.contains("deepseek") || m.contains("v4-pro") || m.contains("v4-flash") {
-        "deepseek-v4-flash".to_string()
+        "deepseek-flash".to_string()
     } else if m.contains("claude") || shape == "anthropic" && m.is_empty() {
         "claude-haiku-4-5-20251001".to_string()
     } else if m.contains("gemini") {
@@ -376,8 +376,9 @@ mod tests {
         std::env::remove_var("ZWORK_COMPACTION_MODEL");
 
         // Each family maps to its cheap tier...
-        assert_eq!(compaction_model_id("openai", "deepseek-v4-pro"), "deepseek-v4-flash");
-        assert_eq!(compaction_model_id("openai", "deepseek-v4-flash"), "deepseek-v4-flash");
+        assert_eq!(compaction_model_id("openai", "deepseek-v4-pro"), "deepseek-flash");
+        assert_eq!(compaction_model_id("openai", "deepseek-flash"), "deepseek-flash");
+        assert_eq!(compaction_model_id("openai", "deepseek-v4-flash"), "deepseek-flash");
         assert_eq!(compaction_model_id("anthropic", "claude-opus-4-8"), "claude-haiku-4-5-20251001");
         assert_eq!(compaction_model_id("openai", "gemini-2.5-pro"), "gemini-2.5-flash");
         assert_eq!(compaction_model_id("openai", "gpt-4.1"), "gpt-4.1-mini");
