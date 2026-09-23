@@ -54,14 +54,19 @@ Status: ✅ done · 🚧 in progress · ⬜ remaining · ➖ excluded (with reas
 
 ## M3 — Session core (`SPEC.md` §session)
 
-- ⬜ Entry tree (message | compaction | branch_summary | custom), write-once
-- ⬜ Typed values/lists with reserved `pi.*` namespaces
-- ⬜ Usage ledger (per-entry attribution)
-- ⬜ `Storage` contract + in-memory backend + SQLite backend (+ conformance
-      suite ported from pi's `session/testing/conformance`)
-- ⬜ MutationLine, commit validation (monotonic seq, parent-exists)
-- ⬜ Fork (branch-scope / tree-scope) + fork policy (excluded namespaces)
-- ⬜ Chatstore becomes projection; non-destructive truncate
+- ✅ Entry tree (message | compaction | branch_summary | custom), write-once
+      (`harness/session/types.rs`)
+- ✅ Typed values/lists with reserved `pi.*` namespaces
+      (`harness/session/values.rs`)
+- ✅ Usage ledger (per-row attribution, adjustment rows)
+- ✅ `Storage` contract + in-memory backend + SQLite backend (+ conformance
+      suite; both backends pass it)
+- ✅ MutationLine, commit validation (monotonic seq, duplicate ids,
+      parent-exists)
+- ✅ Fork (branch-scope / tree-scope) + fork policy (lane state resets,
+      config kept, op/pending/result/usage excluded)
+- ✅ 13-leaf durable `OperationState` vocabulary (types ready for M4)
+- ⬜ Chatstore projection; non-destructive truncate
 - ⬜ Server `POST /api/chats/:id/fork`; rewind w/ optional branch summary
 - ⬜ Frontend: fork from message, branch picker
 
