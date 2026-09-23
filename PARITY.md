@@ -42,11 +42,15 @@ Status: ✅ done · 🚧 in progress · ⬜ remaining · ➖ excluded (with reas
       silent + length-stop overflow; wired into the bridge's
       compact-and-retry
 
-## M2 — Usage & cost surfacing
+## M2 — Usage & cost surfacing — 🚧 backend done, frontend in tree (2026-09-23)
 
-- ⬜ Per-turn usage accumulation; `usage` SSE event; persisted per message +
-      per-chat totals; `GET /api/chats/:id/usage`
-- ⬜ Frontend: usage store handler, per-message token/cost caption, chat total
+- ✅ Per-run usage accumulation (`Usage::add`); `usage` SSE event per
+      assistant message; persisted per message (running total) + per-chat
+      totals (deltas only — no double counting); `GET /api/chats/:id/usage`
+- ✅ Pricing live via M1 table; unknown models show no cost, not fake-zero
+- 🚧 Frontend (implemented + typechecked, uncommitted — rides with the
+      in-flight UI batch): `usage` store handler, per-message token/cost
+      caption in the action row, chat-total chip in the header
 
 ## M3 — Session core (`SPEC.md` §session)
 
