@@ -8,13 +8,34 @@ use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
-use super::truncate::{truncate_tail, TruncatedBy, TruncationOptions, TruncationResult, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES};
+use super::truncate::{
+    truncate_head, truncate_tail, TruncatedBy, TruncationOptions, TruncationResult, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct OutputAccumulatorOptions {
     pub max_lines: Option<usize>,
     pub max_bytes: Option<usize>,
     pub temp_file_prefix: Option<String>,
+    /// Which end of the output to keep when truncating (pi
+    /// `ShellOutputLimits.retain`). Default: tail.
+    pub retain: Option<Retain>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Retain {
+    #[default]
+    Tail,
+    Head,
+}
+
+/// Strip bytes that break terminals, JSON payloads, and model parsing but
+/// carry no content: C0 controls except tab/newline, plus the interlinear
+/// annotation marks U+FFF9..U+FFFB (pi `sanitizeShellOutput`).
+pub fn sanitize_shell_output(text: &str) -> String {
+    text.chars()
+        .filter(|&c| !matches!(c, '\u{0}'..='\u{8}' | '\u{b}'..='\u{1f}' | '\u{fff9}'..='\u{fffb}'))
+        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -28,6 +49,7 @@ pub struct OutputAccumulator {
     max_lines: usize,
     max_bytes: usize,
     max_rolling_bytes: usize,
+    retain: Retain,
     temp_file_prefix: String,
 
     raw_chunks: Vec<Vec<u8>>,
@@ -54,6 +76,7 @@ impl OutputAccumulator {
             max_lines: options.max_lines.unwrap_or(DEFAULT_MAX_LINES),
             max_bytes,
             max_rolling_bytes: (max_bytes * 2).max(1),
+            retain: options.retain.unwrap_or_default(),
             temp_file_prefix: options.temp_file_prefix.unwrap_or_else(|| "zwork-output".into()),
             raw_chunks: Vec::new(),
             pending: Vec::new(),
@@ -105,13 +128,20 @@ impl OutputAccumulator {
     }
 
     pub fn snapshot(&mut self, persist_if_truncated: bool) -> OutputSnapshot {
-        let tail = truncate_tail(
-            self.snapshot_text(),
-            TruncationOptions { max_lines: Some(self.max_lines), max_bytes: Some(self.max_bytes) },
-        );
+        let window = self.snapshot_text();
+        let retained = match self.retain {
+            Retain::Tail => truncate_tail(
+                window,
+                TruncationOptions { max_lines: Some(self.max_lines), max_bytes: Some(self.max_bytes) },
+            ),
+            Retain::Head => truncate_head(
+                window,
+                TruncationOptions { max_lines: Some(self.max_lines), max_bytes: Some(self.max_bytes) },
+            ),
+        };
         let truncated = self.total_lines > self.max_lines || self.total_decoded_bytes > self.max_bytes;
         let truncated_by = if truncated {
-            tail.truncated_by.or(Some(if self.total_decoded_bytes > self.max_bytes {
+            retained.truncated_by.or(Some(if self.total_decoded_bytes > self.max_bytes {
                 TruncatedBy::Bytes
             } else {
                 TruncatedBy::Lines
@@ -126,12 +156,12 @@ impl OutputAccumulator {
             total_bytes: self.total_decoded_bytes,
             max_lines: self.max_lines,
             max_bytes: self.max_bytes,
-            ..tail
+            ..retained
         };
         if persist_if_truncated && truncation.truncated {
             self.ensure_temp_file();
         }
-        OutputSnapshot { content: truncation.content.clone(), truncation, full_output_path: self.temp_file_path.clone() }
+        OutputSnapshot { content: sanitize_shell_output(&truncation.content), truncation, full_output_path: self.temp_file_path.clone() }
     }
 
     pub fn close_temp_file(&mut self) {
@@ -192,13 +222,29 @@ impl OutputAccumulator {
         if self.tail_text.len() <= self.max_rolling_bytes {
             return;
         }
-        let mut start = self.tail_text.len() - self.max_rolling_bytes;
-        while start < self.tail_text.len() && !self.tail_text.is_char_boundary(start) {
-            start += 1;
+        match self.retain {
+            Retain::Tail => {
+                let mut start = self.tail_text.len() - self.max_rolling_bytes;
+                while start < self.tail_text.len() && !self.tail_text.is_char_boundary(start) {
+                    start += 1;
+                }
+                self.tail_starts_at_line_boundary = if start == 0 {
+                    self.tail_starts_at_line_boundary
+                } else {
+                    self.tail_text.as_bytes()[start - 1] == b'\n'
+                };
+                self.tail_text = self.tail_text[start..].to_string();
+            }
+            Retain::Head => {
+                // Keep the first bytes; the window start never moves, so the
+                // starts-at-line-boundary invariant is unchanged.
+                let mut end = self.max_rolling_bytes;
+                while end < self.tail_text.len() && !self.tail_text.is_char_boundary(end) {
+                    end += 1;
+                }
+                self.tail_text.truncate(end);
+            }
         }
-        self.tail_starts_at_line_boundary =
-            if start == 0 { self.tail_starts_at_line_boundary } else { self.tail_text.as_bytes()[start - 1] == b'\n' };
-        self.tail_text = self.tail_text[start..].to_string();
     }
 
     fn snapshot_text(&self) -> &str {
@@ -258,6 +304,7 @@ mod tests {
             max_lines: Some(3),
             max_bytes: Some(1000),
             temp_file_prefix: Some("zwork-test".into()),
+            retain: None,
         });
         for i in 0..10 {
             acc.append(format!("line{i}\n").as_bytes());
@@ -283,5 +330,33 @@ mod tests {
         acc.append(&bytes[1..]);
         acc.finish();
         assert_eq!(acc.snapshot(false).content, "é");
+    }
+
+    #[test]
+    fn head_retention_keeps_first_lines() {
+        let mut acc = OutputAccumulator::new(OutputAccumulatorOptions {
+            max_lines: Some(3),
+            max_bytes: Some(1000),
+            retain: Some(Retain::Head),
+            temp_file_prefix: Some("zwork-test".into()),
+        });
+        for i in 0..10 {
+            acc.append(format!("line{i}\n").as_bytes());
+        }
+        acc.finish();
+        let snap = acc.snapshot(true);
+        assert!(snap.truncation.truncated);
+        assert!(snap.content.starts_with("line0\n"));
+        assert!(snap.content.contains("line2"));
+        assert!(!snap.content.contains("line5"));
+    }
+
+    #[test]
+    fn sanitizes_control_characters() {
+        let mut acc = OutputAccumulator::new(OutputAccumulatorOptions::default());
+        acc.append("ok\u{0}\u{7}\u{1f}bo\u{9}lt\u{fff9}o\n".as_bytes());
+        acc.finish();
+        // Tab survives; C0 controls and interlinear annotation marks don't.
+        assert_eq!(acc.snapshot(false).content, "okbo\tlto\n");
     }
 }
