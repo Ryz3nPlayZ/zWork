@@ -22,16 +22,25 @@ Status: ✅ done · 🚧 in progress · ⬜ remaining · ➖ excluded (with reas
 - ✅ grep/find/ls kept although upstream moved them to its product layer
       (ours are shipped + risk-gated; deliberate divergence)
 
-## M1 — pi-ai/core completions
+## M1 — pi-ai/core completions — ✅ done (2026-09-23)
 
-- ⬜ Image content: full magic-byte detection (png/jpeg/gif/webp/bmp, reject
+- ✅ Image content: full magic-byte detection (png/jpeg/gif/webp/bmp, reject
       APNG/JPEG-XR) + base64 (`harness/tools/image.rs`)
-- ⬜ Usage helpers `empty_usage`/`add_usage` (optional cache_write_1h/reasoning)
-- ⬜ Output-capture parity: head-or-tail retention + slide-window diffs
-- ⬜ Prompt templates: `.md` + frontmatter loader, invocation formatting,
-      system-prompt exposure
-- ⬜ Model pricing at `build_model` so `Usage::calculate_cost` is live
-- ⬜ Overflow classification coverage check vs pi-ai `overflow.ts`
+- ✅ Usage helpers `Usage::empty`/`Usage::add` (optional cache_write_1h/reasoning)
+- ✅ Output-capture parity: control-char sanitization + head retention
+      (`output_accumulator.rs`). The replace|append|slide diff protocol is
+      ➖ excluded: its consumers are pi's remote transcript sync, which zWork
+      excludes; the bridge throttles bounded snapshots at 100ms.
+- ✅ Prompt templates: loader + shell-style arg parsing + $1/$@/$ARGUMENTS/
+      ${@:N}[:L] substitution (`harness/prompt_templates.rs`). pi does not
+      list templates in the system prompt; invocation wiring lands with the
+      M4 Harness facade (`prompt_from_template`).
+- ✅ Model pricing at `build_model` (`harness/pricing.rs`, mirrors cloud
+      estimate_cost) so `Usage::calculate_cost` is live
+- ✅ Overflow classification: full port of pi-ai `overflow.ts`
+      (`harness/overflow.rs`) — 24 provider phrasings, rate-limit exclusions,
+      silent + length-stop overflow; wired into the bridge's
+      compact-and-retry
 
 ## M2 — Usage & cost surfacing
 
