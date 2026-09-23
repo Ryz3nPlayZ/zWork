@@ -33,7 +33,7 @@ use crate::harness::messages as hmessages;
 use crate::harness::overflow as hoverflow;
 use crate::harness::types::{
     AbortSignal, Api, AssistantContent, AssistantMessage, AssistantMessageEvent, InputType, Message, Model,
-    StopReason, TextContent, ImageContent, UserContent,
+    StopReason, TextContent, ImageContent, Usage, UserContent,
 };
 use crate::sync_util::Unpoison;
 use crate::tools::{evaluate_tool_risk, execute_tool, get_tool_schemas, Risk};
@@ -94,6 +94,9 @@ struct TurnShared {
     call_args: Mutex<HashMap<String, Value>>,
     /// Trace entries for the current turn, flushed on `TurnEnd`.
     traces: Mutex<Vec<Value>>,
+    /// Running token/cost usage for this run; each `MessageEnd` adds its
+    /// delta and re-emits the total.
+    usage: Mutex<Usage>,
 }
 
 impl TurnShared {
@@ -761,6 +764,26 @@ async fn handle_event(shared: &TurnShared, event: AgentEvent) {
                         "error": am.error_message,
                     }),
                 );
+                let total = {
+                    let mut u = shared.usage.lock_unpoisoned();
+                    *u = u.add(&am.usage);
+                    u.clone()
+                };
+                {
+                    let _guard = shared.db_lock.lock().await;
+                    let _ = chatstore::record_usage(&shared.chat_id, &shared.assistant_msg_id, &total, &am.usage);
+                }
+                shared
+                    .send(json!({
+                        "type": "usage",
+                        "prompt_tokens": total.input + total.cache_read + total.cache_write,
+                        "completion_tokens": total.output,
+                        "total_tokens": total.total_tokens,
+                        "cost_usd": total.cost.total,
+                        "cache_read_tokens": total.cache_read,
+                        "cache_write_tokens": total.cache_write,
+                    }))
+                    .await;
             }
         }
         AgentEvent::ToolExecutionEnd { tool_call_id, tool_name, result, is_error } => {
@@ -1140,6 +1163,7 @@ pub fn run_agent_turn(
             doom: Mutex::new(DoomLoopDetector::new()),
             call_args: Mutex::new(HashMap::new()),
             traces: Mutex::new(Vec::new()),
+            usage: Mutex::new(Usage::empty()),
         });
 
         // ── Tools ───────────────────────────────────────────────────────
@@ -1503,6 +1527,7 @@ mod tests {
             created_at: 0,
             activities: vec![],
             tool_trace: vec![],
+            usage: None,
         }
     }
 

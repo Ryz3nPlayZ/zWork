@@ -166,6 +166,7 @@ async fn main() {
         .route("/api/chats/:chat_id/messages/:message_id", patch(server::patch_message))
         .route("/api/chats/:chat_id/messages/:message_id/truncate", post(server::truncate_message))
         .route("/api/chats/:chat_id/stop", post(server::stop_chat))
+        .route("/api/chats/:chat_id/usage", get(server::chat_usage))
         .route("/api/chats/:chat_id/answer-question", post(server::answer_question))
         .route("/api/chat/stream", post(server::chat_stream_route))
         .route("/api/chats/:chat_id/gate/:gate_id/approve", post(server::approve_gate))

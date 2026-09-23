@@ -772,6 +772,25 @@ pub async fn get_chat(Path(chat_id): Path<String>) -> impl IntoResponse {
     }
 }
 
+/// Token/cost usage for one chat: cumulative totals plus a per-message
+/// breakdown (assistant rows only). Covers BYOK / claude_code / Ollama turns
+/// that cloud analytics never see.
+pub async fn chat_usage(Path(chat_id): Path<String>) -> impl IntoResponse {
+    match chatstore::get(&chat_id) {
+        Some(chat) => Json(json!({
+            "chat_id": chat.id,
+            "totals": chat.usage_totals,
+            "messages": chat
+                .messages
+                .iter()
+                .filter(|m| m.role == "assistant")
+                .filter_map(|m| m.usage.as_ref().map(|u| json!({ "message_id": m.id, "usage": u })))
+                .collect::<Vec<_>>(),
+        })),
+        None => Json(json!({ "error": "Chat not found" })),
+    }
+}
+
 pub async fn patch_chat(
     Path(chat_id): Path<String>,
     Json(req): Json<PatchChatRequest>,
@@ -834,7 +853,7 @@ pub async fn chat_stream_route(
         chat.id
     });
 
-    let model_id = req.model.unwrap_or_else(|| "deepseek-v4-flash".to_string());
+    let model_id = req.model.unwrap_or_else(|| "deepseek-flash".to_string());
     let project_id = req.project_id.unwrap_or_default();
 
     // Plan mode can be toggled by the explicit flag OR by keywords in the
@@ -1821,10 +1840,10 @@ fn default_clean() -> String { "clean".to_string() }
 pub async fn refactor_code(Json(body): Json<RefactorRequest>) -> impl IntoResponse {
     // Simple refactor: use LLM with non-streaming call
     let s = settings::load();
-    let model_id = if !s.default_model.is_empty() { &s.default_model } else { "deepseek-v4-flash" };
+    let model_id = if !s.default_model.is_empty() { &s.default_model } else { "deepseek-flash" };
 
     let (api_key, base_url, shape, real_model) = if let Some(m) = s.custom_models.iter().find(|m| m.id == model_id) {
-        let real = if m.model_id.is_empty() { "deepseek-v4-flash".to_string() } else { m.model_id.clone() };
+        let real = if m.model_id.is_empty() { "deepseek-flash".to_string() } else { m.model_id.clone() };
         if let Some(cred) = resolve(&m.credential, &s, &m.base_url_override) {
             (cred.api_key, cred.base_url, m.shape.clone(), real)
         } else {
@@ -1832,7 +1851,7 @@ pub async fn refactor_code(Json(body): Json<RefactorRequest>) -> impl IntoRespon
         }
     } else {
         match resolve("zwork_router", &s, "") {
-            Some(cred) => (cred.api_key, cred.base_url, "anthropic".to_string(), "deepseek-v4-flash".to_string()),
+            Some(cred) => (cred.api_key, cred.base_url, "anthropic".to_string(), "deepseek-flash".to_string()),
             None => return Json(json!({ "error": "No model credentials available" })),
         }
     };

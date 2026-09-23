@@ -20,6 +20,11 @@ pub struct ChatMessage {
     /// chat" without storing raw tool_use/tool_result blocks.
     #[serde(default)]
     pub tool_trace: Vec<Value>,
+    /// Token/cost usage for this assistant run (camelCase harness `Usage`
+    /// JSON). Written once per assistant message with the running total,
+    /// so the last write equals the run's total.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Value>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -43,6 +48,11 @@ pub struct Chat {
     /// the main chat list; they surface inside the scheduled task's run history.
     #[serde(default = "default_chat_kind")]
     pub kind: String,
+    /// Cumulative usage across all runs in this chat (camelCase harness
+    /// `Usage` JSON). Unlike cloud analytics this covers BYOK / claude_code /
+    /// Ollama turns too, because the sidecar sees every request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_totals: Option<Value>,
 }
 
 fn default_chat_kind() -> String { "chat".to_string() }
@@ -81,6 +91,7 @@ pub fn create_kind(title: &str, model: &str, project_id: &str, kind: &str) -> Ch
         compacted_summary: String::new(),
         compaction_cursor: 0,
         kind: kind.to_string(),
+        usage_totals: None,
     };
     save(&c);
     c
@@ -276,6 +287,7 @@ pub fn append_message(chat_id: &str, role: &str, content: Value) -> Option<ChatM
         created_at: now_ms(),
         activities: Vec::new(),
         tool_trace: Vec::new(),
+        usage: None,
     };
     
     c.messages.push(msg.clone());
@@ -324,6 +336,39 @@ pub fn update_message(
         save(&c);
     }
     updated
+}
+
+/// Record usage for one assistant message: the message row stores the run's
+/// running total (last write = run total), while `delta` — this message's
+/// own usage — is merged into the chat's cumulative totals. One load+save.
+pub fn record_usage(
+    chat_id: &str,
+    message_id: &str,
+    running_total: &crate::harness::types::Usage,
+    delta: &crate::harness::types::Usage,
+) -> Option<()> {
+    let mut c = get(chat_id)?;
+    let mut found = false;
+    for msg in &mut c.messages {
+        if msg.id == message_id {
+            msg.usage = Some(serde_json::to_value(running_total).ok()?);
+            found = true;
+            break;
+        }
+    }
+    if !found {
+        return None;
+    }
+    let existing: crate::harness::types::Usage = c
+        .usage_totals
+        .as_ref()
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+    let totals = existing.add(delta);
+    c.usage_totals = serde_json::to_value(totals).ok();
+    c.updated_at = now_ms();
+    save(&c);
+    Some(())
 }
 
 #[allow(dead_code)]
@@ -447,4 +492,58 @@ pub fn truncate_at_message(chat_id: &str, message_id: &str, content: Option<Valu
     c.updated_at = now_ms();
     save(&c);
     Some(c)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::harness::types::{Usage, UsageCost};
+
+    fn usage(input: u64, output: u64) -> Usage {
+        Usage {
+            input,
+            output,
+            cache_read: 0,
+            cache_write: 0,
+            cache_write_1h: None,
+            reasoning: None,
+            total_tokens: input + output,
+            cost: UsageCost {
+                input: input as f64 * 1.0,
+                output: output as f64 * 2.0,
+                cache_read: 0.0,
+                cache_write: 0.0,
+                total: input as f64 * 1.0 + output as f64 * 2.0,
+            },
+        }
+    }
+
+    /// Env-mutating test — must stay single and self-cleaning (see the
+    /// convention note in harness_turn tests).
+    #[test]
+    fn record_usage_merges_deltas_into_totals() {
+        let prev = std::env::var("ZWORK_HOME").ok();
+        let home = std::env::temp_dir().join(format!("zwork-chatstore-{}", uuid::Uuid::new_v4().simple()));
+        std::env::set_var("ZWORK_HOME", &home);
+
+        let chat = create("t", "m", "");
+        let msg = append_message(&chat.id, "assistant", serde_json::json!("hi")).unwrap();
+
+        // Two MessageEnds in one run: running totals on the row, deltas in chat.
+        record_usage(&chat.id, &msg.id, &usage(100, 10), &usage(100, 10)).unwrap();
+        record_usage(&chat.id, &msg.id, &usage(150, 30), &usage(50, 20)).unwrap();
+
+        let c = get(&chat.id).unwrap();
+        let row_usage: Usage = serde_json::from_value(c.messages[0].usage.clone().unwrap()).unwrap();
+        assert_eq!((row_usage.input, row_usage.output), (150, 30));
+        let totals: Usage = serde_json::from_value(c.usage_totals.clone().unwrap()).unwrap();
+        assert_eq!((totals.input, totals.output), (150, 30));
+        assert_eq!(totals.cost.total, row_usage.cost.total);
+
+        std::env::remove_var("ZWORK_HOME");
+        if let Some(p) = prev {
+            std::env::set_var("ZWORK_HOME", p);
+        }
+        let _ = std::fs::remove_dir_all(&home);
+    }
 }
