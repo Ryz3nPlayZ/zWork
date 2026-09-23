@@ -722,6 +722,18 @@ async fn handle_event(shared: &TurnShared, event: AgentEvent) {
                 // A tool_use part implicitly closes the preceding thinking
                 // segment in the frontend timeline.
                 close_thinking(shared).await;
+                // Text streamed before a tool call is process narration, not
+                // the answer. Drop it from the persisted display text so a
+                // reloaded chat shows only the final answer (the text after
+                // the last tool call); the frontend mirrors this by demoting
+                // the same text into its process panel.
+                let had_narration = {
+                    let mut text = shared.accumulated_text.lock_unpoisoned();
+                    if text.is_empty() { false } else { text.clear(); true }
+                };
+                if had_narration {
+                    shared.persist().await;
+                }
                 shared.call_args.lock_unpoisoned().insert(tool_call.id.clone(), tool_call.arguments.clone());
                 shared
                     .send(json!({
