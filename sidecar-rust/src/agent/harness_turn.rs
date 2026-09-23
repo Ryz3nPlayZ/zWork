@@ -843,7 +843,7 @@ fn build_model(r: &Resolved, model_id: &str) -> Model {
         reasoning: false,
         thinking_level_map: None,
         input: vec![InputType::Text, InputType::Image],
-        cost: Default::default(),
+        cost: crate::harness::pricing::model_cost_for(model_id),
         prompt_cache: Some(true),
         context_window: context_window_for(model_id),
         max_tokens: max_tokens_for(model_id),

@@ -21,6 +21,7 @@ pub mod estimate;
 pub mod json_parse;
 pub mod messages;
 pub mod overflow;
+pub mod pricing;
 pub mod prompt_templates;
 pub mod providers;
 pub mod retry;
