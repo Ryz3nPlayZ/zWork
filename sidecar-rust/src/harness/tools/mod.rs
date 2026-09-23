@@ -9,6 +9,7 @@ pub mod edit_diff;
 pub mod file_mutation_queue;
 pub mod find;
 pub mod grep;
+pub mod image;
 pub mod ls;
 pub mod output_accumulator;
 pub mod path_utils;

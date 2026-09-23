@@ -38,21 +38,9 @@ impl ReadTool {
     }
 }
 
-/// Sniff supported image types by magic bytes (pi `detectSupportedImageMimeTypeFromFile`).
+/// Sniff supported image types by magic bytes (pi `detectSupportedImageMimeType`).
 pub fn detect_image_mime(bytes: &[u8]) -> Option<&'static str> {
-    if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
-        Some("image/png")
-    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        Some("image/jpeg")
-    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
-        Some("image/gif")
-    } else if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
-        Some("image/webp")
-    } else if bytes.starts_with(b"BM") {
-        Some("image/bmp")
-    } else {
-        None
-    }
+    super::image::detect_supported_image_mime_type(bytes)
 }
 
 #[derive(serde::Deserialize)]
@@ -216,7 +204,11 @@ mod tests {
 
     #[test]
     fn image_sniff() {
-        assert_eq!(detect_image_mime(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0]), Some("image/png"));
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        png.extend_from_slice(&13u32.to_be_bytes());
+        png.extend_from_slice(b"IHDR");
+        png.extend_from_slice(&[0; 17]);
+        assert_eq!(detect_image_mime(&png), Some("image/png"));
         assert_eq!(detect_image_mime(b"hello"), None);
     }
 }
