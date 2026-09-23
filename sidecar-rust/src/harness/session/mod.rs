@@ -18,6 +18,7 @@ pub mod fork_policy;
 pub mod memory;
 pub mod mutation_line;
 pub mod session;
+pub mod sqlite;
 pub mod state;
 pub mod types;
 pub mod values;
