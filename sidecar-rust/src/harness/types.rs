@@ -521,6 +521,38 @@ pub struct Usage {
 }
 
 impl Usage {
+    /// `emptyUsage` from pi `harness/utils/usage.ts`.
+    pub fn empty() -> Usage {
+        Usage::default()
+    }
+
+    /// `addUsage` from pi `harness/utils/usage.ts` — field-wise sum. The
+    /// optional fields (`cache_write_1h`, `reasoning`) stay `None` only when
+    /// both sides are `None`, so merging never invents a zero the provider
+    /// never reported.
+    pub fn add(&self, other: &Usage) -> Usage {
+        let or_sum = |l: Option<u64>, r: Option<u64>| match (l, r) {
+            (None, None) => None,
+            (a, b) => Some(a.unwrap_or(0) + b.unwrap_or(0)),
+        };
+        Usage {
+            input: self.input + other.input,
+            output: self.output + other.output,
+            cache_read: self.cache_read + other.cache_read,
+            cache_write: self.cache_write + other.cache_write,
+            cache_write_1h: or_sum(self.cache_write_1h, other.cache_write_1h),
+            reasoning: or_sum(self.reasoning, other.reasoning),
+            total_tokens: self.total_tokens + other.total_tokens,
+            cost: UsageCost {
+                input: self.cost.input + other.cost.input,
+                output: self.cost.output + other.cost.output,
+                cache_read: self.cost.cache_read + other.cost.cache_read,
+                cache_write: self.cost.cache_write + other.cost.cache_write,
+                total: self.cost.total + other.cost.total,
+            },
+        }
+    }
+
     /// `calculateCost` from pi-ai `models.ts`.
     pub fn calculate_cost(&mut self, model: &Model) {
         let input_tokens = self.input + self.cache_read + self.cache_write;

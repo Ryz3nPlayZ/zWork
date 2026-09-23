@@ -30,6 +30,7 @@ use crate::harness::agent_types::{
 };
 use crate::harness::compaction as hcompaction;
 use crate::harness::messages as hmessages;
+use crate::harness::overflow as hoverflow;
 use crate::harness::types::{
     AbortSignal, Api, AssistantContent, AssistantMessage, AssistantMessageEvent, InputType, Message, Model,
     StopReason, TextContent, ImageContent, UserContent,
@@ -39,9 +40,9 @@ use crate::tools::{evaluate_tool_risk, execute_tool, get_tool_schemas, Risk};
 use crate::{chatstore, settings};
 
 use super::{
-    artifact_hint, classify_provider_error_with_raw, friendly_upstream_error, is_command_approved,
-    is_context_overflow_error, llm_trace, log_agent_event, max_tokens_for, orientation, pending_permission_gates,
-    prompts, router_real_model, web_search_grounding, DoomLoopDetector, ErrorClass, RunGuard,
+    artifact_hint, classify_provider_error_with_raw, friendly_upstream_error, is_command_approved, llm_trace,
+    log_agent_event, max_tokens_for, orientation, pending_permission_gates, prompts, router_real_model,
+    web_search_grounding, DoomLoopDetector, ErrorClass, RunGuard,
 };
 
 const DEFAULT_MAX_TURNS: u32 = 80;
@@ -1216,11 +1217,12 @@ pub fn run_agent_turn(
         loop {
             let last_error = agent.with_state(|st| {
                 st.messages.last().and_then(|m| m.as_assistant()).and_then(|am| {
-                    (am.stop_reason == StopReason::Error).then(|| am.error_message.clone().unwrap_or_default())
+                    (am.stop_reason == StopReason::Error).then(|| am.clone())
                 })
             });
-            let Some(err_msg) = last_error else { break };
-            if is_context_overflow_error(&err_msg, None) && !compacted_on_overflow {
+            let Some(err_am) = last_error else { break };
+            let err_msg = err_am.error_message.clone().unwrap_or_default();
+            if hoverflow::is_context_overflow(&err_am, Some(model.context_window)) && !compacted_on_overflow {
                 compacted_on_overflow = true;
                 llm_trace(&chat_id, shared.turn(), "context_overflow_compaction", json!({ "error": err_msg }));
                 let mut msgs = agent.messages();

@@ -86,26 +86,6 @@ fn router_real_model(model_id: &str) -> String {
     }
 }
 
-/// True when a provider error is actually "the conversation is too long for
-/// the model's context window" — a 400 in disguise that is RECOVERABLE by
-/// compacting history, unlike other permanent 400s (malformed request shape,
-/// unbalanced tool_use/tool_result pairing, auth). Matches the phrasings used
-/// by OpenAI-compatible APIs, Anthropic, and the zWork router envelope.
-fn is_context_overflow_error(message: &str, raw: Option<&str>) -> bool {
-    let hay = format!(
-        "{} {}",
-        message.to_ascii_lowercase(),
-        raw.unwrap_or("").to_ascii_lowercase()
-    );
-    hay.contains("context_length_exceeded")
-        || hay.contains("context length")
-        || hay.contains("maximum context")
-        || hay.contains("context window")
-        || hay.contains("prompt is too long")
-        || hay.contains("too many tokens")
-        || hay.contains("input is too long")
-}
-
 /// Classify a provider error message as transient (retryable) or permanent.
 ///
 /// The `ProviderError` event carries only a string message — no HTTP status
