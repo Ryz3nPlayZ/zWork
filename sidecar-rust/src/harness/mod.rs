@@ -25,6 +25,7 @@ pub mod pricing;
 pub mod prompt_templates;
 pub mod providers;
 pub mod retry;
+pub mod session;
 pub mod skills;
 pub mod sse;
 pub mod system_prompt;
