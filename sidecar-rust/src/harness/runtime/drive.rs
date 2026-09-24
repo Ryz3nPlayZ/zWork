@@ -11,6 +11,7 @@
 pub mod boundary;
 pub mod checkpoint;
 pub mod generation;
+pub mod reconcile;
 pub mod response;
 pub mod structural;
 pub mod tool_placement;
@@ -93,12 +94,7 @@ async fn drive_operation_inner(lane: &Arc<Lane>, drive: &Arc<Drive>) -> Result<D
         operation = current_operation(lane, drive)?;
         let state = operation.state.clone();
         let result: ProcedureResult = if matches!(state.scope().control, Control::CancelRequested { .. }) {
-            // Durable cancellation routes to reconcile, which settles
-            // admitted effects and finishes the operation; it arrives with
-            // the reconciliation slice.
-            return Err(SessionError::Other(
-                SliceNotImplemented { operation: "reconcile" }.to_string(),
-            ));
+            super::drive::reconcile::reconcile_operation(lane, drive).await?
         } else {
             match &state {
                 OperationState::Starting { .. } => start_run(lane, drive).await?,
@@ -111,10 +107,26 @@ async fn drive_operation_inner(lane: &Arc<Lane>, drive: &Arc<Drive>) -> Result<D
                 OperationState::AssistantRetryWait { generation, retry, .. } => {
                     super::drive::generation::run_retry_wait(lane, drive, retry, generation).await?
                 }
-                OperationState::AssistantEffectPending { .. } => {
-                    return Err(SessionError::Other(
-                        SliceNotImplemented { operation: "assistant recovery" }.to_string(),
-                    ));
+                OperationState::AssistantEffectPending {
+                    scope: _,
+                    generation,
+                    attempt,
+                    response_entry_id,
+                    usage_id,
+                    intended_output_limit,
+                    context_window,
+                } => {
+                    super::drive::reconcile::recover_assistant_generation(
+                        lane,
+                        drive,
+                        generation,
+                        *attempt,
+                        response_entry_id,
+                        usage_id,
+                        *intended_output_limit,
+                        *context_window,
+                    )
+                    .await?
                 }
                 OperationState::Tools { .. } => super::drive::tools::run_tools(lane, drive).await?,
                 OperationState::DeferredSuspended { .. } | OperationState::DeferredEffectPending { .. } => {
@@ -131,9 +143,7 @@ async fn drive_operation_inner(lane: &Arc<Lane>, drive: &Arc<Drive>) -> Result<D
                     ));
                 }
                 OperationState::NavigationReadyToCommit { .. } => {
-                    return Err(SessionError::Other(
-                        SliceNotImplemented { operation: "navigation commit" }.to_string(),
-                    ));
+                    super::drive::reconcile::commit_navigation(lane, drive).await?
                 }
             }
         };
@@ -168,6 +178,25 @@ mod tests {
     use crate::harness::session::types::{BranchScan, OperationState, SessionMetadata, TerminalStatus, ToolCallStatus};
     use crate::harness::session::values::operation_state as operation_state_addr;
     use std::sync::{Arc, RwLock};
+
+    fn scripted_model() -> crate::harness::types::Model {
+        crate::harness::types::Model {
+            id: "scripted".into(),
+            name: "scripted".into(),
+            api: crate::harness::types::Api::AnthropicMessages,
+            provider: "test".into(),
+            base_url: String::new(),
+            reasoning: false,
+            thinking_level_map: None,
+            input: vec![],
+            cost: Default::default(),
+            prompt_cache: None,
+            context_window: 200_000,
+            max_tokens: 8_192,
+            headers: None,
+            compat: None,
+        }
+    }
 
     fn test_lane() -> (Arc<Lane>, tokio::sync::mpsc::UnboundedReceiver<HarnessEvent>) {
         let session = Session::new(
@@ -631,16 +660,159 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancellation_routes_to_reconcile_slice() {
-        let (lane, _events) = test_lane();
+    async fn cancellation_reconciles_to_an_aborted_terminal() {
+        let (lane, mut events) = test_lane();
         let operation_id = accept(&lane, "work").await;
-        lane.request_operation_abort(&operation_id).await.unwrap();
+        lane.enqueue(QueueKind::Steer, AgentMessage::user_text("wait")).await.unwrap();
+        let abort = lane.request_operation_abort(&operation_id).await.unwrap();
+        assert_eq!(abort.steer.len(), 1);
+        assert_eq!(abort.steer[0].role(), "user");
 
         let outcome = lane.drive(&operation_id, false).await.unwrap();
-        match outcome {
-            DriveOutcome::Failed { message, .. } => assert!(message.contains("reconcile"), "{message}"),
-            other => panic!("expected reconcile slice failure, got {other:?}"),
+        match &outcome {
+            DriveOutcome::Settled { outcome } => assert_eq!(outcome.status, TerminalStatus::Aborted),
+            other => panic!("expected aborted settle, got {other:?}"),
         }
+        assert!(lane.operation_snapshot().is_none());
+        assert!(drain(&mut events).contains(&"run_end"));
+    }
+
+    #[tokio::test]
+    async fn cancelled_generation_settles_from_committed_frames() {
+        let (lane, _events) = test_lane();
+        let operation_id = accept(&lane, "work").await;
+
+        // Simulate a crash mid-generation: install effect_pending state
+        // with committed partial frames.
+        let response_entry_id = lane.session.next_id();
+        let usage_id = lane.session.next_id();
+        let partial = crate::harness::types::AssistantMessage::pending(&scripted_model());
+        use crate::harness::types::TextContent;
+        let generation = crate::harness::session::types::GenerationContext {
+            step_id: "step".into(),
+            trigger_entry_id: "trigger".into(),
+            configuration: lane.configuration(),
+            stream_options: Default::default(),
+            retry_policy: crate::harness::session::types::NormalizedRetryPolicy {
+                max_attempts: 1,
+                base_delay_ms: 1,
+                max_agent_delay_ms: 10,
+            },
+            overflow_recovery_used: false,
+        };
+        let effect = OperationState::AssistantEffectPending {
+            scope: crate::harness::session::types::OperationScope {
+                control: crate::harness::session::types::Control::Running,
+                settings: crate::harness::session::types::RunSettings {
+                    compaction: crate::harness::compaction::CompactionSettings::default(),
+                    steering_mode: crate::harness::session::types::QueueMode::All,
+                    follow_up_mode: crate::harness::session::types::QueueMode::All,
+                    tool_execution: crate::harness::session::types::ToolExecutionMode::Sequential,
+                },
+                latest_assistant_entry_id: None,
+            },
+            generation: generation.clone(),
+            attempt: 1,
+            response_entry_id: response_entry_id.clone(),
+            usage_id: usage_id.clone(),
+            intended_output_limit: 8_192,
+            context_window: 200_000,
+        };
+        lane.settle_operation(move |_state, _current, _meta, _mutator| {
+            Ok(crate::harness::runtime::lane::OperationCommandFor::Commit {
+                decision: super::super::types::CommitDecision {
+                    writes: Vec::new(),
+                    materialize: Box::new(|_| ()),
+                    events: None,
+                },
+                operation_state: effect,
+                lane: None,
+            })
+        })
+        .await
+        .unwrap();
+
+        // Committed partial frames for the interrupted assistant.
+        let frame_address = crate::harness::session::values::pending_assistant_frames(&operation_id, &response_entry_id);
+        let start_frame = serde_json::to_value(crate::harness::assistant_frame::AssistantMessageFrame::Start {
+            partial: partial.clone(),
+        })
+        .unwrap();
+        let text_frame = serde_json::to_value(crate::harness::assistant_frame::AssistantMessageFrame::TextStart {
+            content_index: 0,
+            content: TextContent { text: String::new(), text_signature: None },
+        })
+        .unwrap();
+        let delta_frame = serde_json::to_value(crate::harness::assistant_frame::AssistantMessageFrame::TextDelta {
+            content_index: 0,
+            delta: "partial work".into(),
+        })
+        .unwrap();
+        let op_for_frames = operation_id.clone();
+        let entry_for_frames = response_entry_id.clone();
+        lane.session
+            .mutate(move |mutator| {
+                mutator.commit(vec![
+                    crate::harness::session::commit::Write::List(crate::harness::session::values::append_list(
+                        &frame_address,
+                        start_frame,
+                    )),
+                    crate::harness::session::commit::Write::List(crate::harness::session::values::append_list(
+                        &frame_address.clone(),
+                        text_frame,
+                    )),
+                    crate::harness::session::commit::Write::List(crate::harness::session::values::append_list(
+                        &frame_address,
+                        delta_frame,
+                    )),
+                ])?;
+                let _ = (op_for_frames, entry_for_frames);
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        // Cancel, then reconcile: the partial settles as an interrupted
+        // assistant entry and the run finishes aborted.
+        lane.request_operation_abort(&operation_id).await.unwrap();
+        let outcome = lane.drive(&operation_id, false).await.unwrap();
+        match &outcome {
+            DriveOutcome::Settled { outcome } => assert_eq!(outcome.status, TerminalStatus::Aborted),
+            other => panic!("expected aborted settle, got {other:?}"),
+        }
+        let entries = lane.find_entries(BranchScan { oldest_first: true, ..Default::default() }).unwrap();
+        let assistant = entries
+            .iter()
+            .find(|entry| entry.id == response_entry_id)
+            .expect("interrupted assistant entry committed");
+        let message = assistant.as_message().unwrap();
+        assert!(message.is_assistant());
+    }
+
+    #[tokio::test]
+    async fn navigation_commits_the_tip_move() {
+        let (lane, mut events) = test_lane();
+        let first = lane.append_message(AgentMessage::user_text("one")).await.unwrap();
+        let _second = lane.append_message(AgentMessage::user_text("two")).await.unwrap();
+
+        let admission = lane
+            .accept_navigation(crate::harness::runtime::lane::NavigationRequest {
+                target_id: Some(first.clone()),
+                label: Some("the good one".into()),
+            })
+            .await
+            .unwrap();
+        let outcome = lane.drive(&admission.operation_id, false).await.unwrap();
+        match &outcome {
+            DriveOutcome::Settled { outcome } => assert_eq!(outcome.status, TerminalStatus::Completed),
+            other => panic!("expected completed navigation, got {other:?}"),
+        }
+        assert_eq!(lane.tip_id().unwrap().as_deref(), Some(first.as_str()));
+        assert_eq!(
+            lane.session.get_label(&first).unwrap().as_deref(),
+            Some("the good one")
+        );
+        assert!(drain(&mut events).contains(&"navigation_end"));
     }
 
     #[tokio::test]
