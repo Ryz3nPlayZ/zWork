@@ -8,6 +8,7 @@
 //! `pi.op.state`; recovery never replays a journal — it reads one total
 //! state and jumps to the responsible procedure.
 
+pub mod drive;
 pub mod effect_gate;
 pub mod events;
 pub mod hooks;

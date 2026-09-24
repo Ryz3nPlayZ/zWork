@@ -40,7 +40,7 @@ use crate::harness::types::Usage;
 
 use super::events::{HarnessEvent, LaneQueuedItem};
 use super::transcript::{chain_entries, read_lane_queues};
-use super::types::{CommitDecision, LaneCommand, RuntimeConfig, RuntimeLaneState};
+use super::types::{CommitDecision, DriveOutcome, LaneCommand, RuntimeConfig, RuntimeLaneState};
 
 /// Caller-facing lane errors (pi `result.ts` tags surfaced by the facade).
 #[derive(Debug, thiserror::Error)]
@@ -403,6 +403,17 @@ impl Lane {
 
     pub fn closed_error(&self) -> Option<String> {
         self.inner.lock().unwrap().closed_error.clone()
+    }
+
+    /// The current operation, if this lane owns one (pi `lane.state.operation`).
+    pub fn operation_snapshot(&self) -> Option<Operation> {
+        self.inner.lock().unwrap().state.operation.clone()
+    }
+
+    /// Resolved context window of the configured model (pi reads
+    /// `lane.models`; the facade publishes the window into the config).
+    pub fn context_window(&self) -> Option<u64> {
+        self.read_config().context_window
     }
 
     // -- command core --
@@ -1409,6 +1420,91 @@ impl Lane {
             })
         })
         .await
+    }
+
+    /// Drive one operation through its durable procedures (pi
+    /// `Lane.drive`): claim install/observe/occupied/settled under the
+    /// mutation line, run the dispatcher on a fresh pass, and await its
+    /// completion. A second caller for the same operation observes the
+    /// installed pass.
+    pub async fn drive(self: &Arc<Self>, operation_id: &str, wait_for_retry: bool) -> LaneResult<DriveOutcome> {
+        enum DriveClaim {
+            Observe { drive: Arc<super::types::Drive>, installed: bool },
+            Occupied { drive: Arc<super::types::Drive> },
+            Settled { record: OperationResultRecord },
+            Mismatch,
+        }
+
+        loop {
+            self.assert_open()?;
+            let target = operation_id.to_string();
+            let claim = self
+                .command(move |state, mutator| {
+                    let matches_current =
+                        state.operation.as_ref().is_some_and(|operation| operation.meta.operation_id == target);
+                    if matches_current {
+                        let active = self.inner.lock().unwrap().active_drive.clone();
+                        let decision = match active {
+                            None => {
+                                let drive = Arc::new(super::types::Drive::standalone(target.clone(), wait_for_retry));
+                                self.inner.lock().unwrap().active_drive = Some(Arc::clone(&drive));
+                                self.signal_state_change();
+                                DriveClaim::Observe { drive, installed: true }
+                            }
+                            Some(drive) if drive.operation_id == target => {
+                                DriveClaim::Observe { drive, installed: false }
+                            }
+                            Some(drive) => DriveClaim::Occupied { drive },
+                        };
+                        return Ok(LaneCommand::Return { result: decision });
+                    }
+                    match mutator.get_value(&operation_result_value(&target))? {
+                        Some(stored) => {
+                            let record = serde_json::from_value(stored.value).map_err(|e| {
+                                SessionError::Storage(format!("operation result decode failed: {e}"))
+                            })?;
+                            Ok(LaneCommand::Return { result: DriveClaim::Settled { record } })
+                        }
+                        None => Ok(LaneCommand::Return { result: DriveClaim::Mismatch }),
+                    }
+                })
+                .await?;
+
+            match claim {
+                DriveClaim::Settled { record } => return Ok(DriveOutcome::Settled { outcome: record }),
+                DriveClaim::Mismatch => {
+                    return Err(LaneError::OperationMismatch { lane: self.name.clone(), expected: operation_id.into() })
+                }
+                DriveClaim::Occupied { drive } => {
+                    self.await_completion(&drive).await?;
+                    continue;
+                }
+                DriveClaim::Observe { drive, installed } => {
+                    if installed {
+                        let lane = Arc::clone(self);
+                        let task_drive = Arc::clone(&drive);
+                        tokio::spawn(async move {
+                            let outcome = super::drive::drive_operation(&lane, &task_drive).await;
+                            lane.clear_drive(&task_drive);
+                            task_drive.settle(outcome);
+                        });
+                    }
+                    return self.await_completion(&drive).await;
+                }
+            }
+        }
+    }
+
+    async fn await_completion(&self, drive: &Arc<super::types::Drive>) -> LaneResult<DriveOutcome> {
+        let mut completion = drive.subscribe();
+        loop {
+            if let Some(outcome) = completion.borrow().clone() {
+                return Ok(outcome);
+            }
+            if completion.changed().await.is_err() {
+                return Err(LaneError::Closed(self.name.clone(), "drive completion dropped".into()));
+            }
+        }
     }
 
     // -- idle coordination & sealing --

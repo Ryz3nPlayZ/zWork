@@ -86,6 +86,9 @@ pub struct RuntimeConfig {
     pub system_prompt: Option<String>,
     pub entry_projectors: Arc<BTreeMap<String, crate::harness::session::context::EntryProjector>>,
     pub resources: Resources,
+    /// Context window of the configured model (pi reads the model
+    /// registry; the facade supplies the resolved window here).
+    pub context_window: Option<u64>,
 }
 
 impl std::fmt::Debug for RuntimeConfig {
@@ -116,6 +119,7 @@ impl Default for RuntimeConfig {
             system_prompt: None,
             entry_projectors: Arc::new(BTreeMap::new()),
             resources: Default::default(),
+            context_window: None,
         }
     }
 }
@@ -126,6 +130,8 @@ impl Default for RuntimeConfig {
 pub enum DriveOutcome {
     Settled { outcome: OperationResultRecord },
     WaitingRetry { operation_id: String, not_before: u64 },
+    /// The drive pass faulted (pi rejects the completion promise).
+    Failed { code: String, message: String },
 }
 
 /// One installed process-local drive pass over an operation (pi `Drive`).
@@ -153,20 +159,41 @@ impl Drive {
         (drive, rx)
     }
 
+    /// Build a drive without an external completion receiver (the claim
+    /// loop installs it; observers subscribe later).
+    pub fn standalone(operation_id: impl Into<String>, wait_for_retry: bool) -> Drive {
+        let (tx, _rx) = tokio::sync::watch::channel(None);
+        Drive {
+            operation_id: operation_id.into(),
+            wait_for_retry,
+            gate: super::effect_gate::SharedGate::new(super::effect_gate::EffectGate::new()),
+            close_signal: crate::harness::types::AbortSignal::new(),
+            completion: tx,
+        }
+    }
+
     pub fn settle(&self, outcome: DriveOutcome) {
         let _ = self.completion.send(Some(outcome));
     }
 
+    /// Subscribe to the completion of this pass (pi `Drive.completion`).
+    pub fn subscribe(&self) -> tokio::sync::watch::Receiver<Option<DriveOutcome>> {
+        self.completion.subscribe()
+    }
+
     /// Close the gate and fail the completion (pi `closeGate`).
     pub fn close_gate(&self, error: String) {
-        self.gate.close(error);
+        self.gate.close(error.clone());
         if !self.close_signal.is_aborted() {
             self.close_signal.abort();
         }
-        let _ = self.completion.send(Some(DriveOutcome::WaitingRetry {
-            operation_id: self.operation_id.clone(),
-            not_before: u64::MAX, // sentinel: never retry after close
-        }));
+        let _ = self.completion.send(Some(DriveOutcome::Failed { code: "closed".into(), message: error }));
+    }
+
+    /// Fail the completion after an unexpected procedure error (pi
+    /// `drive.fail`).
+    pub fn fail(&self, message: String) {
+        let _ = self.completion.send(Some(DriveOutcome::Failed { code: "fault".into(), message }));
     }
 }
 
