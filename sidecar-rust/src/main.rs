@@ -165,6 +165,12 @@ async fn main() {
         )
         .route("/api/chats/:chat_id/messages/:message_id", patch(server::patch_message))
         .route("/api/chats/:chat_id/messages/:message_id/truncate", post(server::truncate_message))
+        .route("/api/chats/:chat_id/fork", post(server::fork_chat))
+        .route("/api/chats/:chat_id/branches", get(server::list_branches))
+        .route(
+            "/api/chats/:chat_id/branches/:branch_id",
+            axum::routing::delete(server::delete_branch).post(server::restore_branch),
+        )
         .route("/api/chats/:chat_id/stop", post(server::stop_chat))
         .route("/api/chats/:chat_id/usage", get(server::chat_usage))
         .route("/api/chats/:chat_id/answer-question", post(server::answer_question))

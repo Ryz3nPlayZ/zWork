@@ -1554,6 +1554,51 @@ pub async fn truncate_message(
     Json(json!({ "success": result.is_some(), "chat": result }))
 }
 
+#[derive(Deserialize)]
+pub struct ForkChatRequest {
+    pub at_message_id: Option<String>,
+    #[serde(default)]
+    pub before: bool,
+}
+
+/// Fork a chat at (or before) a message: ancestry copies into a new chat,
+/// source untouched. Usage totals start at zero (pi fork policy).
+pub async fn fork_chat(Path(chat_id): Path<String>, Json(body): Json<ForkChatRequest>) -> impl IntoResponse {
+    let result = chatstore::fork_chat(&chat_id, body.at_message_id.as_deref(), body.before);
+    match result {
+        Some(chat) => Json(json!({ "success": true, "chat": chat })),
+        None => Json(json!({ "success": false, "error": "Chat or message not found" })),
+    }
+}
+
+/// Parked branch tails (rewind history) for the branch picker.
+pub async fn list_branches(Path(chat_id): Path<String>) -> impl IntoResponse {
+    match chatstore::get(&chat_id) {
+        Some(chat) => Json(json!({
+            "branches": chat.branches.iter().map(|b| json!({
+                "id": b.id,
+                "created_at": b.created_at,
+                "from_message_id": b.from_message_id,
+                "message_count": b.messages.len(),
+                "preview": b.messages.first()
+                    .map(|m| chatstore::content_to_text(&m.content).chars().take(80).collect::<String>())
+                    .unwrap_or_default(),
+            })).collect::<Vec<_>>(),
+        })),
+        None => Json(json!({ "error": "Chat not found" })),
+    }
+}
+
+pub async fn restore_branch(Path((chat_id, branch_id)): Path<(String, String)>) -> impl IntoResponse {
+    let result = chatstore::restore_branch(&chat_id, &branch_id);
+    Json(json!({ "success": result.is_some(), "chat": result }))
+}
+
+pub async fn delete_branch(Path((chat_id, branch_id)): Path<(String, String)>) -> impl IntoResponse {
+    let result = chatstore::delete_branch(&chat_id, &branch_id);
+    Json(json!({ "success": result.is_some(), "chat": result }))
+}
+
 // ─── Activity logs ───────────────────────────────────────────────────────────
 
 pub async fn activity_logs() -> impl IntoResponse {
