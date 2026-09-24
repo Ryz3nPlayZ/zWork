@@ -249,3 +249,64 @@ mod tests {
         assert!(err.message.contains("retry delay"));
     }
 }
+
+// ---------------------------------------------------------------------------
+// Durable assistant retry classification (pi-ai retry.ts)
+// ---------------------------------------------------------------------------
+
+use std::sync::LazyLock;
+use regex::Regex;
+
+use super::types::{now_ms, AssistantMessage, StopReason};
+
+/// Subscription/account limits and exhausted budgets look like throttles
+/// but never recover by retrying.
+static NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new("(?i)GoUsageLimitError|FreeUsageLimitError|Monthly usage limit reached|available balance|insufficient_quota|out of budget|quota exceeded|billing").unwrap()
+});
+
+/// Transient provider load, transport, and premature-stream failures.
+static RETRYABLE_PROVIDER_ERROR_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(concat!(
+        r"overloaded|currently experiencing high demand|rate.?limit|too many requests|",
+        r"429|500|502|503|504|520|524|service.?unavailable|server.?error|internal.?error|",
+        r"provider.?returned.?error|exceeded request buffer limit while retrying upstream|",
+        r"network.?error|connection.?error|connection.?refused|connection.?lost|other side closed|",
+        r"fetch failed|getaddrinfo|ENOTFOUND|EAI_AGAIN|upstream.?connect|reset before headers|",
+        r"socket hang up|socket connection was closed|timed? out|timeout|terminated|",
+        r"websocket.?closed|websocket.?error|",
+        r"ended without|stream ended before message_stop|stream ended before a terminal response event|",
+        r"http2 request did not get a response|retry delay|",
+        r"you can retry your request|try your request again|please retry your request|ResourceExhausted",
+    ))
+    .unwrap()
+});
+
+/// Classify one settled errored assistant message (pi
+/// `isRetryableAssistantError`): transient transport/provider failures
+/// retry; quota and billing limits never do.
+pub fn is_retryable_assistant_error(message: &AssistantMessage) -> bool {
+    if message.stop_reason != StopReason::Error {
+        return false;
+    }
+    let Some(error_message) = &message.error_message else {
+        return false;
+    };
+    if NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN.is_match(error_message) {
+        return false;
+    }
+    RETRYABLE_PROVIDER_ERROR_PATTERN.is_match(error_message)
+}
+
+/// Exponential backoff for one retry attempt (pi `retryDelayMs`):
+/// `base * 2^(attempt-1)` capped at the agent delay ceiling.
+pub fn policy_retry_delay_ms(base_delay_ms: u64, max_agent_delay_ms: u64, attempt: u32) -> u64 {
+    let shift = attempt.saturating_sub(1).min(63);
+    let delay = base_delay_ms.saturating_mul(1u64 << shift);
+    delay.min(max_agent_delay_ms)
+}
+
+/// When the next attempt may start (pi `retryNotBefore`).
+pub fn retry_not_before(base_delay_ms: u64, max_agent_delay_ms: u64, attempt: u32) -> u64 {
+    (now_ms() as u64).saturating_add(policy_retry_delay_ms(base_delay_ms, max_agent_delay_ms, attempt))
+}

@@ -390,6 +390,12 @@ impl Lane {
         }
     }
 
+    /// Emit one runtime event (drive procedures stream assistant progress
+    /// through the same channel the lane commands use).
+    pub(crate) fn emit_public(&self, event: HarnessEvent) {
+        let _ = self.event_tx.send(event);
+    }
+
     fn signal_state_change(&self) {
         self.state_change.send_modify(|generation| *generation += 1);
     }

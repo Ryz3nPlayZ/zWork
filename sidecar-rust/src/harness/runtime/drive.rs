@@ -10,6 +10,8 @@
 
 pub mod boundary;
 pub mod checkpoint;
+pub mod generation;
+pub mod response;
 pub mod structural;
 
 use std::sync::Arc;
@@ -101,10 +103,11 @@ async fn drive_operation_inner(lane: &Arc<Lane>, drive: &Arc<Drive>) -> Result<D
                 OperationState::Checkpoint { checkpoint, scope, .. } => {
                     run_checkpoint(lane, drive, scope, checkpoint, lane.context_window()).await?
                 }
-                OperationState::AssistantReady { .. } | OperationState::AssistantRetryWait { .. } => {
-                    return Err(SessionError::Other(
-                        SliceNotImplemented { operation: "generation" }.to_string(),
-                    ));
+                OperationState::AssistantReady { generation, next_attempt, .. } => {
+                    super::drive::generation::run_generation(lane, drive, generation, *next_attempt).await?
+                }
+                OperationState::AssistantRetryWait { generation, retry, .. } => {
+                    super::drive::generation::run_retry_wait(lane, drive, retry, generation).await?
                 }
                 OperationState::AssistantEffectPending { .. } => {
                     return Err(SessionError::Other(
@@ -162,7 +165,7 @@ mod tests {
     use crate::harness::runtime::types::RuntimeConfig;
     use crate::harness::session::memory::MemoryStorage;
     use crate::harness::session::session::Session;
-    use crate::harness::session::types::{BranchScan, OperationState, SessionMetadata, TerminalStatus};
+    use crate::harness::session::types::{BranchScan, OperationState, SessionMetadata, TerminalStatus, ToolCallStatus};
     use crate::harness::session::values::operation_state as operation_state_addr;
     use std::sync::{Arc, RwLock};
 
@@ -210,27 +213,272 @@ mod tests {
         types
     }
 
+    /// Install a model source + stream that replays one scripted assistant
+    /// response and point the lane configuration at it.
+    async fn install_scripted_stream(lane: &Arc<Lane>, response_text: &'static str) {
+        use crate::harness::types::{AssistantContent, TextContent};
+        let model = crate::harness::types::Model {
+            id: "scripted".into(),
+            name: "scripted".into(),
+            api: crate::harness::types::Api::AnthropicMessages,
+            provider: "test".into(),
+            base_url: String::new(),
+            reasoning: false,
+            thinking_level_map: None,
+            input: vec![],
+            cost: Default::default(),
+            prompt_cache: None,
+            context_window: 200_000,
+            max_tokens: 8_192,
+            headers: None,
+            compat: None,
+        };
+        lane.set_model("test", "scripted").await.unwrap();
+        let handle = lane.config_handle();
+        let mut config = handle.write().unwrap();
+        let source_model = model.clone();
+        config.context_window = Some(model.context_window);
+        config.model_source = Some(Arc::new(move |provider: &str, model_id: &str| {
+            (provider == "test" && model_id == "scripted").then(|| source_model.clone())
+        }));
+        config.stream = Some(Arc::new(move |model, _ctx, _opts| {
+            let (tx, rx) = tokio::sync::mpsc::channel(16);
+            tokio::spawn(async move {
+                use crate::harness::types::{AssistantMessage, AssistantMessageEvent, StopReason, Usage};
+                let partial_empty = AssistantMessage::pending(&model);
+                let _ = tx.send(AssistantMessageEvent::Start { partial: partial_empty.clone() }).await;
+                let mut partial = AssistantMessage::pending(&model);
+                partial.content = vec![AssistantContent::Text(TextContent { text: String::new(), text_signature: None })];
+                let _ = tx
+                    .send(AssistantMessageEvent::TextStart { content_index: 0, partial: partial.clone() })
+                    .await;
+                let block = TextContent { text: response_text.to_string(), text_signature: None };
+                partial.content = vec![AssistantContent::Text(block)];
+                let _ = tx
+                    .send(AssistantMessageEvent::TextDelta {
+                        content_index: 0,
+                        delta: response_text.to_string(),
+                        partial: partial.clone(),
+                    })
+                    .await;
+                let _ = tx
+                    .send(AssistantMessageEvent::TextEnd {
+                        content_index: 0,
+                        content: response_text.to_string(),
+                        partial: partial.clone(),
+                    })
+                    .await;
+                let mut done = partial;
+                done.stop_reason = StopReason::Stop;
+                done.usage = Usage { input: 3, output: 2, total_tokens: 5, ..Default::default() };
+                let _ = tx
+                    .send(AssistantMessageEvent::Done { reason: StopReason::Stop, message: done })
+                    .await;
+            });
+            rx
+        }));
+    }
+
+    /// Scripted stream that settles as a retryable provider error.
+    async fn install_error_stream(lane: &Arc<Lane>, error_message: &'static str) {
+        use crate::harness::types::{AssistantMessage, AssistantMessageEvent, StopReason};
+        let model = crate::harness::types::Model {
+            id: "scripted".into(),
+            name: "scripted".into(),
+            api: crate::harness::types::Api::AnthropicMessages,
+            provider: "test".into(),
+            base_url: String::new(),
+            reasoning: false,
+            thinking_level_map: None,
+            input: vec![],
+            cost: Default::default(),
+            prompt_cache: None,
+            context_window: 200_000,
+            max_tokens: 8_192,
+            headers: None,
+            compat: None,
+        };
+        lane.set_model("test", "scripted").await.unwrap();
+        let handle = lane.config_handle();
+        let mut config = handle.write().unwrap();
+        let source_model = model.clone();
+        config.context_window = Some(model.context_window);
+        config.model_source = Some(Arc::new(move |provider: &str, model_id: &str| {
+            (provider == "test" && model_id == "scripted").then(|| source_model.clone())
+        }));
+        config.stream = Some(Arc::new(move |model, _ctx, _opts| {
+            let (tx, rx) = tokio::sync::mpsc::channel(16);
+            tokio::spawn(async move {
+                let mut failed = AssistantMessage::pending(&model);
+                failed.stop_reason = StopReason::Error;
+                failed.error_message = Some(error_message.to_string());
+                let _ = tx
+                    .send(AssistantMessageEvent::Error { reason: StopReason::Error, error: failed })
+                    .await;
+            });
+            rx
+        }));
+    }
+
+    /// Scripted stream that settles with one tool call.
+    async fn install_tool_call_stream(lane: &Arc<Lane>, tool_name: &'static str) {
+        use crate::harness::types::{AssistantContent, AssistantMessage, AssistantMessageEvent, StopReason, TextContent, ToolCall};
+        let model = crate::harness::types::Model {
+            id: "scripted".into(),
+            name: "scripted".into(),
+            api: crate::harness::types::Api::AnthropicMessages,
+            provider: "test".into(),
+            base_url: String::new(),
+            reasoning: false,
+            thinking_level_map: None,
+            input: vec![],
+            cost: Default::default(),
+            prompt_cache: None,
+            context_window: 200_000,
+            max_tokens: 8_192,
+            headers: None,
+            compat: None,
+        };
+        lane.set_model("test", "scripted").await.unwrap();
+        let handle = lane.config_handle();
+        let mut config = handle.write().unwrap();
+        let source_model = model.clone();
+        config.context_window = Some(model.context_window);
+        config.model_source = Some(Arc::new(move |provider: &str, model_id: &str| {
+            (provider == "test" && model_id == "scripted").then(|| source_model.clone())
+        }));
+        config.stream = Some(Arc::new(move |model, _ctx, _opts| {
+            let (tx, rx) = tokio::sync::mpsc::channel(16);
+            tokio::spawn(async move {
+                let mut partial = AssistantMessage::pending(&model);
+                partial.content = vec![AssistantContent::Text(TextContent { text: "running".into(), text_signature: None })];
+                let mut done = partial;
+                done.content.push(AssistantContent::ToolCall(ToolCall {
+                    id: "call-1".into(),
+                    name: tool_name.to_string(),
+                    arguments: serde_json::json!({"cmd": "ls"}),
+                    thought_signature: None,
+                    namespace: None,
+                }));
+                done.stop_reason = StopReason::ToolUse;
+                let _ = tx
+                    .send(AssistantMessageEvent::Done { reason: StopReason::ToolUse, message: done })
+                    .await;
+            });
+            rx
+        }));
+    }
+
     #[tokio::test]
-    async fn drive_walks_starting_through_checkpoint_to_generation_slice() {
+    async fn missing_model_settles_as_configuration_failure() {
         let (lane, mut events) = test_lane();
         let operation_id = accept(&lane, "hello").await;
 
         let outcome = lane.drive(&operation_id, false).await.unwrap();
         match &outcome {
-            DriveOutcome::Failed { message, .. } => assert!(message.contains("generation"), "{message}"),
-            other => panic!("expected slice failure, got {other:?}"),
+            DriveOutcome::Settled { outcome } => {
+                assert_eq!(outcome.status, TerminalStatus::Failed);
+                assert_eq!(outcome.error.as_ref().unwrap().code, "model_unavailable");
+            }
+            other => panic!("expected configuration failure, got {other:?}"),
+        }
+        assert!(lane.operation_snapshot().is_none());
+        assert!(drain(&mut events).contains(&"run_end"));
+    }
+
+    #[tokio::test]
+    async fn scripted_response_walks_the_full_run_to_completion() {
+        let (lane, mut events) = test_lane();
+        install_scripted_stream(&lane, "all done").await;
+        let operation_id = accept(&lane, "hello").await;
+
+        let outcome = lane.drive(&operation_id, false).await.unwrap();
+        match &outcome {
+            DriveOutcome::Settled { outcome } => assert_eq!(outcome.status, TerminalStatus::Completed),
+            other => panic!("expected completed run, got {other:?}"),
         }
 
-        // The pass persisted its progress before hitting the unported slice.
-        match durable_state(&lane, &operation_id) {
-            OperationState::AssistantReady { generation, next_attempt, .. } => {
-                let entries = lane.find_entries(BranchScan { oldest_first: true, ..Default::default() }).unwrap();
-                assert_eq!(generation.trigger_entry_id, entries[0].id);
-                assert_eq!(next_attempt, 1);
-            }
-            other => panic!("expected assistant.ready, got {}", other.at()),
+        // Prompt + assistant response entries, assistant as the new tip.
+        let entries = lane.find_entries(BranchScan { oldest_first: true, ..Default::default() }).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert!(entries[1].as_message().unwrap().is_assistant());
+        let rows = lane
+            .session
+            .mutate(|mutator| mutator.scan_usage(&crate::harness::session::types::UsageScan::default()))
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(!rows[0].adjustment);
+
+        let types = drain(&mut events);
+        for expected in
+            ["run_start", "turn_start", "message_start", "message_update", "message_end", "entry_added", "usage", "turn_end", "run_end"]
+        {
+            assert!(types.contains(&expected), "missing {expected} in {types:?}");
         }
-        assert!(drain(&mut events).contains(&"message_start"));
+    }
+
+    #[tokio::test]
+    async fn retryable_errors_wait_before_the_next_attempt() {
+        let (lane, mut events) = test_lane();
+        install_error_stream(&lane, "overloaded error, please retry (503)").await;
+        lane.config_handle().write().unwrap().retry_policy = crate::harness::runtime::types::RetryPolicySnapshot {
+            enabled: true,
+            max_retries: 2,
+            base_delay_ms: 10,
+            max_agent_delay_ms: Some(100),
+        };
+        let operation_id = accept(&lane, "hello").await;
+
+        // wait_for_retry = false surfaces the durable wait to the host.
+        let outcome = lane.drive(&operation_id, false).await.unwrap();
+        let not_before = match &outcome {
+            DriveOutcome::WaitingRetry { not_before, .. } => *not_before,
+            other => panic!("expected a durable retry wait, got {other:?}"),
+        };
+        assert!(not_before > 0);
+        match durable_state(&lane, &operation_id) {
+            OperationState::AssistantRetryWait { retry, .. } => {
+                assert_eq!(retry.next_attempt, 2);
+                assert_eq!(retry.not_before, not_before);
+                assert!(retry.error_message.contains("overloaded"));
+            }
+            other => panic!("expected assistant.retry_wait, got {}", other.at()),
+        }
+        assert!(drain(&mut events).contains(&"retry_scheduled"));
+
+        // A retryable quota error never retries: it fails the run.
+        let (lane, _events) = test_lane();
+        install_error_stream(&lane, "insufficient_quota: billing issue").await;
+        let operation_id = accept(&lane, "hello").await;
+        let outcome = lane.drive(&operation_id, false).await.unwrap();
+        match outcome {
+            DriveOutcome::Settled { outcome } => assert_eq!(outcome.status, TerminalStatus::Failed),
+            other => panic!("expected failed settle, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn tool_call_responses_plan_a_durable_batch() {
+        let (lane, _events) = test_lane();
+        install_tool_call_stream(&lane, "bash").await;
+        let operation_id = accept(&lane, "run this").await;
+
+        let outcome = lane.drive(&operation_id, false).await.unwrap();
+        match &outcome {
+            DriveOutcome::Failed { message, .. } => assert!(message.contains("tools"), "{message}"),
+            other => panic!("expected tools slice failure, got {other:?}"),
+        }
+        match durable_state(&lane, &operation_id) {
+            OperationState::Tools { batch, .. } => {
+                assert_eq!(batch.calls.len(), 1);
+                assert_eq!(batch.calls[0].status, ToolCallStatus::Planned);
+                assert_eq!(batch.calls[0].source_index, 1);
+                let entries = lane.find_entries(BranchScan::default()).unwrap();
+                assert!(entries.iter().any(|entry| entry.id == batch.assistant_entry_id));
+            }
+            other => panic!("expected tools, got {}", other.at()),
+        }
     }
 
     #[tokio::test]
@@ -239,15 +487,10 @@ mod tests {
         let operation_id = accept(&lane, "work").await;
         let steer = lane.enqueue(QueueKind::Steer, AgentMessage::user_text("redirect")).await.unwrap();
 
+        // Without a model source the run settles as a configuration
+        // failure — after the boundary consumed the steer.
         let outcome = lane.drive(&operation_id, false).await.unwrap();
-        assert!(matches!(outcome, DriveOutcome::Failed { .. }));
-
-        match durable_state(&lane, &operation_id) {
-            OperationState::AssistantReady { generation, .. } => {
-                assert_eq!(generation.trigger_entry_id, steer);
-            }
-            other => panic!("expected assistant.ready, got {}", other.at()),
-        }
+        assert!(matches!(outcome, DriveOutcome::Settled { .. }));
         // The steer was consumed: the tree now holds prompt + steer.
         assert_eq!(lane.find_entries(BranchScan::default()).unwrap().len(), 2);
     }
@@ -259,12 +502,9 @@ mod tests {
         let steer = lane.enqueue(QueueKind::Steer, AgentMessage::user_text("now")).await.unwrap();
         let follow_up = lane.enqueue(QueueKind::FollowUp, AgentMessage::user_text("later")).await.unwrap();
 
-        lane.drive(&operation_id, false).await.unwrap();
-        // The steer triggered generation; the follow-up stayed queued.
-        match durable_state(&lane, &operation_id) {
-            OperationState::AssistantReady { generation, .. } => assert_eq!(generation.trigger_entry_id, steer),
-            other => panic!("expected assistant.ready, got {}", other.at()),
-        }
+        let outcome = lane.drive(&operation_id, false).await.unwrap();
+        assert!(matches!(outcome, DriveOutcome::Settled { .. }));
+        // The steer entered the tree; the follow-up did not.
         assert!(lane
             .find_entries(BranchScan::default())
             .unwrap()

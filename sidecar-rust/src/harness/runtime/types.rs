@@ -26,6 +26,10 @@ use super::effect_gate::SharedGate;
 /// pi-ai `DEFAULT_MAX_AGENT_RETRY_DELAY_MS`.
 pub const DEFAULT_MAX_AGENT_RETRY_DELAY_MS: u64 = 60_000;
 
+/// Resolves a (provider, model id) pair to the live model record.
+pub type ModelSource =
+    Arc<dyn Fn(&str, &str) -> Option<crate::harness::types::Model> + Send + Sync>;
+
 /// Serializable identity of one provider model (pi `ModelIdentity`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct ModelIdentity {
@@ -89,6 +93,13 @@ pub struct RuntimeConfig {
     /// Context window of the configured model (pi reads the model
     /// registry; the facade supplies the resolved window here).
     pub context_window: Option<u64>,
+    /// Resolves a lane's configured model identity (pi `lane.models`).
+    pub model_source: Option<ModelSource>,
+    /// Provider streaming entry point (pi `lane.models.streamSimple`).
+    pub stream: Option<crate::harness::agent_types::StreamFn>,
+    /// Tool declarations available to lanes (pi `config.tools`; the tool
+    /// procedures attach executors alongside).
+    pub tool_declarations: Arc<Vec<crate::harness::types::Tool>>,
 }
 
 impl std::fmt::Debug for RuntimeConfig {
@@ -120,6 +131,9 @@ impl Default for RuntimeConfig {
             entry_projectors: Arc::new(BTreeMap::new()),
             resources: Default::default(),
             context_window: None,
+            model_source: None,
+            stream: None,
+            tool_declarations: Arc::new(Vec::new()),
         }
     }
 }

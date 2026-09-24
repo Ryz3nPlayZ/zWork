@@ -16,6 +16,7 @@
 pub mod agent;
 pub mod agent_loop;
 pub mod agent_types;
+pub mod assistant_frame;
 pub mod compaction;
 pub mod estimate;
 pub mod json_parse;

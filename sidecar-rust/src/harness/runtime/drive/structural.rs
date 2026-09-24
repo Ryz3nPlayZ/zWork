@@ -89,3 +89,36 @@ pub fn durable_compaction_preparation(
         settings: prepared.settings,
     }
 }
+
+/// Prepare one overflow compaction before the response settlement
+/// transaction (pi `prepareOverflowCompaction`). Skipped when overflow
+/// recovery already ran for this generation.
+pub async fn prepare_overflow_compaction(
+    lane: &Arc<Lane>,
+    drive: &Arc<Drive>,
+    scope: &OperationScope,
+    generation_trigger_entry_id: &str,
+    overflow_recovery_used: bool,
+) -> SessionResult<Option<(String, DurableStructuralPreparation)>> {
+    if overflow_recovery_used {
+        return Ok(None);
+    }
+    let settings = scope.settings.compaction;
+    if !settings.enabled {
+        return Ok(None);
+    }
+    let entries = match read_bounded_entries(lane, drive).await? {
+        ContinueOutcome::CancelRequested => return Ok(None),
+        ContinueOutcome::Result(entries) => entries,
+    };
+    let _ = generation_trigger_entry_id;
+    let projectors = lane.read_config().entry_projectors;
+    let messages = build_session_context(&entries, &projectors)?;
+    let Some(prepared) = prepare_compaction(&messages, settings) else {
+        return Ok(None);
+    };
+    Ok(Some((
+        lane.session.next_id(),
+        durable_compaction_preparation(&prepared, &messages[prepared.first_kept_index..]),
+    )))
+}
