@@ -13,6 +13,7 @@
 
 pub mod commit;
 pub mod conformance;
+pub mod context;
 pub mod fork_policy;
 #[allow(clippy::type_complexity)]
 pub mod memory;

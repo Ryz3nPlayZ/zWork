@@ -7,14 +7,118 @@
 //! generation), and TS's closure-typed `materialize` decisions become
 //! boxed `FnOnce`s.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
+
+use crate::harness::compaction::CompactionSettings;
+use crate::harness::prompt_templates::PromptTemplate;
 use crate::harness::session::commit::Write;
 use crate::harness::session::types::{
-    CommitResult, InboxItem, LaneConfiguration, Operation, OperationResultRecord, OperationState,
+    CommitResult, HarnessStreamOptionsSnapshot, InboxItem, LaneConfiguration, NormalizedRetryPolicy, Operation,
+    OperationResultRecord, OperationState, QueueMode, ToolExecutionMode,
 };
+use crate::harness::skills::Skill;
 
 use super::effect_gate::SharedGate;
+
+/// pi-ai `DEFAULT_MAX_AGENT_RETRY_DELAY_MS`.
+pub const DEFAULT_MAX_AGENT_RETRY_DELAY_MS: u64 = 60_000;
+
+/// Serializable identity of one provider model (pi `ModelIdentity`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct ModelIdentity {
+    pub provider: String,
+    pub model_id: String,
+}
+
+/// Serializable snapshot of the harness retry policy (pi-ai `RetryPolicy`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RetryPolicySnapshot {
+    pub enabled: bool,
+    pub max_retries: u32,
+    pub base_delay_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_agent_delay_ms: Option<u64>,
+}
+
+impl RetryPolicySnapshot {
+    /// Drive-machine retry parameters (pi `normalizedRetryPolicy`): disabled
+    /// means a single attempt; the agent-side delay cap defaults to 60s.
+    pub fn normalized(&self) -> NormalizedRetryPolicy {
+        NormalizedRetryPolicy {
+            max_attempts: if self.enabled { self.max_retries.saturating_add(1) } else { 1 },
+            base_delay_ms: self.base_delay_ms,
+            max_agent_delay_ms: self.max_agent_delay_ms.unwrap_or(DEFAULT_MAX_AGENT_RETRY_DELAY_MS),
+        }
+    }
+}
+
+/// Static resources exposed to prompts and hooks (pi `Resources`).
+#[derive(Clone, Default)]
+pub struct Resources {
+    pub skills: Arc<Vec<Skill>>,
+    pub prompt_templates: Arc<Vec<PromptTemplate>>,
+}
+
+impl std::fmt::Debug for Resources {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Resources")
+            .field("skills", &self.skills.len())
+            .field("prompt_templates", &self.prompt_templates.len())
+            .finish()
+    }
+}
+
+/// Process-local harness configuration consulted by lane procedures
+/// (pi runtime `Config<TContext>`). Tools join when the tool procedures
+/// land; providers already live in the harness.
+#[derive(Clone)]
+pub struct RuntimeConfig {
+    pub stream_options: HarnessStreamOptionsSnapshot,
+    pub retry_policy: RetryPolicySnapshot,
+    pub compaction: CompactionSettings,
+    pub steering_mode: QueueMode,
+    pub follow_up_mode: QueueMode,
+    pub tool_execution: ToolExecutionMode,
+    pub system_prompt: Option<String>,
+    pub entry_projectors: Arc<BTreeMap<String, crate::harness::session::context::EntryProjector>>,
+    pub resources: Resources,
+}
+
+impl std::fmt::Debug for RuntimeConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RuntimeConfig")
+            .field("stream_options", &self.stream_options)
+            .field("retry_policy", &self.retry_policy)
+            .field("compaction", &self.compaction)
+            .field("steering_mode", &self.steering_mode)
+            .field("follow_up_mode", &self.follow_up_mode)
+            .field("tool_execution", &self.tool_execution)
+            .field("system_prompt", &self.system_prompt)
+            .field("entry_projectors", &self.entry_projectors.keys().collect::<Vec<_>>())
+            .field("resources", &self.resources)
+            .finish()
+    }
+}
+
+impl Default for RuntimeConfig {
+    fn default() -> Self {
+        RuntimeConfig {
+            stream_options: Default::default(),
+            retry_policy: Default::default(),
+            compaction: CompactionSettings::default(),
+            steering_mode: QueueMode::All,
+            follow_up_mode: QueueMode::All,
+            tool_execution: ToolExecutionMode::Sequential,
+            system_prompt: None,
+            entry_projectors: Arc::new(BTreeMap::new()),
+            resources: Default::default(),
+        }
+    }
+}
 
 /// Terminal outcome of one drive pass (pi `DriveOutcome`; the `deferred`
 /// variant is excluded with the deferred-generation feature).

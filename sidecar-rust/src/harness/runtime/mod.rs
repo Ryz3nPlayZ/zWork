@@ -9,4 +9,8 @@
 //! state and jumps to the responsible procedure.
 
 pub mod effect_gate;
+pub mod events;
+pub mod hooks;
+pub mod terminal;
+pub mod transcript;
 pub mod types;

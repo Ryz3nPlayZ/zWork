@@ -18,6 +18,13 @@ pub const COMPACTION_SUMMARY_SUFFIX: &str = "\n</summary>";
 /// `custom_type` of a compaction summary message.
 pub const COMPACTION_SUMMARY_TYPE: &str = "compactionSummary";
 
+/// `custom_type` of a branch summary message.
+pub const BRANCH_SUMMARY_TYPE: &str = "branchSummary";
+
+pub const BRANCH_SUMMARY_PREFIX: &str =
+    "The following is a summary of a branch that this conversation came back from:\n\n<summary>\n";
+pub const BRANCH_SUMMARY_SUFFIX: &str = "</summary>";
+
 /// Create a generic custom message.
 pub fn create_custom_message(
     custom_type: impl Into<String>,
@@ -53,6 +60,24 @@ pub fn create_compaction_summary_message(summary: &str, tokens_before: u64, deta
     }
     let text = format!("{COMPACTION_SUMMARY_PREFIX}{summary}{COMPACTION_SUMMARY_SUFFIX}");
     create_custom_message(COMPACTION_SUMMARY_TYPE, UserMessageContent::Text(text), true, Some(d))
+}
+
+/// Create a branch summary message (`createBranchSummaryMessage`): the
+/// summary a lane sees after navigating back from an abandoned branch.
+pub fn create_branch_summary_message(summary: &str, from_id: Option<&str>, details: Option<Value>) -> AgentMessage {
+    let mut d = json!({
+        "summary": summary,
+        "fromId": from_id,
+    });
+    if let Some(Value::Object(extra)) = details {
+        if let Value::Object(map) = &mut d {
+            for (k, v) in extra {
+                map.insert(k, v);
+            }
+        }
+    }
+    let text = format!("{BRANCH_SUMMARY_PREFIX}{summary}{BRANCH_SUMMARY_SUFFIX}");
+    create_custom_message(BRANCH_SUMMARY_TYPE, UserMessageContent::Text(text), true, Some(d))
 }
 
 pub fn is_compaction_summary(message: &AgentMessage) -> bool {

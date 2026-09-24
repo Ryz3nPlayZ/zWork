@@ -53,6 +53,18 @@ pub fn insert_entry(entry: NewEntry) -> Write {
     Write::Entry(entry)
 }
 
+/// Turn a planned entry into a real one using storage-assigned metadata
+/// (pi `materializeCommittedEntry`).
+pub fn materialize_committed_entry(entry: &NewEntry, seq: u64, timestamp: u64) -> Entry {
+    Entry {
+        id: entry.id.clone(),
+        parent_id: entry.parent_id.clone(),
+        seq,
+        timestamp,
+        body: entry.body.clone(),
+    }
+}
+
 pub fn insert_usage(row: UsageRowNoSeq) -> Write {
     Write::Usage(row)
 }

@@ -19,8 +19,8 @@ use crate::harness::types::{Message as LlmMessage, StopReason};
 use super::commit::{insert_entry, NewEntry, UsageRowNoSeq, Write};
 use super::mutation_line::MutationLine;
 use super::types::{
-    BranchScan, Entry, EntryBody, EntryScan, IdGenerator, SessionError, SessionMetadata, SessionResult, SessionStats,
-    Storage, StorageBranchScan, UuidV7Generator,
+    BranchScan, Entry, EntryBody, EntryScan, EntryStructure, IdGenerator, SessionError, SessionMetadata, SessionResult,
+    SessionStats, Storage, StorageBranchScan, UsageRow, UsageScan, UuidV7Generator,
 };
 use super::values::{
     append_list, branch_tip, delete_list, delete_value, entry_label, session_name, set_value, Addr, ListReadOptions,
@@ -70,6 +70,38 @@ impl<'a> SessionMutator<'a> {
 
     pub fn get_value(&self, address: &Addr) -> SessionResult<Option<StoredValue>> {
         self.storage.get_value(address)
+    }
+
+    pub fn scan_values(&self, prefix: &Addr) -> SessionResult<Vec<StoredValue>> {
+        self.storage.scan_values(prefix)
+    }
+
+    pub fn read_list(
+        &self,
+        address: &Addr,
+        options: ListReadOptions,
+    ) -> SessionResult<Vec<super::values::ListElement>> {
+        self.storage.read_list(address, options)
+    }
+
+    pub fn scan_branch(&self, query: &StorageBranchScan) -> SessionResult<Vec<Entry>> {
+        self.storage.scan_branch(query)
+    }
+
+    pub fn scan_branch_structure(&self, query: &StorageBranchScan) -> SessionResult<Vec<EntryStructure>> {
+        self.storage.scan_branch_structure(query)
+    }
+
+    pub fn scan_entries(&self, query: &EntryScan) -> SessionResult<Vec<Entry>> {
+        self.storage.scan_entries(query)
+    }
+
+    pub fn scan_usage(&self, query: &UsageScan) -> SessionResult<Vec<UsageRow>> {
+        self.storage.scan_usage(query)
+    }
+
+    pub fn get_stats(&self) -> SessionResult<SessionStats> {
+        self.storage.get_stats()
     }
 
     pub fn commit(&mut self, writes: Vec<Write>) -> SessionResult<super::types::CommitResult> {
