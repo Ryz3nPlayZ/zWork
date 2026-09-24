@@ -198,10 +198,22 @@ pub struct LanePatch {
 
 /// An effect-free decision made on a lane's serialized mutation line
 /// (pi `CommitDecision`). `materialize` maps the commit result to the
-/// caller's value once the writes are durable.
+/// caller's value once the writes are durable; `events` derives harness
+/// events from storage-assigned commit metadata (seq/timestamp).
 pub struct CommitDecision<TResult> {
     pub writes: Vec<Write>,
     pub materialize: Box<dyn FnOnce(CommitResult) -> TResult + Send>,
+    pub events: Option<Box<dyn FnOnce(&CommitResult) -> Vec<super::events::HarnessEvent> + Send>>,
+}
+
+impl<TResult> CommitDecision<TResult> {
+    /// Decision with no harness events.
+    pub fn quiet(
+        writes: Vec<Write>,
+        materialize: Box<dyn FnOnce(CommitResult) -> TResult + Send>,
+    ) -> Self {
+        CommitDecision { writes, materialize, events: None }
+    }
 }
 
 /// One lane command (pi `LaneCommand`).
@@ -233,6 +245,7 @@ pub enum OperationCommand<TResult> {
         record: OperationResultRecord,
         lane: Option<LanePatch>,
         materialize: Box<dyn FnOnce(CommitResult) -> TResult + Send>,
+        events: Option<Box<dyn FnOnce(&CommitResult) -> Vec<super::events::HarnessEvent> + Send>>,
     },
     Return {
         result: TResult,

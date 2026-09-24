@@ -11,6 +11,7 @@
 pub mod effect_gate;
 pub mod events;
 pub mod hooks;
+pub mod lane;
 pub mod terminal;
 pub mod transcript;
 pub mod types;

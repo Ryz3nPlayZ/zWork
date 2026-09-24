@@ -237,7 +237,7 @@ use super::values::{Addr, ListElement, ListReadOptions, StoredValue};
 
 /// The backend contract: an atomic multi-write commit with monotonic seq;
 /// everything else is a query. Synchronous by design (see module docs).
-pub trait Storage: Send {
+pub trait Storage: Send + Sync {
     fn commit(&self, writes: Vec<Write>) -> SessionResult<CommitResult>;
 
     fn get_entries(&self, ids: &[String]) -> SessionResult<HashMap<String, Entry>>;
@@ -319,6 +319,7 @@ pub enum ForkOptions {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct LaneConfiguration {
     pub provider: String,
     pub model_id: String,
@@ -327,6 +328,7 @@ pub struct LaneConfiguration {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct LaneState {
     pub current_operation_id: Option<String>,
     pub last_operation_id: Option<String>,

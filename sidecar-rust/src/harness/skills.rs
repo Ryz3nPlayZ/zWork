@@ -448,6 +448,22 @@ pub enum SkillFileReadTool {
 
 /// `formatSkillsForPrompt`: `<available_skills>` block per the Agent Skills
 /// integration guide. Skills with `disable-model-invocation` are omitted.
+/// One skill invocation as sent to the model (pi `formatSkillInvocation`).
+/// `content` is the SKILL.md body; callers read it from disk at invocation.
+pub fn format_skill_invocation(skill: &Skill, content: &str, additional_instructions: Option<&str>) -> String {
+    let skill_block = format!(
+        "<skill name=\"{}\" location=\"{}\">\nReferences are relative to {}.\n\n{}\n</skill>",
+        skill.name,
+        skill.file_path.display(),
+        skill.base_dir.display(),
+        content
+    );
+    match additional_instructions {
+        Some(extra) => format!("{skill_block}\n\n{extra}"),
+        None => skill_block,
+    }
+}
+
 pub fn format_skills_for_prompt(skills: &[Skill], file_read_tool: SkillFileReadTool) -> String {
     let visible: Vec<&Skill> = skills.iter().filter(|s| !s.disable_model_invocation).collect();
     if visible.is_empty() {

@@ -130,7 +130,7 @@ pub fn assert_fork_invariants(dest: &dyn Storage) -> super::types::SessionResult
 
     // Lane config survives; lane state reset; usage starts at zero.
     let config = dest.get_value(&lane_config("main"))?.expect("lane config");
-    assert_eq!(config.value["model_id"], "m");
+    assert_eq!(config.value["modelId"], "m");
     let state: LaneState = serde_json::from_value(dest.get_value(&lane_state("main"))?.expect("lane state").value).unwrap();
     assert_eq!(state.current_operation_id, None);
     assert!(state.inbox.is_empty());
