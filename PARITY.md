@@ -66,9 +66,16 @@ Status: ✅ done · 🚧 in progress · ⬜ remaining · ➖ excluded (with reas
 - ✅ Fork (branch-scope / tree-scope) + fork policy (lane state resets,
       config kept, op/pending/result/usage excluded)
 - ✅ 13-leaf durable `OperationState` vocabulary (types ready for M4)
-- ⬜ Chatstore projection; non-destructive truncate
-- ⬜ Server `POST /api/chats/:id/fork`; rewind w/ optional branch summary
-- ⬜ Frontend: fork from message, branch picker
+- ✅ Chatstore projection mechanisms; non-destructive truncate (dropped
+      tails park as restorable `BranchRecord`s); fork copies ancestry with
+      zeroed usage totals; restore/delete branch records
+- ✅ Server `POST /api/chats/:id/fork`, `GET .../branches`,
+      `POST|DELETE .../branches/:id` — verified end-to-end
+- ✅ Frontend: fork-from-message button + branch picker (implemented +
+      typechecked in tree; uncommitted with the in-flight UI batch)
+- Note: the entry tree becomes the model-facing source of truth at the
+      M4 cutover (bridge drives the durable runtime) — no throwaway mirror
+      layer between chatstore and sessions was built in M3
 
 ## M4 — Durable runtime (`SPEC.md` §runtime + durability specs)
 
