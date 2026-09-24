@@ -13,6 +13,8 @@ pub mod checkpoint;
 pub mod generation;
 pub mod response;
 pub mod structural;
+pub mod tool_placement;
+pub mod tools;
 
 use std::sync::Arc;
 
@@ -114,9 +116,7 @@ async fn drive_operation_inner(lane: &Arc<Lane>, drive: &Arc<Drive>) -> Result<D
                         SliceNotImplemented { operation: "assistant recovery" }.to_string(),
                     ));
                 }
-                OperationState::Tools { .. } => {
-                    return Err(SessionError::Other(SliceNotImplemented { operation: "tools" }.to_string()));
-                }
+                OperationState::Tools { .. } => super::drive::tools::run_tools(lane, drive).await?,
                 OperationState::DeferredSuspended { .. } | OperationState::DeferredEffectPending { .. } => {
                     return Err(SessionError::Other(
                         SliceNotImplemented { operation: "deferred" }.to_string(),
@@ -320,7 +320,8 @@ mod tests {
         }));
     }
 
-    /// Scripted stream that settles with one tool call.
+    /// Scripted stream that settles with one tool call on the first
+    /// response and plain text afterwards.
     async fn install_tool_call_stream(lane: &Arc<Lane>, tool_name: &'static str) {
         use crate::harness::types::{AssistantContent, AssistantMessage, AssistantMessageEvent, StopReason, TextContent, ToolCall};
         let model = crate::harness::types::Model {
@@ -347,26 +348,71 @@ mod tests {
         config.model_source = Some(Arc::new(move |provider: &str, model_id: &str| {
             (provider == "test" && model_id == "scripted").then(|| source_model.clone())
         }));
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         config.stream = Some(Arc::new(move |model, _ctx, _opts| {
             let (tx, rx) = tokio::sync::mpsc::channel(16);
+            let calls = Arc::clone(&calls);
             tokio::spawn(async move {
-                let mut partial = AssistantMessage::pending(&model);
-                partial.content = vec![AssistantContent::Text(TextContent { text: "running".into(), text_signature: None })];
-                let mut done = partial;
-                done.content.push(AssistantContent::ToolCall(ToolCall {
-                    id: "call-1".into(),
-                    name: tool_name.to_string(),
-                    arguments: serde_json::json!({"cmd": "ls"}),
-                    thought_signature: None,
-                    namespace: None,
-                }));
-                done.stop_reason = StopReason::ToolUse;
+                let mut done = AssistantMessage::pending(&model);
+                if calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                    done.content = vec![
+                        AssistantContent::Text(TextContent { text: "running".into(), text_signature: None }),
+                        AssistantContent::ToolCall(ToolCall {
+                            id: "call-1".into(),
+                            name: tool_name.to_string(),
+                            arguments: serde_json::json!({"cmd": "ls"}),
+                            thought_signature: None,
+                            namespace: None,
+                        }),
+                    ];
+                    done.stop_reason = StopReason::ToolUse;
+                } else {
+                    done.content = vec![AssistantContent::Text(TextContent {
+                        text: "all finished".into(),
+                        text_signature: None,
+                    })];
+                    done.stop_reason = StopReason::Stop;
+                }
                 let _ = tx
-                    .send(AssistantMessageEvent::Done { reason: StopReason::ToolUse, message: done })
+                    .send(AssistantMessageEvent::Done { reason: done.stop_reason, message: done })
                     .await;
             });
             rx
         }));
+
+        // An echo tool so the batch has a real executor.
+        let echo = crate::harness::runtime::tool_exec::RuntimeTool {
+            declaration: crate::harness::types::Tool {
+                name: tool_name.to_string(),
+                description: "echo".into(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {"cmd": {"type": "string"}},
+                    "required": ["cmd"]
+                }),
+            },
+            replay: crate::harness::runtime::tool_exec::ReplayPolicy::Safe,
+            execute: Arc::new(|execution| {
+                Box::pin(async move {
+                    let cmd = execution.args.get("cmd").cloned().unwrap_or(serde_json::json!(""));
+                    Ok(crate::harness::agent_types::AgentToolResult {
+                        content: vec![crate::harness::types::UserContent::Text(
+                            crate::harness::types::TextContent {
+                                text: format!("echo: {cmd}"),
+                                text_signature: None,
+                            },
+                        )],
+                        details: serde_json::Value::Null,
+                        usage: None,
+                        terminate: None,
+                    })
+                })
+            }),
+        };
+        config.tools = Arc::new(vec![Arc::new(echo)]);
+
+        // The lane must declare the tool active for generation + execution.
+        lane.set_active_tools(vec![tool_name.to_string()]).await.unwrap();
     }
 
     #[tokio::test]
@@ -459,26 +505,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tool_call_responses_plan_a_durable_batch() {
-        let (lane, _events) = test_lane();
+    async fn tool_calls_execute_and_complete_the_run() {
+        let (lane, mut events) = test_lane();
         install_tool_call_stream(&lane, "bash").await;
         let operation_id = accept(&lane, "run this").await;
 
         let outcome = lane.drive(&operation_id, false).await.unwrap();
         match &outcome {
-            DriveOutcome::Failed { message, .. } => assert!(message.contains("tools"), "{message}"),
-            other => panic!("expected tools slice failure, got {other:?}"),
+            DriveOutcome::Settled { outcome } => assert_eq!(outcome.status, TerminalStatus::Completed),
+            other => panic!("expected completed run, got {other:?}"),
         }
-        match durable_state(&lane, &operation_id) {
-            OperationState::Tools { batch, .. } => {
-                assert_eq!(batch.calls.len(), 1);
-                assert_eq!(batch.calls[0].status, ToolCallStatus::Planned);
-                assert_eq!(batch.calls[0].source_index, 1);
-                let entries = lane.find_entries(BranchScan::default()).unwrap();
-                assert!(entries.iter().any(|entry| entry.id == batch.assistant_entry_id));
-            }
-            other => panic!("expected tools, got {}", other.at()),
+
+        // prompt → assistant(toolCall) → toolResult → final assistant.
+        let entries = lane.find_entries(BranchScan { oldest_first: true, ..Default::default() }).unwrap();
+        assert_eq!(entries.len(), 4, "{entries:?}");
+        let roles: Vec<&str> = entries.iter().filter_map(|entry| entry.as_message().map(|m| m.role())).collect();
+        assert_eq!(roles, ["user", "assistant", "toolResult", "assistant"]);
+        let tool_result = entries[2].as_message().unwrap();
+        assert!(tool_result.role() == "toolResult");
+
+        let types = drain(&mut events);
+        for expected in ["tool_start", "tool_end", "turn_end", "run_end"] {
+            assert!(types.contains(&expected), "missing {expected} in {types:?}");
         }
+
+        // Operation bookkeeping is cleaned up after settlement.
+        let idle = lane.operation_snapshot();
+        assert!(idle.is_none());
     }
 
     #[tokio::test]

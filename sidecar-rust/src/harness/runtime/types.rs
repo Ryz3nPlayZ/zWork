@@ -97,9 +97,9 @@ pub struct RuntimeConfig {
     pub model_source: Option<ModelSource>,
     /// Provider streaming entry point (pi `lane.models.streamSimple`).
     pub stream: Option<crate::harness::agent_types::StreamFn>,
-    /// Tool declarations available to lanes (pi `config.tools`; the tool
-    /// procedures attach executors alongside).
-    pub tool_declarations: Arc<Vec<crate::harness::types::Tool>>,
+    /// Tools available to lanes (pi `config.tools`): declarations plus
+    /// replay policy and executor.
+    pub tools: Arc<Vec<Arc<super::tool_exec::RuntimeTool>>>,
 }
 
 impl std::fmt::Debug for RuntimeConfig {
@@ -133,7 +133,7 @@ impl Default for RuntimeConfig {
             context_window: None,
             model_source: None,
             stream: None,
-            tool_declarations: Arc::new(Vec::new()),
+            tools: Arc::new(Vec::new()),
         }
     }
 }

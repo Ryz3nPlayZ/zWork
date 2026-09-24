@@ -158,11 +158,10 @@ async fn prepare_generation(
         ))));
     };
 
-    let declarations = config.tool_declarations.clone();
     let missing: Vec<String> = configuration
         .active_tool_names
         .iter()
-        .filter(|name| !declarations.iter().any(|tool| &tool.name == *name))
+        .filter(|name| !config.tools.iter().any(|tool| &tool.declaration.name == *name))
         .cloned()
         .collect();
     if !missing.is_empty() {
@@ -174,7 +173,13 @@ async fn prepare_generation(
     let tools: Vec<Tool> = configuration
         .active_tool_names
         .iter()
-        .filter_map(|name| declarations.iter().find(|tool| &tool.name == name).cloned())
+        .filter_map(|name| {
+            config
+                .tools
+                .iter()
+                .find(|tool| &tool.declaration.name == name)
+                .map(|tool| tool.declaration.clone())
+        })
         .collect();
 
     let messages = match read_bounded_context(lane, drive).await? {
