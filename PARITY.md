@@ -79,19 +79,25 @@ Status: ✅ done · 🚧 in progress · ⬜ remaining · ➖ excluded (with reas
 
 ## M4 — Durable runtime (`SPEC.md` §runtime + durability specs)
 
-- ⬜ Effect gate (abort wins admission races)
-- ⬜ 13-state durable operation machine; intent→effect→settlement commits
-- ⬜ Tool replay policies: `safe` re-executes, `never` synthesizes
-      "interrupted, outcome unknown"
-- ⬜ Mid-stream assistant durability (bounded durable partial frames)
-- ⬜ Checkpoint inbox drain, compaction threshold, finish decisions
-- ⬜ Recovery / reconcile / terminal records
+- ✅ Effect gate (abort wins admission races) — runtime/effect_gate.rs
+- ✅ 13-state durable operation machine; intent→effect→settlement commits
+      (dispatcher + Lane command core + drive claim loop)
+- ✅ Tool replay policies: `safe` re-executes, `never` synthesizes
+      "interrupted, outcome unknown" (tool_exec + drive/tools)
+- ✅ Mid-stream assistant durability (bounded durable partial frames —
+      assistant_frame.rs codec + progress channels)
+- ✅ Checkpoint inbox drain, compaction threshold, finish decisions
+      (drive/checkpoint + boundary)
+- ✅ Recovery / reconcile / terminal records; navigation commit
+- ✅ 11-hook registry (runtime/hooks.rs; ZworkHooks mapping pending facade)
 - ⬜ `Harness` facade: prompt/compact/navigate/resume/abort/steer/followUp/
       nextRun/cancelQueued/recordUsage/watch
-- ⬜ 11-hook registry; ZworkHooks (doom guard, turn cap, compaction) mapped on
 - ⬜ Re-base `harness_turn.rs` on Harness; delete legacy Agent/agent_loop
 - ⬜ Resume-on-restart (open operations at startup)
 - ⬜ Re-attach SSE + run event cursor + gate polling endpoint
+
+Remaining slice stubs in the dispatcher: summary.*/deferred.* leaves land
+with M6 durable compaction (deferred is excluded from the port).
 
 ## M5 — Queue while busy
 
