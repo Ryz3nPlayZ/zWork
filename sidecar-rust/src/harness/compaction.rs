@@ -945,7 +945,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
-    use crate::harness::agent_loop::test_support::{model, scripted_stream, Script};
+    use crate::harness::test_support::{model, scripted_stream, Script};
     use crate::harness::types::{Api, TextContent, ToolCall, ToolResultMessage};
 
     fn user(text: &str) -> AgentMessage {

@@ -16,20 +16,16 @@ use std::convert::Infallible;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-use futures_util::future::BoxFuture;
 use futures_util::StreamExt;
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
 
-use crate::harness::agent::{Agent, AgentListener, AgentOptions, InitialState};
 use crate::harness::agent_types::{
-    AgentContext, AgentEvent, AgentHooks, AgentLoopTurnUpdate, AgentMessage, AgentTool, AgentToolResult,
-    AgentToolUpdateCallback, BeforeToolCallContext, BeforeToolCallResult, DynTool, ReplayPolicy, StreamFn,
-    ToolExecutionMode, ToolFuture, TurnContext,
+    AgentMessage, AgentTool, AgentToolResult, AgentToolUpdateCallback, DynTool, ReplayPolicy, StreamFn,
+    ToolExecutionMode, ToolFuture,
 };
 use crate::harness::compaction as hcompaction;
-use crate::harness::messages as hmessages;
 use crate::harness::overflow as hoverflow;
 use crate::harness::types::{
     AbortSignal, Api, AssistantContent, AssistantMessage, AssistantMessageEvent, InputType, Message, Model,
@@ -568,133 +564,8 @@ impl AgentTool for GatedPiTool {
 }
 
 // ---------------------------------------------------------------------------
-// Hooks: doom-loop guard, turn cap, auto-compaction
-// ---------------------------------------------------------------------------
-
-struct ZworkHooks {
-    shared: Arc<TurnShared>,
-    model: Model,
-    compaction_model: Model,
-    api_key: String,
-    stream_fn: StreamFn,
-}
-
-impl ZworkHooks {
-    /// Summarize the older part of `messages` on the cheap tier. Returns the
-    /// compacted transcript, or `None` when nothing was done.
-    async fn compact(&self, messages: Vec<AgentMessage>, signal: Option<AbortSignal>) -> Option<Vec<AgentMessage>> {
-        let settings = hcompaction::CompactionSettings::default();
-        let prep = hcompaction::prepare_compaction(&messages, settings)?;
-        let opts = hcompaction::SummarizationOptions {
-            api_key: Some(self.api_key.clone()),
-            signal,
-            session_id: Some(self.shared.chat_id.clone()),
-            max_retries: Some(2),
-            ..Default::default()
-        };
-        match hcompaction::compact(&prep, &self.compaction_model, None, &opts, &self.stream_fn).await {
-            Ok(result) => {
-                let compacted = hcompaction::apply_compaction(&messages, &result);
-                let after = hcompaction::estimate_context_tokens(&compacted).tokens;
-                self.shared
-                    .send(json!({
-                        "type": "compaction",
-                        "status": "complete",
-                        "before_tokens": result.tokens_before,
-                        "after_tokens": after,
-                        "model": self.compaction_model.id,
-                    }))
-                    .await;
-                llm_trace(
-                    &self.shared.chat_id,
-                    self.shared.turn(),
-                    "compaction",
-                    json!({ "before_tokens": result.tokens_before, "after_tokens": after, "model": self.compaction_model.id }),
-                );
-                Some(compacted)
-            }
-            Err(e) => {
-                llm_trace(&self.shared.chat_id, self.shared.turn(), "compaction_error", json!({ "error": e }));
-                self.shared.send(json!({ "type": "compaction", "status": "failed", "error": e })).await;
-                None
-            }
-        }
-    }
-}
-
-impl AgentHooks for ZworkHooks {
-    fn convert_to_llm(&self, messages: &[AgentMessage]) -> Vec<Message> {
-        hmessages::convert_to_llm(messages)
-    }
-
-    fn before_tool_call<'a>(
-        &'a self,
-        ctx: BeforeToolCallContext<'a>,
-        _signal: Option<&'a AbortSignal>,
-    ) -> BoxFuture<'a, Option<BeforeToolCallResult>> {
-        // Doom-loop guard: the same tool call (name + input) three turns
-        // running means the model isn't making progress. Block the call and
-        // stop after this turn; the listener emits the recovery text.
-        let doomed = self.shared.doom.lock_unpoisoned().push(&ctx.tool_call.name, ctx.args);
-        Box::pin(async move {
-            if !doomed && !self.shared.doomed.load(Ordering::SeqCst) {
-                return None;
-            }
-            self.shared.doomed.store(true, Ordering::SeqCst);
-            Some(BeforeToolCallResult {
-                block: true,
-                reason: Some("Stopped: this exact action was repeated without progress.".into()),
-                terminate: Some(true),
-            })
-        })
-    }
-
-    fn should_stop_after_turn<'a>(&'a self, _ctx: TurnContext<'a>, _signal: Option<&'a AbortSignal>) -> BoxFuture<'a, bool> {
-        Box::pin(async move {
-            if self.shared.doomed.load(Ordering::SeqCst) {
-                return true;
-            }
-            if self.shared.turn() >= self.shared.max_turns {
-                self.shared.hit_turn_cap.store(true, Ordering::SeqCst);
-                return true;
-            }
-            false
-        })
-    }
-
-    fn prepare_next_turn<'a>(
-        &'a self,
-        ctx: TurnContext<'a>,
-        signal: Option<&'a AbortSignal>,
-    ) -> BoxFuture<'a, Option<AgentLoopTurnUpdate>> {
-        let messages = ctx.context.messages.clone();
-        let tools = ctx.context.tools.clone();
-        let signal = signal.cloned();
-        Box::pin(async move {
-            let tokens = hcompaction::estimate_context_tokens(&messages).tokens;
-            let settings = hcompaction::CompactionSettings::default();
-            if !hcompaction::should_compact(tokens, self.model.context_window, &settings) {
-                return None;
-            }
-            let compacted = self.compact(messages, signal).await?;
-            Some(AgentLoopTurnUpdate { context: Some(AgentContext { messages: compacted, tools }), ..Default::default() })
-        })
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Durable runtime drive (pi AgentHarness) — M4 cutover path
 // ---------------------------------------------------------------------------
-
-/// Opt into the durable runtime (pi `AgentHarness`) for chat turns. While
-/// off, turns run on the in-memory pi agent loop. Once M6 lands the
-/// structural procedures this becomes the only path.
-fn durable_enabled() -> bool {
-    match std::env::var("ZWORK_DURABLE").as_deref() {
-        Ok("1") | Ok("true") | Ok("on") => true,
-        _ => false,
-    }
-}
 
 /// Expose one zWork-gated tool to the durable runtime. Execution, permission
 /// gating and event forwarding are the tool's own (identical to the agent
@@ -1004,15 +875,8 @@ async fn compact_history(
 }
 
 // ---------------------------------------------------------------------------
-// Event listener: AgentEvent -> zWork wire events
+// Wire emission (shared by the durable event mapper)
 // ---------------------------------------------------------------------------
-
-fn make_listener(shared: Arc<TurnShared>) -> AgentListener {
-    Arc::new(move |event: AgentEvent, _signal: AbortSignal| {
-        let shared = shared.clone();
-        Box::pin(async move { handle_event(&shared, event).await })
-    })
-}
 
 async fn close_thinking(shared: &TurnShared) {
     if shared.thinking_open.swap(false, Ordering::SeqCst) {
@@ -1020,28 +884,7 @@ async fn close_thinking(shared: &TurnShared) {
     }
 }
 
-async fn handle_event(shared: &TurnShared, event: AgentEvent) {
-    match event {
-        AgentEvent::TurnStart => {
-            shared.turn.fetch_add(1, Ordering::SeqCst);
-            shared.send(json!({ "type": "status", "text": "Thinking" })).await;
-        }
-        AgentEvent::MessageUpdate { assistant_message_event, .. } => {
-            handle_stream_event(shared, assistant_message_event).await;
-        }
-        AgentEvent::MessageEnd { message } => {
-            record_assistant_end(shared, &message).await;
-        }
-        AgentEvent::ToolExecutionEnd { tool_call_id, tool_name, result, is_error } => {
-            push_tool_trace(shared, &tool_call_id, &tool_name, &result, is_error);
-        }
-        AgentEvent::TurnEnd { .. } => flush_traces(shared).await,
-        _ => {}
-    }
-}
-
 /// One streamed assistant block: text deltas, thinking deltas, tool calls.
-/// Shared by the agent-loop listener and the durable event mapper.
 async fn handle_stream_event(shared: &TurnShared, event: AssistantMessageEvent) {
     match event {
         AssistantMessageEvent::TextDelta { delta, .. } => {
@@ -1533,107 +1376,31 @@ pub fn run_agent_turn(
         // sensitive prompt-cache prefix) doesn't reshuffle across turns.
         tools.sort_by(|a, b| a.name().cmp(b.name()));
 
-        // ── Drive ───────────────────────────────────────────────────────
+        // ── Drive (durable AgentHarness) ────────────────────────────────
         let stream_fn: StreamFn = Arc::new(crate::harness::providers::stream);
-        let compacted_on_overflow = if durable_enabled() {
-            // Pre-run compaction (same rule as the agent path): a long-lived
-            // chat may already be over budget before the first request of
-            // this turn.
-            let mut seed_history = history;
-            {
-                let tokens = hcompaction::estimate_context_tokens(&seed_history).tokens;
-                if hcompaction::should_compact(tokens, model.context_window, &hcompaction::CompactionSettings::default()) {
-                    if let Some(compacted) = compact_history(&shared, &compaction_model, &resolved.api_key, &stream_fn, &seed_history).await {
-                        seed_history = compacted;
-                    }
+        // Pre-run compaction: a long-lived chat may already be over budget
+        // before the first request of this turn.
+        let mut seed_history = history;
+        {
+            let tokens = hcompaction::estimate_context_tokens(&seed_history).tokens;
+            if hcompaction::should_compact(tokens, model.context_window, &hcompaction::CompactionSettings::default()) {
+                if let Some(compacted) = compact_history(&shared, &compaction_model, &resolved.api_key, &stream_fn, &seed_history).await {
+                    seed_history = compacted;
                 }
             }
-            drive_durable(
-                &shared,
-                &model,
-                &compaction_model,
-                &resolved.api_key,
-                stream_fn.clone(),
-                &system_prompt,
-                prompt_message,
-                seed_history,
-                &tools,
-            )
-            .await
-        } else {
-            let hooks = Arc::new(ZworkHooks {
-                shared: shared.clone(),
-                model: model.clone(),
-                compaction_model,
-                api_key: resolved.api_key.clone(),
-                stream_fn: stream_fn.clone(),
-            });
-            let agent = Agent::new(AgentOptions {
-                initial_state: InitialState {
-                    system_prompt: Some(system_prompt),
-                    model: Some(model.clone()),
-                    thinking_level: None,
-                    tools,
-                    messages: history,
-                },
-                hooks: hooks.clone(),
-                stream_fn: Some(stream_fn),
-                session_id: Some(chat_id.clone()),
-                max_retries: Some(MAX_TRANSIENT_RETRIES),
-                api_key: Some(resolved.api_key.clone()),
-                ..AgentOptions::default()
-            });
-            let listener_id = agent.subscribe(make_listener(shared.clone()));
-
-            // Pre-run compaction: a long-lived chat may already be over budget
-            // before the first request of this turn.
-            {
-                let msgs = agent.messages();
-                let tokens = hcompaction::estimate_context_tokens(&msgs).tokens;
-                if hcompaction::should_compact(tokens, model.context_window, &hcompaction::CompactionSettings::default()) {
-                    if let Some(compacted) = hooks.compact(msgs, agent.signal()).await {
-                        agent.replace_messages(compacted);
-                    }
-                }
-            }
-
-            if let Err(e) = agent.prompt(prompt_message).await {
-                let _ = tx.send(json!({ "type": "error", "text": e })).await;
-            }
-
-            // ── Post-run: error surfacing + one context-overflow retry ──
-            let mut compacted_on_overflow = false;
-            loop {
-                let last_error = agent.with_state(|st| {
-                    st.messages.last().and_then(|m| m.as_assistant()).and_then(|am| {
-                        (am.stop_reason == StopReason::Error).then(|| am.clone())
-                    })
-                });
-                let Some(err_am) = last_error else { break };
-                let err_msg = err_am.error_message.clone().unwrap_or_default();
-                if hoverflow::is_context_overflow(&err_am, Some(model.context_window)) && !compacted_on_overflow {
-                    compacted_on_overflow = true;
-                    llm_trace(&chat_id, shared.turn(), "context_overflow_compaction", json!({ "error": err_msg }));
-                    let mut msgs = agent.messages();
-                    msgs.pop(); // the failed assistant message
-                    if let Some(compacted) = hooks.compact(msgs, agent.signal()).await {
-                        agent.replace_messages(compacted);
-                        if let Err(e) = agent.continue_run().await {
-                            let _ = tx.send(json!({ "type": "error", "text": e })).await;
-                            break;
-                        }
-                        continue;
-                    }
-                    llm_trace(&chat_id, shared.turn(), "context_overflow_compaction_failed", json!({}));
-                }
-                let exhausted = classify_provider_error_with_raw(&err_msg, None) == ErrorClass::Transient;
-                let friendly = friendly_upstream_error(&err_msg, None, exhausted);
-                let _ = tx.send(json!({ "type": "error", "text": friendly })).await;
-                break;
-            }
-            agent.unsubscribe(listener_id);
-            compacted_on_overflow
-        };
+        }
+        let compacted_on_overflow = drive_durable(
+            &shared,
+            &model,
+            &compaction_model,
+            &resolved.api_key,
+            stream_fn,
+            &system_prompt,
+            prompt_message,
+            seed_history,
+            &tools,
+        )
+        .await;
 
         if shared.doomed.load(Ordering::SeqCst) {
             // Emit a real assistant text so the persisted turn isn't empty
@@ -1722,20 +1489,6 @@ impl AgentTool for SubagentDirectTool {
         })
     }
 }
-
-struct SubagentHooks {
-    turns: AtomicU32,
-}
-
-impl AgentHooks for SubagentHooks {
-    fn convert_to_llm(&self, messages: &[AgentMessage]) -> Vec<Message> {
-        hmessages::convert_to_llm(messages)
-    }
-    fn should_stop_after_turn<'a>(&'a self, _ctx: TurnContext<'a>, _signal: Option<&'a AbortSignal>) -> BoxFuture<'a, bool> {
-        Box::pin(async move { self.turns.fetch_add(1, Ordering::SeqCst) + 1 >= MAX_SUBAGENT_TURNS })
-    }
-}
-
 
 /// The sub-agent on the durable runtime: read-only tools, same 12-turn cap
 /// (enforced by a durable abort at the boundary), deltas streamed as
@@ -1836,11 +1589,7 @@ async fn spawn_subagent_durable(
 
     let result = accumulated.lock_unpoisoned().clone();
     match record {
-        Ok(record)
-            if record.status != crate::harness::session::types::TerminalStatus::Failed =>
-        {
-            Ok(result)
-        }
+        Ok(record) if record.status != crate::harness::session::types::TerminalStatus::Failed => Ok(result),
         record => {
             let error = record
                 .ok()
@@ -1900,81 +1649,20 @@ pub async fn spawn_subagent(
     );
 
     let stream_fn: StreamFn = Arc::new(crate::harness::providers::stream);
-    if durable_enabled() {
-        return match spawn_subagent_durable(chat_id, parent_run_id, &task_id, task, &model, &resolved.api_key, &tools, &system, stream_fn, tx).await {
-            Ok(result) => {
-                log_agent_event(chat_id, parent_run_id, "subagent_done", json!({ "task_id": task_id, "chars": result.len() }));
-                let _ = tx.send(json!({ "type": "subagent_done", "task_id": task_id, "result": result })).await;
-                Ok(result)
-            }
-            Err(friendly) => {
-                let _ = tx.send(json!({ "type": "subagent_done", "task_id": task_id, "error": friendly })).await;
-                Err(friendly)
-            }
-        };
-    }
-
-    let accumulated = Arc::new(Mutex::new(String::new()));
-    let agent = Agent::new(AgentOptions {
-        initial_state: InitialState {
-            system_prompt: Some(system),
-            model: Some(model),
-            thinking_level: None,
-            tools,
-            messages: Vec::new(),
-        },
-        hooks: Arc::new(SubagentHooks { turns: AtomicU32::new(0) }),
-        stream_fn: Some(Arc::new(crate::harness::providers::stream)),
-        session_id: Some(format!("{chat_id}:{task_id}")),
-        max_retries: Some(2),
-        api_key: Some(resolved.api_key.clone()),
-        ..AgentOptions::default()
-    });
-    {
-        let tx = tx.clone();
-        let task_id = task_id.clone();
-        let accumulated = accumulated.clone();
-        agent.subscribe(Arc::new(move |event: AgentEvent, _sig: AbortSignal| {
-            let tx = tx.clone();
-            let task_id = task_id.clone();
-            let accumulated = accumulated.clone();
-            Box::pin(async move {
-                if let AgentEvent::MessageUpdate {
-                    assistant_message_event: AssistantMessageEvent::TextDelta { delta, .. },
-                    ..
-                } = event
-                {
-                    if delta.is_empty() {
-                        return;
-                    }
-                    accumulated.lock_unpoisoned().push_str(&delta);
-                    let _ = tx.send(json!({ "type": "subagent_delta", "task_id": task_id, "text": delta })).await;
-                }
-            })
-        }));
-    }
-
-    let run = agent.prompt(task.to_string()).await;
-    let last_error = agent.with_state(|st| {
-        st.messages.last().and_then(|m| m.as_assistant()).and_then(|am| {
-            (am.stop_reason == StopReason::Error).then(|| am.error_message.clone().unwrap_or_default())
-        })
-    });
-    let result = accumulated.lock_unpoisoned().clone();
-    if let Some(err) = run.err().or(last_error) {
-        if result.is_empty() {
-            let friendly = friendly_upstream_error(&err, None, true);
-            let _ = tx.send(json!({ "type": "subagent_done", "task_id": task_id, "error": friendly })).await;
-            return Err(friendly);
+    match spawn_subagent_durable(chat_id, parent_run_id, &task_id, task, &model, &resolved.api_key, &tools, &system, stream_fn, tx).await {
+        Ok(result) => {
+            log_agent_event(chat_id, parent_run_id, "subagent_done", json!({ "task_id": task_id, "chars": result.len() }));
+            let _ = tx.send(json!({ "type": "subagent_done", "task_id": task_id, "result": result })).await;
+            Ok(result)
         }
-        llm_trace(chat_id, 0, "subagent_error", json!({ "task_id": task_id, "error": err }));
+        Err(friendly) => {
+            let _ = tx.send(json!({ "type": "subagent_done", "task_id": task_id, "error": friendly })).await;
+            Err(friendly)
+        }
     }
-    log_agent_event(chat_id, parent_run_id, "subagent_done", json!({ "task_id": task_id, "chars": result.len() }));
-    let _ = tx.send(json!({ "type": "subagent_done", "task_id": task_id, "result": result })).await;
-    Ok(result)
 }
 
-/// Pick the model id used for compaction summarization. Summarization is a
+/// Pick the model id used for compaction summarization./// Pick the model id used for compaction summarization. Summarization is a
 /// background chore that re-runs whenever the conversation crosses ~200k tokens,
 /// so it should always run on a **cheap tier** rather than whatever expensive
 /// model the user is driving the chat with. The endpoint/headers passed to
@@ -2035,7 +1723,7 @@ mod tests {
 
     #[test]
     fn history_alternates_and_drops_empty_assistant() {
-        let model = crate::harness::agent::default_model();
+        let model = crate::harness::test_support::default_model();
         let rows = vec![
             row("assistant", "stray"),
             row("user", "hi"),

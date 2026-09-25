@@ -13,8 +13,8 @@
 
 #![allow(dead_code)]
 
-pub mod agent;
-pub mod agent_loop;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub mod agent_types;
 pub mod assistant_frame;
 pub mod compaction;
