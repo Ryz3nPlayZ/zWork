@@ -9,6 +9,7 @@ mod prompts;
 mod trace;
 mod orientation;
 pub mod harness_turn;
+pub mod run_state;
 
 use trace::trace as llm_trace;
 
@@ -420,29 +421,12 @@ async fn web_search_grounding(message: &str) -> Option<String> {
     }
 }
 
-fn pending_permission_gates() -> &'static Mutex<HashMap<String, oneshot::Sender<bool>>> {
-    static INSTANCE: OnceLock<Mutex<HashMap<String, oneshot::Sender<bool>>>> = OnceLock::new();
-    INSTANCE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
 pub fn approve_gate(gate_id: &str) -> bool {
-    let mut map = pending_permission_gates().lock_unpoisoned();
-    if let Some(tx) = map.remove(gate_id) {
-        let _ = tx.send(true);
-        true
-    } else {
-        false
-    }
+    run_state::resolve_gate(gate_id, true)
 }
 
 pub fn reject_gate(gate_id: &str) -> bool {
-    let mut map = pending_permission_gates().lock_unpoisoned();
-    if let Some(tx) = map.remove(gate_id) {
-        let _ = tx.send(false);
-        true
-    } else {
-        false
-    }
+    run_state::resolve_gate(gate_id, false)
 }
 
 // ── Pending interactive questions (ask_question / ask_user) ──────────────────

@@ -172,6 +172,8 @@ async fn main() {
             axum::routing::delete(server::delete_branch).post(server::restore_branch),
         )
         .route("/api/chats/:chat_id/stop", post(server::stop_chat))
+        .route("/api/chats/:chat_id/run/live", get(server::chat_run_live))
+        .route("/api/chats/:chat_id/gates", get(server::list_chat_gates))
         .route("/api/chats/:chat_id/usage", get(server::chat_usage))
         .route("/api/chats/:chat_id/answer-question", post(server::answer_question))
         .route("/api/chat/stream", post(server::chat_stream_route))

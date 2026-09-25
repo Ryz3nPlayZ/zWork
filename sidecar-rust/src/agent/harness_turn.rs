@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 
 use futures_util::StreamExt;
 use serde_json::{json, Value};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::harness::agent_types::{
@@ -37,8 +37,8 @@ use crate::{chatstore, settings};
 
 use super::{
     artifact_hint, classify_provider_error_with_raw, friendly_upstream_error, is_command_approved, llm_trace,
-    log_agent_event, max_tokens_for, orientation, pending_permission_gates, prompts, router_real_model,
-    web_search_grounding, DoomLoopDetector, ErrorClass, RunGuard,
+    log_agent_event, max_tokens_for, orientation, prompts, router_real_model,
+    run_state, web_search_grounding, DoomLoopDetector, ErrorClass, RunGuard,
 };
 
 const DEFAULT_MAX_TURNS: u32 = 80;
@@ -167,7 +167,7 @@ impl LegacyTool {
         if shared.auto_approve || already_approved {
             return true;
         }
-        let gate_id = format!("gate_{}", uuid::Uuid::new_v4().simple());
+        let (gate_id, gate_rx) = super::run_state::open_gate(&shared.chat_id, &self.name, &reason, tc_id);
         shared
             .send(json!({
                 "type": "permission",
@@ -178,11 +178,11 @@ impl LegacyTool {
                 "tool_use_id": tc_id
             }))
             .await;
-        let (gate_tx, gate_rx) = oneshot::channel();
-        pending_permission_gates().lock_unpoisoned().insert(gate_id.clone(), gate_tx);
         // Long safety timeout so an unanswered prompt (UI closed, SSE stream
         // dropped) can't hang the loop forever; expiry auto-denies.
-        match tokio::time::timeout(GATE_TIMEOUT, gate_rx).await {
+        let outcome = tokio::time::timeout(GATE_TIMEOUT, gate_rx).await;
+        super::run_state::drop_gate(&gate_id);
+        match outcome {
             Ok(Ok(approved)) => approved,
             Ok(Err(_)) => false,
             Err(_) => {
@@ -412,7 +412,7 @@ impl GatedPiTool {
         if shared.auto_approve || already_approved {
             return true;
         }
-        let gate_id = format!("gate_{}", uuid::Uuid::new_v4().simple());
+        let (gate_id, gate_rx) = super::run_state::open_gate(&shared.chat_id, self.inner.name(), &reason, tc_id);
         shared
             .send(json!({
                 "type": "permission",
@@ -423,9 +423,9 @@ impl GatedPiTool {
                 "tool_use_id": tc_id
             }))
             .await;
-        let (gate_tx, gate_rx) = oneshot::channel();
-        pending_permission_gates().lock_unpoisoned().insert(gate_id.clone(), gate_tx);
-        match tokio::time::timeout(GATE_TIMEOUT, gate_rx).await {
+        let outcome = tokio::time::timeout(GATE_TIMEOUT, gate_rx).await;
+        super::run_state::drop_gate(&gate_id);
+        match outcome {
             Ok(Ok(approved)) => approved,
             Ok(Err(_)) => false,
             Err(_) => {
@@ -633,7 +633,10 @@ async fn map_harness_events(
             HarnessEvent::MessageUpdate { event, .. } => {
                 handle_stream_event(&shared, event).await;
             }
-            HarnessEvent::MessageEnd { message, .. } => {
+            HarnessEvent::MessageEnd { message, recovery, .. } => {
+                if recovery == Some(true) {
+                    recover_assistant_text(&shared, &message).await;
+                }
                 record_assistant_end(&shared, &message).await;
             }
             HarnessEvent::ToolEnd { tool_call_id, tool_name, result, is_error, .. } => {
@@ -690,6 +693,7 @@ async fn run_durable_once(
             ("turn.system_prompt", json!(system_prompt)),
             ("turn.cwd", json!(cwd)),
             ("turn.auto_approve", json!(shared.auto_approve)),
+            ("turn.assistant_msg_id", json!(shared.assistant_msg_id)),
         ];
         for (key, payload) in writes {
             if let Ok(address) = value("zwork", key) {
@@ -777,6 +781,17 @@ async fn run_durable_once(
         }));
     }
 
+    // Re-attach surface: while this run is live, `GET /api/chats/:id/run/live`
+    // streams the bus (cursor-based) and Stop can durably abort the open
+    // operation.
+    run_state::register_run(&shared.chat_id, run_state::LiveRun {
+        run_id: shared.run_id.clone(),
+        session_id: session_id.clone(),
+        bus: harness.events.clone(),
+        lane: lane.clone(),
+        started_at: run_state::now_ms(),
+    });
+
     let mapper = tokio::spawn(map_harness_events(
         shared.clone(),
         lane.clone(),
@@ -787,6 +802,7 @@ async fn run_durable_once(
     // Drain trailing events (usage / turn_end / run_end race the settle).
     let _ = tokio::time::timeout(std::time::Duration::from_secs(10), mapper).await;
     harness.close().await;
+    run_state::unregister_run(&shared.chat_id, &session_id);
     record
 }
 
@@ -954,6 +970,19 @@ async fn handle_stream_event(shared: &TurnShared, event: AssistantMessageEvent) 
         }
         _ => {}
     }
+}
+
+/// A recovery-settled message carries its full committed text; no deltas
+/// ever streamed it, so the display text is seeded (replaced) from the
+/// message itself. Empty recoveries keep whatever the pre-crash deltas
+/// already persisted. Live (non-recovery) ends keep delta-driven semantics.
+async fn recover_assistant_text(shared: &TurnShared, message: &AgentMessage) {
+    let Some(am) = message.as_assistant() else { return };
+    let text = am.text();
+    if !text.is_empty() {
+        *shared.accumulated_text.lock_unpoisoned() = text;
+    }
+    shared.persist().await;
 }
 
 /// A settled assistant message: finish trace, usage ledger + wire totals.
@@ -1195,6 +1224,10 @@ pub fn run_agent_turn(
             Some(c) => c,
             None => chatstore::create("New chat", &model_id, &project_id),
         };
+        // Everything downstream persists against the row we actually
+        // resolved/created (a caller may pass an unknown id; the wire
+        // `chat` event tells it the real one) — not the id it asked for.
+        let chat_id = chat.id.clone();
         let is_dup = chat
             .messages
             .last()
@@ -1763,7 +1796,8 @@ fn prune_completed_sessions(repo: &crate::harness::session::sqlite::SqliteSessio
 /// reconcile durably; interrupted assistant effects settle from their
 /// committed frames without another provider call when possible, otherwise
 /// the run continues from its durable state. Recovery output persists to
-/// chatstore like any turn. Wire events go nowhere (no SSE client yet).
+/// the crashed run's own chat row; a re-attached SSE client can watch it
+/// live via the run registry.
 pub async fn resume_interrupted_runs() {
     let repo = crate::harness::session::sqlite::SqliteSessionRepo::new(
         crate::paths::home_dir().join("sessions"),
@@ -1847,9 +1881,26 @@ async fn resume_one_interrupted(
     // fill the bounded buffer and block the mapper forever.
     let (dead_tx, dead_rx) = mpsc::channel(1);
     drop(dead_rx);
-    let assistant_msg_id = chatstore::append_message(&chat_id, "assistant", json!(""))
-        .map(|m| m.id)
-        .unwrap_or_default();
+    // Reuse the crashed run's assistant row (recorded in turn metadata) so
+    // recovery updates the row the user already sees instead of appending a
+    // fresh empty one; fall back to a new row when the id is unknown or the
+    // row is gone. Seed display text/activities from that row so the first
+    // persist doesn't erase what the pre-crash deltas already wrote.
+    let persisted_msg_id = read_str("turn.assistant_msg_id").filter(|id| !id.is_empty());
+    let existing_row = chatstore::get(&chat_id).and_then(|chat| {
+        let id = persisted_msg_id.as_deref()?;
+        chat.messages.iter().rev().find(|m| m.id == id).cloned()
+    });
+    let (assistant_msg_id, seed_text, seed_activities) = match existing_row {
+        Some(row) => (row.id, chatstore::content_to_text(&row.content), row.activities),
+        None => (
+            chatstore::append_message(&chat_id, "assistant", json!(""))
+                .map(|m| m.id)
+                .unwrap_or_default(),
+            String::new(),
+            Vec::new(),
+        ),
+    };
     let shared = Arc::new(TurnShared {
         chat_id: chat_id.clone(),
         run_id: chat_id.clone(),
@@ -1857,8 +1908,8 @@ async fn resume_one_interrupted(
         assistant_msg_id,
         auto_approve: read_str("turn.auto_approve").map(|v| v == "true").unwrap_or(false),
         max_turns: max_turns(),
-        accumulated_text: Mutex::new(String::new()),
-        activities: Mutex::new(Vec::new()),
+        accumulated_text: Mutex::new(seed_text),
+        activities: Mutex::new(seed_activities),
         db_lock: tokio::sync::Mutex::new(()),
         turn: AtomicU32::new(0),
         doomed: AtomicBool::new(false),
@@ -1938,6 +1989,17 @@ async fn resume_one_interrupted(
         Err(_) => return "lane-open-failed",
     };
 
+    // Recovery is observable too: an attached client polls
+    // /api/chats/:id/run/live and watches the bus while resume settles.
+    // try-register: a user turn that started meanwhile owns the slot.
+    run_state::try_register_run(&chat_id, run_state::LiveRun {
+        run_id: session_id.to_string(),
+        session_id: session_id.to_string(),
+        bus: harness.events.clone(),
+        lane: lane.clone(),
+        started_at: run_state::now_ms(),
+    });
+
     let mapper = tokio::spawn(map_harness_events(
         shared.clone(),
         lane.clone(),
@@ -1946,6 +2008,7 @@ async fn resume_one_interrupted(
     let record = harness.resume(&lane_name).await;
     let _ = tokio::time::timeout(std::time::Duration::from_secs(10), mapper).await;
     harness.close().await;
+    run_state::unregister_run(&chat_id, session_id);
 
     if aborting {
         return "reconciled-aborted";

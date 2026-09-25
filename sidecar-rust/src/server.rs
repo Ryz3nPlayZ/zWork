@@ -825,8 +825,11 @@ pub async fn patch_message(
 }
 
 pub async fn stop_chat(Path(chat_id): Path<String>) -> impl IntoResponse {
+    // Durable abort first so the open operation reconciles as cancelled
+    // (never auto-resumes) even when the task is killed before it settles.
+    let durable_stop = crate::agent::run_state::request_stop(&chat_id).await;
     let stopped = crate::watchdog::cancel_run(&chat_id);
-    Json(json!({ "success": stopped }))
+    Json(json!({ "success": stopped || durable_stop }))
 }
 
 pub async fn approve_gate(Path((_chat_id, gate_id)): Path<(String, String)>) -> impl IntoResponse {
@@ -837,6 +840,29 @@ pub async fn approve_gate(Path((_chat_id, gate_id)): Path<(String, String)>) -> 
 pub async fn reject_gate(Path((_chat_id, gate_id)): Path<(String, String)>) -> impl IntoResponse {
     let ok = crate::agent::reject_gate(&gate_id);
     Json(json!({ "success": ok }))
+}
+
+/// Unanswered permission gates for a chat, for polling after a stream
+/// drop (the gate card lives on the SSE stream; without this a
+/// disconnected UI silently eats the 10-minute auto-deny).
+pub async fn list_chat_gates(Path(chat_id): Path<String>) -> impl IntoResponse {
+    Json(json!({ "gates": crate::agent::run_state::chat_gates(&chat_id) }))
+}
+
+/// Re-attach to a live run's event stream: replays from `?after=<cursor>`
+/// (the last seq the client saw) then streams live until the run ends.
+/// Without a live run, emits one `run_state { live: false }` event.
+pub async fn chat_run_live(
+    Path(chat_id): Path<String>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let cursor = params.get("after").and_then(|v| v.parse::<u64>().ok());
+    let stream = crate::agent::run_state::attach_or_idle(&chat_id, cursor);
+    let mapped = stream.map(|val| {
+        let s = serde_json::to_string(&val).unwrap_or_default();
+        Ok::<Event, Infallible>(Event::default().data(s))
+    });
+    Sse::new(mapped).keep_alive(axum::response::sse::KeepAlive::default())
 }
 
 // SSE Chat Stream Endpoint

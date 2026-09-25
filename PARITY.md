@@ -103,10 +103,18 @@ Status: ✅ done · 🚧 in progress · ⬜ remaining · ➖ excluded (with reas
       persisted); volatile api_key/max_tokens resolve from live config so a
       restored snapshot can't fire an unauthenticated retry; kill -9 smoke
       settles from committed frames with zero extra provider calls
-- ⬜ Re-attach SSE + run event cursor + gate polling endpoint (bus replay
-      ring already stamped with cursors)
-- ⬜ Recovery display: message_end(recovery) output should persist to the
-      chat row (currently settles durably but the row stays empty)
+- ✅ Re-attach SSE + gate polling + recovery display (agent/run_state.rs):
+      `GET /api/chats/:id/run/live` replays from `?after=<cursor>` then
+      streams live until RunEnd (works during startup recovery too);
+      `GET /api/chats/:id/gates` polls unanswered permission gates so a
+      dropped stream no longer eats the silent 10-min auto-deny; recovery
+      output lands in the crashed run's own assistant row (reused via
+      `zwork.turn.assistant_msg_id`, seeded from its persisted state —
+      no stray empty rows). Stop is durable now: `request_stop` records
+      CancelRequested so a killed task reconciles as `reconciled-aborted`
+      at restart instead of auto-resuming. Also fixed: turns requested
+      with an unknown chat id persist against the created row, not the
+      requested id (silent data loss before).
 
 Remaining slice stubs in the dispatcher: summary.*/deferred.* leaves land
 with M6 durable compaction (deferred is excluded from the port).
