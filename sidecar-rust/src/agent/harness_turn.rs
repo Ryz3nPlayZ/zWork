@@ -656,6 +656,7 @@ async fn map_harness_events(
 async fn run_durable_once(
     shared: &Arc<TurnShared>,
     model: &Model,
+    model_product_id: &str,
     api_key: &str,
     system_prompt: &str,
     prompt_message: AgentMessage,
@@ -677,6 +678,26 @@ async fn run_durable_once(
             return None;
         }
     };
+    // Run metadata for resume-on-restart: enough to rebuild the provider
+    // context (credentials re-resolve from settings at resume time; the
+    // api key itself is never persisted). App namespace, not pi.*.
+    {
+        use crate::harness::session::values::value;
+        let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+        let writes = [
+            ("turn.chat_id", json!(shared.chat_id)),
+            ("turn.model_id", json!(model_product_id)),
+            ("turn.system_prompt", json!(system_prompt)),
+            ("turn.cwd", json!(cwd)),
+            ("turn.auto_approve", json!(shared.auto_approve)),
+        ];
+        for (key, payload) in writes {
+            if let Ok(address) = value("zwork", key) {
+                let _ = session.set_value(&address, payload).await;
+            }
+        }
+    }
+    prune_completed_sessions(&repo, &shared.chat_id, &session_id);
 
     let provider = model.provider.clone();
     let model_id = model.id.clone();
@@ -777,6 +798,7 @@ async fn run_durable_once(
 async fn drive_durable(
     shared: &Arc<TurnShared>,
     model: &Model,
+    model_product_id: &str,
     compaction_model: &Model,
     api_key: &str,
     stream_fn: StreamFn,
@@ -790,6 +812,7 @@ async fn drive_durable(
         let record = run_durable_once(
             shared,
             model,
+            model_product_id,
             api_key,
             system_prompt,
             prompt_message.clone(),
@@ -1392,6 +1415,7 @@ pub fn run_agent_turn(
         let compacted_on_overflow = drive_durable(
             &shared,
             &model,
+            &model_id,
             &compaction_model,
             &resolved.api_key,
             stream_fn,
@@ -1702,6 +1726,234 @@ pub fn compaction_model_id(shape: &str, main_model: &str) -> String {
         // Unknown provider: keep the main model so the request can't 404 on
         // a guessed id. Still correct, just not cheaper.
         main_model.to_string()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Resume-on-restart
+// ---------------------------------------------------------------------------
+
+/// Delete this chat's previously completed run sessions (best effort). A
+/// crash leaves the newest session open for resume; everything settled is
+/// debuggable history we don't need to keep forever.
+fn prune_completed_sessions(repo: &crate::harness::session::sqlite::SqliteSessionRepo, chat_id: &str, keep: &str) {
+    let prefix = format!("{chat_id}__");
+    for meta in repo.list().unwrap_or_default() {
+        if !meta.id.starts_with(&prefix) || meta.id == keep {
+            continue;
+        }
+        // Completed ⇔ its lane state carries no current operation.
+        let settled = repo
+            .open(&meta.id)
+            .ok()
+            .and_then(|session| {
+                crate::harness::runtime::restore::restore_session(&session)
+                    .ok()
+                    .map(|restored| restored.iter().all(|(_, snapshot)| snapshot.operation.is_none()))
+            })
+            .unwrap_or(false);
+        if settled {
+            let _ = repo.delete(&meta.id);
+        }
+    }
+}
+
+/// Scan `~/.zwork/sessions/` at sidecar startup and drive every interrupted
+/// main-lane run to settlement (pi auto-resume). Cancelled operations
+/// reconcile durably; interrupted assistant effects settle from their
+/// committed frames without another provider call when possible, otherwise
+/// the run continues from its durable state. Recovery output persists to
+/// chatstore like any turn. Wire events go nowhere (no SSE client yet).
+pub async fn resume_interrupted_runs() {
+    let repo = crate::harness::session::sqlite::SqliteSessionRepo::new(
+        crate::paths::home_dir().join("sessions"),
+    );
+    let candidates: Vec<String> = repo
+        .list()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|meta| meta.id)
+        .filter(|id| !id.starts_with("subagent_"))
+        .collect();
+    for session_id in candidates {
+        let resumed = resume_one_interrupted(&repo, &session_id).await;
+        tracing::info!("resume scan: {session_id} -> {resumed}");
+    }
+}
+
+async fn resume_one_interrupted(
+    repo: &crate::harness::session::sqlite::SqliteSessionRepo,
+    session_id: &str,
+) -> &'static str {
+    use crate::harness::runtime::harness::{Harness, HarnessOptions};
+    use crate::harness::session::values::value;
+
+    let session = match repo.open(session_id) {
+        Ok(session) => session,
+        Err(_) => return "unreadable",
+    };
+    // Metadata (written at run start) rebuilds the provider context.
+    let read_str = |key: &str| -> Option<String> {
+        let address = value("zwork", key).ok()?;
+        session
+            .get_value::<serde_json::Value>(&address)
+            .ok()
+            .flatten()
+            .map(|(v, _)| v.as_str().map(String::from))
+            .flatten()
+    };
+    let Some(chat_id) = read_str("turn.chat_id") else {
+        return "no-metadata";
+    };
+    let model_product_id = read_str("turn.model_id").unwrap_or_default();
+    let system_prompt = read_str("turn.system_prompt").unwrap_or_default();
+    if model_product_id.is_empty() || system_prompt.is_empty() {
+        return "incomplete-metadata";
+    }
+
+    let restored = match crate::harness::runtime::restore::restore_session(&session) {
+        Ok(restored) => restored,
+        Err(_) => return "restore-failed",
+    };
+    if restored.iter().all(|(_, snapshot)| snapshot.operation.is_none()) {
+        return "already-settled";
+    }
+    let (lane_name, snapshot) = match restored
+        .iter()
+        .find(|(_, snapshot)| snapshot.operation.is_some())
+    {
+        Some(found) => (found.0.clone(), found.1.clone()),
+        None => return "already-settled",
+    };
+    let Some(operation) = &snapshot.operation else {
+        return "already-settled";
+    };
+    let aborting = matches!(
+        operation.state.scope().control,
+        crate::harness::session::types::Control::CancelRequested { .. }
+    );
+
+    // Rebuild the provider context from current settings.
+    let s = settings::load();
+    let resolved = resolve_model(&model_product_id, &s);
+    if resolved.api_key.trim().is_empty() {
+        return "no-credentials";
+    }
+    let model = build_model(&resolved, &resolved.real_model_id);
+
+    // A dead channel with the receiver DROPPED: every wire send fails
+    // immediately (and is ignored), while chatstore persistence still
+    // happens through the shared state. Keeping the receiver alive would
+    // fill the bounded buffer and block the mapper forever.
+    let (dead_tx, dead_rx) = mpsc::channel(1);
+    drop(dead_rx);
+    let assistant_msg_id = chatstore::append_message(&chat_id, "assistant", json!(""))
+        .map(|m| m.id)
+        .unwrap_or_default();
+    let shared = Arc::new(TurnShared {
+        chat_id: chat_id.clone(),
+        run_id: chat_id.clone(),
+        tx: dead_tx,
+        assistant_msg_id,
+        auto_approve: read_str("turn.auto_approve").map(|v| v == "true").unwrap_or(false),
+        max_turns: max_turns(),
+        accumulated_text: Mutex::new(String::new()),
+        activities: Mutex::new(Vec::new()),
+        db_lock: tokio::sync::Mutex::new(()),
+        turn: AtomicU32::new(0),
+        doomed: AtomicBool::new(false),
+        hit_turn_cap: AtomicBool::new(false),
+        thinking_open: AtomicBool::new(false),
+        doom: Mutex::new(DoomLoopDetector::new()),
+        call_args: Mutex::new(HashMap::new()),
+        traces: Mutex::new(Vec::new()),
+        usage: Mutex::new(Usage::empty()),
+    });
+
+    // Toolset: the same menu a live turn builds (plan-mode read-only not
+    // reconstructed — resume runs with the full menu; the durable operation
+    // state already carries which tools each step planned).
+    let mut schemas = get_tool_schemas(false);
+    schemas.extend(crate::composio::all_tool_schemas().await);
+    schemas.extend(crate::mcp::all_tool_schemas());
+    schemas.retain(|schema| {
+        let name = schema.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        !SUPERSEDED_LEGACY_TOOLS.contains(&name)
+    });
+    let cwd = read_str("turn.cwd").unwrap_or_else(|| ".".into());
+    let mut tools: Vec<DynTool> = schemas
+        .iter()
+        .filter_map(|schema| LegacyTool::from_schema(schema, shared.clone()))
+        .map(|t| Arc::new(t) as DynTool)
+        .collect();
+    let supports_images: crate::harness::tools::SupportsImagesFn = {
+        let has_image = model.input.contains(&InputType::Image);
+        Arc::new(move || has_image)
+    };
+    for tool in crate::harness::tools::create_coding_tools(std::path::Path::new(&cwd), Some(supports_images)) {
+        tools.push(Arc::new(GatedPiTool { inner: tool, shared: shared.clone() }) as DynTool);
+    }
+    tools.sort_by(|a, b| a.name().cmp(b.name()));
+
+    let provider = model.provider.clone();
+    let model_key = model.id.clone();
+    let source_model = model.clone();
+    let mut config = crate::harness::runtime::types::RuntimeConfig::default();
+    config.system_prompt = Some(system_prompt);
+    config.context_window = Some(model.context_window);
+    config.model_source = Some(Arc::new(move |p: &str, m: &str| {
+        (p == provider && m == model_key).then(|| source_model.clone())
+    }));
+    config.stream = Some(Arc::new(crate::harness::providers::stream) as StreamFn);
+    config.stream_options = crate::harness::session::types::HarnessStreamOptionsSnapshot {
+        api_key: Some(resolved.api_key.clone()),
+        max_tokens: Some(super::max_tokens_for(&model.id)),
+        max_retries: Some(MAX_TRANSIENT_RETRIES),
+        session_id: Some(chat_id.clone()),
+        ..Default::default()
+    };
+    config.retry_policy = crate::harness::runtime::types::RetryPolicySnapshot {
+        enabled: true,
+        max_retries: MAX_TRANSIENT_RETRIES,
+        ..Default::default()
+    };
+    config.compaction = hcompaction::CompactionSettings { enabled: false, ..Default::default() };
+    config.tools = Arc::new(tools.iter().map(|t| runtime_tool_from(t.clone())).collect());
+
+    let (harness, _open) = match Harness::create(
+        session,
+        HarnessOptions {
+            provider: model.provider.clone(),
+            model_id: model.id.clone(),
+            thinking_level: crate::harness::types::ThinkingLevel::Off,
+            active_tool_names: tools.iter().map(|t| t.name().to_string()).collect(),
+            config,
+        },
+    ) {
+        Ok(created) => created,
+        Err(_) => return "harness-open-failed",
+    };
+    let lane = match harness.lane(&lane_name).await {
+        Ok(lane) => lane,
+        Err(_) => return "lane-open-failed",
+    };
+
+    let mapper = tokio::spawn(map_harness_events(
+        shared.clone(),
+        lane.clone(),
+        harness.events.subscribe(None),
+    ));
+    let record = harness.resume(&lane_name).await;
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(10), mapper).await;
+    harness.close().await;
+
+    if aborting {
+        return "reconciled-aborted";
+    }
+    match record {
+        Ok(record) if record.status == crate::harness::session::types::TerminalStatus::Completed => "resumed-completed",
+        Ok(_) => "resumed-settled",
+        Err(_) => "resume-failed",
     }
 }
 

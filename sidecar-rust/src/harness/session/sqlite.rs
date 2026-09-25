@@ -781,14 +781,18 @@ impl SqliteSessionRepo {
             if path.extension().and_then(|e| e.to_str()) != Some("db") {
                 continue;
             }
-            if let Ok(storage) = SqliteStorage::open(&path) {
-                let metadata = {
-                    let conn = storage.conn.lock().unwrap();
-                    Self::read_meta(&conn)
-                };
-                if let Ok(m) = metadata {
-                    out.push(m);
+            match SqliteStorage::open(&path) {
+                Ok(storage) => {
+                    let metadata = {
+                        let conn = storage.conn.lock().unwrap();
+                        Self::read_meta(&conn)
+                    };
+                    match metadata {
+                        Ok(m) => out.push(m),
+                        Err(e) => tracing::warn!("session list: {} meta unreadable: {e}", path.display()),
+                    }
                 }
+                Err(e) => tracing::warn!("session list: {} open failed: {e}", path.display()),
             }
         }
         out.sort_by_key(|m| m.created_at);
@@ -924,5 +928,30 @@ mod tests {
             let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
             rt.block_on(self)
         }
+    }
+}
+
+#[cfg(test)]
+mod list_probe {
+    #[test]
+    fn lists_crashed_session_with_hot_wal() {
+        let dir = "/tmp/zwork-smoke-durable/sessions";
+        if !std::path::Path::new(dir).exists() {
+            return; // smoke dir absent (CI) — no-op
+        }
+        if !std::path::Path::new(
+            "/tmp/zwork-smoke-durable/sessions/634577ed3a1d4a33974efd0c7d9d455f__af5a90d552a74f9f98a9aa96d154ce7c.db",
+        )
+        .exists()
+        {
+            return; // the specific crashed-session artifact is gone; nothing to assert
+        }
+        let repo = super::SqliteSessionRepo::new(dir);
+        let listed = repo.list().unwrap();
+        let ids: Vec<&str> = listed.iter().map(|m| m.id.as_str()).collect();
+        assert!(
+            ids.iter().any(|id| id.starts_with("634577ed")),
+            "crashed session missing from list(): {ids:?}"
+        );
     }
 }

@@ -264,6 +264,10 @@ async fn main() {
     // inbox. See scheduler::scheduler_loop.
     tokio::spawn(scheduler::scheduler_loop());
 
+    // Resume-on-restart: scan durable sessions for interrupted runs and
+    // drive them to settlement (recovery output persists to chatstore).
+    tokio::spawn(agent::harness_turn::resume_interrupted_runs());
+
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(listener) => listener,
         Err(err) => {

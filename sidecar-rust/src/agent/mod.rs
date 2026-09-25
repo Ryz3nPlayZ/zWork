@@ -8,7 +8,7 @@ use crate::sync_util::Unpoison;
 mod prompts;
 mod trace;
 mod orientation;
-mod harness_turn;
+pub mod harness_turn;
 
 use trace::trace as llm_trace;
 

@@ -853,3 +853,101 @@ mod tests {
         ""
     }
 }
+
+#[cfg(test)]
+mod retry_key_probe {
+    use super::super::lane::{Lane, RunRequest};
+    use super::super::types::{DriveOutcome, RuntimeConfig};
+    use crate::harness::session::memory::MemoryStorage;
+    use crate::harness::session::session::Session;
+    use crate::harness::session::SessionMetadata;
+    use crate::harness::types::{AssistantMessage, AssistantMessageEvent, StopReason};
+    use std::sync::Mutex;
+
+    #[tokio::test]
+    async fn retry_preserves_stream_options_api_key() {
+        let session = Session::new(
+            SessionMetadata { id: "s".into(), created_at: 0, storage_version: 1, cwd: None, parent_session_id: None },
+            std::sync::Arc::new(MemoryStorage::new()),
+        );
+        let (bus, event_tx) = super::super::harness::HarnessEventBus::new();
+        let hooks = std::sync::Arc::new(super::super::hooks::HookRegistry::new());
+        let config = std::sync::Arc::new(std::sync::RwLock::new(RuntimeConfig::default()));
+        let lane = Lane::new(
+            "main",
+            session,
+            hooks,
+            config,
+            super::super::lane::LaneSnapshotState::default(),
+            event_tx,
+        )
+        .unwrap();
+        drop(bus);
+
+        let model = crate::harness::types::Model {
+            id: "m".into(),
+            name: "m".into(),
+            api: crate::harness::types::Api::OpenAICompletions,
+            provider: "p".into(),
+            base_url: String::new(),
+            reasoning: false,
+            thinking_level_map: None,
+            input: vec![],
+            cost: Default::default(),
+            prompt_cache: None,
+            context_window: 100_000,
+            max_tokens: 1000,
+            headers: None,
+            compat: None,
+        };
+        let seen_keys: std::sync::Arc<Mutex<Vec<Option<String>>>> = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let source_model = model.clone();
+        {
+            let handle = lane.config_handle();
+            let mut config = handle.write().unwrap();
+            config.context_window = Some(model.context_window);
+            let sm = source_model.clone();
+            config.model_source = Some(std::sync::Arc::new(move |p: &str, m: &str| {
+                (p == "p" && m == "m").then(|| sm.clone())
+            }));
+            let seen = seen_keys.clone();
+            config.stream_options.api_key = Some("sk-live".into());
+            config.stream_options.max_retries = Some(1);
+            config.retry_policy = super::super::types::RetryPolicySnapshot {
+                enabled: true,
+                max_retries: 1,
+                ..Default::default()
+            };
+            config.stream = Some(std::sync::Arc::new(
+                move |model: crate::harness::types::Model, _ctx: crate::harness::types::TranscriptContext, opts: crate::harness::types::StreamOptions| {
+                seen.lock().unwrap().push(opts.api_key.clone());
+                let (tx, rx) = tokio::sync::mpsc::channel(16);
+                let first = seen.lock().unwrap().len() == 1;
+                tokio::spawn(async move {
+                    if first {
+                        // Retryable provider failure on attempt 1.
+                        let mut err = AssistantMessage::pending(&model);
+                        err.stop_reason = StopReason::Error;
+                        err.error_message = Some("429 rate limited: slow down".into());
+                        let _ = tx.send(AssistantMessageEvent::Done { reason: StopReason::Error, message: err }).await;
+                    } else {
+                        let mut done = AssistantMessage::pending(&model);
+                        done.stop_reason = StopReason::Stop;
+                        let _ = tx.send(AssistantMessageEvent::Done { reason: StopReason::Stop, message: done }).await;
+                    }
+                });
+                rx
+            }) as crate::harness::agent_types::StreamFn);
+        }
+        lane.set_model("p", "m").await.unwrap();
+
+        let admission = lane
+            .accept(RunRequest::Prompt { messages: vec![crate::harness::agent_types::AgentMessage::user_text("hi")] })
+            .await
+            .unwrap();
+        let outcome = lane.drive(&admission.operation_id, true).await.unwrap();
+        assert!(matches!(outcome, DriveOutcome::Settled { .. }), "outcome: {outcome:?}");
+        let seen = seen_keys.lock().unwrap().clone();
+        assert_eq!(seen, vec![Some("sk-live".into()), Some("sk-live".into())], "api key must survive the retry: {seen:?}");
+    }
+}

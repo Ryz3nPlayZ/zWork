@@ -276,19 +276,24 @@ async fn publish_generation_intent(
 
 fn stream_options_from(
     snapshot: &crate::harness::session::types::HarnessStreamOptionsSnapshot,
+    volatile: &crate::harness::session::types::HarnessStreamOptionsSnapshot,
     thinking_level: ThinkingLevel,
     signal: crate::harness::types::AbortSignal,
 ) -> StreamOptions {
+    // Durable knobs (retries, delays, cache hints, headers) come from the
+    // operation's snapshot; credentials and generation ceilings are volatile
+    // by contract — after a restart the deserialized snapshot no longer
+    // carries them, so they always resolve from the live harness config.
     StreamOptions {
-        api_key: snapshot.api_key.clone(),
+        api_key: volatile.api_key.clone(),
         headers: snapshot.headers.clone(),
         temperature: None,
-        max_tokens: snapshot.max_tokens,
+        max_tokens: volatile.max_tokens,
         reasoning: (thinking_level != ThinkingLevel::Off).then_some(thinking_level),
         signal: Some(signal),
         max_retries: snapshot.max_retries.unwrap_or(0),
         max_retry_delay_ms: snapshot.max_retry_delay_ms,
-        session_id: snapshot.session_id.clone(),
+        session_id: volatile.session_id.clone(),
         cache_retention: snapshot.cache_retention.clone(),
         sampling_params: None,
         on_payload: None,
@@ -341,6 +346,7 @@ async fn perform_generation(
 
     let options = stream_options_from(
         stream_options,
+        &lane.read_config().stream_options,
         intent.generation.configuration.thinking_level,
         drive.gate.signal().clone(),
     );
