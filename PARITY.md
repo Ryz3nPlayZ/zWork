@@ -164,8 +164,27 @@ with M6 durable compaction (deferred is excluded from the port).
 
 ## M7 — Wrap-up
 
-- ⬜ pi bundled SKILL.md content (docx/pptx/xlsx/pdf) license check
-- ⬜ Final audit vs this file + SPEC §0.9; CHANGELOG; merge to main
+- ✅ pi bundled SKILL.md license check (2026-09-25): pi-agent-core ships NO
+      document skills — the docx/pptx/xlsx/pdf SKILL.mds in pi-mono are
+      coding-agent TEST FIXTURES (excluded product layer); repo .pi/skills
+      are dev-workflow docs. Nothing to adopt; zWork's own skills system
+      stands. (pi-mono is MIT regardless.)
+- ✅ Final audit vs SPEC §0.9 (2026-09-25): every remaining §0.9 item is
+      either ported-and-covered, or excluded by the confirmed scope —
+      J1 JSONL compaction N/A (our backend is SQLite), C1 RemoteSession
+      excluded (single-process sidecar), R12 watchSession not stubbed here
+      (the event bus subscribe + run registry cover the watch need), T1
+      telemetry excluded (agent.jsonl traces), S3 search excluded
+      (upstream skeleton), R11 migrations N/A (storage_version 1, our own
+      schema), WP08 named-branch/streaming forks: fork + policy landed in
+      M3 (streaming JSONL/SQLite transfer N/A — no cross-session
+      transfer in zWork's model), H1 contract closure tracked as upstream
+      debt. The only SliceNotImplemented left in OUR tree is `deferred`
+      (excluded by scope).
+- ⬜ CHANGELOG entry + merge harness/pi-port → main + release — gated on
+      the user's in-flight frontend batch (M2 usage captions, M4
+      re-attach/queue UI, M5 composer queue chips ride in the uncommitted
+      app/ tree) and the release decision (releases push to ALL users).
 
 ## Excluded (serve pi's TUI/multi-client architecture, not the agent)
 
