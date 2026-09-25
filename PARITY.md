@@ -137,10 +137,30 @@ with M6 durable compaction (deferred is excluded from the port).
 - ⬜ Frontend: send-while-busy, queued-message chips, mode picker — rides
       with the in-flight app/ batch
 
-## M6 — Compaction persistence + sub-agent parity
+## M6 — Compaction persistence + sub-agent parity — ✅ done (2026-09-25)
 
-- ⬜ Compaction as first-class durable entries; reloads skip re-compaction
-- ⬜ Sub-agents: parallel spawn, fuller gated toolset, cap raise, 1 nesting lvl
+- ✅ Durable compaction (dd51299): summary.deciding/ready/effect_pending/
+      retry_wait procedures over the configured stream; result staged
+      durably (pi.op.summary) before the effect so a crash never re-bills;
+      CompactionEntry commits with summary + retained tail + usage and the
+      branch tip chains through it; ResumeCheckpoint resumption (queued
+      steer becomes the trigger, needed assistant re-arms generation);
+      before_compaction hook (decline / hook summary); bridge cutover to
+      real CompactionSettings for chat turns + startup resume (mid-run
+      threshold + overflow now durable; pre-run + post-failure overflow
+      retry stay bridge-level); compaction wire events on the live stream
+      and re-attach projection. Unit golden path + crash-recovery (zero
+      re-bill) + live 7-turn smoke.
+- ✅ Sub-agent parity (119ab9b): fuller toolset (pi coding tools incl.
+      bash/write/edit behind the same risk evaluator — destructive actions
+      denied with a report-don't-act message since sub-agents run
+      unattended; web/document/academic lookups; interactive tools
+      excluded), cap raised 12 → 40 with ZWORK_SUBAGENT_MAX_TURNS
+      override, one nesting level (depth-bound spawn tool; grandchildren
+      get none), and ZWORK_PARALLEL_TOOLS=1 runs tool batches — several
+      spawn_agent calls in one turn — concurrently (runtime run_parallel).
+      Smoke-verified: parent delegates → sub-agent session durable →
+      result flows back.
 
 ## M7 — Wrap-up
 
