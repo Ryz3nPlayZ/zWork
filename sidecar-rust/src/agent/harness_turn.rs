@@ -1736,6 +1736,126 @@ impl AgentHooks for SubagentHooks {
     }
 }
 
+
+/// The sub-agent on the durable runtime: read-only tools, same 12-turn cap
+/// (enforced by a durable abort at the boundary), deltas streamed as
+/// `subagent_delta`.
+async fn spawn_subagent_durable(
+    chat_id: &str,
+    parent_run_id: &str,
+    task_id: &str,
+    task: &str,
+    model: &Model,
+    api_key: &str,
+    tools: &[DynTool],
+    system: &str,
+    stream_fn: StreamFn,
+    tx: &mpsc::Sender<Value>,
+) -> Result<String, String> {
+    use crate::harness::runtime::events::HarnessEvent;
+    use crate::harness::runtime::harness::{Harness, HarnessOptions};
+    use crate::harness::runtime::types::RetryPolicySnapshot;
+    use crate::harness::session::sqlite::SqliteSessionRepo;
+    use crate::harness::session::types::HarnessStreamOptionsSnapshot;
+
+    let _ = parent_run_id;
+    let repo = SqliteSessionRepo::new(crate::paths::home_dir().join("sessions"));
+    let session_id = format!("subagent_{task_id}_{}", uuid::Uuid::new_v4().simple());
+    let session = repo.create(&session_id, None).map_err(|e| format!("Failed to open durable session: {e}"))?;
+
+    let provider = model.provider.clone();
+    let model_id = model.id.clone();
+    let source_model = model.clone();
+    let mut config = crate::harness::runtime::types::RuntimeConfig::default();
+    config.system_prompt = Some(system.to_string());
+    config.context_window = Some(model.context_window);
+    config.model_source = Some(Arc::new(move |p: &str, m: &str| {
+        (p == provider && m == model_id).then(|| source_model.clone())
+    }));
+    config.stream = Some(stream_fn);
+    config.stream_options = HarnessStreamOptionsSnapshot {
+        api_key: Some(api_key.to_string()),
+        max_retries: Some(2),
+        ..Default::default()
+    };
+    config.retry_policy = RetryPolicySnapshot { enabled: true, max_retries: 2, ..Default::default() };
+    config.tools = Arc::new(tools.iter().map(|t| runtime_tool_from(t.clone())).collect());
+
+    let (harness, _open) = Harness::create(
+        session,
+        HarnessOptions {
+            provider: model.provider.clone(),
+            model_id: model.id.clone(),
+            thinking_level: crate::harness::types::ThinkingLevel::Off,
+            active_tool_names: tools.iter().map(|t| t.name().to_string()).collect(),
+            config,
+        },
+    )
+    .map_err(|e| format!("Durable harness failed to open: {e}"))?;
+    let lane = harness.lane("main").await.map_err(|e| format!("Durable lane failed to open: {e}"))?;
+
+    let mut events = harness.events.subscribe(None);
+    let mapper_lane = lane.clone();
+    let mapper_tx = tx.clone();
+    let mapper_task_id = task_id.to_string();
+    let mapper = tokio::spawn(async move {
+        let accumulated = Arc::new(Mutex::new(String::new()));
+        let mut turns: u32 = 0;
+        while let Some((_seq, event)) = events.recv().await {
+            match event {
+                HarnessEvent::TurnStart { .. } => {
+                    turns += 1;
+                    if turns > MAX_SUBAGENT_TURNS {
+                        if let Some(operation_id) = mapper_lane.current_operation_id().ok().flatten() {
+                            let _ = mapper_lane.request_operation_abort(&operation_id).await;
+                        }
+                    }
+                }
+                HarnessEvent::MessageUpdate {
+                    event: AssistantMessageEvent::TextDelta { delta, .. },
+                    ..
+                } => {
+                    if !delta.is_empty() {
+                        accumulated.lock_unpoisoned().push_str(&delta);
+                        let _ = mapper_tx.send(json!({ "type": "subagent_delta", "task_id": mapper_task_id, "text": delta })).await;
+                    }
+                }
+                HarnessEvent::RunEnd { .. } => break,
+                _ => {}
+            }
+        }
+        accumulated
+    });
+
+    let record = harness.prompt("main", vec![AgentMessage::user_text(task)]).await;
+    let accumulated = match tokio::time::timeout(std::time::Duration::from_secs(10), mapper).await {
+        Ok(joined) => joined.unwrap_or_default(),
+        Err(_) => Arc::new(Mutex::new(String::new())),
+    };
+    harness.close().await;
+
+    let result = accumulated.lock_unpoisoned().clone();
+    match record {
+        Ok(record)
+            if record.status != crate::harness::session::types::TerminalStatus::Failed =>
+        {
+            Ok(result)
+        }
+        record => {
+            let error = record
+                .ok()
+                .and_then(|r| r.error.map(|e| e.message))
+                .unwrap_or_else(|| "sub-agent failed".to_string());
+            if result.is_empty() {
+                Err(friendly_upstream_error(&error, None, true))
+            } else {
+                llm_trace(chat_id, 0, "subagent_error", json!({ "task_id": task_id, "error": error }));
+                Ok(result)
+            }
+        }
+    }
+}
+
 /// Run a bounded, READ-ONLY sub-agent for `task` on the harness, streaming
 /// `subagent_started` / `subagent_delta` / `subagent_done` to the parent's
 /// SSE stream. Returns the sub-agent's full text output.
@@ -1778,6 +1898,21 @@ pub async fn spawn_subagent(
          You have READ-ONLY tools (read/ls/grep/find, web and document lookups). Do the task, then stop. \
          Be concise — your full text output is returned to the parent agent."
     );
+
+    let stream_fn: StreamFn = Arc::new(crate::harness::providers::stream);
+    if durable_enabled() {
+        return match spawn_subagent_durable(chat_id, parent_run_id, &task_id, task, &model, &resolved.api_key, &tools, &system, stream_fn, tx).await {
+            Ok(result) => {
+                log_agent_event(chat_id, parent_run_id, "subagent_done", json!({ "task_id": task_id, "chars": result.len() }));
+                let _ = tx.send(json!({ "type": "subagent_done", "task_id": task_id, "result": result })).await;
+                Ok(result)
+            }
+            Err(friendly) => {
+                let _ = tx.send(json!({ "type": "subagent_done", "task_id": task_id, "error": friendly })).await;
+                Err(friendly)
+            }
+        };
+    }
 
     let accumulated = Arc::new(Mutex::new(String::new()));
     let agent = Agent::new(AgentOptions {
