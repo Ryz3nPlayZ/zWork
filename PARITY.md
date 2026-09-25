@@ -98,8 +98,15 @@ Status: ✅ done · 🚧 in progress · ⬜ remaining · ➖ excluded (with reas
       recordUsage/navigate)
 - ✅ Re-based `harness_turn.rs` on Harness; legacy Agent/agent_loop deleted
       (8ed24f9, -2.8k lines); sub-agents run on the durable runtime too
-- ⬜ Resume-on-restart (open operations at startup)
-- ⬜ Re-attach SSE + run event cursor + gate polling endpoint
+- ✅ Resume-on-restart (58c0aff): startup scan auto-resumes interrupted
+      runs from `zwork.turn.*` metadata (credentials re-resolved, never
+      persisted); volatile api_key/max_tokens resolve from live config so a
+      restored snapshot can't fire an unauthenticated retry; kill -9 smoke
+      settles from committed frames with zero extra provider calls
+- ⬜ Re-attach SSE + run event cursor + gate polling endpoint (bus replay
+      ring already stamped with cursors)
+- ⬜ Recovery display: message_end(recovery) output should persist to the
+      chat row (currently settles durably but the row stays empty)
 
 Remaining slice stubs in the dispatcher: summary.*/deferred.* leaves land
 with M6 durable compaction (deferred is excluded from the port).
