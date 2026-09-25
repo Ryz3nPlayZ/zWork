@@ -89,10 +89,15 @@ Status: ✅ done · 🚧 in progress · ⬜ remaining · ➖ excluded (with reas
 - ✅ Checkpoint inbox drain, compaction threshold, finish decisions
       (drive/checkpoint + boundary)
 - ✅ Recovery / reconcile / terminal records; navigation commit
-- ✅ 11-hook registry (runtime/hooks.rs; ZworkHooks mapping pending facade)
-- ⬜ `Harness` facade: prompt/compact/navigate/resume/abort/steer/followUp/
-      nextRun/cancelQueued/recordUsage/watch
-- ⬜ Re-base `harness_turn.rs` on Harness; delete legacy Agent/agent_loop
+- ✅ 11-hook registry (runtime/hooks.rs) + ZworkHooks mapped: doom guard on
+      `before_tool`, turn cap via durable `request_operation_abort`,
+      pre-run/overflow compaction bridge-level (mid-run threshold waits M6)
+- ✅ `Harness` facade (67299e9): event bus w/ replay cursor, startup restore
+      w/ intent validation, lane lifecycle, global config, convenience ops
+      (prompt/skill/resume/abort/steer/followUp/nextRun/cancelQueued/
+      recordUsage/navigate)
+- ✅ Re-based `harness_turn.rs` on Harness; legacy Agent/agent_loop deleted
+      (8ed24f9, -2.8k lines); sub-agents run on the durable runtime too
 - ⬜ Resume-on-restart (open operations at startup)
 - ⬜ Re-attach SSE + run event cursor + gate polling endpoint
 
