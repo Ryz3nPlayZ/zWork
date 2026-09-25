@@ -11,9 +11,11 @@
 pub mod drive;
 pub mod effect_gate;
 pub mod events;
+pub mod harness;
 pub mod hooks;
 pub mod lane;
 pub mod progress;
+pub mod restore;
 pub mod terminal;
 pub mod tool_exec;
 pub mod transcript;

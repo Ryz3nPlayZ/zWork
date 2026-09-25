@@ -55,6 +55,8 @@ pub enum LaneError {
     UnknownTemplate(String),
     #[error("invalid navigation: {reason}")]
     InvalidNavigation { lane: String, reason: &'static str },
+    #[error("invalid lane {lane:?}: {reason}")]
+    InvalidLane { lane: String, reason: &'static str },
     #[error("unknown target: {0}")]
     UnknownTarget(String),
     #[error("no active operation on lane {0:?}")]

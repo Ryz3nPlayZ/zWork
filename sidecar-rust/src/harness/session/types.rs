@@ -462,6 +462,17 @@ pub struct RunSettings {
     pub tool_execution: ToolExecutionMode,
 }
 
+impl Default for RunSettings {
+    fn default() -> Self {
+        RunSettings {
+            compaction: CompactionSettings::default(),
+            steering_mode: QueueMode::All,
+            follow_up_mode: QueueMode::All,
+            tool_execution: ToolExecutionMode::Sequential,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum Continuation {
