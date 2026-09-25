@@ -85,6 +85,7 @@ pub fn plan_boundary_inbox(
     scope: &OperationScope,
     mutator: &mut SessionMutator<'_>,
     follow_up_when_no_trigger: bool,
+    tip_override: Option<&str>,
 ) -> SessionResult<BoundaryPlacement> {
     let inbox = &state.inbox;
     let steer: Vec<&InboxItem> = inbox.iter().filter(|item| item.kind == InboxItemKind::Steer).collect();
@@ -157,7 +158,10 @@ pub fn plan_boundary_inbox(
         pending = load(&selected)?;
     }
 
-    let mut parent_id = state.tip_id.clone();
+    // Chain from the override when a structural effect just moved the tip
+    // in this same transaction (the compaction entry becomes the parent of
+    // the drained inbox entries).
+    let mut parent_id = tip_override.map(String::from).or_else(|| state.tip_id.clone());
     let mut trigger_entry_id: Option<String> = None;
     let mut entries: Vec<NewEntry> = Vec::with_capacity(pending.len());
     for (item, value) in &pending {
@@ -315,7 +319,7 @@ pub async fn finish_run_boundary(
 
     let outcome = lane
         .continue_operation::<BoundaryFinish, _>(move |state, current, meta, mutator| {
-            let placement = plan_boundary_inbox(lane, state, current.scope(), mutator, true)?;
+            let placement = plan_boundary_inbox(lane, state, current.scope(), mutator, true, None)?;
             let scope = current.scope().clone();
             let configuration = state.configuration.clone();
 

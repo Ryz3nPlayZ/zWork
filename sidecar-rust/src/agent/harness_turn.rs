@@ -653,6 +653,22 @@ async fn map_harness_events(
                     }))
                     .await;
             }
+            HarnessEvent::CompactionStart { reason, .. } => {
+                shared
+                    .send(json!({ "type": "compaction", "status": "started", "reason": compaction_reason(&reason) }))
+                    .await;
+            }
+            HarnessEvent::CompactionEnd { reason, outcome, .. } => {
+                use crate::harness::runtime::events::StructuralOutcome as Out;
+                let status = match outcome {
+                    Out::Completed { .. } => "complete",
+                    Out::Declined => "declined",
+                    Out::Failed { .. } | Out::Aborted => "failed",
+                };
+                shared
+                    .send(json!({ "type": "compaction", "status": status, "reason": compaction_reason(&reason) }))
+                    .await;
+            }
             HarnessEvent::TurnEnd { .. } => flush_traces(&shared).await,
             HarnessEvent::RunEnd { .. } => break,
             _ => {}
@@ -660,12 +676,23 @@ async fn map_harness_events(
     }
 }
 
+/// Wire name for a structural reason (matches the bridge-level compaction
+/// event vocabulary the frontend already handles).
+fn compaction_reason(reason: &crate::harness::runtime::events::StructuralReason) -> &'static str {
+    use crate::harness::runtime::events::StructuralReason as R;
+    match reason {
+        R::Manual => "manual",
+        R::Threshold => "threshold",
+        R::Overflow => "overflow",
+    }
+}
+
 /// One durable attempt: a fresh per-run session (crash-resumable artifact
 /// under `~/.zwork/sessions/`), the harness facade over it, the doom-loop
 /// guard on the hook registry, the event mapper, and the prompt driven to
-/// settlement. Mid-run threshold compaction stays disabled until the
-/// structural procedures land (M6); pre-run and overflow compaction stay at
-/// the bridge level, exactly as before.
+/// settlement. Mid-run threshold + overflow compaction run as durable
+/// structural procedures (M6); pre-run and the post-failure overflow retry
+/// stay bridge-level.
 #[allow(clippy::too_many_arguments)]
 async fn run_durable_once(
     shared: &Arc<TurnShared>,
@@ -736,7 +763,11 @@ async fn run_durable_once(
         max_retries: MAX_TRANSIENT_RETRIES,
         ..Default::default()
     };
-    config.compaction = hcompaction::CompactionSettings { enabled: false, ..Default::default() };
+    // Durable compaction (M6): mid-run threshold + overflow compactions
+    // run as structural procedures in the session (crash-safe, first-class
+    // CompactionEntry, reloads stop re-compacting); pre-run and the
+    // post-failure overflow retry stay bridge-level.
+    config.compaction = hcompaction::CompactionSettings::default();
     config.tools = Arc::new(tools.iter().map(|t| runtime_tool_from(t.clone())).collect());
 
     let (harness, open) = match Harness::create(
@@ -1980,7 +2011,11 @@ async fn resume_one_interrupted(
         max_retries: MAX_TRANSIENT_RETRIES,
         ..Default::default()
     };
-    config.compaction = hcompaction::CompactionSettings { enabled: false, ..Default::default() };
+    // Durable compaction (M6): mid-run threshold + overflow compactions
+    // run as structural procedures in the session (crash-safe, first-class
+    // CompactionEntry, reloads stop re-compacting); pre-run and the
+    // post-failure overflow retry stay bridge-level.
+    config.compaction = hcompaction::CompactionSettings::default();
     config.tools = Arc::new(tools.iter().map(|t| runtime_tool_from(t.clone())).collect());
 
     let (harness, _open) = match Harness::create(

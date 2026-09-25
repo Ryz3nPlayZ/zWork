@@ -382,6 +382,18 @@ pub fn project_harness_event(event: &HarnessEvent) -> Option<Value> {
             "type": "queue",
             "items": queues.iter().map(queued_item_wire).collect::<Vec<_>>(),
         })),
+        HarnessEvent::CompactionStart { .. } => Some(json!({
+            "type": "compaction", "status": "started"
+        })),
+        HarnessEvent::CompactionEnd { outcome, .. } => {
+            use crate::harness::runtime::events::StructuralOutcome as Out;
+            let status = match outcome {
+                Out::Completed { .. } => "complete",
+                Out::Declined => "declined",
+                Out::Failed { .. } | Out::Aborted => "failed",
+            };
+            Some(json!({ "type": "compaction", "status": status }))
+        },
         HarnessEvent::RunEnd { status, .. } => Some(json!({
             "type": "done",
             "status": status,
@@ -518,10 +530,6 @@ mod tests {
         .unwrap();
         let lane = harness.lane("main").await.unwrap();
         (harness, lane)
-    }
-
-    async fn test_lane() -> Arc<Lane> {
-        test_harness_lane().await.1
     }
 
     #[test]

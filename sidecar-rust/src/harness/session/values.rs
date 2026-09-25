@@ -140,6 +140,13 @@ pub fn operation_preparation(operation_id: &str, task_id: &str) -> Addr {
     value("pi.op.preparation", &format!("{operation_id}:{task_id}")).expect("static")
 }
 
+/// Staged summary generation result (pi `summaryResult`): written before
+/// the structural effect, read by recovery so a crash between generation
+/// and effect never re-bills the summarizer.
+pub fn summary_result(task_id: &str) -> Addr {
+    value("pi.op.summary", task_id).expect("static")
+}
+
 pub fn operation_tool_args_prefix(operation_id: &str, step_id: Option<&str>) -> Addr {
     let key = match step_id {
         None => format!("{operation_id}:"),

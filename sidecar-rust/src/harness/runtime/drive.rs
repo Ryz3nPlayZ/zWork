@@ -14,6 +14,7 @@ pub mod generation;
 pub mod reconcile;
 pub mod response;
 pub mod structural;
+pub mod structural_generation;
 pub mod tool_placement;
 pub mod tools;
 
@@ -134,13 +135,47 @@ async fn drive_operation_inner(lane: &Arc<Lane>, drive: &Arc<Drive>) -> Result<D
                         SliceNotImplemented { operation: "deferred" }.to_string(),
                     ));
                 }
-                OperationState::SummaryDeciding { .. }
-                | OperationState::SummaryReady { .. }
-                | OperationState::SummaryEffectPending { .. }
-                | OperationState::SummaryRetryWait { .. } => {
-                    return Err(SessionError::Other(
-                        SliceNotImplemented { operation: "structural generation" }.to_string(),
-                    ));
+                OperationState::SummaryDeciding { scope, task, .. } => {
+                    super::drive::structural_generation::run_structural_decision(lane, drive, scope, task).await?
+                }
+                OperationState::SummaryReady { scope, task, summary, next_attempt, .. } => {
+                    super::drive::structural_generation::run_structural_generation(
+                        lane,
+                        drive,
+                        scope,
+                        task,
+                        summary,
+                        *next_attempt,
+                    )
+                    .await?
+                }
+                OperationState::SummaryEffectPending {
+                    scope,
+                    task,
+                    summary,
+                    attempt,
+                    ..
+                } => {
+                    super::drive::structural_generation::recover_structural_generation(
+                        lane,
+                        drive,
+                        scope,
+                        task,
+                        summary,
+                        *attempt,
+                    )
+                    .await?
+                }
+                OperationState::SummaryRetryWait { scope, task, summary, retry, .. } => {
+                    super::drive::structural_generation::run_structural_retry_wait(
+                        lane,
+                        drive,
+                        scope,
+                        task,
+                        summary,
+                        retry,
+                    )
+                    .await?
                 }
                 OperationState::NavigationReadyToCommit { .. } => {
                     super::drive::reconcile::commit_navigation(lane, drive).await?
@@ -175,7 +210,7 @@ mod tests {
     use crate::harness::runtime::types::RuntimeConfig;
     use crate::harness::session::memory::MemoryStorage;
     use crate::harness::session::session::Session;
-    use crate::harness::session::types::{BranchScan, OperationState, SessionMetadata, TerminalStatus, ToolCallStatus};
+    use crate::harness::session::types::{BranchScan, OperationState, SessionMetadata, TerminalStatus};
     use crate::harness::session::values::operation_state as operation_state_addr;
     use std::sync::{Arc, RwLock};
 
@@ -567,7 +602,7 @@ mod tests {
     async fn steering_renews_generation_at_the_boundary() {
         let (lane, _events) = test_lane();
         let operation_id = accept(&lane, "work").await;
-        let steer = lane.enqueue(QueueKind::Steer, AgentMessage::user_text("redirect")).await.unwrap();
+        let _steer = lane.enqueue(QueueKind::Steer, AgentMessage::user_text("redirect")).await.unwrap();
 
         // Without a model source the run settles as a configuration
         // failure — after the boundary consumed the steer.
@@ -581,7 +616,7 @@ mod tests {
     async fn follow_ups_wait_for_a_triggerless_boundary() {
         let (lane, _events) = test_lane();
         let operation_id = accept(&lane, "work").await;
-        let steer = lane.enqueue(QueueKind::Steer, AgentMessage::user_text("now")).await.unwrap();
+        let _steer = lane.enqueue(QueueKind::Steer, AgentMessage::user_text("now")).await.unwrap();
         let follow_up = lane.enqueue(QueueKind::FollowUp, AgentMessage::user_text("later")).await.unwrap();
 
         let outcome = lane.drive(&operation_id, false).await.unwrap();
@@ -816,8 +851,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn threshold_hands_off_to_summary_deciding() {
+    async fn threshold_compaction_commits_and_completes() {
         let (lane, mut events) = test_lane();
+        install_scripted_stream(&lane, "a concise summary of the conversation").await;
         {
             let handle = lane.config_handle();
             let mut config = handle.write().unwrap();
@@ -838,15 +874,177 @@ mod tests {
         let operation_id = accept(&lane, "now run").await;
 
         let outcome = lane.drive(&operation_id, false).await.unwrap();
-        assert!(matches!(outcome, DriveOutcome::Failed { .. }));
-
-        match durable_state(&lane, &operation_id) {
-            OperationState::SummaryDeciding { task, .. } => {
-                assert_eq!(task.reason.as_deref(), Some("threshold"));
-            }
-            other => panic!("expected summary.deciding, got {}", other.at()),
+        match &outcome {
+            DriveOutcome::Settled { outcome } => assert_eq!(outcome.status, TerminalStatus::Completed),
+            other => panic!("expected completed run, got {other:?}"),
         }
-        assert!(drain(&mut events).contains(&"compaction_start"));
+
+        // The compaction entry is a first-class branch entry and the tip
+        // chains through it.
+        let entries = lane.find_entries(BranchScan { oldest_first: true, ..Default::default() }).unwrap();
+        let compaction = entries
+            .iter()
+            .find(|entry| entry.entry_type() == "compaction")
+            .expect("compaction entry committed");
+        assert!(compaction.parent_id.is_some());
+        let tip = lane.tip_id().unwrap().expect("run leaves a tip");
+        let mut cursor = Some(tip);
+        let mut chains_through_compaction = false;
+        while let Some(id) = cursor {
+            if id == compaction.id {
+                chains_through_compaction = true;
+                break;
+            }
+            cursor = entries.iter().find(|entry| entry.id == id).and_then(|entry| entry.parent_id.clone());
+        }
+        assert!(chains_through_compaction, "tip must chain through the compaction entry");
+
+        let event_types = drain(&mut events);
+        assert!(event_types.contains(&"compaction_start"));
+        assert!(event_types.contains(&"compaction_end"));
+    }
+
+    #[tokio::test]
+    async fn staged_summary_recovers_without_re_billing() {
+        let (lane, _events) = test_lane();
+        install_scripted_stream(&lane, "the final answer").await;
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        {
+            // Wrap the configured stream with a call counter: recovery must
+            // make ZERO summarizer calls (the staged result applies), then
+            // exactly one assistant call continues the run.
+            let handle = lane.config_handle();
+            let mut config = handle.write().unwrap();
+            let inner = config.stream.clone().unwrap();
+            let calls = calls.clone();
+            config.stream = Some(Arc::new(move |model, ctx, opts| {
+                calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                inner(model, ctx, opts)
+            }));
+        }
+
+        let operation_id = accept(&lane, "work").await;
+
+        // Simulate a crash after the summarizer billed but before the
+        // effect: summary.effect_pending state + durable preparation +
+        // staged result (pi recoverStructuralGeneration).
+        let task_id = lane.session.next_id();
+        let result_entry_id = lane.session.next_id();
+        let preparation = crate::harness::session::types::DurableStructuralPreparation::Compaction {
+            messages_to_summarize: vec![AgentMessage::user_text("old conversation worth summarizing")],
+            turn_prefix_messages: vec![],
+            retained_tail: vec![],
+            is_split_turn: false,
+            tokens_before: 100,
+            previous_summary: None,
+            file_ops: Default::default(),
+            settings: crate::harness::compaction::CompactionSettings::default(),
+        };
+        let effect = {
+            let boundary_trigger = "trigger".to_string();
+            OperationState::SummaryEffectPending {
+                scope: test_scope(),
+                task: crate::harness::session::types::SummaryTask {
+                    task_id: task_id.clone(),
+                    reason: Some("threshold".into()),
+                    custom_instructions: None,
+                    boundary: crate::harness::session::types::ResultBoundary::ResumeCheckpoint {
+                        resume_after: crate::harness::session::types::CheckpointData {
+                            continuation: crate::harness::session::types::Continuation::NeedAssistant {
+                                overflow_recovery_used: false,
+                            },
+                            trigger_entry_id: boundary_trigger,
+                        },
+                    },
+                },
+                summary: crate::harness::session::types::SummaryContext {
+                    result_entry_id: result_entry_id.clone(),
+                    configuration: lane.configuration(),
+                    stream_options: Default::default(),
+                    retry_policy: crate::harness::session::types::NormalizedRetryPolicy {
+                        max_attempts: 1,
+                        base_delay_ms: 1,
+                        max_agent_delay_ms: 10,
+                    },
+                },
+                attempt: 1,
+                request: None,
+                usage_ids: vec![],
+            }
+        };
+        let prep_addr = crate::harness::session::values::operation_preparation(&operation_id, &task_id);
+        let prep_json = serde_json::to_value(&preparation).unwrap();
+        let staged_addr = crate::harness::session::values::summary_result(&task_id);
+        let staged_usage = serde_json::to_value(crate::harness::types::Usage {
+            input: 1,
+            output: 1,
+            total_tokens: 2,
+            ..Default::default()
+        })
+        .unwrap();
+        let staged_json = serde_json::json!({ "text": "recovered summary", "usage": staged_usage });
+        lane.settle_operation(move |_state, _current, _meta, _mutator| {
+            Ok(crate::harness::runtime::lane::OperationCommandFor::Commit {
+                decision: super::super::types::CommitDecision {
+                    writes: Vec::new(),
+                    materialize: Box::new(|_| ()),
+                    events: None,
+                },
+                operation_state: effect,
+                lane: None,
+            })
+        })
+        .await
+        .unwrap();
+        lane.session
+            .mutate(move |mutator| {
+                mutator.commit(vec![
+                    crate::harness::session::commit::Write::Value(crate::harness::session::values::set_value(
+                        &prep_addr,
+                        prep_json,
+                    )),
+                    crate::harness::session::commit::Write::Value(crate::harness::session::values::set_value(
+                        &staged_addr,
+                        staged_json,
+                    )),
+                ])?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        let outcome = lane.drive(&operation_id, false).await.unwrap();
+        match &outcome {
+            DriveOutcome::Settled { outcome } => assert_eq!(outcome.status, TerminalStatus::Completed),
+            other => panic!("expected completed run after recovery, got {other:?}"),
+        }
+
+        // Zero summarizer calls: the staged result applied durably.
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let entries = lane.find_entries(BranchScan { oldest_first: true, ..Default::default() }).unwrap();
+        let compaction = entries
+            .iter()
+            .find(|entry| entry.id == result_entry_id)
+            .expect("compaction entry committed from the staged result");
+        match &compaction.body {
+            crate::harness::session::types::EntryBody::Compaction { summary, .. } => {
+                assert_eq!(summary, "recovered summary");
+            }
+            other => panic!("expected a compaction entry, got {other:?}"),
+        }
+    }
+
+    fn test_scope() -> crate::harness::session::types::OperationScope {
+        crate::harness::session::types::OperationScope {
+            control: crate::harness::session::types::Control::Running,
+            settings: crate::harness::session::types::RunSettings {
+                compaction: crate::harness::compaction::CompactionSettings::default(),
+                steering_mode: crate::harness::session::types::QueueMode::All,
+                follow_up_mode: crate::harness::session::types::QueueMode::All,
+                tool_execution: crate::harness::session::types::ToolExecutionMode::Sequential,
+            },
+            latest_assistant_entry_id: None,
+        }
     }
 
     fn meta_used() -> &'static str {

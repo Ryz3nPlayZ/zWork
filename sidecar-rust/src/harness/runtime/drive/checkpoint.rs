@@ -164,7 +164,7 @@ pub async fn run_checkpoint(
             let scope = current.scope().clone();
             let follow_up_when_no_trigger =
                 threshold_for_plan.is_none() && matches!(current_checkpoint(current).continuation, Continuation::MayFinish { .. });
-            let placement = plan_boundary_inbox(lane, state, &scope, mutator, follow_up_when_no_trigger)?;
+            let placement = plan_boundary_inbox(lane, state, &scope, mutator, follow_up_when_no_trigger, None)?;
 
             if let Some(trigger_entry_id) = &placement.trigger_entry_id {
                 let ready = assistant_ready_at_boundary(
