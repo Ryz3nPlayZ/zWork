@@ -431,6 +431,16 @@ pub struct HarnessStreamOptionsSnapshot {
     pub cache_retention: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deferred: Option<bool>,
+    /// Provider credential and generation ceiling. Volatile bridge inputs —
+    /// never write these into durable operation state; they ride the
+    /// in-memory runtime config only (upstream resolves credentials outside
+    /// the snapshot entirely).
+    #[serde(skip)]
+    pub api_key: Option<String>,
+    #[serde(skip)]
+    pub max_tokens: Option<u64>,
+    #[serde(skip)]
+    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

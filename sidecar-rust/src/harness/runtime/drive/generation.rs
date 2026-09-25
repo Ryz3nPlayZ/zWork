@@ -280,15 +280,15 @@ fn stream_options_from(
     signal: crate::harness::types::AbortSignal,
 ) -> StreamOptions {
     StreamOptions {
-        api_key: None,
+        api_key: snapshot.api_key.clone(),
         headers: snapshot.headers.clone(),
         temperature: None,
-        max_tokens: None,
+        max_tokens: snapshot.max_tokens,
         reasoning: (thinking_level != ThinkingLevel::Off).then_some(thinking_level),
         signal: Some(signal),
         max_retries: snapshot.max_retries.unwrap_or(0),
         max_retry_delay_ms: snapshot.max_retry_delay_ms,
-        session_id: None,
+        session_id: snapshot.session_id.clone(),
         cache_retention: snapshot.cache_retention.clone(),
         sampling_params: None,
         on_payload: None,

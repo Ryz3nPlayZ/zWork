@@ -64,6 +64,10 @@ impl HarnessEventBus {
             while let Some(event) = rx.recv().await {
                 pump.push(event);
             }
+            // Intake closed (harness and every lane dropped): no further
+            // events can arrive, so release subscribers — their receivers
+            // resolve and dependent tasks (event mappers) can exit.
+            pump.inner.lock().unwrap().subscribers.clear();
         });
         (bus, tx)
     }

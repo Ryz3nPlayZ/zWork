@@ -683,6 +683,327 @@ impl AgentHooks for ZworkHooks {
 }
 
 // ---------------------------------------------------------------------------
+// Durable runtime drive (pi AgentHarness) — M4 cutover path
+// ---------------------------------------------------------------------------
+
+/// Opt into the durable runtime (pi `AgentHarness`) for chat turns. While
+/// off, turns run on the in-memory pi agent loop. Once M6 lands the
+/// structural procedures this becomes the only path.
+fn durable_enabled() -> bool {
+    match std::env::var("ZWORK_DURABLE").as_deref() {
+        Ok("1") | Ok("true") | Ok("on") => true,
+        _ => false,
+    }
+}
+
+/// Expose one zWork-gated tool to the durable runtime. Execution, permission
+/// gating and event forwarding are the tool's own (identical to the agent
+/// loop path); the adapter only supplies the durable wrapper: declaration,
+/// replay policy, and an executor over the runtime's gate signal and update
+/// callback.
+fn runtime_tool_from(tool: DynTool) -> std::sync::Arc<crate::harness::runtime::tool_exec::RuntimeTool> {
+    use crate::harness::runtime::tool_exec::{RuntimeTool, ToolExecution};
+    let declaration = crate::harness::types::Tool {
+        name: tool.name().to_string(),
+        description: tool.description().to_string(),
+        parameters: tool.parameters(),
+    };
+    let replay = match tool.replay() {
+        ReplayPolicy::Safe => crate::harness::runtime::tool_exec::ReplayPolicy::Safe,
+        ReplayPolicy::Never => crate::harness::runtime::tool_exec::ReplayPolicy::Never,
+    };
+    let execute: crate::harness::runtime::tool_exec::ExecuteFn = {
+        let tool = tool.clone();
+        Arc::new(move |execution: ToolExecution| {
+            let tool = tool.clone();
+            Box::pin(async move {
+                let on_update: AgentToolUpdateCallback = {
+                    let update = execution.update.clone();
+                    Arc::new(move |partial: AgentToolResult| update(&partial, false))
+                };
+                tool.execute(
+                    &execution.tool_call_id,
+                    execution.args,
+                    Some(&execution.signal),
+                    on_update,
+                )
+                .await
+            })
+        })
+    };
+    Arc::new(RuntimeTool { declaration, replay, execute })
+}
+
+/// Map durable harness events onto the zWork wire (same events, same order
+/// as the agent-loop listener). Breaks on `run_end`; exits when the bus
+/// closes. Enforces the runaway turn cap by aborting the operation durably.
+async fn map_harness_events(
+    shared: Arc<TurnShared>,
+    lane: std::sync::Arc<crate::harness::runtime::lane::Lane>,
+    mut events: tokio::sync::mpsc::UnboundedReceiver<(u64, crate::harness::runtime::events::HarnessEvent)>,
+) {
+    use crate::harness::runtime::events::HarnessEvent;
+    let max_turns = shared.max_turns;
+    while let Some((_seq, event)) = events.recv().await {
+        match event {
+            HarnessEvent::TurnStart { .. } => {
+                let turn = shared.turn.fetch_add(1, Ordering::SeqCst) + 1;
+                shared.send(json!({ "type": "status", "text": "Thinking" })).await;
+                // Legacy semantics: stop after completing `max_turns` turns
+                // (0 = unbounded). Here the cap aborts the durable operation
+                // as the (max+1)-th turn starts, which reconciles cleanly.
+                if max_turns > 0 && turn > max_turns {
+                    shared.hit_turn_cap.store(true, Ordering::SeqCst);
+                    if let Some(operation_id) = lane.current_operation_id().ok().flatten() {
+                        let _ = lane.request_operation_abort(&operation_id).await;
+                    }
+                }
+            }
+            HarnessEvent::MessageUpdate { event, .. } => {
+                handle_stream_event(&shared, event).await;
+            }
+            HarnessEvent::MessageEnd { message, .. } => {
+                record_assistant_end(&shared, &message).await;
+            }
+            HarnessEvent::ToolEnd { tool_call_id, tool_name, result, is_error, .. } => {
+                push_tool_trace(&shared, &tool_call_id, &tool_name, &result, is_error);
+            }
+            HarnessEvent::TurnEnd { .. } => flush_traces(&shared).await,
+            HarnessEvent::RunEnd { .. } => break,
+            _ => {}
+        }
+    }
+}
+
+/// One durable attempt: a fresh per-run session (crash-resumable artifact
+/// under `~/.zwork/sessions/`), the harness facade over it, the doom-loop
+/// guard on the hook registry, the event mapper, and the prompt driven to
+/// settlement. Mid-run threshold compaction stays disabled until the
+/// structural procedures land (M6); pre-run and overflow compaction stay at
+/// the bridge level, exactly as before.
+#[allow(clippy::too_many_arguments)]
+async fn run_durable_once(
+    shared: &Arc<TurnShared>,
+    model: &Model,
+    api_key: &str,
+    system_prompt: &str,
+    prompt_message: AgentMessage,
+    history: &[AgentMessage],
+    tools: &[DynTool],
+    stream_fn: StreamFn,
+) -> Option<crate::harness::session::types::OperationResultRecord> {
+    use crate::harness::runtime::harness::{Harness, HarnessOptions};
+    use crate::harness::runtime::types::RetryPolicySnapshot;
+    use crate::harness::session::sqlite::SqliteSessionRepo;
+    use crate::harness::session::types::HarnessStreamOptionsSnapshot;
+
+    let repo = SqliteSessionRepo::new(crate::paths::home_dir().join("sessions"));
+    let session_id = format!("{}__{}", shared.chat_id, uuid::Uuid::new_v4().simple());
+    let session = match repo.create(&session_id, None) {
+        Ok(session) => session,
+        Err(error) => {
+            let _ = shared.send(json!({ "type": "error", "text": format!("Failed to open durable session: {error}") })).await;
+            return None;
+        }
+    };
+
+    let provider = model.provider.clone();
+    let model_id = model.id.clone();
+    let source_model = model.clone();
+    let mut config = crate::harness::runtime::types::RuntimeConfig::default();
+    config.system_prompt = Some(system_prompt.to_string());
+    config.context_window = Some(model.context_window);
+    config.model_source = Some(Arc::new(move |p: &str, m: &str| {
+        (p == provider && m == model_id).then(|| source_model.clone())
+    }));
+    config.stream = Some(stream_fn);
+    config.stream_options = HarnessStreamOptionsSnapshot {
+        api_key: Some(api_key.to_string()),
+        max_tokens: Some(super::max_tokens_for(&model.id)),
+        max_retries: Some(MAX_TRANSIENT_RETRIES),
+        session_id: Some(shared.chat_id.clone()),
+        ..Default::default()
+    };
+    config.retry_policy = RetryPolicySnapshot {
+        enabled: true,
+        max_retries: MAX_TRANSIENT_RETRIES,
+        ..Default::default()
+    };
+    config.compaction = hcompaction::CompactionSettings { enabled: false, ..Default::default() };
+    config.tools = Arc::new(tools.iter().map(|t| runtime_tool_from(t.clone())).collect());
+
+    let (harness, open) = match Harness::create(
+        session,
+        HarnessOptions {
+            provider: model.provider.clone(),
+            model_id: model.id.clone(),
+            thinking_level: crate::harness::types::ThinkingLevel::Off,
+            active_tool_names: tools.iter().map(|t| t.name().to_string()).collect(),
+            config,
+        },
+    ) {
+        Ok(created) => created,
+        Err(error) => {
+            let _ = shared.send(json!({ "type": "error", "text": format!("Durable harness failed to open: {error}") })).await;
+            return None;
+        }
+    };
+    debug_assert!(open.is_empty(), "fresh sessions must not carry open operations");
+
+    let lane = match harness.lane("main").await {
+        Ok(lane) => lane,
+        Err(error) => {
+            let _ = shared.send(json!({ "type": "error", "text": format!("Durable lane failed to open: {error}") })).await;
+            return None;
+        }
+    };
+    for message in history {
+        if let Err(error) = lane.append_message(message.clone()).await {
+            let _ = shared.send(json!({ "type": "error", "text": format!("Failed to seed history: {error}") })).await;
+            return None;
+        }
+    }
+
+    // Doom-loop guard on the durable registry (same rule as the agent-loop
+    // hook): the same tool call three turns running blocks the call and
+    // terminates the run; the post-run section emits the recovery text.
+    {
+        let shared = shared.clone();
+        harness.hooks.on_before_tool(Arc::new(move |_ctx, event| {
+            let doomed = shared.doom.lock_unpoisoned().push(&event.tool_name, &event.args);
+            if !doomed && !shared.doomed.load(Ordering::SeqCst) {
+                return Ok(None);
+            }
+            shared.doomed.store(true, Ordering::SeqCst);
+            Ok(Some(crate::harness::runtime::hooks::BeforeToolResult {
+                args: None,
+                block: Some(crate::harness::runtime::hooks::ToolBlock {
+                    reason: "Stopped: this exact action was repeated without progress.".into(),
+                    terminate: Some(true),
+                }),
+            }))
+        }));
+    }
+
+    let mapper = tokio::spawn(map_harness_events(
+        shared.clone(),
+        lane.clone(),
+        harness.events.subscribe(None),
+    ));
+
+    let record = harness.prompt("main", vec![prompt_message]).await.ok();
+    // Drain trailing events (usage / turn_end / run_end race the settle).
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(10), mapper).await;
+    harness.close().await;
+    record
+}
+
+/// Drive the turn on the durable runtime with the same overflow recovery as
+/// the agent-loop path: on a context-overflow failure, compact the history
+/// (bridge level, cheap tier) and retry once on a fresh session. Returns
+/// whether an overflow compaction happened.
+#[allow(clippy::too_many_arguments)]
+async fn drive_durable(
+    shared: &Arc<TurnShared>,
+    model: &Model,
+    compaction_model: &Model,
+    api_key: &str,
+    stream_fn: StreamFn,
+    system_prompt: &str,
+    prompt_message: AgentMessage,
+    mut history: Vec<AgentMessage>,
+    tools: &[DynTool],
+) -> bool {
+    let mut compacted_on_overflow = false;
+    loop {
+        let record = run_durable_once(
+            shared,
+            model,
+            api_key,
+            system_prompt,
+            prompt_message.clone(),
+            &history,
+            tools,
+            stream_fn.clone(),
+        )
+        .await;
+
+        let Some(record) = record else { return compacted_on_overflow };
+        if record.status != crate::harness::session::types::TerminalStatus::Failed {
+            return compacted_on_overflow;
+        }
+        let error_message = record.error.map(|e| e.message).unwrap_or_default();
+        let mut probe = AssistantMessage::pending(model);
+        probe.stop_reason = StopReason::Error;
+        probe.error_message = Some(error_message.clone());
+        if hoverflow::is_context_overflow(&probe, Some(model.context_window)) && !compacted_on_overflow {
+            compacted_on_overflow = true;
+            llm_trace(&shared.chat_id, shared.turn(), "context_overflow_compaction", json!({ "error": error_message }));
+            match compact_history(shared, compaction_model, api_key, &stream_fn, &history).await {
+                Some(compacted) => {
+                    history = compacted;
+                    continue;
+                }
+                None => {
+                    llm_trace(&shared.chat_id, shared.turn(), "context_overflow_compaction_failed", json!({}));
+                }
+            }
+        }
+        let exhausted = classify_provider_error_with_raw(&error_message, None) == ErrorClass::Transient;
+        let friendly = friendly_upstream_error(&error_message, None, exhausted);
+        let _ = shared.send(json!({ "type": "error", "text": friendly })).await;
+        return compacted_on_overflow;
+    }
+}
+
+/// Bridge-level history compaction on the cheap tier (pre-run and overflow).
+/// Same behavior as the agent-loop `ZworkHooks::compact`.
+async fn compact_history(
+    shared: &Arc<TurnShared>,
+    compaction_model: &Model,
+    api_key: &str,
+    stream_fn: &StreamFn,
+    messages: &[AgentMessage],
+) -> Option<Vec<AgentMessage>> {
+    let settings = hcompaction::CompactionSettings::default();
+    let prep = hcompaction::prepare_compaction(messages, settings)?;
+    let opts = hcompaction::SummarizationOptions {
+        api_key: Some(api_key.to_string()),
+        signal: None,
+        session_id: Some(shared.chat_id.clone()),
+        max_retries: Some(2),
+        ..Default::default()
+    };
+    match hcompaction::compact(&prep, compaction_model, None, &opts, stream_fn).await {
+        Ok(result) => {
+            let compacted = hcompaction::apply_compaction(messages, &result);
+            let after = hcompaction::estimate_context_tokens(&compacted).tokens;
+            shared
+                .send(json!({
+                    "type": "compaction",
+                    "status": "complete",
+                    "before_tokens": result.tokens_before,
+                    "after_tokens": after,
+                    "model": compaction_model.id,
+                }))
+                .await;
+            llm_trace(
+                &shared.chat_id,
+                shared.turn(),
+                "compaction",
+                json!({ "before_tokens": result.tokens_before, "after_tokens": after, "model": compaction_model.id }),
+            );
+            Some(compacted)
+        }
+        Err(e) => {
+            llm_trace(&shared.chat_id, shared.turn(), "compaction_error", json!({ "error": e }));
+            shared.send(json!({ "type": "compaction", "status": "failed", "error": e })).await;
+            None
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Event listener: AgentEvent -> zWork wire events
 // ---------------------------------------------------------------------------
 
@@ -705,102 +1026,120 @@ async fn handle_event(shared: &TurnShared, event: AgentEvent) {
             shared.turn.fetch_add(1, Ordering::SeqCst);
             shared.send(json!({ "type": "status", "text": "Thinking" })).await;
         }
-        AgentEvent::MessageUpdate { assistant_message_event, .. } => match assistant_message_event {
-            AssistantMessageEvent::TextDelta { delta, .. } => {
-                if delta.is_empty() {
-                    return;
-                }
-                shared.accumulated_text.lock_unpoisoned().push_str(&delta);
-                shared.persist().await;
-                shared.send(json!({ "type": "delta", "text": delta })).await;
-            }
-            AssistantMessageEvent::ThinkingDelta { delta, .. } => {
-                if delta.is_empty() {
-                    return;
-                }
-                shared.thinking_open.store(true, Ordering::SeqCst);
-                shared.send(json!({ "type": "thinking_delta", "text": delta })).await;
-            }
-            AssistantMessageEvent::ThinkingEnd { .. } => close_thinking(shared).await,
-            AssistantMessageEvent::ToolcallEnd { tool_call, .. } => {
-                // A tool_use part implicitly closes the preceding thinking
-                // segment in the frontend timeline.
-                close_thinking(shared).await;
-                // Text streamed before a tool call is process narration, not
-                // the answer. Drop it from the persisted display text so a
-                // reloaded chat shows only the final answer (the text after
-                // the last tool call); the frontend mirrors this by demoting
-                // the same text into its process panel.
-                let had_narration = {
-                    let mut text = shared.accumulated_text.lock_unpoisoned();
-                    if text.is_empty() { false } else { text.clear(); true }
-                };
-                if had_narration {
-                    shared.persist().await;
-                }
-                shared.call_args.lock_unpoisoned().insert(tool_call.id.clone(), tool_call.arguments.clone());
-                shared
-                    .send(json!({
-                        "type": "tool_use",
-                        "id": tool_call.id,
-                        "name": tool_call.name,
-                        "input": tool_call.arguments
-                    }))
-                    .await;
-            }
-            _ => {}
-        },
+        AgentEvent::MessageUpdate { assistant_message_event, .. } => {
+            handle_stream_event(shared, assistant_message_event).await;
+        }
         AgentEvent::MessageEnd { message } => {
-            close_thinking(shared).await;
-            if let Some(am) = message.as_assistant() {
-                llm_trace(
-                    &shared.chat_id,
-                    shared.turn(),
-                    "finish",
-                    json!({
-                        "stop_reason": am.stop_reason.as_str(),
-                        "usage": am.usage,
-                        "tool_calls": am.tool_calls().len(),
-                        "error": am.error_message,
-                    }),
-                );
-                let total = {
-                    let mut u = shared.usage.lock_unpoisoned();
-                    *u = u.add(&am.usage);
-                    u.clone()
-                };
-                {
-                    let _guard = shared.db_lock.lock().await;
-                    let _ = chatstore::record_usage(&shared.chat_id, &shared.assistant_msg_id, &total, &am.usage);
-                }
-                shared
-                    .send(json!({
-                        "type": "usage",
-                        "prompt_tokens": total.input + total.cache_read + total.cache_write,
-                        "completion_tokens": total.output,
-                        "total_tokens": total.total_tokens,
-                        "cost_usd": total.cost.total,
-                        "cache_read_tokens": total.cache_read,
-                        "cache_write_tokens": total.cache_write,
-                    }))
-                    .await;
-            }
+            record_assistant_end(shared, &message).await;
         }
         AgentEvent::ToolExecutionEnd { tool_call_id, tool_name, result, is_error } => {
-            let args = shared.call_args.lock_unpoisoned().remove(&tool_call_id).unwrap_or_else(|| json!({}));
-            let text = result.text_content();
-            shared.traces.lock_unpoisoned().push(chatstore::tool_trace_entry(&tool_name, &args, !is_error, &text));
+            push_tool_trace(shared, &tool_call_id, &tool_name, &result, is_error);
         }
-        AgentEvent::TurnEnd { .. } => {
-            // Persist this turn's tool trace so the NEXT run can rebuild
-            // "what was done earlier in this chat".
-            let traces: Vec<Value> = std::mem::take(&mut *shared.traces.lock_unpoisoned());
-            if !traces.is_empty() {
-                let _guard = shared.db_lock.lock().await;
-                chatstore::append_tool_trace(&shared.chat_id, &shared.assistant_msg_id, traces);
+        AgentEvent::TurnEnd { .. } => flush_traces(shared).await,
+        _ => {}
+    }
+}
+
+/// One streamed assistant block: text deltas, thinking deltas, tool calls.
+/// Shared by the agent-loop listener and the durable event mapper.
+async fn handle_stream_event(shared: &TurnShared, event: AssistantMessageEvent) {
+    match event {
+        AssistantMessageEvent::TextDelta { delta, .. } => {
+            if delta.is_empty() {
+                return;
             }
+            shared.accumulated_text.lock_unpoisoned().push_str(&delta);
+            shared.persist().await;
+            shared.send(json!({ "type": "delta", "text": delta })).await;
+        }
+        AssistantMessageEvent::ThinkingDelta { delta, .. } => {
+            if delta.is_empty() {
+                return;
+            }
+            shared.thinking_open.store(true, Ordering::SeqCst);
+            shared.send(json!({ "type": "thinking_delta", "text": delta })).await;
+        }
+        AssistantMessageEvent::ThinkingEnd { .. } => close_thinking(shared).await,
+        AssistantMessageEvent::ToolcallEnd { tool_call, .. } => {
+            // A tool_use part implicitly closes the preceding thinking
+            // segment in the frontend timeline.
+            close_thinking(shared).await;
+            // Text streamed before a tool call is process narration, not
+            // the answer. Drop it from the persisted display text so a
+            // reloaded chat shows only the final answer (the text after
+            // the last tool call); the frontend mirrors this by demoting
+            // the same text into its process panel.
+            let had_narration = {
+                let mut text = shared.accumulated_text.lock_unpoisoned();
+                if text.is_empty() { false } else { text.clear(); true }
+            };
+            if had_narration {
+                shared.persist().await;
+            }
+            shared.call_args.lock_unpoisoned().insert(tool_call.id.clone(), tool_call.arguments.clone());
+            shared
+                .send(json!({
+                    "type": "tool_use",
+                    "id": tool_call.id,
+                    "name": tool_call.name,
+                    "input": tool_call.arguments
+                }))
+                .await;
         }
         _ => {}
+    }
+}
+
+/// A settled assistant message: finish trace, usage ledger + wire totals.
+async fn record_assistant_end(shared: &TurnShared, message: &AgentMessage) {
+    close_thinking(shared).await;
+    let Some(am) = message.as_assistant() else { return };
+    llm_trace(
+        &shared.chat_id,
+        shared.turn(),
+        "finish",
+        json!({
+            "stop_reason": am.stop_reason.as_str(),
+            "usage": am.usage,
+            "tool_calls": am.tool_calls().len(),
+            "error": am.error_message,
+        }),
+    );
+    let total = {
+        let mut u = shared.usage.lock_unpoisoned();
+        *u = u.add(&am.usage);
+        u.clone()
+    };
+    {
+        let _guard = shared.db_lock.lock().await;
+        let _ = chatstore::record_usage(&shared.chat_id, &shared.assistant_msg_id, &total, &am.usage);
+    }
+    shared
+        .send(json!({
+            "type": "usage",
+            "prompt_tokens": total.input + total.cache_read + total.cache_write,
+            "completion_tokens": total.output,
+            "total_tokens": total.total_tokens,
+            "cost_usd": total.cost.total,
+            "cache_read_tokens": total.cache_read,
+            "cache_write_tokens": total.cache_write,
+        }))
+        .await;
+}
+
+fn push_tool_trace(shared: &TurnShared, tool_call_id: &str, tool_name: &str, result: &AgentToolResult, is_error: bool) {
+    let args = shared.call_args.lock_unpoisoned().remove(tool_call_id).unwrap_or_else(|| json!({}));
+    let text = result.text_content();
+    shared.traces.lock_unpoisoned().push(chatstore::tool_trace_entry(tool_name, &args, !is_error, &text));
+}
+
+/// Persist this turn's tool trace so the NEXT run can rebuild "what was
+/// done earlier in this chat".
+async fn flush_traces(shared: &TurnShared) {
+    let traces: Vec<Value> = std::mem::take(&mut *shared.traces.lock_unpoisoned());
+    if !traces.is_empty() {
+        let _guard = shared.db_lock.lock().await;
+        chatstore::append_tool_trace(&shared.chat_id, &shared.assistant_msg_id, traces);
     }
 }
 
@@ -1194,79 +1533,107 @@ pub fn run_agent_turn(
         // sensitive prompt-cache prefix) doesn't reshuffle across turns.
         tools.sort_by(|a, b| a.name().cmp(b.name()));
 
-        // ── Agent ───────────────────────────────────────────────────────
+        // ── Drive ───────────────────────────────────────────────────────
         let stream_fn: StreamFn = Arc::new(crate::harness::providers::stream);
-        let hooks = Arc::new(ZworkHooks {
-            shared: shared.clone(),
-            model: model.clone(),
-            compaction_model,
-            api_key: resolved.api_key.clone(),
-            stream_fn: stream_fn.clone(),
-        });
-        let agent = Agent::new(AgentOptions {
-            initial_state: InitialState {
-                system_prompt: Some(system_prompt),
-                model: Some(model.clone()),
-                thinking_level: None,
-                tools,
-                messages: history,
-            },
-            hooks: hooks.clone(),
-            stream_fn: Some(stream_fn),
-            session_id: Some(chat_id.clone()),
-            max_retries: Some(MAX_TRANSIENT_RETRIES),
-            api_key: Some(resolved.api_key.clone()),
-            ..AgentOptions::default()
-        });
-        let listener_id = agent.subscribe(make_listener(shared.clone()));
-
-        // Pre-run compaction: a long-lived chat may already be over budget
-        // before the first request of this turn.
-        {
-            let msgs = agent.messages();
-            let tokens = hcompaction::estimate_context_tokens(&msgs).tokens;
-            if hcompaction::should_compact(tokens, model.context_window, &hcompaction::CompactionSettings::default()) {
-                if let Some(compacted) = hooks.compact(msgs, agent.signal()).await {
-                    agent.replace_messages(compacted);
-                }
-            }
-        }
-
-        if let Err(e) = agent.prompt(prompt_message).await {
-            let _ = tx.send(json!({ "type": "error", "text": e })).await;
-        }
-
-        // ── Post-run: error surfacing + one context-overflow retry ───────
-        let mut compacted_on_overflow = false;
-        loop {
-            let last_error = agent.with_state(|st| {
-                st.messages.last().and_then(|m| m.as_assistant()).and_then(|am| {
-                    (am.stop_reason == StopReason::Error).then(|| am.clone())
-                })
-            });
-            let Some(err_am) = last_error else { break };
-            let err_msg = err_am.error_message.clone().unwrap_or_default();
-            if hoverflow::is_context_overflow(&err_am, Some(model.context_window)) && !compacted_on_overflow {
-                compacted_on_overflow = true;
-                llm_trace(&chat_id, shared.turn(), "context_overflow_compaction", json!({ "error": err_msg }));
-                let mut msgs = agent.messages();
-                msgs.pop(); // the failed assistant message
-                if let Some(compacted) = hooks.compact(msgs, agent.signal()).await {
-                    agent.replace_messages(compacted);
-                    if let Err(e) = agent.continue_run().await {
-                        let _ = tx.send(json!({ "type": "error", "text": e })).await;
-                        break;
+        let compacted_on_overflow = if durable_enabled() {
+            // Pre-run compaction (same rule as the agent path): a long-lived
+            // chat may already be over budget before the first request of
+            // this turn.
+            let mut seed_history = history;
+            {
+                let tokens = hcompaction::estimate_context_tokens(&seed_history).tokens;
+                if hcompaction::should_compact(tokens, model.context_window, &hcompaction::CompactionSettings::default()) {
+                    if let Some(compacted) = compact_history(&shared, &compaction_model, &resolved.api_key, &stream_fn, &seed_history).await {
+                        seed_history = compacted;
                     }
-                    continue;
                 }
-                llm_trace(&chat_id, shared.turn(), "context_overflow_compaction_failed", json!({}));
             }
-            let exhausted = classify_provider_error_with_raw(&err_msg, None) == ErrorClass::Transient;
-            let friendly = friendly_upstream_error(&err_msg, None, exhausted);
-            let _ = tx.send(json!({ "type": "error", "text": friendly })).await;
-            break;
-        }
-        agent.unsubscribe(listener_id);
+            drive_durable(
+                &shared,
+                &model,
+                &compaction_model,
+                &resolved.api_key,
+                stream_fn.clone(),
+                &system_prompt,
+                prompt_message,
+                seed_history,
+                &tools,
+            )
+            .await
+        } else {
+            let hooks = Arc::new(ZworkHooks {
+                shared: shared.clone(),
+                model: model.clone(),
+                compaction_model,
+                api_key: resolved.api_key.clone(),
+                stream_fn: stream_fn.clone(),
+            });
+            let agent = Agent::new(AgentOptions {
+                initial_state: InitialState {
+                    system_prompt: Some(system_prompt),
+                    model: Some(model.clone()),
+                    thinking_level: None,
+                    tools,
+                    messages: history,
+                },
+                hooks: hooks.clone(),
+                stream_fn: Some(stream_fn),
+                session_id: Some(chat_id.clone()),
+                max_retries: Some(MAX_TRANSIENT_RETRIES),
+                api_key: Some(resolved.api_key.clone()),
+                ..AgentOptions::default()
+            });
+            let listener_id = agent.subscribe(make_listener(shared.clone()));
+
+            // Pre-run compaction: a long-lived chat may already be over budget
+            // before the first request of this turn.
+            {
+                let msgs = agent.messages();
+                let tokens = hcompaction::estimate_context_tokens(&msgs).tokens;
+                if hcompaction::should_compact(tokens, model.context_window, &hcompaction::CompactionSettings::default()) {
+                    if let Some(compacted) = hooks.compact(msgs, agent.signal()).await {
+                        agent.replace_messages(compacted);
+                    }
+                }
+            }
+
+            if let Err(e) = agent.prompt(prompt_message).await {
+                let _ = tx.send(json!({ "type": "error", "text": e })).await;
+            }
+
+            // ── Post-run: error surfacing + one context-overflow retry ──
+            let mut compacted_on_overflow = false;
+            loop {
+                let last_error = agent.with_state(|st| {
+                    st.messages.last().and_then(|m| m.as_assistant()).and_then(|am| {
+                        (am.stop_reason == StopReason::Error).then(|| am.clone())
+                    })
+                });
+                let Some(err_am) = last_error else { break };
+                let err_msg = err_am.error_message.clone().unwrap_or_default();
+                if hoverflow::is_context_overflow(&err_am, Some(model.context_window)) && !compacted_on_overflow {
+                    compacted_on_overflow = true;
+                    llm_trace(&chat_id, shared.turn(), "context_overflow_compaction", json!({ "error": err_msg }));
+                    let mut msgs = agent.messages();
+                    msgs.pop(); // the failed assistant message
+                    if let Some(compacted) = hooks.compact(msgs, agent.signal()).await {
+                        agent.replace_messages(compacted);
+                        if let Err(e) = agent.continue_run().await {
+                            let _ = tx.send(json!({ "type": "error", "text": e })).await;
+                            break;
+                        }
+                        continue;
+                    }
+                    llm_trace(&chat_id, shared.turn(), "context_overflow_compaction_failed", json!({}));
+                }
+                let exhausted = classify_provider_error_with_raw(&err_msg, None) == ErrorClass::Transient;
+                let friendly = friendly_upstream_error(&err_msg, None, exhausted);
+                let _ = tx.send(json!({ "type": "error", "text": friendly })).await;
+                break;
+            }
+            agent.unsubscribe(listener_id);
+            compacted_on_overflow
+        };
 
         if shared.doomed.load(Ordering::SeqCst) {
             // Emit a real assistant text so the persisted turn isn't empty
