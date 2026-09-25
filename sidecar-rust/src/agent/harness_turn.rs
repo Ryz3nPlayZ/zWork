@@ -768,6 +768,12 @@ async fn run_durable_once(
     // CompactionEntry, reloads stop re-compacting); pre-run and the
     // post-failure overflow retry stay bridge-level.
     config.compaction = hcompaction::CompactionSettings::default();
+    // Parallel tool batches (several spawn_agent calls in one turn run
+    // concurrently — the runtime's run_parallel). Off by default: bash and
+    // write calls interleave, so it's an explicit opt-in.
+    if std::env::var("ZWORK_PARALLEL_TOOLS").map(|v| v.trim() == "1").unwrap_or(false) {
+        config.tool_execution = crate::harness::session::types::ToolExecutionMode::Parallel;
+    }
     config.tools = Arc::new(tools.iter().map(|t| runtime_tool_from(t.clone())).collect());
 
     let (harness, open) = match Harness::create(
@@ -1540,7 +1546,128 @@ pub fn run_agent_turn(
 // Sub-agents (spawn_agent tool)
 // ---------------------------------------------------------------------------
 
-const MAX_SUBAGENT_TURNS: u32 = 12;
+/// A pi core coding tool (bash/write/edit) exposed to a sub-agent.
+/// Destructive actions are denied outright — sub-agents run unattended,
+/// with no UI to answer a permission card — and forward progress lines as
+/// `subagent_delta` status the way the parent's tools stream output.
+struct SubagentPiTool {
+    inner: DynTool,
+    task_id: String,
+    tx: mpsc::Sender<Value>,
+}
+
+impl AgentTool for SubagentPiTool {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+    fn description(&self) -> &str {
+        self.inner.description()
+    }
+    fn parameters(&self) -> Value {
+        self.inner.parameters()
+    }
+    fn replay(&self) -> ReplayPolicy {
+        self.inner.replay()
+    }
+    fn execute<'a>(
+        &'a self,
+        tc_id: &'a str,
+        params: Value,
+        signal: Option<&'a AbortSignal>,
+        _on_update: AgentToolUpdateCallback,
+    ) -> ToolFuture<'a> {
+        let tool_name = self.inner.name().to_string();
+        let risk = match tool_name.as_str() {
+            "bash" => evaluate_tool_risk("run_command", &json!({ "command": params.get("command").cloned().unwrap_or(Value::Null) })),
+            "write" | "edit" => evaluate_tool_risk("write_file", &json!({ "path": params.get("path").cloned().unwrap_or(Value::Null) })),
+            _ => Risk::Safe,
+        };
+        if let Risk::Destructive { reason } = risk {
+            return Box::pin(async move {
+                Err(format!(
+                    "Denied: {reason}. Sub-agents cannot take destructive actions — report what needs doing and let the parent agent ask the user."
+                ))
+            });
+        }
+        let tx = self.tx.clone();
+        let task_id = self.task_id.clone();
+        let forward: AgentToolUpdateCallback = Arc::new(move |partial: AgentToolResult| {
+            let text = partial.text_content();
+            if !text.is_empty() {
+                let _ = tx.try_send(json!({ "type": "subagent_delta", "task_id": task_id, "text": format!("{text}\n") }));
+            }
+        });
+        self.inner.execute(tc_id, params, signal, forward)
+    }
+}
+
+/// Depth-bound `spawn_agent` for sub-agents: one nesting level. Children of
+/// a sub-agent get no spawn tool at all.
+struct SubagentSpawnTool {
+    chat_id: String,
+    child_depth: u32,
+    tx: mpsc::Sender<Value>,
+}
+
+impl AgentTool for SubagentSpawnTool {
+    fn name(&self) -> &str {
+        "spawn_agent"
+    }
+    fn description(&self) -> &str {
+        "Spawn a sub-agent for parallel independent work. Returns the sub-agent's result."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "name": "spawn_agent",
+            "description": "Spawn a sub-agent for parallel independent work.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "description": { "type": "string", "description": "Short description of the task for the sub-agent" },
+                    "model_id": { "type": "string", "description": "Optional model override for the sub-agent" }
+                },
+                "required": ["description"]
+            }
+        })
+    }
+    fn execute<'a>(
+        &'a self,
+        _id: &'a str,
+        params: Value,
+        _signal: Option<&'a AbortSignal>,
+        _on_update: AgentToolUpdateCallback,
+    ) -> ToolFuture<'a> {
+        let chat_id = self.chat_id.clone();
+        let child_depth = self.child_depth;
+        let tx = self.tx.clone();
+        Box::pin(async move {
+            let desc = params.get("description").and_then(|v| v.as_str()).unwrap_or("task").to_string();
+            let model_id = params.get("model_id").and_then(|v| v.as_str())
+                .map(str::to_string)
+                .unwrap_or_else(|| {
+                    let s = crate::settings::load();
+                    if !s.default_model.is_empty() { s.default_model } else { "deepseek-flash".to_string() }
+                });
+            match spawn_subagent_at_depth(&chat_id, &chat_id, &desc, &model_id, child_depth, &tx).await {
+                Ok(result) => Ok(AgentToolResult::text(format!("Sub-agent completed the task. Result:\n\n{result}"))),
+                Err(e) => Err(format!("Sub-agent failed: {e}")),
+            }
+        })
+    }
+}
+
+/// Sub-agent runaway cap. Unattended work needs more headroom than the
+/// old 12; 40 with an env override (0 = unbounded).
+fn max_subagent_turns() -> u32 {
+    match std::env::var("ZWORK_SUBAGENT_MAX_TURNS") {
+        Ok(v) => v.trim().parse::<u32>().ok().filter(|&n| n > 0).unwrap_or(40),
+        Err(_) => 40,
+    }
+}
+
+/// How many times a sub-agent may spawn its own children (one nesting
+/// level: a sub-agent can spawn sub-sub-agents, those cannot spawn).
+const MAX_SUBAGENT_DEPTH: u32 = 1;
 
 /// Read-only zWork tools a sub-agent may call, executed directly (not via the
 /// streaming `execute_tool` dispatcher, which is what's running us).
@@ -1658,7 +1785,7 @@ async fn spawn_subagent_durable(
             match event {
                 HarnessEvent::TurnStart { .. } => {
                     turns += 1;
-                    if turns > MAX_SUBAGENT_TURNS {
+                    if turns > max_subagent_turns() {
                         if let Some(operation_id) = mapper_lane.current_operation_id().ok().flatten() {
                             let _ = mapper_lane.request_operation_abort(&operation_id).await;
                         }
@@ -1705,17 +1832,32 @@ async fn spawn_subagent_durable(
     }
 }
 
-/// Run a bounded, READ-ONLY sub-agent for `task` on the harness, streaming
+/// Run a bounded sub-agent for `task` on the harness, streaming
 /// `subagent_started` / `subagent_delta` / `subagent_done` to the parent's
 /// SSE stream. Returns the sub-agent's full text output.
 ///
-/// Rails: pi read/grep/find/ls plus web/document/academic lookups only; no
-/// bash/write/edit, no nested spawn_agent; hard cap of 12 turns.
+/// Rails: the pi coding tools (read/grep/find/ls always; bash/write/edit
+/// with destructive actions denied — sub-agents run unattended) plus
+/// web/document/academic lookups; interactive tools (ask_question) are
+/// excluded. A depth-0 sub-agent may spawn one level of children
+/// (`MAX_SUBAGENT_DEPTH`); grandchildren get no spawn tool.
 pub async fn spawn_subagent(
     chat_id: &str,
     parent_run_id: &str,
     task: &str,
     model_id: &str,
+    tx: &mpsc::Sender<Value>,
+) -> Result<String, String> {
+    spawn_subagent_at_depth(chat_id, parent_run_id, task, model_id, 0, tx).await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn spawn_subagent_at_depth(
+    chat_id: &str,
+    parent_run_id: &str,
+    task: &str,
+    model_id: &str,
+    depth: u32,
     tx: &mpsc::Sender<Value>,
 ) -> Result<String, String> {
     let task_id = format!("subagent_{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
@@ -1732,7 +1874,13 @@ pub async fn spawn_subagent(
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let mut tools: Vec<DynTool> = crate::harness::tools::create_coding_tools(&cwd, None)
         .into_iter()
-        .filter(|t| matches!(t.name(), "read" | "grep" | "find" | "ls"))
+        .map(|tool| {
+            Arc::new(SubagentPiTool {
+                inner: tool,
+                task_id: task_id.clone(),
+                tx: tx.clone(),
+            }) as DynTool
+        })
         .collect();
     for schema in get_tool_schemas(false) {
         let name = schema.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -1740,18 +1888,34 @@ pub async fn spawn_subagent(
             tools.push(Arc::new(SubagentDirectTool { schema, name }) as DynTool);
         }
     }
+    // One nesting level: a sub-agent (depth 0) may spawn children; their
+    // children (depth >= MAX_SUBAGENT_DEPTH) get no spawn tool.
+    let can_spawn_children = depth < MAX_SUBAGENT_DEPTH;
+    if can_spawn_children {
+        tools.push(Arc::new(SubagentSpawnTool {
+            chat_id: chat_id.to_string(),
+            child_depth: depth + 1,
+            tx: tx.clone(),
+        }) as DynTool);
+    }
     tools.sort_by(|a, b| a.name().cmp(b.name()));
 
+    let spawn_note = if can_spawn_children {
+        "You may spawn one level of your own sub-agents for parallel work; they cannot spawn further."
+    } else {
+        "You cannot spawn further sub-agents."
+    };
     let system = format!(
         "You are a focused sub-agent. Complete this task: {task}\n\n\
-         You have READ-ONLY tools (read/ls/grep/find, web and document lookups). Do the task, then stop. \
-         Be concise — your full text output is returned to the parent agent."
+         You have the coding tools (read/ls/grep/find, bash/write/edit — destructive actions are \
+         denied: report what needs doing instead), plus web and document lookups. {spawn_note} \
+         Do the task, then stop. Be concise — your full text output is returned to the parent agent."
     );
 
     let stream_fn: StreamFn = Arc::new(crate::harness::providers::stream);
     match spawn_subagent_durable(chat_id, parent_run_id, &task_id, task, &model, &resolved.api_key, &tools, &system, stream_fn, tx).await {
         Ok(result) => {
-            log_agent_event(chat_id, parent_run_id, "subagent_done", json!({ "task_id": task_id, "chars": result.len() }));
+            log_agent_event(chat_id, parent_run_id, "subagent_done", json!({ "task_id": task_id, "chars": result.len(), "depth": depth }));
             let _ = tx.send(json!({ "type": "subagent_done", "task_id": task_id, "result": result })).await;
             Ok(result)
         }
@@ -1762,7 +1926,7 @@ pub async fn spawn_subagent(
     }
 }
 
-/// Pick the model id used for compaction summarization./// Pick the model id used for compaction summarization. Summarization is a
+/// Pick the model id used for compaction summarization. Summarization is a
 /// background chore that re-runs whenever the conversation crosses ~200k tokens,
 /// so it should always run on a **cheap tier** rather than whatever expensive
 /// model the user is driving the chat with. The endpoint/headers passed to
