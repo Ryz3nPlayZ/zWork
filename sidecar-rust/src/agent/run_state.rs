@@ -16,8 +16,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde_json::{json, Value};
 use tokio::sync::oneshot;
 
+use crate::harness::agent_types::AgentMessage;
 use crate::harness::runtime::events::HarnessEvent;
-use crate::harness::runtime::harness::HarnessEventBus;
+use crate::harness::runtime::harness::{Harness, HarnessEventBus};
 use crate::harness::runtime::lane::Lane;
 use crate::sync_util::Unpoison;
 
@@ -39,6 +40,7 @@ pub struct LiveRun {
     pub session_id: String,
     pub bus: Arc<HarnessEventBus>,
     pub lane: Arc<Lane>,
+    pub harness: Arc<Harness>,
     pub started_at: u64,
 }
 
@@ -79,14 +81,39 @@ pub fn live_run(chat_id: &str) -> Option<LiveRun> {
     runs().lock_unpoisoned().get(chat_id).cloned()
 }
 
+/// Durable stop result: whether an abort was requested, plus the run's
+/// unconsumed steer / follow-up texts for the composer to restore (pi
+/// returns them from `abort`).
+pub struct StopOutcome {
+    pub requested: bool,
+    pub steer: Vec<String>,
+    pub follow_up: Vec<String>,
+}
+
+fn message_texts(messages: &[AgentMessage]) -> Vec<String> {
+    messages
+        .iter()
+        .filter_map(|m| m.as_llm().and_then(|llm| llm.as_user()).map(|u| u.content.text()))
+        .collect()
+}
+
 /// Durable stop: record `CancelRequested` on the open operation so the run
 /// reconciles as cancelled (never resumes) even if the task is killed
-/// before it settles. Returns whether an abort was requested.
-pub async fn request_stop(chat_id: &str) -> bool {
-    let Some(run) = live_run(chat_id) else { return false };
+/// before it settles. Carries the unconsumed queue back to the composer.
+pub async fn request_stop(chat_id: &str) -> StopOutcome {
+    let Some(run) = live_run(chat_id) else {
+        return StopOutcome { requested: false, steer: Vec::new(), follow_up: Vec::new() };
+    };
     match run.lane.current_operation_id() {
-        Ok(Some(operation_id)) => run.lane.request_operation_abort(&operation_id).await.is_ok(),
-        _ => false,
+        Ok(Some(operation_id)) => match run.lane.request_operation_abort(&operation_id).await {
+            Ok(request) => StopOutcome {
+                requested: true,
+                steer: message_texts(&request.steer),
+                follow_up: message_texts(&request.follow_up),
+            },
+            Err(_) => StopOutcome { requested: false, steer: Vec::new(), follow_up: Vec::new() },
+        },
+        _ => StopOutcome { requested: false, steer: Vec::new(), follow_up: Vec::new() },
     }
 }
 
@@ -178,6 +205,137 @@ fn prune_stale_gates() {
 }
 
 // ---------------------------------------------------------------------------
+// Queue while busy (M5)
+// ---------------------------------------------------------------------------
+
+/// Result of a queue wire op: no live run, done, or the lane refused.
+#[derive(Debug)]
+pub enum QueueOutcome<T> {
+    NotBusy,
+    Done(T),
+    Failed(String),
+}
+
+/// One queued item on the wire: kind is "steer" | "follow_up" | "next_run" |
+/// "write", text is the user text (custom payloads serialize as JSON).
+pub fn queued_item_wire(item: &crate::harness::runtime::events::LaneQueuedItem) -> Value {
+    use crate::harness::runtime::events::LaneQueuedItem;
+    match item {
+        LaneQueuedItem::Message { entry_id, kind, message } => {
+            let text = message
+                .as_llm()
+                .and_then(|m| m.as_user())
+                .map(|u| u.content.text())
+                .unwrap_or_default();
+            json!({ "entry_id": entry_id, "kind": kind, "text": text })
+        }
+        LaneQueuedItem::Custom { entry_id, kind, custom_type, data } => {
+            json!({ "entry_id": entry_id, "kind": kind, "custom_type": custom_type, "data": data })
+        }
+    }
+}
+
+fn map_enqueue(
+    outcome: Result<String, crate::harness::runtime::lane::LaneError>,
+) -> QueueOutcome<String> {
+    match outcome {
+        Ok(entry_id) => QueueOutcome::Done(entry_id),
+        Err(error) => QueueOutcome::Failed(error.to_string()),
+    }
+}
+
+/// Steer the live run: the message joins the current operation's context at
+/// its next checkpoint drain (pi `steer`).
+pub async fn steer(chat_id: &str, message: &str) -> QueueOutcome<String> {
+    let Some(run) = live_run(chat_id) else { return QueueOutcome::NotBusy };
+    let outcome = run
+        .lane
+        .enqueue(crate::harness::runtime::lane::QueueKind::Steer, AgentMessage::user_text(message))
+        .await;
+    map_enqueue(outcome)
+}
+
+/// Queue a follow-up for when the live run finishes (pi `followUp`). With
+/// mode `all` every queued follow-up seeds the finishing boundary together;
+/// `one-at-a-time` takes the first.
+pub async fn queue_follow_up(chat_id: &str, message: &str) -> QueueOutcome<String> {
+    let Some(run) = live_run(chat_id) else { return QueueOutcome::NotBusy };
+    let outcome = run
+        .lane
+        .enqueue(crate::harness::runtime::lane::QueueKind::FollowUp, AgentMessage::user_text(message))
+        .await;
+    map_enqueue(outcome)
+}
+
+/// Queue a whole next run (pi `nextRun`).
+pub async fn queue_next_run(chat_id: &str, message: &str) -> QueueOutcome<String> {
+    let Some(run) = live_run(chat_id) else { return QueueOutcome::NotBusy };
+    let outcome = run
+        .lane
+        .enqueue(crate::harness::runtime::lane::QueueKind::NextRun, AgentMessage::user_text(message))
+        .await;
+    map_enqueue(outcome)
+}
+
+/// Snapshot of the live run's queue (pi queue watch).
+pub async fn queued(chat_id: &str) -> QueueOutcome<Vec<Value>> {
+    let Some(run) = live_run(chat_id) else { return QueueOutcome::NotBusy };
+    match run.lane.read_queue().await {
+        Ok(items) => QueueOutcome::Done(items.iter().map(queued_item_wire).collect()),
+        Err(error) => QueueOutcome::Failed(error.to_string()),
+    }
+}
+
+/// Cancel one queued item; the returned tag tells the composer whether to
+/// restore the message ("cancelled"/"not_found") or leave it ("consumed").
+pub async fn cancel_queued(chat_id: &str, entry_id: &str) -> QueueOutcome<&'static str> {
+    use crate::harness::runtime::lane::CancelledQueued;
+    let Some(run) = live_run(chat_id) else { return QueueOutcome::NotBusy };
+    match run.lane.cancel_queued(entry_id).await {
+        Ok(CancelledQueued::Cancelled) => QueueOutcome::Done("cancelled"),
+        Ok(CancelledQueued::AlreadyConsumed) => QueueOutcome::Done("consumed"),
+        Ok(CancelledQueued::NotFound) => QueueOutcome::Done("not_found"),
+        Err(error) => QueueOutcome::Failed(error.to_string()),
+    }
+}
+
+fn queue_mode_from_wire(mode: &str) -> Option<crate::harness::runtime::events::QueueModeUpdate> {
+    use crate::harness::runtime::events::QueueModeUpdate;
+    match mode {
+        "all" => Some(QueueModeUpdate::All),
+        "one-at-a-time" => Some(QueueModeUpdate::OneAtATime),
+        _ => None,
+    }
+}
+
+/// Set steering / follow-up queue modes on the live run's harness config
+/// (pi `setSteeringMode` / `setFollowUpMode`).
+pub fn set_queue_modes(
+    chat_id: &str,
+    steering: Option<&str>,
+    follow_up: Option<&str>,
+) -> QueueOutcome<()> {
+    let Some(run) = live_run(chat_id) else { return QueueOutcome::NotBusy };
+    if let Some(mode) = steering {
+        let Some(mode) = queue_mode_from_wire(mode) else {
+            return QueueOutcome::Failed(format!("unknown steering mode '{mode}' (all | one-at-a-time)"));
+        };
+        if let Err(error) = run.harness.set_steering_mode(mode) {
+            return QueueOutcome::Failed(error.to_string());
+        }
+    }
+    if let Some(mode) = follow_up {
+        let Some(mode) = queue_mode_from_wire(mode) else {
+            return QueueOutcome::Failed(format!("unknown followUp mode '{mode}' (all | one-at-a-time)"));
+        };
+        if let Err(error) = run.harness.set_follow_up_mode(mode) {
+            return QueueOutcome::Failed(error.to_string());
+        }
+    }
+    QueueOutcome::Done(())
+}
+
+// ---------------------------------------------------------------------------
 // Re-attach projection
 // ---------------------------------------------------------------------------
 
@@ -219,6 +377,10 @@ pub fn project_harness_event(event: &HarnessEvent) -> Option<Value> {
             "cost_usd": totals.cost.total,
             "cache_read_tokens": totals.cache_read,
             "cache_write_tokens": totals.cache_write,
+        })),
+        HarnessEvent::QueueUpdate { queues, .. } => Some(json!({
+            "type": "queue",
+            "items": queues.iter().map(queued_item_wire).collect::<Vec<_>>(),
         })),
         HarnessEvent::RunEnd { status, .. } => Some(json!({
             "type": "done",
@@ -330,7 +492,7 @@ mod tests {
         }
     }
 
-    async fn test_lane() -> Arc<Lane> {
+    async fn test_harness_lane() -> (Arc<crate::harness::runtime::harness::Harness>, Arc<Lane>) {
         use crate::harness::runtime::harness::{Harness, HarnessOptions};
         let storage = Arc::new(MemoryStorage::new());
         let session = crate::harness::session::session::Session::new(
@@ -354,7 +516,12 @@ mod tests {
             },
         )
         .unwrap();
-        harness.lane("main").await.unwrap()
+        let lane = harness.lane("main").await.unwrap();
+        (harness, lane)
+    }
+
+    async fn test_lane() -> Arc<Lane> {
+        test_harness_lane().await.1
     }
 
     #[test]
@@ -389,14 +556,14 @@ mod tests {
     async fn attach_replays_from_cursor_and_ends_on_run_end() {
         use futures_util::StreamExt;
 
-        let lane = test_lane().await;
+        let (harness, lane) = test_harness_lane().await;
         let (event_bus, tx) = HarnessEventBus::new();
         tx.send(text_delta("one")).unwrap();
         tx.send(text_delta("two")).unwrap();
         tx.send(text_delta("three")).unwrap();
         register_run(
             "chat-a",
-            LiveRun { run_id: "run-1".into(), session_id: "s1".into(), bus: event_bus.clone(), lane, started_at: 0 },
+            LiveRun { run_id: "run-1".into(), session_id: "s1".into(), bus: event_bus.clone(), lane, harness, started_at: 0 },
         );
         // Give the pump a beat to stamp the pushed events.
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -435,13 +602,14 @@ mod tests {
 
     #[tokio::test]
     async fn unregister_only_matching_session() {
-        let lane = test_lane().await;
+        let (harness, lane) = test_harness_lane().await;
         let (bus, _tx) = HarnessEventBus::new();
         let make = |session_id: &str| LiveRun {
             run_id: "r".into(),
             session_id: session_id.into(),
             bus: bus.clone(),
             lane: lane.clone(),
+            harness: harness.clone(),
             started_at: 0,
         };
         register_run("chat-b", make("s-old"));
@@ -478,6 +646,57 @@ mod tests {
         drop_gate(&gate_id);
         assert!(chat_gates("chat-g2").is_empty());
         drop(rx);
+    }
+
+    #[tokio::test]
+    async fn queue_while_busy_lifecycle() {
+        let (harness, lane) = test_harness_lane().await;
+        let (bus, _tx) = HarnessEventBus::new();
+        register_run(
+            "chat-q",
+            LiveRun { run_id: "r".into(), session_id: "s".into(), bus, lane: lane.clone(), harness, started_at: 0 },
+        );
+
+        // Steer + follow-up enqueue durably with ids.
+        let steer_id = match steer("chat-q", "go faster").await {
+            QueueOutcome::Done(id) => id,
+            other => panic!("steer failed: {other:?}"),
+        };
+        let follow_id = match queue_follow_up("chat-q", "then summarize").await {
+            QueueOutcome::Done(id) => id,
+            other => panic!("follow-up failed: {other:?}"),
+        };
+        assert_ne!(steer_id, follow_id);
+
+        // The queue snapshot shows both with kind + text.
+        let items = match queued("chat-q").await {
+            QueueOutcome::Done(items) => items,
+            other => panic!("queued failed: {other:?}"),
+        };
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0]["kind"], "steer");
+        assert_eq!(items[0]["text"], "go faster");
+        assert_eq!(items[1]["kind"], "follow_up");
+        assert_eq!(items[1]["text"], "then summarize");
+
+        // Cancel the follow-up; the snapshot updates.
+        assert!(matches!(cancel_queued("chat-q", &follow_id).await, QueueOutcome::Done("cancelled")));
+        let items = match queued("chat-q").await {
+            QueueOutcome::Done(items) => items,
+            other => panic!("queued failed: {other:?}"),
+        };
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["kind"], "steer");
+
+        // Queue modes flip via the harness config.
+        assert!(matches!(set_queue_modes("chat-q", Some("one-at-a-time"), Some("all")), QueueOutcome::Done(())));
+        assert!(matches!(
+            set_queue_modes("chat-q", Some("bogus"), None),
+            QueueOutcome::Failed(_)
+        ));
+
+        // Unknown chat / idle chat: NotBusy.
+        assert!(matches!(steer("chat-none", "x").await, QueueOutcome::NotBusy));
     }
 
     #[test]

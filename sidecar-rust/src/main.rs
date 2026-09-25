@@ -3,7 +3,7 @@ use axum::{
     http::{header, HeaderName, HeaderValue, Method, StatusCode},
     middleware::{self, Next},
     response::Response,
-    routing::{get, post, patch, delete},
+    routing::{get, post, put, patch, delete},
     Router,
 };
 use std::sync::Arc;
@@ -174,6 +174,12 @@ async fn main() {
         .route("/api/chats/:chat_id/stop", post(server::stop_chat))
         .route("/api/chats/:chat_id/run/live", get(server::chat_run_live))
         .route("/api/chats/:chat_id/gates", get(server::list_chat_gates))
+        .route("/api/chats/:chat_id/steer", post(server::steer_chat))
+        .route("/api/chats/:chat_id/follow-up", post(server::follow_up_chat))
+        .route("/api/chats/:chat_id/next-run", post(server::next_run_chat))
+        .route("/api/chats/:chat_id/queue", get(server::list_chat_queue))
+        .route("/api/chats/:chat_id/queue/mode", put(server::put_chat_queue_mode))
+        .route("/api/chats/:chat_id/queue/:entry_id/cancel", post(server::cancel_chat_queue))
         .route("/api/chats/:chat_id/usage", get(server::chat_usage))
         .route("/api/chats/:chat_id/answer-question", post(server::answer_question))
         .route("/api/chat/stream", post(server::chat_stream_route))

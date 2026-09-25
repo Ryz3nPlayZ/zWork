@@ -642,6 +642,17 @@ async fn map_harness_events(
             HarnessEvent::ToolEnd { tool_call_id, tool_name, result, is_error, .. } => {
                 push_tool_trace(&shared, &tool_call_id, &tool_name, &result, is_error);
             }
+            HarnessEvent::QueueUpdate { queues, .. } => {
+                shared
+                    .send(json!({
+                        "type": "queue",
+                        "items": queues
+                            .iter()
+                            .map(run_state::queued_item_wire)
+                            .collect::<Vec<_>>(),
+                    }))
+                    .await;
+            }
             HarnessEvent::TurnEnd { .. } => flush_traces(&shared).await,
             HarnessEvent::RunEnd { .. } => break,
             _ => {}
@@ -789,6 +800,7 @@ async fn run_durable_once(
         session_id: session_id.clone(),
         bus: harness.events.clone(),
         lane: lane.clone(),
+        harness: harness.clone(),
         started_at: run_state::now_ms(),
     });
 
@@ -1997,6 +2009,7 @@ async fn resume_one_interrupted(
         session_id: session_id.to_string(),
         bus: harness.events.clone(),
         lane: lane.clone(),
+        harness: harness.clone(),
         started_at: run_state::now_ms(),
     });
 

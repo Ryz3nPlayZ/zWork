@@ -520,6 +520,12 @@ impl Lane {
             .await
     }
 
+    /// Snapshot the queued inbox items with their payloads (the same shape
+    /// `queue_update` events carry) — pi queue watch.
+    pub async fn read_queue(&self) -> LaneResult<Vec<LaneQueuedItem>> {
+        self.read(|state, mutator| read_lane_queues(mutator, &state.inbox)).await
+    }
+
     // -- operation commands --
 
     /// Run a command against the current operation even after cancellation

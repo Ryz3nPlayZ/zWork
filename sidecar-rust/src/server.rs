@@ -827,9 +827,14 @@ pub async fn patch_message(
 pub async fn stop_chat(Path(chat_id): Path<String>) -> impl IntoResponse {
     // Durable abort first so the open operation reconciles as cancelled
     // (never auto-resumes) even when the task is killed before it settles.
-    let durable_stop = crate::agent::run_state::request_stop(&chat_id).await;
+    // Unconsumed steer/follow-up messages come back for the composer.
+    let stop = crate::agent::run_state::request_stop(&chat_id).await;
     let stopped = crate::watchdog::cancel_run(&chat_id);
-    Json(json!({ "success": stopped || durable_stop }))
+    Json(json!({
+        "success": stopped || stop.requested,
+        "steer": stop.steer,
+        "follow_up": stop.follow_up,
+    }))
 }
 
 pub async fn approve_gate(Path((_chat_id, gate_id)): Path<(String, String)>) -> impl IntoResponse {
@@ -847,6 +852,66 @@ pub async fn reject_gate(Path((_chat_id, gate_id)): Path<(String, String)>) -> i
 /// disconnected UI silently eats the 10-minute auto-deny).
 pub async fn list_chat_gates(Path(chat_id): Path<String>) -> impl IntoResponse {
     Json(json!({ "gates": crate::agent::run_state::chat_gates(&chat_id) }))
+}
+
+#[derive(Deserialize, Debug)]
+pub struct QueueMessageRequest {
+    pub message: String,
+}
+
+fn queue_outcome_json<T: serde::Serialize>(outcome: crate::agent::run_state::QueueOutcome<T>) -> Json<Value> {
+    use crate::agent::run_state::QueueOutcome;
+    match outcome {
+        QueueOutcome::Done(value) => Json(json!({ "queued": true, "result": value })),
+        QueueOutcome::NotBusy => Json(json!({ "queued": false, "reason": "not-busy" })),
+        QueueOutcome::Failed(error) => Json(json!({ "queued": false, "reason": "error", "error": error })),
+    }
+}
+
+/// Steer the live run (message joins the current operation at its next
+/// checkpoint).
+pub async fn steer_chat(Path(chat_id): Path<String>, Json(req): Json<QueueMessageRequest>) -> impl IntoResponse {
+    queue_outcome_json(crate::agent::run_state::steer(&chat_id, &req.message).await)
+}
+
+/// Queue a follow-up message for when the live run finishes.
+pub async fn follow_up_chat(Path(chat_id): Path<String>, Json(req): Json<QueueMessageRequest>) -> impl IntoResponse {
+    queue_outcome_json(crate::agent::run_state::queue_follow_up(&chat_id, &req.message).await)
+}
+
+/// Queue a whole next run.
+pub async fn next_run_chat(Path(chat_id): Path<String>, Json(req): Json<QueueMessageRequest>) -> impl IntoResponse {
+    queue_outcome_json(crate::agent::run_state::queue_next_run(&chat_id, &req.message).await)
+}
+
+/// Snapshot the live run's queued items.
+pub async fn list_chat_queue(Path(chat_id): Path<String>) -> impl IntoResponse {
+    match crate::agent::run_state::queued(&chat_id).await {
+        crate::agent::run_state::QueueOutcome::Done(items) => Json(json!({ "live": true, "items": items })),
+        _ => Json(json!({ "live": false, "items": [] })),
+    }
+}
+
+/// Cancel one queued item; "cancelled"/"not_found" mean the composer
+/// should restore the message, "consumed" means the run already took it.
+pub async fn cancel_chat_queue(Path((chat_id, entry_id)): Path<(String, String)>) -> impl IntoResponse {
+    queue_outcome_json(crate::agent::run_state::cancel_queued(&chat_id, &entry_id).await)
+}
+
+#[derive(Deserialize, Debug)]
+pub struct QueueModeRequest {
+    pub steering: Option<String>,
+    #[serde(rename = "followUp")]
+    pub follow_up: Option<String>,
+}
+
+/// Set steering / follow-up queue modes ("all" | "one-at-a-time").
+pub async fn put_chat_queue_mode(Path(chat_id): Path<String>, Json(req): Json<QueueModeRequest>) -> impl IntoResponse {
+    queue_outcome_json(crate::agent::run_state::set_queue_modes(
+        &chat_id,
+        req.steering.as_deref(),
+        req.follow_up.as_deref(),
+    ))
 }
 
 /// Re-attach to a live run's event stream: replays from `?after=<cursor>`

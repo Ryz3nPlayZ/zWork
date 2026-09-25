@@ -121,8 +121,21 @@ with M6 durable compaction (deferred is excluded from the port).
 
 ## M5 — Queue while busy
 
-- ⬜ steer / followUp / nextRun / cancelQueued over the wire; queue modes
-      (all / one-at-a-time); composer queue UI; unconsumed returned on abort
+- ✅ Backend wire surface (agent/run_state.rs over the live lane):
+      POST steer / follow-up / next-run (durable queue entries, entry ids
+      back), GET queue (kind + text snapshot), POST queue/:id/cancel
+      (cancelled | consumed | not_found), PUT queue/mode (steering +
+      followUp, all / one-at-a-time)
+- ✅ QueueUpdate → `{"type":"queue","items":[…]}` on the live stream AND
+      the run/live re-attach replay (composer chips can track either)
+- ✅ Consumption semantics smoke-proven with a mock provider: steer joins
+      the in-flight context at the next checkpoint drain; a queued
+      follow-up drives a whole next run at the finish boundary (queue
+      modes apply); cancel removes before consumption
+- ✅ Stop returns unconsumed steer/follow-up texts so the composer can
+      restore them (`POST /stop` → `{steer, follow_up}`)
+- ⬜ Frontend: send-while-busy, queued-message chips, mode picker — rides
+      with the in-flight app/ batch
 
 ## M6 — Compaction persistence + sub-agent parity
 
