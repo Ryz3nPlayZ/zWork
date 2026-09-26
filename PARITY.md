@@ -115,6 +115,18 @@ Status: ✅ done · 🚧 in progress · ⬜ remaining · ➖ excluded (with reas
       at restart instead of auto-resuming. Also fixed: turns requested
       with an unknown chat id persist against the created row, not the
       requested id (silent data loss before).
+- ✅ Consumed-queue projection + wire seq cursor: bus-ordered live events
+      carry their `seq` so a dropped stream resumes the SAME run via
+      `run/live?after=<seq>` instead of re-POSTing (api.ts attachLive —
+      implemented in tree with the UI batch); a queued message consumed
+      mid-run (steer/follow-up/next-run) projects into the flat chatstore
+      as a user row AND rotates the assistant row (usage baseline resets,
+      activities/traces split with it), so reload order reads
+      user → assistant(part 1) → user(queued) → assistant(part 2) and the
+      next turn's seeded history stays faithful; the wire gets a
+      `user_message` event so the live client rotates its bubble in sync
+      (EntryAdded projection in the live mapper + the stateless re-attach
+      projection, both skipping the prompt's own entry).
 
 Remaining slice stubs in the dispatcher: summary.*/deferred.* leaves land
 with M6 durable compaction (deferred is excluded from the port).
@@ -134,8 +146,16 @@ with M6 durable compaction (deferred is excluded from the port).
       modes apply); cancel removes before consumption
 - ✅ Stop returns unconsumed steer/follow-up texts so the composer can
       restore them (`POST /stop` → `{steer, follow_up}`)
-- ⬜ Frontend: send-while-busy, queued-message chips, mode picker — rides
-      with the in-flight app/ batch
+- ✅ Frontend (implemented + typechecked + visual-QA'd in tree, uncommitted
+      — rides with the in-flight app/ batch): send-while-busy in the
+      composer (textarea live while working, Enter queues a follow-up by
+      default; chevron menu offers Steer / Follow-up / New run; Stop stays
+      primary), queued-message chips with per-item cancel (consumed items
+      refuse the cancel), queue-mode picker (steering + follow-ups,
+      all / one-at-a-time) on the chips row, Stop's unconsumed texts
+      restored into the draft via a store→composer injection channel, and
+      the stream-retry path re-attaches via `run/live?after=<seq>` before
+      ever re-POSTing. Not-busy race falls back to a normal send.
 
 ## M6 — Compaction persistence + sub-agent parity — ✅ done (2026-09-25)
 
@@ -182,9 +202,10 @@ with M6 durable compaction (deferred is excluded from the port).
       debt. The only SliceNotImplemented left in OUR tree is `deferred`
       (excluded by scope).
 - ⬜ CHANGELOG entry + merge harness/pi-port → main + release — gated on
-      the user's in-flight frontend batch (M2 usage captions, M4
-      re-attach/queue UI, M5 composer queue chips ride in the uncommitted
-      app/ tree) and the release decision (releases push to ALL users).
+      the user's in-flight frontend batch (M2 usage captions, M3 fork
+      button, M4 re-attach/queue UI, M5 composer queue chips all
+      implemented + typechecked in the uncommitted app/ tree) and the
+      release decision (releases push to ALL users).
 
 ## Excluded (serve pi's TUI/multi-client architecture, not the agent)
 

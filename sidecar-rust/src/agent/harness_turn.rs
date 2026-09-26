@@ -72,7 +72,11 @@ struct TurnShared {
     chat_id: String,
     run_id: String,
     tx: mpsc::Sender<Value>,
-    assistant_msg_id: String,
+    /// Chatstore row the current generation streams into. Rotates when a
+    /// queued message is consumed mid-run (steer / follow-up / next-run):
+    /// the flat store can't interleave, so each consumed message closes the
+    /// current assistant row and opens a fresh one.
+    assistant_msg_id: Mutex<String>,
     auto_approve: bool,
     max_turns: u32,
     /// Display text streamed so far (persisted on every delta, as before).
@@ -100,6 +104,15 @@ impl TurnShared {
         let _ = self.tx.send(v).await;
     }
 
+    /// Send one bus-ordered event, stamped with its bus seq (re-attach
+    /// cursor protocol — see `map_harness_events`).
+    async fn send_seq(&self, seq: u64, mut v: Value) {
+        if let Some(map) = v.as_object_mut() {
+            map.insert("seq".into(), json!(seq));
+        }
+        self.send(v).await;
+    }
+
     fn turn(&self) -> u32 {
         self.turn.load(Ordering::SeqCst)
     }
@@ -109,8 +122,42 @@ impl TurnShared {
     async fn persist(&self) {
         let text = self.accumulated_text.lock_unpoisoned().clone();
         let activities = self.activities.lock_unpoisoned().clone();
+        let row = self.assistant_row();
         let _guard = self.db_lock.lock().await;
-        let _ = chatstore::update_message(&self.chat_id, &self.assistant_msg_id, Some(json!(text)), Some(activities));
+        let _ = chatstore::update_message(&self.chat_id, &row, Some(json!(text)), Some(activities));
+    }
+
+    /// Current assistant row id (cloned so no lock is held across awaits).
+    fn assistant_row(&self) -> String {
+        self.assistant_msg_id.lock_unpoisoned().clone()
+    }
+
+    /// A queued message (steer / follow-up / next-run) was consumed and its
+    /// entry committed mid-run: project it into the flat chatstore and rotate
+    /// the display to a fresh assistant row. Flat append order then reads
+    /// `user → assistant(part 1) → user(queued) → assistant(part 2)`, which
+    /// matches the live wire and keeps the next turn's seeded history
+    /// faithful. The usage baseline resets so row 2 doesn't re-attribute
+    /// row 1's tokens (per-chat totals only ever see each delta once).
+    async fn consume_queued_message(&self, text: &str) {
+        close_thinking(self).await;
+        let new_row = {
+            let _guard = self.db_lock.lock().await;
+            chatstore::append_message(&self.chat_id, "user", json!(text));
+            chatstore::append_message(&self.chat_id, "assistant", json!(""))
+                .map(|m| m.id)
+                .unwrap_or_default()
+        };
+        if new_row.is_empty() {
+            return;
+        }
+        *self.assistant_msg_id.lock_unpoisoned() = new_row.clone();
+        *self.accumulated_text.lock_unpoisoned() = String::new();
+        *self.activities.lock_unpoisoned() = Vec::new();
+        *self.usage.lock_unpoisoned() = Usage::empty();
+        let _ = self
+            .send(json!({ "type": "user_message", "text": text, "assistant_id": new_row }))
+            .await;
     }
 
     fn upsert_activity(&self, entry: Value) {
@@ -605,9 +652,26 @@ fn runtime_tool_from(tool: DynTool) -> std::sync::Arc<crate::harness::runtime::t
     Arc::new(RuntimeTool { declaration, replay, execute })
 }
 
+/// Text of a committed user entry, if this entry is one (assistant
+/// settlements, compactions and custom entries project differently).
+pub(crate) fn entry_user_text(entry: &crate::harness::session::types::Entry) -> Option<String> {
+    use crate::harness::session::types::EntryBody;
+    let EntryBody::Message { message, .. } = &entry.body else { return None };
+    message
+        .as_llm()
+        .and_then(|m| m.as_user())
+        .map(|u| u.content.text())
+        .filter(|text| !text.is_empty())
+}
+
 /// Map durable harness events onto the zWork wire (same events, same order
 /// as the agent-loop listener). Breaks on `run_end`; exits when the bus
 /// closes. Enforces the runaway turn cap by aborting the operation durably.
+///
+/// Bus-ordered events carry their `seq` on the wire so a client that drops
+/// mid-stream can re-attach via `GET /api/chats/:id/run/live?after=<seq>`
+/// and replay exactly the gap (bridge-level events — chat/meta/done/end —
+/// have no bus seq and stay unsequenced).
 async fn map_harness_events(
     shared: Arc<TurnShared>,
     lane: std::sync::Arc<crate::harness::runtime::lane::Lane>,
@@ -615,11 +679,16 @@ async fn map_harness_events(
 ) {
     use crate::harness::runtime::events::HarnessEvent;
     let max_turns = shared.max_turns;
-    while let Some((_seq, event)) = events.recv().await {
+    // The prompt's own user entry is the first user entry on the bus (the
+    // mapper subscribes before `prompt`; seeded history committed earlier and
+    // is never seen). The bridge persisted that row at turn start, so only
+    // LATER user entries — queue consumptions — project.
+    let mut seen_prompt_entry = false;
+    while let Some((seq, event)) = events.recv().await {
         match event {
             HarnessEvent::TurnStart { .. } => {
                 let turn = shared.turn.fetch_add(1, Ordering::SeqCst) + 1;
-                shared.send(json!({ "type": "status", "text": "Thinking" })).await;
+                shared.send_seq(seq, json!({ "type": "status", "text": "Thinking" })).await;
                 // Legacy semantics: stop after completing `max_turns` turns
                 // (0 = unbounded). Here the cap aborts the durable operation
                 // as the (max+1)-th turn starts, which reconciles cleanly.
@@ -631,20 +700,31 @@ async fn map_harness_events(
                 }
             }
             HarnessEvent::MessageUpdate { event, .. } => {
-                handle_stream_event(&shared, event).await;
+                handle_stream_event(&shared, event, seq).await;
             }
             HarnessEvent::MessageEnd { message, recovery, .. } => {
                 if recovery == Some(true) {
                     recover_assistant_text(&shared, &message).await;
                 }
-                record_assistant_end(&shared, &message).await;
+                record_assistant_end(&shared, &message, seq).await;
+            }
+            HarnessEvent::EntryAdded { entry, recovery, .. } => {
+                if recovery == Some(true) {
+                    continue;
+                }
+                let Some(text) = entry_user_text(&entry) else { continue };
+                if !seen_prompt_entry {
+                    seen_prompt_entry = true;
+                    continue;
+                }
+                shared.consume_queued_message(&text).await;
             }
             HarnessEvent::ToolEnd { tool_call_id, tool_name, result, is_error, .. } => {
                 push_tool_trace(&shared, &tool_call_id, &tool_name, &result, is_error);
             }
             HarnessEvent::QueueUpdate { queues, .. } => {
                 shared
-                    .send(json!({
+                    .send_seq(seq, json!({
                         "type": "queue",
                         "items": queues
                             .iter()
@@ -655,7 +735,7 @@ async fn map_harness_events(
             }
             HarnessEvent::CompactionStart { reason, .. } => {
                 shared
-                    .send(json!({ "type": "compaction", "status": "started", "reason": compaction_reason(&reason) }))
+                    .send_seq(seq, json!({ "type": "compaction", "status": "started", "reason": compaction_reason(&reason) }))
                     .await;
             }
             HarnessEvent::CompactionEnd { reason, outcome, .. } => {
@@ -666,7 +746,7 @@ async fn map_harness_events(
                     Out::Failed { .. } | Out::Aborted => "failed",
                 };
                 shared
-                    .send(json!({ "type": "compaction", "status": status, "reason": compaction_reason(&reason) }))
+                    .send_seq(seq, json!({ "type": "compaction", "status": status, "reason": compaction_reason(&reason) }))
                     .await;
             }
             HarnessEvent::TurnEnd { .. } => flush_traces(&shared).await,
@@ -731,7 +811,7 @@ async fn run_durable_once(
             ("turn.system_prompt", json!(system_prompt)),
             ("turn.cwd", json!(cwd)),
             ("turn.auto_approve", json!(shared.auto_approve)),
-            ("turn.assistant_msg_id", json!(shared.assistant_msg_id)),
+            ("turn.assistant_msg_id", json!(shared.assistant_row())),
         ];
         for (key, payload) in writes {
             if let Ok(address) = value("zwork", key) {
@@ -973,7 +1053,7 @@ async fn close_thinking(shared: &TurnShared) {
 }
 
 /// One streamed assistant block: text deltas, thinking deltas, tool calls.
-async fn handle_stream_event(shared: &TurnShared, event: AssistantMessageEvent) {
+async fn handle_stream_event(shared: &TurnShared, event: AssistantMessageEvent, seq: u64) {
     match event {
         AssistantMessageEvent::TextDelta { delta, .. } => {
             if delta.is_empty() {
@@ -981,14 +1061,14 @@ async fn handle_stream_event(shared: &TurnShared, event: AssistantMessageEvent) 
             }
             shared.accumulated_text.lock_unpoisoned().push_str(&delta);
             shared.persist().await;
-            shared.send(json!({ "type": "delta", "text": delta })).await;
+            shared.send_seq(seq, json!({ "type": "delta", "text": delta })).await;
         }
         AssistantMessageEvent::ThinkingDelta { delta, .. } => {
             if delta.is_empty() {
                 return;
             }
             shared.thinking_open.store(true, Ordering::SeqCst);
-            shared.send(json!({ "type": "thinking_delta", "text": delta })).await;
+            shared.send_seq(seq, json!({ "type": "thinking_delta", "text": delta })).await;
         }
         AssistantMessageEvent::ThinkingEnd { .. } => close_thinking(shared).await,
         AssistantMessageEvent::ToolcallEnd { tool_call, .. } => {
@@ -1009,7 +1089,7 @@ async fn handle_stream_event(shared: &TurnShared, event: AssistantMessageEvent) 
             }
             shared.call_args.lock_unpoisoned().insert(tool_call.id.clone(), tool_call.arguments.clone());
             shared
-                .send(json!({
+                .send_seq(seq, json!({
                     "type": "tool_use",
                     "id": tool_call.id,
                     "name": tool_call.name,
@@ -1035,7 +1115,7 @@ async fn recover_assistant_text(shared: &TurnShared, message: &AgentMessage) {
 }
 
 /// A settled assistant message: finish trace, usage ledger + wire totals.
-async fn record_assistant_end(shared: &TurnShared, message: &AgentMessage) {
+async fn record_assistant_end(shared: &TurnShared, message: &AgentMessage, seq: u64) {
     close_thinking(shared).await;
     let Some(am) = message.as_assistant() else { return };
     llm_trace(
@@ -1056,10 +1136,10 @@ async fn record_assistant_end(shared: &TurnShared, message: &AgentMessage) {
     };
     {
         let _guard = shared.db_lock.lock().await;
-        let _ = chatstore::record_usage(&shared.chat_id, &shared.assistant_msg_id, &total, &am.usage);
+        let _ = chatstore::record_usage(&shared.chat_id, &shared.assistant_row(), &total, &am.usage);
     }
     shared
-        .send(json!({
+        .send_seq(seq, json!({
             "type": "usage",
             "prompt_tokens": total.input + total.cache_read + total.cache_write,
             "completion_tokens": total.output,
@@ -1083,7 +1163,7 @@ async fn flush_traces(shared: &TurnShared) {
     let traces: Vec<Value> = std::mem::take(&mut *shared.traces.lock_unpoisoned());
     if !traces.is_empty() {
         let _guard = shared.db_lock.lock().await;
-        chatstore::append_tool_trace(&shared.chat_id, &shared.assistant_msg_id, traces);
+        chatstore::append_tool_trace(&shared.chat_id, &shared.assistant_row(), traces);
     }
 }
 
@@ -1437,7 +1517,7 @@ pub fn run_agent_turn(
             chat_id: chat_id.clone(),
             run_id: run_id.clone(),
             tx: tx.clone(),
-            assistant_msg_id,
+            assistant_msg_id: Mutex::new(assistant_msg_id),
             auto_approve,
             max_turns,
             accumulated_text: Mutex::new(String::new()),
@@ -2112,7 +2192,7 @@ async fn resume_one_interrupted(
         chat_id: chat_id.clone(),
         run_id: chat_id.clone(),
         tx: dead_tx,
-        assistant_msg_id,
+        assistant_msg_id: Mutex::new(assistant_msg_id),
         auto_approve: read_str("turn.auto_approve").map(|v| v == "true").unwrap_or(false),
         max_turns: max_turns(),
         accumulated_text: Mutex::new(seed_text),

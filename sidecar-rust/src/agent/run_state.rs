@@ -430,9 +430,34 @@ pub fn attach_or_idle(
         if tx.send(header).await.is_err() {
             return;
         }
-        while let Some((_seq, event)) = events.recv().await {
+        // Same first-user-entry rule as the live mapper: the prompt's own
+        // entry is skipped (the client rendered that bubble when it sent the
+        // message); later user entries are queue consumptions the client may
+        // have missed while disconnected.
+        let mut seen_prompt_entry = false;
+        while let Some((seq, event)) = events.recv().await {
             let ended = matches!(event, HarnessEvent::RunEnd { .. });
-            if let Some(wire) = project_harness_event(&event) {
+            let wire = match &event {
+                HarnessEvent::EntryAdded { entry, recovery, .. } => {
+                    if recovery.is_some() {
+                        None
+                    } else if let Some(text) = crate::agent::harness_turn::entry_user_text(entry) {
+                        if seen_prompt_entry {
+                            Some(json!({ "type": "user_message", "text": text }))
+                        } else {
+                            seen_prompt_entry = true;
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+                _ => project_harness_event(&event),
+            };
+            if let Some(mut wire) = wire {
+                if let Some(map) = wire.as_object_mut() {
+                    map.insert("seq".into(), json!(seq));
+                }
                 if tx.send(wire).await.is_err() {
                     break;
                 }
