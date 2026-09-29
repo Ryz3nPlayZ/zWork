@@ -173,6 +173,36 @@ export interface ProvidersResponse {
   default_model: string;
 }
 
+export type McpServerState = "connected" | "connecting" | "error" | "idle" | "disabled";
+
+/** An MCP connector as served by `/api/mcp/servers`. */
+export interface McpServer {
+  name: string;
+  transport: "stdio" | "http" | "sse";
+  /** Command line or URL. */
+  target: string;
+  enabled: boolean;
+  state: McpServerState;
+  error: string | null;
+  server_name: string | null;
+  server_version: string | null;
+  tools: { name: string; description: string; read_only: boolean }[];
+  config: Record<string, unknown>;
+}
+
+/** Servers configured in another app (Claude, Cursor, VS Code, …). */
+export interface McpDiscoverySource {
+  id: string;
+  label: string;
+  servers: { name: string; transport: string; target: string; already_added: boolean }[];
+}
+
+export interface McpAddResult {
+  success?: boolean;
+  error?: string;
+  results?: { name: string; ok: boolean; error: string | null }[];
+}
+
 /** A models.dev provider as served by `/api/providers/catalog`. */
 export interface CatalogProvider {
   id: string;
@@ -764,6 +794,43 @@ export const api = {
     localFetch(`/api/providers/catalog/${encodeURIComponent(id)}`).then((r) =>
       j<{ id: string; name: string; models: CatalogModel[] }>(r),
     ),
+
+  mcpServers: () =>
+    localFetch("/api/mcp/servers").then((r) => j<{ servers: McpServer[]; config_path: string }>(r)),
+
+  /** Add one server (`name` + `config`) or a pasted JSON snippet; connects before replying. */
+  mcpAdd: (body: { name?: string; config?: Record<string, unknown>; paste?: string }) =>
+    localFetch("/api/mcp/servers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => r.json() as Promise<McpAddResult>),
+
+  mcpRemove: (name: string) =>
+    localFetch(`/api/mcp/servers/${encodeURIComponent(name)}`, { method: "DELETE" }).then((r) =>
+      j<{ success: boolean }>(r),
+    ),
+
+  mcpSetEnabled: (name: string, enabled: boolean) =>
+    localFetch(`/api/mcp/servers/${encodeURIComponent(name)}/enabled`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    }).then((r) => j<{ success: boolean; error?: string | null }>(r)),
+
+  mcpConnect: (name: string) =>
+    localFetch(`/api/mcp/servers/${encodeURIComponent(name)}/connect`, { method: "POST" }).then((r) =>
+      j<{ success: boolean; error?: string }>(r),
+    ),
+
+  mcpDiscover: () => localFetch("/api/mcp/discover").then((r) => j<{ sources: McpDiscoverySource[] }>(r)),
+
+  mcpImport: (source: string, names: string[]) =>
+    localFetch("/api/mcp/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source, names }),
+    }).then((r) => j<{ success: boolean; imported?: string[]; error?: string }>(r)),
 
   upsertCustomModel: (body: Omit<CustomModel, "id"> & { id?: string }) =>
     localFetch("/api/custom-models", {

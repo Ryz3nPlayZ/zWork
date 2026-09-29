@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useApp } from "../lib/store";
 import { AppBrandLogo, hasBrandLogo } from "./BrandLogos";
+import { McpConnectors } from "./McpConnectors";
 
 const APP_DESCRIPTIONS: Record<string, string> = {
   gmail: "Send, read, and search your emails",
@@ -179,6 +180,8 @@ export function ConnectorsPage() {
             );
           })}
         </div>
+
+        <McpConnectors />
       </div>
 
       {/* Expanded overlay */}
