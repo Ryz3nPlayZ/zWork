@@ -1419,7 +1419,7 @@ export function ChatInput({
           void uploadFiles(files);
           e.currentTarget.value = "";
         }}
-        accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.txt,.md,.markdown,.csv,.tsv,.json,.yaml,.yml,.py,.js,.jsx,.ts,.tsx,.html,.css,.xml,.pdf"
+        accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.txt,.md,.markdown,.csv,.tsv,.json,.yaml,.yml,.py,.js,.jsx,.ts,.tsx,.html,.css,.xml,.pdf,.xlsx,.xls,.xlsm,.docx,.doc,.pptx,.ppt,.odt,.ods,.odp,.rtf,.key,.numbers,.pages,.zip"
       />
     </div>
       </BorderBeam>
