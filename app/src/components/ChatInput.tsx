@@ -1537,7 +1537,7 @@ function QuestionCardBody({
 }
 
 /**
- * Permission card — "zWork wants to run: {command}" with Allow / Don't allow
+ * Permission card — "zWork needs your OK" plus the reason, with Allow / Don't allow
  * and an always-present "tell zWork what to do instead" text row below them.
  * Always visible (no collapsed state) so the user sees it immediately.
  */
@@ -1559,7 +1559,7 @@ function PermissionCardBody({
       <div className="flex items-start gap-2.5">
         <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
         <div className="flex-1">
-          <p className="text-[13px] font-medium text-ink">zWork wants to run a command</p>
+          <p className="text-[13px] font-medium text-ink">zWork needs your OK</p>
           {reason && (
             <p className="mt-1 text-[12px] leading-relaxed text-ink-muted">{reason}</p>
           )}

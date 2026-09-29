@@ -2779,8 +2779,8 @@ export const useApp = create<AppState>((set, get) => ({
               if (!c) return s;
               const awaiting = evt.blocked && !!evt.gate_id;
               const toolKey = evt.tool_use_id || evt.gate_id;
-              const baseLabel = `${evt.tool} (${evt.risk})`;
-              const permIcon = evt.risk === "destructive" ? "shield-alert" : evt.risk === "sensitive" ? "shield" : "check";
+              const baseLabel = evt.tool ?? "action";
+              const permIcon = awaiting || evt.blocked ? "shield-alert" : "check";
               const msgs = toolKey
                 ? c.messages.map((m) => {
                     if (m.id !== activeAsstId) return m;
@@ -2792,7 +2792,7 @@ export const useApp = create<AppState>((set, get) => ({
                         kind: "tool",
                         id: toolKey,
                         tool: evt.tool,
-                        label: awaiting ? `Needs permission: ${baseLabel}` : `${evt.blocked ? "Blocked" : "Allowed"} ${baseLabel}`,
+                        label: awaiting ? "Waiting for your OK" : `${evt.blocked ? "Blocked" : "Allowed"} ${baseLabel}`,
                         icon: permIcon,
                         ...(awaiting
                           ? { ok: undefined, done: false, pendingGate: { gateId: evt.gate_id!, reason: evt.reason } }
@@ -2805,7 +2805,6 @@ export const useApp = create<AppState>((set, get) => ({
                     const updated: MessagePart = awaiting
                       ? {
                           ...part,
-                          label: `Needs permission: ${baseLabel}`,
                           icon: permIcon,
                           ok: undefined,
                           done: false,

@@ -218,6 +218,14 @@ fn start_packaged_backend(app: &tauri::AppHandle) -> Option<BackendChild> {
         .env("PYTHONIOENCODING", "utf-8")
         .env("ZWORK_HOME", zwork_sidecar_home().display().to_string());
 
+    // The agent works from its workspace. A Finder launch inherits `/`, which
+    // the backend already settles, but a Windows or Linux launch inherits the
+    // install folder, which it can't tell apart from a folder the user chose.
+    let workspace = zwork_sidecar_home().join("workspace");
+    if std::fs::create_dir_all(&workspace).is_ok() {
+        sidecar = sidecar.current_dir(workspace);
+    }
+
     // Per-run token the sidecar requires on every request (except /ws).
     if let Some(token) = app.try_state::<SidecarToken>() {
         sidecar = sidecar.env("ZWORK_SIDECAR_TOKEN", token.0.clone());
