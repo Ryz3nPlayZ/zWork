@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use crate::harness::agent_types::{AgentTool, AgentToolResult, AgentToolUpdateCallback, ReplayPolicy, ToolFuture};
 use crate::harness::types::{AbortSignal, ImageContent, UserContent};
 
-use super::truncate::{format_size, truncate_head, TruncationOptions};
+use super::truncate::{format_size, truncate_or_spill};
 
 pub const WEB_FETCH_SNIPPET: &str = "Fetch a URL and read it as markdown, text, or HTML";
 const MAX_RESPONSE_BYTES: usize = 5 * 1024 * 1024;
@@ -194,7 +194,7 @@ async fn render(url: &str, format: Format, f: Fetched) -> Result<AgentToolResult
 
     if let Some(ext) = document_extension(&f.mime, &f.final_url) {
         let text = extract_document(&f.bytes, ext).await?;
-        return Ok(AgentToolResult::text(budget(&source, &text, "txt")).with_details(details));
+        return Ok(AgentToolResult::text(truncate_or_spill(&source, &text, "txt")).with_details(details));
     }
 
     let body = String::from_utf8_lossy(&f.bytes);
@@ -213,32 +213,7 @@ async fn render(url: &str, format: Format, f: Fetched) -> Result<AgentToolResult
         Some(t) => format!("{t}\n{source}"),
         None => source,
     };
-    Ok(AgentToolResult::text(budget(&header, &text, ext)).with_details(details))
-}
-
-/// Keep output inside the shared tool budget; the full text goes to a temp
-/// file so nothing is lost.
-fn budget(header: &str, text: &str, ext: &str) -> String {
-    let t = truncate_head(text, TruncationOptions::default());
-    if !t.truncated {
-        return format!("{header}\n\n{text}");
-    }
-    let hash = text.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3));
-    let path = std::env::temp_dir().join(format!("zwork-fetch-{hash:016x}.{ext}"));
-    let saved = std::fs::write(&path, text).is_ok();
-    let more = if saved {
-        format!("Full content saved to {} — use `read` with offset/limit to see the rest.", path.display())
-    } else {
-        "Could not save the rest.".into()
-    };
-    format!(
-        "{header}\n\n{}\n\n[Showing {} of {} lines ({} of {}). {more}]",
-        t.content,
-        t.output_lines,
-        t.total_lines,
-        format_size(t.output_bytes),
-        format_size(t.total_bytes)
-    )
+    Ok(AgentToolResult::text(truncate_or_spill(&header, &text, ext)).with_details(details))
 }
 
 fn document_extension(mime: &str, url: &str) -> Option<&'static str> {
@@ -392,15 +367,6 @@ mod tests {
         assert_eq!(document_extension("application/pdf", "https://x/y"), Some("pdf"));
         assert_eq!(document_extension("application/octet-stream", "https://x/report.DOCX?dl=1"), Some("docx"));
         assert_eq!(document_extension("text/html", "https://x/a.pdf"), None);
-    }
-
-    #[test]
-    fn long_output_is_saved_not_lost() {
-        let text = (0..5000).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
-        let out = budget("T", &text, "md");
-        let path = out.rsplit("saved to ").next().unwrap().split(" — ").next().unwrap();
-        assert_eq!(std::fs::read_to_string(path).unwrap(), text);
-        let _ = std::fs::remove_file(path);
     }
 
     /// `cargo test live_fetch -- --ignored --nocapture`

@@ -198,13 +198,12 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
         }),
         json!({
             "name": "extract_document",
-            "description": "Extract text and metadata from PDF, DOCX, XLSX, PPTX, or TXT files.",
+            "description": "Read the text of a document: PDF (scanned PDFs are OCR'd), Word (.docx/.doc/.rtf), Excel and CSV-like spreadsheets (.xlsx/.xls/.ods, returned as markdown tables), PowerPoint (.pptx, with speaker notes), OpenDocument (.odt/.odp), or HTML. Long output is saved to a file you can page through with `read`.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": "Path to document" },
-                    "format": { "type": "string", "description": "Output format ('markdown' or 'text')" },
-                    "pages": { "type": "string", "description": "1-based page range for PDFs, e.g., '1-5'" }
+                    "path": { "type": "string", "description": "Path to the document" },
+                    "pages": { "type": "string", "description": "1-based page or slide range, e.g. '3' or '1-5'" }
                 },
                 "required": ["path"]
             }

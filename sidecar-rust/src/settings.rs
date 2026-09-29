@@ -621,7 +621,7 @@ pub fn build_system_prompt(
         ];
 
         if include_academic {
-            list.push("- `extract_document(path)` — extract text from PDF, DOCX, XLSX, PPTX files.");
+            list.push("- `extract_document(path, pages?)` — read PDFs (OCRs scans), Word, Excel, PowerPoint and OpenDocument files.");
             list.push("- `search_papers(query, max_results?, year_min?, year_max?)` — search academic literature across databases.");
             list.push("- `format_citation(paper, style?)` — format citation string.");
             list.push("- `get_stock_data(ticker, range?)` — get stock price data and technical indicators.");

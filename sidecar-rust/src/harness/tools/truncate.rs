@@ -222,6 +222,32 @@ pub fn truncate_line(line: &str, max_chars: usize) -> (String, bool) {
     (format!("{head}... [truncated]"), true)
 }
 
+/// `header`, then `text` cut to the shared tool budget. Past the budget the
+/// full text is written to a temp file (named by content hash, so repeats
+/// reuse it) and the model is told to page through it with `read`.
+pub fn truncate_or_spill(header: &str, text: &str, ext: &str) -> String {
+    let t = truncate_head(text, TruncationOptions::default());
+    if !t.truncated {
+        return format!("{header}\n\n{text}");
+    }
+    let hash = text.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3));
+    let path = std::env::temp_dir().join(format!("zwork-output-{hash:016x}.{ext}"));
+    let saved = std::fs::write(&path, text).is_ok();
+    let more = if saved {
+        format!("Full content saved to {} — use `read` with offset/limit to see the rest.", path.display())
+    } else {
+        "Could not save the rest.".into()
+    };
+    format!(
+        "{header}\n\n{}\n\n[Showing {} of {} lines ({} of {}). {more}]",
+        t.content,
+        t.output_lines,
+        t.total_lines,
+        format_size(t.output_bytes),
+        format_size(t.total_bytes)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,5 +294,14 @@ mod tests {
         let (t, was) = truncate_line("abcdef", 3);
         assert_eq!(t, "abc... [truncated]");
         assert!(was);
+    }
+
+    #[test]
+    fn long_output_is_saved_not_lost() {
+        let text = (0..5000).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
+        let out = truncate_or_spill("T", &text, "md");
+        let path = out.rsplit("saved to ").next().unwrap().split(" — ").next().unwrap();
+        assert_eq!(std::fs::read_to_string(path).unwrap(), text);
+        let _ = std::fs::remove_file(path);
     }
 }
