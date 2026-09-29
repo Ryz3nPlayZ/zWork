@@ -34,17 +34,28 @@ export function Reveal({ children, delay = 0, className = "" }: { children: Reac
   );
 }
 
+/** Pixel sizes of the captures in public/shots (1440x900 @2x crops), so the
+ *  page reserves their space before they load. */
+const SHOT_SIZE: Record<string, [number, number]> = {
+  hero: [2880, 1800],
+  report: [1322, 1684],
+  steps: [1020, 1180],
+};
+
 /** A real app screenshot, light or dark to match the visitor's theme. */
 export function Shot({ name, alt, className = "", eager = false }: { name: string; alt: string; className?: string; eager?: boolean }) {
+  const [width, height] = SHOT_SIZE[name] ?? [];
   return (
     <picture>
       <source srcSet={`/shots/${name}-dark.webp`} media="(prefers-color-scheme: dark)" />
       <img
         src={`/shots/${name}-light.webp`}
         alt={alt}
+        width={width}
+        height={height}
         loading={eager ? "eager" : "lazy"}
         decoding="async"
-        className={`block w-full rounded-2xl border border-line shadow-[0_24px_60px_-28px_rgb(var(--ink)/0.35)] ${className}`}
+        className={`block h-auto w-full rounded-2xl border border-line shadow-[0_24px_60px_-28px_rgb(var(--ink)/0.35)] ${className}`}
       />
     </picture>
   );

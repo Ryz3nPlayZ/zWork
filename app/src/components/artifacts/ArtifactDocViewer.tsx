@@ -432,6 +432,7 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
                   h2: ({ children }) => <h3 className="mb-2 mt-5 text-[15.5px] font-semibold text-ink">{children}</h3>,
                   h3: ({ children }) => <h4 className="mb-1 mt-4 text-[13.5px] font-semibold text-ink">{children}</h4>,
                   p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
+                  hr: () => <hr className="my-5 border-line" />,
                   ul: ({ children }) => <ul className="mb-3 list-disc space-y-1 pl-5">{children}</ul>,
                   ol: ({ children }) => <ol className="mb-3 list-decimal space-y-1 pl-5">{children}</ol>,
                   table: ({ children }) => (
