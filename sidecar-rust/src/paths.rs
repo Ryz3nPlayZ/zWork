@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::env;
 
 pub fn home_dir() -> PathBuf {
@@ -172,7 +172,11 @@ pub fn skills_dir() -> PathBuf {
         }
     }
 
-    // 5. Dev fallback.
+    // 5. Dev fallback: the checkout this binary was built from, then cwd.
+    let built_from = Path::new(env!("CARGO_MANIFEST_DIR")).join("../zWork-Skills");
+    if built_from.exists() {
+        return built_from;
+    }
     repo_root().join("zWork-Skills")
 }
 

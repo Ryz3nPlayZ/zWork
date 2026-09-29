@@ -1,151 +1,100 @@
-use std::collections::HashMap;
-use std::fs;
+//! Skills from everywhere people keep them, loaded by the harness's Agent
+//! Skills loader ([`crate::harness::skills`]).
+//!
+//! A skill installed for Claude Code, Codex, opencode or pi works in zWork
+//! unchanged. When two locations define the same name the first wins:
+//! the user's zWork skills, then the working directory's, then the skills
+//! bundled with the app (written for zWork's tools), then other agents'
+//! global folders.
+
 use std::path::{Path, PathBuf};
-use crate::paths::skills_dir;
+
+use crate::harness::skills::{format_skill_invocation, load_skills, parse_frontmatter, LoadSkillsOptions, Skill};
 
 #[derive(Clone, Debug)]
 pub struct SkillMeta {
+    /// What `read_skill` takes: the skill's name.
     pub slug: String,
     pub name: String,
     pub description: String,
     pub path: PathBuf,
+    /// "user" | "project" | "claude" | "codex" | ... | "bundled"
+    pub source: String,
 }
 
-fn parse_frontmatter(text: &str) -> HashMap<String, String> {
-    let mut out = HashMap::new();
-    let trimmed = text.trim_start();
-    if !trimmed.starts_with("---") {
-        return out;
-    }
-    let after_first = &trimmed[3..];
-    if let Some(end_pos) = after_first.find("---") {
-        let frontmatter_content = &after_first[..end_pos];
-        for line in frontmatter_content.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            if let Some(colon_pos) = line.find(':') {
-                let key = line[..colon_pos].trim().to_string();
-                let value = line[colon_pos + 1..]
-                    .trim()
-                    .trim_matches('"')
-                    .trim_matches('\'')
-                    .to_string();
-                out.insert(key, value);
-            }
-        }
-    }
+/// Project-local skill folders, relative to the working directory.
+const PROJECT_DIRS: &[&str] = &[".zwork/skills", ".claude/skills", ".agents/skills", ".pi/skills", ".opencode/skill", ".opencode/skills"];
+
+/// Other agents' global skill folders, relative to the home directory.
+const GLOBAL_DIRS: &[(&str, &str)] = &[
+    (".claude/skills", "claude"),
+    (".agents/skills", "agents"),
+    (".pi/agent/skills", "pi"),
+    (".config/opencode/skill", "opencode"),
+    (".config/opencode/skills", "opencode"),
+    (".codex/skills", "codex"),
+];
+
+fn locations(cwd: &Path, home: &Path) -> Vec<(PathBuf, String)> {
+    let mut out = vec![(crate::paths::home_dir().join("skills"), "user".to_string())];
+    out.extend(PROJECT_DIRS.iter().map(|d| (cwd.join(d), "project".to_string())));
+    out.push((crate::paths::skills_dir(), "bundled".to_string()));
+    out.extend(GLOBAL_DIRS.iter().map(|(d, src)| (home.join(d), src.to_string())));
     out
 }
 
-fn clip(s: &str, n: usize) -> String {
-    let clean = s.replace('\n', " ").trim().to_string();
-    if clean.len() <= n {
-        clean
-    } else {
-        format!("{}…", &clean[..n - 1])
-    }
-}
-
-fn first_paragraph(text: &str) -> String {
-    let trimmed = text.trim_start();
-    let body = if trimmed.starts_with("---") {
-        if let Some(pos) = trimmed[3..].find("---") {
-            &trimmed[3 + pos + 3..]
-        } else {
-            trimmed
-        }
-    } else {
-        trimmed
-    };
-    
-    let mut lines = Vec::new();
-    for line in body.lines() {
-        let s = line.trim();
-        if s.starts_with('#') {
+fn load_all() -> Vec<Skill> {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let home = dirs::home_dir().unwrap_or_default();
+    let mut skills = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for (dir, source) in locations(&cwd, &home) {
+        if !dir.is_dir() {
             continue;
         }
-        if s.is_empty() {
-            if !lines.is_empty() {
-                break;
-            }
-            continue;
-        }
-        lines.push(s);
-        let total_len: usize = lines.iter().map(|l| l.len()).sum();
-        if total_len > 200 {
-            break;
-        }
-    }
-    lines.join(" ")
-}
-
-fn visit_dirs(dir: &Path, files: &mut Vec<PathBuf>) {
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                visit_dirs(&path, files);
-            } else if path.file_name().map_or(false, |n| n == "SKILL.md") {
-                files.push(path);
+        let loaded = load_skills(&LoadSkillsOptions {
+            cwd: cwd.clone(),
+            agent_dir: PathBuf::new(),
+            skill_paths: vec![dir],
+            include_defaults: false,
+        });
+        for mut s in loaded.skills {
+            if seen.insert(s.name.to_lowercase()) {
+                s.source = source.clone();
+                skills.push(s);
             }
         }
     }
+    skills.sort_by(|a, b| a.name.cmp(&b.name));
+    skills
 }
 
 pub fn list_skills() -> Vec<SkillMeta> {
-    let root = skills_dir();
-    if !root.exists() {
-        return Vec::new();
-    }
-    let mut skill_files = Vec::new();
-    visit_dirs(&root, &mut skill_files);
-    skill_files.sort();
-    
-    let mut out = Vec::new();
-    for md_path in skill_files {
-        if let Ok(text) = fs::read_to_string(&md_path) {
-            let fm = parse_frontmatter(&text);
-            let name = fm.get("name").cloned().unwrap_or_else(|| {
-                md_path.parent()
-                    .and_then(|p| p.file_name())
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "Unknown".to_string())
-            });
-            let desc = fm.get("description").cloned().unwrap_or_else(|| first_paragraph(&text));
-            
-            // Generate slug relative to root
-            let slug = if let Ok(rel) = md_path.parent().unwrap().relative_to(&root) {
-                rel.to_string_lossy().to_string().replace('\\', "/")
-            } else {
-                md_path.parent().unwrap().file_name().unwrap().to_string_lossy().to_string()
-            };
-            
-            out.push(SkillMeta {
-                slug,
-                name,
-                description: clip(&desc, 280),
-                path: md_path,
-            });
-        }
-    }
-    out
+    load_all()
+        .into_iter()
+        .filter(|s| !s.disable_model_invocation)
+        .map(|s| SkillMeta {
+            slug: s.name.clone(),
+            name: s.name,
+            description: clip(&s.description, 280),
+            path: s.file_path,
+            source: s.source,
+        })
+        .collect()
 }
 
+/// The skill's instructions, wrapped so relative references (`scripts/`,
+/// `reference.md`) resolve against its folder. Accepts the name or, for
+/// older transcripts, a `folder/name` path.
 pub fn read_skill(slug: &str) -> Option<String> {
-    let slug_norm = slug.trim().trim_matches('/').to_lowercase();
-    let skills = list_skills();
-    for s in skills {
-        let s_slug_norm = s.slug.to_lowercase();
-        if s_slug_norm == slug_norm 
-            || s_slug_norm.ends_with(&format!("/{}", slug_norm))
-            || s.path.parent().unwrap().file_name().unwrap().to_string_lossy().to_lowercase() == slug_norm
-        {
-            return fs::read_to_string(s.path).ok();
-        }
-    }
-    None
+    let want = slug.trim().trim_matches('/').to_lowercase();
+    let want = want.rsplit('/').next().unwrap_or(&want).to_string();
+    let skill = load_all().into_iter().find(|s| {
+        s.name.to_lowercase() == want || s.base_dir.file_name().is_some_and(|n| n.to_string_lossy().to_lowercase() == want)
+    })?;
+    let raw = std::fs::read_to_string(&skill.file_path).ok()?;
+    let body = parse_frontmatter(&raw).map(|fm| fm.body).unwrap_or(raw);
+    Some(format_skill_invocation(&skill, body.trim(), None))
 }
 
 pub fn format_for_system_prompt() -> String {
@@ -153,24 +102,43 @@ pub fn format_for_system_prompt() -> String {
     if skills.is_empty() {
         return "(none installed)".to_string();
     }
-    let limit = 40;
-    let mut lines = Vec::new();
-    for s in skills.iter().take(limit) {
-        lines.push(format!("- `{}` — {}", s.slug, s.description));
-    }
-    if skills.len() > limit {
-        lines.push(format!("- …and {} more", skills.len() - limit));
+    const LIMIT: usize = 60;
+    let mut lines: Vec<String> = skills.iter().take(LIMIT).map(|s| format!("- `{}` — {}", s.slug, s.description)).collect();
+    if skills.len() > LIMIT {
+        lines.push(format!("- …and {} more", skills.len() - LIMIT));
     }
     lines.join("\n")
 }
 
-// Minimal path helper for relativity
-trait RelativeTo {
-    fn relative_to(&self, base: &Path) -> Result<PathBuf, std::path::StripPrefixError>;
+fn clip(s: &str, n: usize) -> String {
+    let clean = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if clean.chars().count() <= n {
+        return clean;
+    }
+    let cut: String = clean.chars().take(n - 1).collect();
+    format!("{cut}…")
 }
 
-impl RelativeTo for Path {
-    fn relative_to(&self, base: &Path) -> Result<PathBuf, std::path::StripPrefixError> {
-        self.strip_prefix(base).map(|p| p.to_path_buf())
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bundled_skills_load_by_name_with_their_folder() {
+        let names: Vec<String> = list_skills().into_iter().filter(|s| s.source == "bundled").map(|s| s.name).collect();
+        if names.is_empty() {
+            return; // no zWork-Skills checkout next to this build
+        }
+        assert!(names.iter().any(|n| n == "pdf"), "{names:?}");
+        let pdf = read_skill("anthropic-skills/pdf").expect("path-style slug still resolves");
+        assert!(pdf.starts_with("<skill name=\"pdf\""), "{}", &pdf[..80.min(pdf.len())]);
+        assert!(pdf.contains("References are relative to"));
+        assert!(!pdf.contains("\n---\nname:"), "frontmatter is stripped");
+    }
+
+    #[test]
+    fn clip_counts_characters() {
+        assert_eq!(clip("héllo  wörld", 6), "héllo…");
+        assert_eq!(clip("a\nb", 10), "a b");
     }
 }

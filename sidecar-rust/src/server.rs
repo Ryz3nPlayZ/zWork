@@ -1097,7 +1097,8 @@ pub async fn list_skills() -> impl IntoResponse {
             "slug": s.slug,
             "name": s.name,
             "description": s.description,
-            "path": s.path.to_string_lossy().to_string()
+            "path": s.path.to_string_lossy().to_string(),
+            "source": s.source
         })
     }).collect();
     Json(serde_json::json!({ "skills": serialized }))

@@ -138,6 +138,7 @@ mod tests {
 
     #[test]
     fn newest_compaction_replaces_history() {
+        let kept = AgentMessage::user_text("kept");
         let compaction = Entry {
             id: "k2".into(),
             parent_id: Some("old".into()),
@@ -145,7 +146,7 @@ mod tests {
             timestamp: 0,
             body: EntryBody::Compaction {
                 summary: "second".into(),
-                retained_tail: vec![AgentMessage::user_text("kept")],
+                retained_tail: vec![kept.clone()],
                 tokens_before: 100,
                 details: None,
                 usage: None,
@@ -178,7 +179,7 @@ mod tests {
             crate::harness::messages::compaction_summary_text(&messages[0]),
             Some("second")
         );
-        assert_eq!(messages[1], AgentMessage::user_text("kept"));
+        assert_eq!(messages[1], kept);
         assert_eq!(messages[2], AgentMessage::user_text("fresh"));
     }
 
