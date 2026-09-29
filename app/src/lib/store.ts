@@ -1890,10 +1890,11 @@ export const useApp = create<AppState>((set, get) => ({
         const loadedArtifacts: Artifact[] = [];
         for (let i = 0; i < messages.length; i++) {
           const m = messages[i];
-          if (m.role === "assistant" && m.content.includes("[[ARTIFACT")) {
+          if (m.role === "assistant" && /\[\[(ARTIFACT|DOCUMENT)\s/.test(m.content)) {
             const { cleaned, artifacts } = extractArtifacts(m.content, m.id);
             if (artifacts.length > 0) {
-              messages[i] = { ...m, content: cleaned || (artifacts.length === 1 ? "Here's the document:" : "Here are the documents:") };
+              const replacement = cleaned || (artifacts.length === 1 ? "Here's the document:" : "Here are the documents:");
+              messages[i] = withParts(m, replaceTextParts(m.parts, replacement));
               loadedArtifacts.push(...artifacts);
             }
           }
