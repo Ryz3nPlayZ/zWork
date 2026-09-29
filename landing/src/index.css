@@ -1,0 +1,81 @@
+@import "tailwindcss";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+/* Tokens ported from app/src/index.css so the page reads as the same product.
+   Light surfaces step darker as they come forward (the app's "OpenCode mirror"
+   rule): sunken is lightest, raised is darkest. */
+:root {
+  --paper: 242 240 232;
+  --paper-sunken: 246 244 236;
+  --paper-raised: 234 232 224;
+  --ink: 48 46 40;
+  --ink-soft: 80 76 68;
+  --ink-muted: 102 98 88; /* one step darker than the app's, AA on paper for body copy */
+  --line: 218 214 202;
+  --line-strong: 200 196 184;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: 22 22 24;
+    --paper-sunken: 18 18 20;
+    --paper-raised: 31 31 34;
+    --ink: 236 236 234;
+    --ink-soft: 213 213 211;
+    --ink-muted: 160 160 157;
+    --line: 45 45 49;
+    --line-strong: 62 62 66;
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --color-paper: rgb(var(--paper));
+  --color-paper-sunken: rgb(var(--paper-sunken));
+  --color-paper-raised: rgb(var(--paper-raised));
+  --color-ink: rgb(var(--ink));
+  --color-ink-soft: rgb(var(--ink-soft));
+  --color-ink-muted: rgb(var(--ink-muted));
+  --color-line: rgb(var(--line));
+  --color-line-strong: rgb(var(--line-strong));
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, monospace;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background: rgb(var(--paper));
+  color: rgb(var(--ink));
+  font-family: var(--font-sans);
+}
+
+::selection {
+  background: rgb(var(--ink));
+  color: rgb(var(--paper));
+}
+
+:focus-visible {
+  outline: 2px solid rgb(var(--ink));
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+.marquee-track {
+  animation: marquee 48s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .marquee-track { animation: none; }
+}
