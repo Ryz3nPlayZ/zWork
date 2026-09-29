@@ -33,7 +33,7 @@ const TIERS: PricingTier[] = [
     priceMonthly: 0,
     priceAnnual: 0,
     annualPerMonth: 0,
-    description: "For getting started with AI-powered development.",
+    description: "Everything you need to try zWork on real work.",
     features: [
       "Shared request pool (up to 200 per 5 hours)",
       "Up to 1,000 requests per week",

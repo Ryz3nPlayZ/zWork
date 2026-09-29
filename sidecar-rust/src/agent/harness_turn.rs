@@ -778,9 +778,12 @@ async fn run_durable_once(
         session_id: Some(shared.chat_id.clone()),
         ..Default::default()
     };
+    // pi's defaults: back off 2s, 4s, 8s... so a dropped stream or a 529
+    // has time to clear before the next attempt.
     config.retry_policy = RetryPolicySnapshot {
         enabled: true,
         max_retries: MAX_TRANSIENT_RETRIES,
+        base_delay_ms: 2_000,
         ..Default::default()
     };
     // Durable compaction (M6): mid-run threshold + overflow compactions
@@ -1850,7 +1853,7 @@ async fn spawn_subagent_durable(
         max_retries: Some(2),
         ..Default::default()
     };
-    config.retry_policy = RetryPolicySnapshot { enabled: true, max_retries: 2, ..Default::default() };
+    config.retry_policy = RetryPolicySnapshot { enabled: true, max_retries: 2, base_delay_ms: 2_000, ..Default::default() };
     config.tools = Arc::new(tools.iter().map(|t| runtime_tool_from(t.clone())).collect());
 
     let (harness, _open) = Harness::create(
@@ -2263,6 +2266,7 @@ async fn resume_one_interrupted(
     config.retry_policy = crate::harness::runtime::types::RetryPolicySnapshot {
         enabled: true,
         max_retries: MAX_TRANSIENT_RETRIES,
+        base_delay_ms: 2_000,
         ..Default::default()
     };
     // Durable compaction (M6): mid-run threshold + overflow compactions

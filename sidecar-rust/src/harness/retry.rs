@@ -277,7 +277,10 @@ static RETRYABLE_PROVIDER_ERROR_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
         r"websocket.?closed|websocket.?error|",
         r"ended without|stream ended before message_stop|stream ended before a terminal response event|",
         r"http2 request did not get a response|retry delay|",
-        r"you can retry your request|try your request again|please retry your request|ResourceExhausted",
+        r"you can retry your request|try your request again|please retry your request|ResourceExhausted|",
+        // The same failures in reqwest/hyper words (pi sees Node's wording).
+        r"stream read error|error decoding response body|unexpected EOF|connection reset|broken pipe|",
+        r"incomplete message|connection closed before message completed",
     ))
     .unwrap()
 });
@@ -309,4 +312,35 @@ pub fn policy_retry_delay_ms(base_delay_ms: u64, max_agent_delay_ms: u64, attemp
 /// When the next attempt may start (pi `retryNotBefore`).
 pub fn retry_not_before(base_delay_ms: u64, max_agent_delay_ms: u64, attempt: u32) -> u64 {
     (now_ms() as u64).saturating_add(policy_retry_delay_ms(base_delay_ms, max_agent_delay_ms, attempt))
+}
+
+#[cfg(test)]
+mod assistant_error_tests {
+    use super::*;
+
+    fn errored(msg: &str) -> AssistantMessage {
+        AssistantMessage {
+            content: vec![],
+            api: crate::harness::types::Api::AnthropicMessages,
+            provider: "p".into(),
+            model: "m".into(),
+            response_model: None,
+            response_id: None,
+            usage: Default::default(),
+            stop_reason: StopReason::Error,
+            error_message: Some(msg.into()),
+            raw_stop_reason: None,
+            end_turn: None,
+            timestamp: 0,
+        }
+    }
+
+    #[test]
+    fn dropped_streams_retry_and_quota_does_not() {
+        assert!(is_retryable_assistant_error(&errored("stream read error: error decoding response body")));
+        assert!(is_retryable_assistant_error(&errored("stream read error: unexpected EOF during chunk size line")));
+        assert!(is_retryable_assistant_error(&errored("overloaded error, please retry (503)")));
+        assert!(!is_retryable_assistant_error(&errored("insufficient_quota: 429")));
+        assert!(!is_retryable_assistant_error(&errored("invalid x-api-key")));
+    }
 }
