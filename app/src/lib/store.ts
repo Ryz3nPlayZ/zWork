@@ -55,6 +55,8 @@ function loadSecurityPreset(): SecurityPreset {
   return "ask";
 }
 
+const INITIAL_PRESET = loadSecurityPreset();
+
 function hasCompletedOnboardingLocally(): boolean {
   if (typeof window === "undefined") return false;
   return window.localStorage.getItem(ONBOARDING_DONE_KEY) === "true";
@@ -1246,9 +1248,9 @@ export const useApp = create<AppState>((set, get) => ({
   setArtifactMode: (v) => set({ artifactMode: v }),
 
   // Chat harness options
-  planMode: false,
+  planMode: SECURITY_PRESET_META[INITIAL_PRESET].planMode,
   setPlanMode: (v) => set({ planMode: v }),
-  autoApproveDestructive: false,
+  autoApproveDestructive: SECURITY_PRESET_META[INITIAL_PRESET].autoApproveDestructive,
   setAutoApproveDestructive: (v) => set({ autoApproveDestructive: v }),
   accessibilityPermissionGranted: null,
   screenRecordingPermissionGranted: null,
@@ -1256,9 +1258,9 @@ export const useApp = create<AppState>((set, get) => ({
   wrongIdentityHint: null,
   zworkSelfTrusted: null,
   extensionConnected: null,
-  webSearchEnabled: false,
+  webSearchEnabled: SECURITY_PRESET_META[INITIAL_PRESET].webSearchEnabled,
   setWebSearchEnabled: (v) => set({ webSearchEnabled: v }),
-  securityPreset: loadSecurityPreset(),
+  securityPreset: INITIAL_PRESET,
   setSecurityPreset: (preset) => {
     try {
       localStorage.setItem(SECURITY_PRESET_KEY, preset);

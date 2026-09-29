@@ -124,15 +124,16 @@ mod tests {
 
     #[test]
     fn drops_unusable_assistant_turns() {
+        let hi = AgentMessage::user_text("hi");
         let entries = vec![
-            message_entry("a", None, AgentMessage::user_text("hi")),
+            message_entry("a", None, hi.clone()),
             message_entry("b", Some("a"), assistant(StopReason::Error)),
             message_entry("c", Some("b"), assistant(StopReason::Stop)),
             message_entry("d", Some("c"), assistant(StopReason::Aborted)),
         ];
         let messages = build_session_context(&entries, &EntryProjectors::new()).unwrap();
         assert_eq!(messages.len(), 2);
-        assert_eq!(messages[0], AgentMessage::user_text("hi"));
+        assert_eq!(messages[0], hi);
         assert!(messages[1].is_assistant());
     }
 

@@ -9,6 +9,7 @@ pub mod search;
 pub mod doc_extract;
 pub mod stock;
 pub mod todos;
+pub mod file_guard;
 
 // Risk evaluation for permission checking
 pub enum Risk {
@@ -37,6 +38,10 @@ pub fn evaluate_tool_risk(name: &str, params: &Value) -> Risk {
                     Risk::Destructive {
                         reason: format!("Executing potentially destructive command: '{}'", cmd),
                     }
+                } else if let Some(path) = file_guard::user_file_changed_by(cmd, &risk_cwd(cwd)) {
+                    Risk::Destructive {
+                        reason: format!("Changing a file outside the zWork workspace: {}", path.display()),
+                    }
                 } else {
                     Risk::Safe
                 }
@@ -49,12 +54,22 @@ pub fn evaluate_tool_risk(name: &str, params: &Value) -> Risk {
                 Risk::Destructive {
                     reason: format!("Writing to sensitive backend configuration file: '{}'", path),
                 }
+            } else if let Some(path) = file_guard::user_file_written(path, &risk_cwd(None)) {
+                Risk::Destructive {
+                    reason: format!("Changing a file outside the zWork workspace: {}", path.display()),
+                }
             } else {
                 Risk::Safe
             }
         }
         _ => Risk::Safe,
     }
+}
+
+fn risk_cwd(cwd: Option<&str>) -> std::path::PathBuf {
+    cwd.map(std::path::PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(crate::paths::workspace_root)
 }
 
 fn targets_zwork_backend(command: &str) -> bool {
@@ -1548,9 +1563,11 @@ fn describe_schedule(
 mod tests {
     use super::*;
 
+    /// Commands run from the zWork workspace, like a normal session.
     fn gated(cmd: &str) -> bool {
+        let cwd = crate::paths::workspace_root();
         matches!(
-            evaluate_tool_risk("bash", &json!({ "command": cmd })),
+            evaluate_tool_risk("bash", &json!({ "command": cmd, "cwd": cwd })),
             Risk::Destructive { .. }
         )
     }
@@ -1606,11 +1623,13 @@ mod tests {
     fn catches_redirect_outside_workdir() {
         assert!(gated("echo evil > /etc/hosts"));
         assert!(gated("cat payload > '/Library/LaunchDaemons/x.plist'"));
-        // Truncating redirect under an absolute cwd is inside the workdir.
-        assert!(!gated_with_cwd("echo hi > /work/proj/out.txt", "/work/proj"));
-        assert!(!gated_with_cwd("echo hi > /work/proj/sub/out.txt", "/work/proj/"));
-        // Different absolute root than the cwd → gated.
-        assert!(gated_with_cwd("echo hi > /etc/other.txt", "/work/proj"));
+        let ws = crate::paths::workspace_root();
+        let ws = ws.to_str().unwrap();
+        assert!(!gated_with_cwd(&format!("echo hi > {ws}/out.txt"), ws));
+        assert!(!gated_with_cwd(&format!("echo hi > {ws}/sub/out.txt"), &format!("{ws}/")));
+        assert!(gated_with_cwd("echo hi > /etc/other.txt", ws));
+        // A folder of the user's own is theirs, even as the cwd.
+        assert!(gated_with_cwd("echo hi > /work/proj/out.txt", "/work/proj"));
     }
 
     #[test]

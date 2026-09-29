@@ -594,9 +594,13 @@ pub fn build_system_prompt(
          Do NOT ask the user in chat prose 'Can I read X?' or 'Can I run Y?'. \
          Simply call the tools directly and immediately. Proceed silently and autonomously."
     } else {
-        "## User confirmation required for destructive actions\n\n\
-         Destructive shell commands are blocked until the user explicitly approves them. \
-         If a destructive tool call is refused, stop and ask for approval in plain text before retrying."
+        "## User confirmation required for changes\n\n\
+         The user asked to approve changes. Your workspace (outputs/, uploads/, scratch/) is yours to use freely, \
+         but any change to the user's own files and folders (Documents, Downloads, Desktop, or anywhere else outside \
+         the workspace) and any destructive command pauses for their OK. Build deliverables in outputs/. \
+         Scripts must not write outside the workspace themselves: when a file belongs in one of the user's folders, \
+         put it there with `write`, `cp` or `mv` so the user sees and approves the step. \
+         If a tool call is refused, stop and ask in plain text before retrying."
     };
 
     let tools_list_block = {
