@@ -18,6 +18,7 @@ pub(crate) mod test_support;
 pub mod agent_types;
 pub mod assistant_frame;
 pub mod compaction;
+pub mod context_files;
 pub mod estimate;
 pub mod json_parse;
 pub mod messages;

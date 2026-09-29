@@ -1456,7 +1456,10 @@ pub fn run_agent_turn(
             include_academic,
             &connected_apps_block,
         );
-        let system_prompt = system_prompt + &mcp_prompt_block(&mcp);
+        let context_files = crate::harness::context_files::load(std::path::Path::new(&cwd));
+        let system_prompt = system_prompt
+            + &crate::harness::context_files::prompt_block(&context_files)
+            + &mcp_prompt_block(&mcp);
         let browser_connected = crate::browser_bridge::extension_connected().await;
         let system_prompt = format!(
             "{system_prompt}\n\n## Live environment status\n{}",

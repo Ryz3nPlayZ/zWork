@@ -308,3 +308,14 @@ fn login_shell_path() -> Option<String> {
     let path = out.split(MARKER).nth(1)?.trim().to_string();
     (!path.is_empty()).then_some(path)
 }
+
+/// A Finder-launched app inherits `/` as its working directory, which would
+/// make the agent's shell, relative paths and AGENTS.md lookup start at the
+/// filesystem root. Work from the zWork workspace instead; a real directory
+/// (a terminal launch, a benchmark checkout) is left alone.
+pub fn settle_cwd() {
+    let at_root = env::current_dir().map_or(true, |d| d.parent().is_none());
+    if at_root {
+        let _ = env::set_current_dir(workspace_root());
+    }
+}

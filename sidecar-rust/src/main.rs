@@ -120,6 +120,7 @@ fn main() {
     // Before the runtime starts threads: `set_var` is only sound while the
     // process is single-threaded.
     paths::hydrate_path();
+    paths::settle_cwd();
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

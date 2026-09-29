@@ -105,7 +105,7 @@ fn build_tools_section(selected: &[String], options: &BuildSystemPromptOptions<'
     format!("{body}\n\nIn addition to the tools above, you may have access to other custom tools depending on the project.")
 }
 
-fn build_project_context(files: &[ContextFile]) -> Option<String> {
+pub fn build_project_context(files: &[ContextFile]) -> Option<String> {
     if files.is_empty() {
         return None;
     }
