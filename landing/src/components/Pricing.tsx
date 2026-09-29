@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Check } from "@phosphor-icons/react";
-import { DOWNLOAD_URL } from "../lib/site";
+import { detectPlatform, downloadUrl } from "../lib/site";
 import { Reveal, Section } from "./ui";
 
 type Tier = { name: string; monthly: number; annualPerMonth: number; blurb: string; features: string[]; featured?: boolean };
@@ -32,6 +32,7 @@ const TIERS: Tier[] = [
 ];
 
 export function Pricing() {
+  const href = useMemo(() => downloadUrl(detectPlatform()), []);
   const [annual, setAnnual] = useState(true);
   return (
     <Section id="pricing" className="scroll-mt-20 py-28 sm:py-36">
@@ -86,7 +87,7 @@ export function Pricing() {
                   ))}
                 </ul>
                 <a
-                  href={DOWNLOAD_URL}
+                  href={href}
                   className={`mt-10 inline-flex h-11 items-center justify-center rounded-full text-[15px] font-medium transition-transform active:scale-[0.98] ${
                     t.featured ? "bg-paper text-ink" : "border border-line-strong text-ink hover:bg-paper-raised"
                   }`}

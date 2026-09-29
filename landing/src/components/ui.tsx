@@ -1,7 +1,7 @@
 import { useMemo, type ReactNode } from "react";
 import { motion } from "motion/react";
 import { DownloadSimple } from "@phosphor-icons/react";
-import { DOWNLOAD_URL, detectPlatform } from "../lib/site";
+import { detectPlatform, downloadUrl } from "../lib/site";
 
 /* Radius rule for the page: anything you press is a pill, every surface
    (screenshots, panels) is rounded-2xl. */
@@ -11,7 +11,7 @@ export function DownloadButton({ size = "md" }: { size?: "sm" | "md" }) {
   const pad = size === "sm" ? "h-9 px-4 text-sm" : "h-12 px-6 text-[15px]";
   return (
     <a
-      href={DOWNLOAD_URL}
+      href={downloadUrl(platform)}
       className={`inline-flex items-center gap-2 whitespace-nowrap rounded-full bg-ink font-medium text-paper transition-transform duration-150 hover:-translate-y-px active:translate-y-0 active:scale-[0.98] ${pad}`}
     >
       <DownloadSimple weight="bold" className={size === "sm" ? "size-4" : "size-[18px]"} />
