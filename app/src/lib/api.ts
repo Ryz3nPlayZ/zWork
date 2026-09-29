@@ -151,14 +151,15 @@ export interface CredentialStatus {
   configured: boolean;
   source: "byok" | "claude_code" | "env" | null;
   base_url: string | null;
-  shape: "anthropic" | "openai";
+  shape: string;
+  api?: string;
 }
 
 export interface ModelEntry {
   id: string;
   name: string;
   subtitle: string;
-  shape: "anthropic" | "openai";
+  shape: string;
   credential: string;
   model_id: string;
   base_url_override?: string;
@@ -170,6 +171,35 @@ export interface ProvidersResponse {
   credentials: Record<string, CredentialStatus>;
   models: ModelEntry[];
   default_model: string;
+}
+
+/** A models.dev provider as served by `/api/providers/catalog`. */
+export interface CatalogProvider {
+  id: string;
+  name: string;
+  supported: boolean;
+  api: string | null;
+  base_url: string;
+  /** Env vars that hold the secret key, e.g. ["OPENAI_API_KEY"]. */
+  env: string[];
+  /** Non-secret URL placeholders, e.g. ["AZURE_RESOURCE_NAME"]. */
+  vars: string[];
+  doc: string;
+  keyless: boolean;
+  model_count: number;
+  configured: boolean;
+}
+
+export interface CatalogModel {
+  id: string;
+  name: string;
+  reasoning: boolean;
+  images: boolean;
+  context: number;
+  output: number;
+  cost: { input: number; output: number; cache_read: number; cache_write: number };
+  api: string;
+  base_url: string;
 }
 
 export interface CustomModel {
@@ -726,6 +756,14 @@ export const api = {
       body: JSON.stringify(body),
       keepalive: true,
     }).then((r) => j<{ ok: boolean }>(r)),
+
+  providerCatalog: () =>
+    localFetch("/api/providers/catalog").then((r) => j<{ providers: CatalogProvider[] }>(r)),
+
+  providerCatalogModels: (id: string) =>
+    localFetch(`/api/providers/catalog/${encodeURIComponent(id)}`).then((r) =>
+      j<{ id: string; name: string; models: CatalogModel[] }>(r),
+    ),
 
   upsertCustomModel: (body: Omit<CustomModel, "id"> & { id?: string }) =>
     localFetch("/api/custom-models", {

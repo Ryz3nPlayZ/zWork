@@ -13,6 +13,11 @@ export default defineConfig({
       "/api": {
         target: "http://127.0.0.1:8787",
         changeOrigin: true,
+        // Browser dev against a sidecar started with the same
+        // ZWORK_SIDECAR_TOKEN (the Tauri host injects it in the app).
+        headers: process.env.ZWORK_SIDECAR_TOKEN
+          ? { "x-zwork-token": process.env.ZWORK_SIDECAR_TOKEN }
+          : undefined,
       },
     },
   },

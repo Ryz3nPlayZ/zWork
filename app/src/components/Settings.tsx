@@ -26,6 +26,7 @@ import {
   ChevronDown,
   Palette,
   Download,
+  Search,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
@@ -55,7 +56,7 @@ import {
   type PromptTemplate,
 } from "../lib/templates";
 import { IconButton } from "./IconButton";
-import { api, IS_WEB, type Integration } from "../lib/api";
+import { api, IS_WEB, type CatalogModel, type CatalogProvider, type Integration } from "../lib/api";
 import { KeybindRecorder } from "./KeybindRecorder";
 
 type Section = "account" | "appearance" | "general" | "memory" | "models" | "integrations";
@@ -90,56 +91,6 @@ const SECTION_META: Record<Section, { title: string; description: string; icon: 
     title: "Integrations",
     description: "Detect and reuse local tooling.",
     icon: <Plug className="h-4 w-4" />,
-  },
-};
-
-// Known native credentials whose default base URL the user might paste into
-// the per-model "Base URL override" field. When that happens, steer them at
-// the dedicated credential slot so we don't end up with one model's URL
-// shoved into a different credential.
-const NATIVE_PRESET_HINTS: Array<{ id: string; label: string; matcher: RegExp }> = [
-  { id: "deepseek", label: "DeepSeek", matcher: /\bapi\.deepseek\.com\b/i },
-  { id: "zai", label: "z.ai", matcher: /\bapi\.z\.ai\b/i },
-];
-
-function detectPresetCredentialHint(
-  url: string,
-  currentCredential: string,
-): { id: string; label: string } | null {
-  const trimmed = url.trim();
-  if (!trimmed) return null;
-  for (const preset of NATIVE_PRESET_HINTS) {
-    if (preset.matcher.test(trimmed) && currentCredential !== preset.id) {
-      return { id: preset.id, label: preset.label };
-    }
-  }
-  return null;
-}
-
-const CREDENTIAL_PLACEHOLDERS: Record<string, { keyPlaceholder: string; baseUrlPlaceholder: string }> = {
-  anthropic: {
-    keyPlaceholder: "sk-ant-…",
-    baseUrlPlaceholder: "https://api.anthropic.com",
-  },
-  openai: {
-    keyPlaceholder: "sk-…",
-    baseUrlPlaceholder: "https://api.openai.com/v1",
-  },
-  claude_code: {
-    keyPlaceholder: "(reuses local credentials — no key needed)",
-    baseUrlPlaceholder: "",
-  },
-  deepseek: {
-    keyPlaceholder: "sk-…",
-    baseUrlPlaceholder: "https://api.deepseek.com/v1",
-  },
-  zai: {
-    keyPlaceholder: "(z.ai API key)",
-    baseUrlPlaceholder: "https://api.z.ai/api/paas/v4",
-  },
-  ollama: {
-    keyPlaceholder: "(optional — leave blank for local)",
-    baseUrlPlaceholder: "http://localhost:11434/v1",
   },
 };
 
@@ -270,11 +221,173 @@ export function SettingsPage() {
 
 const EMPTY_MODEL = {
   name: "",
-  shape: "anthropic" as "anthropic" | "openai",
+  shape: "auto",
   credential: "anthropic",
   model_id: "",
   base_url_override: "",
 };
+
+// Pinned to the top of the provider picker; everything else follows A–Z.
+const POPULAR_PROVIDERS = [
+  "anthropic",
+  "openai",
+  "google",
+  "openrouter",
+  "deepseek",
+  "xai",
+  "mistral",
+  "groq",
+  "zai",
+  "ollama",
+];
+
+// Gateways (OpenRouter & co.) list hundreds of `vendor/model` ids A–Z; surface
+// the frontier labs first so the obvious picks aren't buried.
+const FEATURED_VENDORS = ["anthropic", "openai", "google", "x-ai", "deepseek", "moonshotai", "z-ai", "qwen", "mistralai"];
+
+function vendorRank(id: string): number {
+  const slash = id.indexOf("/");
+  if (slash < 0) return 0;
+  const i = FEATURED_VENDORS.indexOf(id.slice(0, slash));
+  return i < 0 ? FEATURED_VENDORS.length : i;
+}
+
+// Pseudo-providers that live outside the models.dev catalog.
+const LOCAL_CONFIG = "claude_code";
+const CUSTOM_ENDPOINT = "custom";
+
+const PROTOCOLS: Array<{ value: string; label: string }> = [
+  { value: "auto", label: "Automatic (from catalog)" },
+  { value: "anthropic", label: "Anthropic Messages" },
+  { value: "openai", label: "OpenAI Chat Completions" },
+  { value: "openai-responses", label: "OpenAI Responses" },
+  { value: "google", label: "Google Gemini" },
+];
+
+const inputClass =
+  "block w-full rounded-lg border border-line bg-paper px-3 py-2 text-[12.5px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none";
+
+function formatTokens(n: number): string {
+  if (!n) return "";
+  if (n >= 1_000_000) return `${+(n / 1_000_000).toFixed(1)}M`;
+  return `${Math.round(n / 1000)}k`;
+}
+
+function formatPrice(cost: CatalogModel["cost"]): string {
+  if (!cost.input && !cost.output) return "free";
+  return `$${+cost.input.toFixed(2)} / $${+cost.output.toFixed(2)}`;
+}
+
+function ProviderPicker({
+  providers,
+  value,
+  onChange,
+}: {
+  providers: CatalogProvider[];
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const options = useMemo(() => {
+    const rank = (p: CatalogProvider) => {
+      const i = POPULAR_PROVIDERS.indexOf(p.id);
+      return p.configured ? -100 + Math.max(i, 0) : i >= 0 ? i : 100;
+    };
+    const q = query.trim().toLowerCase();
+    return providers
+      .filter((p) => p.supported)
+      .filter((p) => !q || p.name.toLowerCase().includes(q) || p.id.includes(q))
+      .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+  }, [providers, query]);
+
+  const current = providers.find((p) => p.id === value);
+  const label =
+    value === LOCAL_CONFIG
+      ? "Local config (reuse credentials)"
+      : value === CUSTOM_ENDPOINT
+        ? "Custom OpenAI-compatible endpoint"
+        : value === "zwork_router"
+          ? "zWork Router (managed)"
+          : current?.name || value;
+
+  const pick = (id: string) => {
+    onChange(id);
+    setOpen(false);
+    setQuery("");
+  };
+
+  const row = (id: string, name: string, meta: string, configured: boolean) => (
+    <li key={id}>
+      <button
+        type="button"
+        onClick={() => pick(id)}
+        className={cn(
+          "flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left text-[12.5px] transition-colors",
+          id === value ? "bg-accent/10 text-accent" : "text-ink hover:bg-paper-sunken",
+        )}
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          {configured ? (
+            <CircleCheck className="h-3.5 w-3.5 shrink-0 text-success" />
+          ) : (
+            <CircleDashed className="h-3.5 w-3.5 shrink-0 text-ink-faint" />
+          )}
+          <span className="truncate">{name}</span>
+        </span>
+        <span className="shrink-0 text-[11px] text-ink-faint">{meta}</span>
+      </button>
+    </li>
+  );
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="ring-focus flex w-full items-center justify-between rounded-xl border border-line bg-paper px-3.5 py-2 text-left text-[13px] text-ink transition-colors hover:border-line-strong"
+      >
+        <span className="flex items-center gap-2">
+          {current?.configured ? (
+            <CircleCheck className="h-3.5 w-3.5 text-success" />
+          ) : (
+            <CircleDashed className="h-3.5 w-3.5 text-ink-faint" />
+          )}
+          {label}
+        </span>
+        <ChevronDown className={cn("h-4 w-4 text-ink-muted transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div className="mt-1.5 rounded-xl border border-line bg-paper p-1.5 shadow-sm">
+          <div className="flex items-center gap-2 border-b border-line px-2 pb-1.5">
+            <Search className="h-3.5 w-3.5 text-ink-faint" />
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={`Search ${options.length} providers…`}
+              className="w-full bg-transparent py-1 text-[12.5px] text-ink placeholder:text-ink-faint focus:outline-none"
+            />
+          </div>
+          <ul className="mt-1 max-h-64 overflow-y-auto">
+            {options.map((p) => row(p.id, p.name, p.keyless ? "local" : `${p.model_count} models`, p.configured))}
+            {!query && row(LOCAL_CONFIG, "Local config (reuse credentials)", "no key", false)}
+            {!query && row(CUSTOM_ENDPOINT, "Custom OpenAI-compatible endpoint", "any URL", false)}
+            {query && options.length === 0 && (
+              <li className="px-2.5 py-2 text-[12px] text-ink-muted">
+                No match.{" "}
+                <button type="button" className="underline underline-offset-2" onClick={() => pick(CUSTOM_ENDPOINT)}>
+                  Use a custom endpoint
+                </button>
+              </li>
+            )}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function ModelsPanel({
   providers,
@@ -297,14 +410,17 @@ function ModelsPanel({
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_MODEL);
   const [apiKey, setApiKey] = useState("");
+  const [vars, setVars] = useState<Record<string, string>>({});
   const [revealKey, setRevealKey] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [editId, setEditId] = useState<string | undefined>();
-  // Ollama local-model discovery + pull. The backend endpoint exists
-  // (POST /api/ollama/models) and the API wrapper exists (api.ollamaModels).
-  // This surfaces installed models as a clickable list and auto-loads on
-  // credential select so the user never has to hand-type a model ID.
+
+  // models.dev catalog: provider list once, model list per selected provider.
+  const [catalog, setCatalog] = useState<CatalogProvider[]>([]);
+  const [catalogModels, setCatalogModels] = useState<CatalogModel[]>([]);
+  // Ollama local-model discovery + pull — the catalog can't know what's installed.
   const [ollamaModels, setOllamaModels] = useState<{ id: string; name: string }[] | null>(null);
   const [ollamaLoading, setOllamaLoading] = useState(false);
   const [ollamaError, setOllamaError] = useState("");
@@ -312,58 +428,54 @@ function ModelsPanel({
   const [ollamaPulling, setOllamaPulling] = useState(false);
   const [ollamaPullProgress, setOllamaPullProgress] = useState("");
 
-  const credMeta = CREDENTIAL_PLACEHOLDERS[form.credential] || CREDENTIAL_PLACEHOLDERS.openai;
+  const provider = catalog.find((p) => p.id === form.credential);
   const credStatus = providers?.credentials?.[form.credential];
   const maskedKey = settings?.api_keys?.[form.credential] || "";
-  const isKeyless = form.credential === "claude_code";
-  const presetHint = detectPresetCredentialHint(form.base_url_override, form.credential);
-  const deprecatedCredentialLabel =
-    form.credential === "groq"
-      ? "Groq"
-      : form.credential === "cerebras"
-        ? "Cerebras"
-        : form.credential === "zwork_router"
-          ? "zWork Router"
-        : null;
+  const isLocalConfig = form.credential === LOCAL_CONFIG;
+  const isCustom = form.credential === CUSTOM_ENDPOINT || (!provider && !isLocalConfig && form.credential !== "zwork_router");
+  const isOllama = form.credential === "ollama";
+  const savedVars = settings?.provider_config?.[form.credential] ?? {};
 
-  // Clear the API-key field when the user switches credentials.
+  useEffect(() => {
+    if (!showForm || catalog.length) return;
+    api.providerCatalog().then((r) => setCatalog(r.providers)).catch(() => setCatalog([]));
+  }, [showForm, catalog.length]);
+
   useEffect(() => {
     setApiKey("");
-  }, [form.credential]);
+    setVars({});
+    setCatalogModels([]);
+    if (!showForm || isLocalConfig || form.credential === CUSTOM_ENDPOINT) return;
+    let cancelled = false;
+    api
+      .providerCatalogModels(form.credential)
+      .then((r) => !cancelled && setCatalogModels(r.models))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.credential, showForm]);
 
-  // Reset Ollama discovery when leaving the Ollama credential source so stale
-  // model lists don't leak into other provider forms.
   useEffect(() => {
-    if (form.credential !== "ollama") {
+    if (!isOllama) {
       setOllamaModels(null);
       setOllamaError("");
       setOllamaPullProgress("");
-    }
-  }, [form.credential]);
-
-  // Auto-load Ollama models the moment the user picks the Ollama credential —
-  // don't wait for a "Load models" click. This makes the common case (Ollama
-  // running locally on default port) work with zero manual steps: pick
-  // Ollama, see your models, click one, done.
-  useEffect(() => {
-    if (form.credential === "ollama" && ollamaModels === null && !ollamaLoading) {
+    } else if (showForm && ollamaModels === null && !ollamaLoading) {
       void loadOllamaModels();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.credential]);
+  }, [form.credential, showForm]);
 
   const loadOllamaModels = async () => {
     setOllamaLoading(true);
     setOllamaError("");
     try {
       const res = await api.ollamaModels(form.base_url_override, apiKey);
-      if (res.error) {
-        setOllamaError(res.error);
-        setOllamaModels([]);
-      } else {
-        setOllamaModels(res.models || []);
-      }
-    } catch (e) {
+      setOllamaError(res.error || "");
+      setOllamaModels(res.error ? [] : res.models || []);
+    } catch {
       setOllamaError("Couldn't reach Ollama. Is it running on localhost:11434?");
       setOllamaModels([]);
     } finally {
@@ -377,22 +489,16 @@ function ModelsPanel({
     setOllamaPulling(true);
     setOllamaPullProgress("Starting pull…");
     try {
-      await api.ollamaPull(
-        name,
-        form.base_url_override,
-        apiKey,
-        (rec) => {
-          if (rec.status === "success") {
-            setOllamaPullProgress("Done");
-          } else if (rec.total && rec.completed != null) {
-            const pct = rec.total > 0 ? Math.round((rec.completed / rec.total) * 100) : 0;
-            setOllamaPullProgress(`${rec.status} — ${pct}%`);
-          } else {
-            setOllamaPullProgress(rec.status);
-          }
-        },
-      );
-      // Refresh the installed-model list so the just-pulled model appears.
+      await api.ollamaPull(name, form.base_url_override, apiKey, (rec) => {
+        if (rec.status === "success") {
+          setOllamaPullProgress("Done");
+        } else if (rec.total && rec.completed != null) {
+          const pct = rec.total > 0 ? Math.round((rec.completed / rec.total) * 100) : 0;
+          setOllamaPullProgress(`${rec.status} — ${pct}%`);
+        } else {
+          setOllamaPullProgress(rec.status);
+        }
+      });
       await loadOllamaModels();
       setOllamaPullName("");
       setOllamaPullProgress("");
@@ -403,32 +509,54 @@ function ModelsPanel({
     }
   };
 
+  // Catalog models filtered by what's typed in the Model ID box.
+  const modelMatches = useMemo(() => {
+    const q = form.model_id.trim().toLowerCase();
+    return catalogModels
+      .filter((m) => !q || m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q))
+      .sort((a, b) => vendorRank(a.id) - vendorRank(b.id))
+      .slice(0, 60);
+  }, [catalogModels, form.model_id]);
+  const exactModel = catalogModels.find((m) => m.id === form.model_id);
+
+  const pickModel = (id: string, name: string) =>
+    setForm((f) => {
+      const autoNamed = !f.name.trim() || catalogModels.some((m) => m.name === f.name) || f.name === f.model_id;
+      return { ...f, model_id: id, name: autoNamed ? name : f.name };
+    });
+
   const startEdit = (id: string) => {
     const m = customModels.find((cm) => cm.id === id);
     if (!m) return;
     setForm({
       name: m.name,
-      shape: (m.shape as "anthropic" | "openai") || "anthropic",
+      shape: m.shape || "auto",
       credential: m.credential,
       model_id: m.model_id,
       base_url_override: m.base_url_override,
     });
+    setShowAdvanced(Boolean(m.base_url_override) || (m.shape !== "" && m.shape !== "auto"));
     setEditId(id);
     setShowForm(true);
   };
 
+  const needsBaseUrl = isCustom && !form.base_url_override.trim();
+  const missingVars = (provider?.vars ?? []).filter((v) => !(vars[v] ?? savedVars[v] ?? "").trim());
+  const canSubmit = form.name.trim() && form.model_id.trim() && !needsBaseUrl && missingVars.length === 0;
+
   const submit = async () => {
-    if (!form.name.trim() || !form.model_id.trim()) return;
+    if (!canSubmit) return;
     setBusy(true);
     setError("");
     try {
-      const patch: { api_keys?: Record<string, string> } = {};
-      if (!isKeyless && apiKey.trim()) {
-        patch.api_keys = { [form.credential]: apiKey.trim() };
-      }
-      if (patch.api_keys) {
-        await onSaveSettings(patch);
-      }
+      const patch: {
+        api_keys?: Record<string, string>;
+        provider_config?: Record<string, Record<string, string>>;
+      } = {};
+      if (!isLocalConfig && apiKey.trim()) patch.api_keys = { [form.credential]: apiKey.trim() };
+      const changedVars = Object.fromEntries(Object.entries(vars).filter(([, v]) => v.trim()));
+      if (Object.keys(changedVars).length) patch.provider_config = { [form.credential]: changedVars };
+      if (patch.api_keys || patch.provider_config) await onSaveSettings(patch);
       await onUpsert({ ...form, id: editId });
       setShowForm(false);
       setEditId(undefined);
@@ -441,19 +569,26 @@ function ModelsPanel({
     }
   };
 
+  const openNew = () => {
+    setShowForm(true);
+    setShowAdvanced(false);
+    setEditId(undefined);
+    setForm(EMPTY_MODEL);
+  };
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-[17px] font-semibold tracking-tight text-ink">Models</h2>
           <p className="mt-1 text-[13px] leading-5 text-ink-muted">
-            Add models to chat with. Each points to a credential and model ID.
+            Bring any model from 150+ providers — Anthropic, OpenAI, Gemini, OpenRouter, local Ollama and more.
           </p>
         </div>
         <button
           type="button"
-          onClick={() => { setShowForm(true); setEditId(undefined); setForm(EMPTY_MODEL); }}
-          className="press ring-focus inline-flex items-center gap-1.5 rounded-lg border border-line bg-paper px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-paper-sunken"
+          onClick={openNew}
+          className="press ring-focus inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-line bg-paper px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-paper-sunken"
         >
           <Plus className="h-3.5 w-3.5" /> Add model
         </button>
@@ -490,8 +625,8 @@ function ModelsPanel({
                     <CircleDashed className="h-3.5 w-3.5 text-ink-faint" />
                   )}
                 </div>
-                <p className="mt-0.5 text-[12px] text-ink-muted">
-                  {live?.subtitle || `${m.shape} · ${m.credential} · ${m.model_id}`}
+                <p className="mt-0.5 truncate text-[12px] text-ink-muted">
+                  {live?.subtitle || `${m.credential} · ${m.model_id}`}
                 </p>
               </div>
               <div className="flex items-center gap-1">
@@ -502,12 +637,7 @@ function ModelsPanel({
                 >
                   Edit
                 </button>
-                <IconButton
-                  icon={<Trash2 />}
-                  label="Delete"
-                  size="sm"
-                  onClick={async () => { await onDelete(m.id); }}
-                />
+                <IconButton icon={<Trash2 />} label="Delete" size="sm" onClick={async () => { await onDelete(m.id); }} />
               </div>
             </div>
           </div>
@@ -518,7 +648,7 @@ function ModelsPanel({
         <div className="rounded-xl border border-dashed border-line bg-paper p-6 text-center">
           <p className="text-[13px] font-medium text-ink">No models configured</p>
           <p className="mt-1 text-[12.5px] text-ink-muted">
-            Add a model above, or set up credentials so auto-detected models appear.
+            Add a model above, or set a provider key in your environment so it's detected automatically.
           </p>
         </div>
       )}
@@ -527,56 +657,38 @@ function ModelsPanel({
       {showForm && (
         <section className="rounded-xl border border-line-strong bg-paper-raised p-4">
           <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-[13.5px] font-semibold text-ink">
-              {editId ? "Edit model" : "Add model"}
-            </h3>
+            <h3 className="text-[13.5px] font-semibold text-ink">{editId ? "Edit model" : "Add model"}</h3>
             <IconButton icon={<X />} label="Cancel" size="sm" onClick={() => setShowForm(false)} />
           </div>
           <div className="flex flex-col gap-3">
-            <Field label="Display name">
-              <input
-                className="block w-full rounded-lg border border-line bg-paper px-3 py-2 text-[12.5px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
-                placeholder="My local proxy"
-                value={form.name}
-                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+            <Field label="Provider">
+              <ProviderPicker
+                providers={catalog}
+                value={form.credential}
+                onChange={(id) => {
+                  setForm((f) => ({ ...f, credential: id, model_id: "", base_url_override: "" }));
+                  setShowAdvanced(id === CUSTOM_ENDPOINT);
+                }}
               />
+              {provider?.doc && (
+                <a
+                  href={provider.doc}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1 inline-flex items-center gap-1 text-[11.5px] text-ink-muted hover:text-ink"
+                >
+                  {provider.name} docs <ExternalLink className="h-3 w-3" />
+                </a>
+              )}
             </Field>
-            <Field label="Credential source">
-              <div className="relative">
-                <select
-                  value={form.credential}
-                  onChange={(e) => {
-                    const cred = e.target.value;
-                    const shape = cred === "anthropic" || cred === "claude_code" || cred === "zwork_router" ? "anthropic" : "openai";
-                    setForm((f) => ({ ...f, credential: cred, shape }));
-                  }}
-                  className="ring-focus w-full appearance-none rounded-xl border border-line bg-paper px-3.5 py-2 pr-10 text-[13px] text-ink hover:border-line-strong focus:border-line-strong focus:outline-none cursor-pointer transition-colors"
-                  >
-                    {deprecatedCredentialLabel && (
-                      <option value={form.credential} className="bg-paper text-ink">
-                        {form.credential === "zwork_router" ? `${deprecatedCredentialLabel} (Managed)` : `${deprecatedCredentialLabel} (Deprecated)`}
-                      </option>
-                    )}
-                    <option value="anthropic" className="bg-paper text-ink">Anthropic (BYOK)</option>
-                    <option value="openai" className="bg-paper text-ink">OpenAI-compatible (BYOK)</option>
-                    <option value="deepseek" className="bg-paper text-ink">DeepSeek (BYOK)</option>
-                    <option value="zai" className="bg-paper text-ink">z.ai (BYOK)</option>
-                    <option value="ollama" className="bg-paper text-ink">Ollama (local / cloud)</option>
-                    <option value="claude_code" className="bg-paper text-ink">Local config (reuse credentials)</option>
-                  </select>
-                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" />
-              </div>
-            </Field>
-            {deprecatedCredentialLabel && (
+
+            {form.credential === "zwork_router" && (
               <p className="rounded-lg border border-warning/20 bg-warning/5 px-3 py-2 text-[12px] leading-5 text-warning">
-                {form.credential === "zwork_router"
-                  ? `${deprecatedCredentialLabel} is managed by zWork and pinned to DeepSeek V4 Flash.`
-                  : `${deprecatedCredentialLabel} is deprecated and hidden for new setups. Migrate this model to a stronger provider.`}
+                zWork Router is managed by zWork and pinned to its hosted lineup.
               </p>
             )}
 
-            {/* Credential status + inline key + base URL */}
-            {isKeyless ? (
+            {isLocalConfig ? (
               <div className="rounded-lg border border-line bg-paper px-3 py-2 text-[12px] text-ink-muted">
                 <span className="inline-flex items-center gap-1.5">
                   {credStatus?.configured ? (
@@ -590,46 +702,95 @@ function ModelsPanel({
                 </span>
               </div>
             ) : (
-              <>
-                <Field
-                  label="API key"
-                  description={
-                    maskedKey
-                      ? `Currently stored: ${maskedKey}. Leave blank to keep it.`
-                      : "Your API key is stored locally only — never sent anywhere except the base URL."
-                  }
-                >
-                  <div className="flex items-center rounded-lg border border-line bg-paper focus-within:border-line-strong">
-                    <input
-                      type={revealKey ? "text" : "password"}
-                      value={apiKey}
-                      onChange={(e) => setApiKey(e.target.value)}
-                      placeholder={credMeta.keyPlaceholder}
-                      className="block w-full bg-transparent px-3 py-2 font-mono text-[12.5px] text-ink placeholder:text-ink-faint focus:outline-none"
-                    />
-                    <IconButton
-                      icon={revealKey ? <EyeOff /> : <Eye />}
-                      size="sm"
-                      label={revealKey ? "Hide" : "Reveal"}
-                      onClick={() => setRevealKey((v) => !v)}
-                      className="mr-1"
-                    />
-                  </div>
-                </Field>
-
-              </>
+              <Field
+                label={provider?.keyless ? "API key (optional)" : "API key"}
+                description={
+                  maskedKey
+                    ? `Currently stored: ${maskedKey}. Leave blank to keep it.`
+                    : credStatus?.source === "env"
+                      ? "Found in your environment — leave blank to use it."
+                      : provider?.env?.length
+                        ? `Stored locally. You can also set ${provider.env[0]} in your environment.`
+                        : "Stored locally — only ever sent to this provider."
+                }
+              >
+                <div className="flex items-center rounded-lg border border-line bg-paper focus-within:border-line-strong">
+                  <input
+                    type={revealKey ? "text" : "password"}
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder={provider?.keyless ? "Leave blank for a local server" : provider?.env?.[0] || "API key"}
+                    className="block w-full bg-transparent px-3 py-2 font-mono text-[12.5px] text-ink placeholder:text-ink-faint focus:outline-none"
+                  />
+                  <IconButton
+                    icon={revealKey ? <EyeOff /> : <Eye />}
+                    size="sm"
+                    label={revealKey ? "Hide" : "Reveal"}
+                    onClick={() => setRevealKey((v) => !v)}
+                    className="mr-1"
+                  />
+                </div>
+              </Field>
             )}
 
-            <Field label="Model ID" description="The exact model string sent to the API, e.g. claude-3-5-sonnet-20241022 or gpt-4o.">
+            {provider?.vars.map((v) => (
+              <Field key={v} label={v.replace(/_/g, " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase())}>
+                <input
+                  className={cn(inputClass, "font-mono")}
+                  placeholder={savedVars[v] || v}
+                  value={vars[v] ?? ""}
+                  onChange={(e) => setVars((cur) => ({ ...cur, [v]: e.target.value }))}
+                />
+              </Field>
+            ))}
+
+            <Field label="Model" description={catalogModels.length ? "Pick from the list or type any model ID." : "The exact model ID sent to the API."}>
               <input
-                className="block w-full rounded-lg border border-line bg-paper px-3 py-2 font-mono text-[12.5px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
-                placeholder="claude-sonnet-4-5-20250929"
+                className={cn(inputClass, "font-mono")}
+                placeholder={catalogModels[0]?.id || (isOllama ? "llama3.2" : "model-id")}
                 value={form.model_id}
                 onChange={(e) => setForm((f) => ({ ...f, model_id: e.target.value }))}
               />
+              {!isOllama && modelMatches.length > 0 && !exactModel && (
+                <ul className="mt-1.5 max-h-56 overflow-y-auto rounded-lg border border-line bg-paper p-1">
+                  {modelMatches.map((m) => (
+                    <li key={m.id}>
+                      <button
+                        type="button"
+                        onClick={() => pickModel(m.id, m.name)}
+                        className="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left hover:bg-paper-sunken"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-[12.5px] text-ink">{m.name}</span>
+                          <span className="block truncate font-mono text-[10.5px] text-ink-faint">{m.id}</span>
+                        </span>
+                        <span className="flex shrink-0 items-center gap-1.5 text-[10.5px] text-ink-muted">
+                          {m.reasoning && <span className="rounded border border-line px-1">reasoning</span>}
+                          {m.images && <span className="rounded border border-line px-1">vision</span>}
+                          {m.context > 0 && <span>{formatTokens(m.context)}</span>}
+                          <span className="font-mono">{formatPrice(m.cost)}</span>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {exactModel && (
+                <p className="mt-1 text-[11.5px] text-ink-muted">
+                  {[
+                    exactModel.context && `${formatTokens(exactModel.context)} context`,
+                    exactModel.reasoning && "reasoning",
+                    exactModel.images && "vision",
+                    `${formatPrice(exactModel.cost)} per 1M tokens`,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+              )}
             </Field>
-            {form.credential === "ollama" && (
-              <div className="rounded-lg border border-line bg-paper-sunken/40 px-3 py-2.5 space-y-2">
+
+            {isOllama && (
+              <div className="space-y-2 rounded-lg border border-line bg-paper-sunken/40 px-3 py-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[12px] text-ink-muted">
                     {ollamaLoading
@@ -638,7 +799,7 @@ function ModelsPanel({
                         ? "Models auto-load when Ollama is running."
                         : ollamaModels.length === 0
                           ? ollamaError || "No models found."
-                          : `${ollamaModels.length} model${ollamaModels.length === 1 ? "" : "s"} found — click to use:`}
+                          : `${ollamaModels.length} model${ollamaModels.length === 1 ? "" : "s"} installed — click to use:`}
                   </span>
                   <button
                     type="button"
@@ -656,7 +817,7 @@ function ModelsPanel({
                       <li key={m.id}>
                         <button
                           type="button"
-                          onClick={() => setForm((f) => ({ ...f, model_id: m.id }))}
+                          onClick={() => pickModel(m.id, m.name || m.id)}
                           className={cn(
                             "press rounded-md border px-2 py-1 font-mono text-[11px] transition-colors",
                             form.model_id === m.id
@@ -670,8 +831,6 @@ function ModelsPanel({
                     ))}
                   </ul>
                 )}
-                {/* Pull a new model without leaving zWork. Streams live progress
-                    from Ollama's /api/pull. Common names: llama3.2, qwen2.5, etc. */}
                 <div className="flex items-center gap-1.5 pt-1">
                   <input
                     type="text"
@@ -697,51 +856,81 @@ function ModelsPanel({
                     {ollamaPulling ? "Pulling…" : "Pull"}
                   </button>
                 </div>
-                {ollamaPullProgress && (
-                  <p className="text-[11px] text-ink-muted font-mono">{ollamaPullProgress}</p>
-                )}
+                {ollamaPullProgress && <p className="font-mono text-[11px] text-ink-muted">{ollamaPullProgress}</p>}
                 {ollamaError && (
-                  <p className="text-[11px] text-warning leading-relaxed">
+                  <p className="text-[11px] leading-relaxed text-warning">
                     {ollamaError}{" "}
-                    <span className="text-ink-faint">
-                      Make sure Ollama is installed and running (the daemon listens on localhost:11434).
-                    </span>
+                    <span className="text-ink-faint">Make sure Ollama is installed and running (localhost:11434).</span>
                   </p>
                 )}
               </div>
             )}
-            <Field label="Base URL override (optional)" description="Per-model URL override. Use this for OpenAI-compatible gateways. Doesn't change the credential's saved base URL.">
+
+            <Field label="Display name">
               <input
-                className="block w-full rounded-lg border border-line bg-paper px-3 py-2 font-mono text-[12.5px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
-                placeholder="https://openrouter.ai/api/v1"
-                value={form.base_url_override}
-                onChange={(e) => setForm((f) => ({ ...f, base_url_override: e.target.value }))}
+                className={inputClass}
+                placeholder={exactModel?.name || "My model"}
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
               />
-              {presetHint && (
-                <p className="mt-1 text-[12px] leading-5 text-warning">
-                  This URL looks like {presetHint.label}.{" "}
-                  <button
-                    type="button"
-                    className="underline underline-offset-2 hover:text-ink"
-                    onClick={() =>
-                      setForm((f) => ({ ...f, credential: presetHint.id, base_url_override: "" }))
-                    }
-                  >
-                    Use the {presetHint.label} credential instead
-                  </button>{" "}
-                  — it has its own API key slot and default endpoint.
-                </p>
-              )}
             </Field>
+
+            {!isLocalConfig && (
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setShowAdvanced((v) => !v)}
+                  className="inline-flex items-center gap-1 text-[12px] font-medium text-ink-muted hover:text-ink"
+                >
+                  <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", !showAdvanced && "-rotate-90")} />
+                  {isCustom ? "Endpoint" : "Advanced"}
+                </button>
+                {showAdvanced && (
+                  <div className="mt-2 flex flex-col gap-3">
+                    <Field
+                      label={isCustom ? "Base URL" : "Base URL override (optional)"}
+                      description="Point this model at a proxy or self-hosted gateway. The provider's saved endpoint is unchanged."
+                    >
+                      <input
+                        className={cn(inputClass, "font-mono")}
+                        placeholder={provider?.base_url || "https://my-gateway.example.com/v1"}
+                        value={form.base_url_override}
+                        onChange={(e) => setForm((f) => ({ ...f, base_url_override: e.target.value }))}
+                      />
+                    </Field>
+                    <Field label="Protocol" description="Automatic picks the right wire format per model.">
+                      <div className="relative">
+                        <select
+                          value={form.shape || "auto"}
+                          onChange={(e) => setForm((f) => ({ ...f, shape: e.target.value }))}
+                          className="ring-focus w-full cursor-pointer appearance-none rounded-xl border border-line bg-paper px-3.5 py-2 pr-10 text-[13px] text-ink transition-colors hover:border-line-strong focus:border-line-strong focus:outline-none"
+                        >
+                          {PROTOCOLS.map((p) => (
+                            <option key={p.value} value={p.value} className="bg-paper text-ink">
+                              {p.label}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" />
+                      </div>
+                    </Field>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {missingVars.length > 0 && (
+              <p className="text-[12px] text-ink-muted">Fill in {missingVars.join(", ")} to use {provider?.name}.</p>
+            )}
             {error && (
               <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] leading-5 text-red-700">{error}</p>
             )}
             <div className="flex justify-end pt-1">
               <button
                 type="button"
-                disabled={busy || !form.name.trim() || !form.model_id.trim()}
+                disabled={busy || !canSubmit}
                 onClick={submit}
-                className="press inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-paper hover:bg-ink-soft disabled:opacity-40 disabled:cursor-not-allowed"
+                className="press inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-paper hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {busy ? "Saving…" : editId ? "Update" : "Add"}
               </button>
