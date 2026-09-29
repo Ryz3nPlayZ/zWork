@@ -1,5 +1,5 @@
 //! Port of pi's core coding tools (`core/tools/*`): read, write, edit,
-//! bash, grep, find, ls, plus the shared truncation / path / walking
+//! bash, grep, find, ls — and web_fetch (opencode's webfetch) — plus the shared truncation / path / walking
 //! infrastructure they build on. grep and find use a native walker
 //! instead of shelling out to rg/fd so zWork ships no extra binaries.
 
@@ -16,6 +16,7 @@ pub mod path_utils;
 pub mod read;
 pub mod truncate;
 pub mod walk;
+pub mod web_fetch;
 pub mod write;
 
 use std::collections::HashMap;
@@ -30,6 +31,7 @@ pub use find::FindTool;
 pub use grep::GrepTool;
 pub use ls::LsTool;
 pub use read::{ReadTool, SupportsImagesFn};
+pub use web_fetch::WebFetchTool;
 pub use write::WriteTool;
 
 /// Build the default coding tool set for `cwd` in pi's canonical order.
@@ -42,6 +44,7 @@ pub fn create_coding_tools(cwd: &Path, supports_images: Option<SupportsImagesFn>
         Arc::new(GrepTool::new(cwd)),
         Arc::new(FindTool::new(cwd)),
         Arc::new(LsTool::new(cwd)),
+        Arc::new(WebFetchTool),
     ]
 }
 

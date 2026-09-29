@@ -1878,7 +1878,7 @@ pub async fn scrape_url(Json(body): Json<ScrapeRequest>) -> impl IntoResponse {
         Ok(resp) => {
             let html = resp.text().await.unwrap_or_default();
             let title = extract_html_title(&html);
-            let markdown = html_to_markdown(&html);
+            let markdown = crate::harness::tools::web_fetch::html_to_markdown(&html);
             Json(json!({ "markdown": markdown, "title": title }))
         }
         Err(e) => Json(json!({ "error": format!("Failed to fetch: {}", e), "markdown": "", "title": "" })),
@@ -2222,51 +2222,6 @@ fn extract_html_title(html: &str) -> String {
         }
     }
     String::new()
-}
-
-fn html_to_markdown(html: &str) -> String {
-    let mut text = html.to_string();
-    // Strip script and style blocks
-    let re_script = regex::Regex::new(r"(?is)<script[^>]*>.*?</script>").ok();
-    let re_style = regex::Regex::new(r"(?is)<style[^>]*>.*?</style>").ok();
-    if let Some(re) = re_script { text = re.replace_all(&text, "").to_string(); }
-    if let Some(re) = re_style { text = re.replace_all(&text, "").to_string(); }
-    // Headers
-    for level in 1..=6 {
-        let tag = format!("h{}", level);
-        let prefix = "#".repeat(level);
-        let re_open = regex::Regex::new(&format!(r"(?i)<{}\s*[^>]*>", tag)).ok();
-        let re_close = regex::Regex::new(&format!(r"(?i)</{}>", tag)).ok();
-        if let Some(re) = re_open { text = re.replace_all(&text, &format!("\n{} ", prefix)).to_string(); }
-        if let Some(re) = re_close { text = re.replace_all(&text, "\n").to_string(); }
-    }
-    // Paragraphs and line breaks
-    let re_p = regex::Regex::new(r"(?i)<p\s*[^>]*>").ok();
-    let re_p_close = regex::Regex::new(r"(?i)</p>").ok();
-    let re_br = regex::Regex::new(r"(?i)<br\s*/?\s*>").ok();
-    if let Some(re) = re_p { text = re.replace_all(&text, "\n").to_string(); }
-    if let Some(re) = re_p_close { text = re.replace_all(&text, "\n").to_string(); }
-    if let Some(re) = re_br { text = re.replace_all(&text, "\n").to_string(); }
-    // Links
-    let re_link = regex::Regex::new(r#"(?i)<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>"#).ok();
-    if let Some(re) = re_link { text = re.replace_all(&text, "[$2]($1)").to_string(); }
-    // Bold and italic
-    let re_b = regex::Regex::new(r"(?i)</?(b|strong)>").ok();
-    let re_i = regex::Regex::new(r"(?i)</?(i|em)>").ok();
-    if let Some(re) = re_b { text = re.replace_all(&text, "**").to_string(); }
-    if let Some(re) = re_i { text = re.replace_all(&text, "*").to_string(); }
-    // List items
-    let re_li = regex::Regex::new(r"(?i)<li[^>]*>").ok();
-    if let Some(re) = re_li { text = re.replace_all(&text, "- ").to_string(); }
-    // Strip remaining tags
-    let re_tag = regex::Regex::new(r"<[^>]+>").ok();
-    if let Some(re) = re_tag { text = re.replace_all(&text, "").to_string(); }
-    // Decode HTML entities
-    text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'");
-    // Collapse whitespace
-    let re_ws = regex::Regex::new(r"\n{3,}").ok();
-    if let Some(re) = re_ws { text = re.replace_all(&text, "\n\n").to_string(); }
-    text.trim().to_string()
 }
 
 // ─── Tasks ────────────────────────────────────────────────────────────────────
