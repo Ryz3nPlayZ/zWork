@@ -26,6 +26,7 @@ use crate::harness::agent_types::{
     ToolExecutionMode, ToolFuture,
 };
 use crate::harness::compaction as hcompaction;
+use crate::harness::providers::catalog;
 use crate::harness::overflow as hoverflow;
 use crate::harness::types::{
     AbortSignal, Api, AssistantContent, AssistantMessage, AssistantMessageEvent, InputType, Message, Model,
@@ -37,7 +38,7 @@ use crate::{chatstore, settings};
 
 use super::{
     artifact_hint, classify_provider_error_with_raw, friendly_upstream_error, is_command_approved, llm_trace,
-    log_agent_event, max_tokens_for, orientation, prompts, router_real_model,
+    log_agent_event, orientation, prompts, router_real_model,
     run_state, web_search_grounding, DoomLoopDetector, ErrorClass, RunGuard,
 };
 
@@ -45,14 +46,16 @@ const DEFAULT_MAX_TURNS: u32 = 80;
 const GATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
 const MAX_TRANSIENT_RETRIES: u32 = 3;
 
-/// Context window used for auto-compaction. Kept at 200k regardless of the
-/// provider's advertised window: every turn re-sends the whole history, so
-/// compacting at 200k keeps latency and cost sane even on 1M-window models.
-fn context_window_for(_model_id: &str) -> u64 {
-    match std::env::var("ZWORK_CONTEXT_WINDOW").ok().and_then(|v| v.trim().parse::<u64>().ok()) {
-        Some(n) if n > 0 => n,
+/// Context window used for auto-compaction: the model's own window, capped at
+/// 200k — every turn re-sends the whole history, so compacting at 200k keeps
+/// latency and cost sane even on 1M-window models. `ZWORK_CONTEXT_WINDOW`
+/// replaces the cap.
+fn context_window_for(model_window: u64) -> u64 {
+    let cap = match std::env::var("ZWORK_CONTEXT_WINDOW").ok().and_then(|v| v.trim().parse::<u64>().ok()) {
+        Some(n) if n > 0 => return n,
         _ => 200_000,
-    }
+    };
+    model_window.min(cap)
 }
 
 fn max_turns() -> u32 {
@@ -833,7 +836,7 @@ async fn run_durable_once(
     config.stream = Some(stream_fn);
     config.stream_options = HarnessStreamOptionsSnapshot {
         api_key: Some(api_key.to_string()),
-        max_tokens: Some(super::max_tokens_for(&model.id)),
+        max_tokens: Some(model.max_tokens),
         max_retries: Some(MAX_TRANSIENT_RETRIES),
         session_id: Some(shared.chat_id.clone()),
         ..Default::default()
@@ -861,7 +864,7 @@ async fn run_durable_once(
         HarnessOptions {
             provider: model.provider.clone(),
             model_id: model.id.clone(),
-            thinking_level: crate::harness::types::ThinkingLevel::Off,
+            thinking_level: thinking_level_for(&model),
             active_tool_names: tools.iter().map(|t| t.name().to_string()).collect(),
             config,
         },
@@ -1174,67 +1177,137 @@ async fn flush_traces(shared: &TurnShared) {
 struct Resolved {
     api_key: String,
     base_url: String,
-    shape: String,
+    /// models.dev provider id (`anthropic`, `openrouter`, …) or `zwork_router`.
+    provider: String,
+    /// Protocol pinned by the user (custom endpoint + declared shape) or by a
+    /// zWork-owned endpoint. `None` lets the catalog pick per model.
+    api: Option<Api>,
     real_model_id: String,
     provider_display_name: String,
+    configured: bool,
+}
+
+impl Resolved {
+    /// Protocol family for logs and the compaction-model picker.
+    fn shape(&self) -> &'static str {
+        match self.api {
+            Some(Api::AnthropicMessages) => "anthropic",
+            _ if self.provider == "anthropic" => "anthropic",
+            _ => "openai",
+        }
+    }
 }
 
 fn resolve_model(model_id: &str, s: &settings::Settings) -> Resolved {
-    let (api_key, base_url, shape, real_model_id, provider_display_name) = if model_id == "__claude_code__" {
-        let cc_model = crate::server::read_claude_code_model().unwrap_or_default();
-        let real_model =
-            if cc_model.is_empty() || cc_model == "(default)" { "claude-3-5-sonnet-latest".to_string() } else { cc_model };
-        if let Some(cred) = crate::server::resolve("claude_code", s, "") {
-            (cred.api_key, cred.base_url, cred.shape, real_model, "local credentials".to_string())
-        } else {
-            ("".into(), "https://api.anthropic.com".into(), "anthropic".into(), real_model, "local credentials".into())
-        }
-    } else if let Some(m) = s.custom_models.iter().find(|m| m.id == model_id) {
-        let real_model = if m.model_id == "(default)" || m.model_id.is_empty() {
-            "claude-3-5-sonnet-latest".to_string()
-        } else {
-            m.model_id.clone()
-        };
-        let provider_name = m.credential.clone();
-        if let Some(cred) = crate::server::resolve(&m.credential, s, &m.base_url_override) {
-            (cred.api_key, cred.base_url, m.shape.clone(), real_model, provider_name)
-        } else {
-            ("".into(), m.base_url_override.clone(), m.shape.clone(), real_model, provider_name)
-        }
-    } else {
-        let real_model = router_real_model(model_id);
-        if let Some(cred) = crate::server::resolve("zwork_router", s, "") {
-            (cred.api_key, cred.base_url, "anthropic".into(), real_model, "zWork Cloud Router".into())
-        } else {
-            ("".into(), "https://api.tryzwork.app/api".into(), "anthropic".into(), real_model, "zWork Cloud Router".into())
-        }
+    let unconfigured = |provider: &str, base_url: &str, api: Option<Api>, real_model_id: String, display: &str| Resolved {
+        api_key: String::new(),
+        base_url: base_url.to_string(),
+        provider: provider.to_string(),
+        api,
+        real_model_id,
+        provider_display_name: display.to_string(),
+        configured: false,
     };
-    Resolved { api_key, base_url, shape, real_model_id, provider_display_name }
+    let from_cred = |cred: crate::server::Credentials, api: Option<Api>, real_model_id: String, display: String| Resolved {
+        api_key: cred.api_key,
+        base_url: cred.base_url,
+        provider: cred.provider,
+        api,
+        real_model_id,
+        provider_display_name: display,
+        configured: true,
+    };
+
+    if model_id == "__claude_code__" {
+        let cc_model = crate::server::read_claude_code_model().unwrap_or_default();
+        let real = if cc_model.is_empty() || cc_model == "(default)" { "claude-sonnet-4-5".to_string() } else { cc_model };
+        return match crate::server::resolve("claude_code", s, "") {
+            Some(cred) => from_cred(cred, Some(Api::AnthropicMessages), real, "local credentials".into()),
+            None => unconfigured("anthropic", "https://api.anthropic.com", Some(Api::AnthropicMessages), real, "local credentials"),
+        };
+    }
+    if let Some(m) = s.custom_models.iter().find(|m| m.id == model_id) {
+        let real = if m.model_id == "(default)" || m.model_id.is_empty() { "claude-sonnet-4-5".to_string() } else { m.model_id.clone() };
+        let declared = catalog::api_for_shape(&m.shape);
+        return match crate::server::resolve(&m.credential, s, &m.base_url_override) {
+            // A user-supplied endpoint speaks whatever the user declared; a
+            // catalog endpoint speaks what the catalog says for this model.
+            Some(cred) => {
+                let api = if cred.custom_endpoint { declared.or(Some(cred.api)) } else { None };
+                from_cred(cred, api, real, m.credential.clone())
+            }
+            None => unconfigured(&m.credential, &m.base_url_override, declared, real, &m.credential),
+        };
+    }
+    let real = router_real_model(model_id);
+    match crate::server::resolve("zwork_router", s, "") {
+        Some(cred) => from_cred(cred, Some(Api::AnthropicMessages), real, "zWork Cloud Router".into()),
+        None => unconfigured("zwork_router", "https://api.tryzwork.app/api", Some(Api::AnthropicMessages), real, "zWork Cloud Router"),
+    }
 }
 
 fn build_model(r: &Resolved, model_id: &str) -> Model {
-    let api = if r.shape == "anthropic" { Api::AnthropicMessages } else { Api::OpenAICompletions };
-    let mut headers = BTreeMap::new();
+    let mut model = catalog::build_model(
+        &catalog::global(),
+        catalog::Target { provider: &r.provider, model_id, base_url: &r.base_url, api: r.api },
+    );
+    model.context_window = context_window_for(model.context_window);
+    // The managed router serves a fixed lineup with its own thinking policy.
+    if r.provider == "zwork_router" {
+        model.reasoning = false;
+    }
     // Router / gateway keys aren't Anthropic keys: they authenticate with a
     // bearer token in addition to x-api-key (matches the legacy loop).
-    if api == Api::AnthropicMessages && !r.api_key.is_empty() && !r.api_key.starts_with("sk-ant-") {
-        headers.insert("authorization".to_string(), format!("Bearer {}", r.api_key));
+    if model.api == Api::AnthropicMessages && !r.api_key.is_empty() && !r.api_key.starts_with("sk-ant-") {
+        model.headers = Some(BTreeMap::from([("authorization".to_string(), format!("Bearer {}", r.api_key))]));
     }
-    Model {
-        id: model_id.to_string(),
-        name: model_id.to_string(),
-        api,
-        provider: r.provider_display_name.clone(),
-        base_url: r.base_url.trim_end_matches('/').to_string(),
-        reasoning: false,
-        thinking_level_map: None,
-        input: vec![InputType::Text, InputType::Image],
-        cost: crate::harness::pricing::model_cost_for(model_id),
-        prompt_cache: Some(true),
-        context_window: context_window_for(model_id),
-        max_tokens: max_tokens_for(model_id),
-        headers: if headers.is_empty() { None } else { Some(headers) },
-        compat: None,
+    model
+}
+
+/// One-shot completion on the user's default model — for side features
+/// (refactor, paper pipeline) that need text back, not an agent run.
+pub async fn complete_text(system: &str, prompt: &str, max_tokens: u64) -> Result<String, String> {
+    let s = settings::load();
+    let model_id = if s.default_model.is_empty() { "zwork-flash" } else { s.default_model.as_str() };
+    let resolved = resolve_model(model_id, &s);
+    if !resolved.configured {
+        return Err("No model credentials configured. Add an API key in Settings.".into());
+    }
+    let model = build_model(&resolved, &resolved.real_model_id);
+    let context = crate::harness::transcript::normalize_context(Some(system), None, vec![Message::user_text(prompt)]);
+    let options = crate::harness::types::StreamOptions {
+        api_key: Some(resolved.api_key.clone()),
+        max_tokens: Some(max_tokens.min(model.max_tokens)),
+        max_retries: MAX_TRANSIENT_RETRIES,
+        ..Default::default()
+    };
+    let reply = crate::harness::providers::complete(model, context, options).await;
+    match reply.stop_reason {
+        StopReason::Error | StopReason::Aborted => Err(reply.error_message.unwrap_or_else(|| "LLM request failed".into())),
+        _ => Ok(reply
+            .content
+            .iter()
+            .filter_map(|b| b.as_text().map(|t| t.text.as_str()))
+            .collect::<Vec<_>>()
+            .join("")),
+    }
+}
+
+/// Default reasoning effort for a model: on for models that reason (pi's and
+/// opencode's default), overridable with `ZWORK_THINKING=off|low|medium|high…`.
+fn thinking_level_for(model: &Model) -> crate::harness::types::ThinkingLevel {
+    use crate::harness::types::ThinkingLevel as L;
+    if !model.reasoning {
+        return L::Off;
+    }
+    match std::env::var("ZWORK_THINKING").unwrap_or_default().trim().to_ascii_lowercase().as_str() {
+        "off" | "none" | "0" => L::Off,
+        "minimal" => L::Minimal,
+        "low" => L::Low,
+        "high" => L::High,
+        "xhigh" => L::Xhigh,
+        "max" => L::Max,
+        _ => L::Medium,
     }
 }
 
@@ -1374,7 +1447,7 @@ pub fn run_agent_turn(
         log_agent_event(&chat_id, &run_id, "provider_resolved", json!({
             "provider": resolved.provider_display_name,
             "base_url": resolved.base_url,
-            "shape": resolved.shape,
+            "shape": resolved.shape(),
             "real_model_id": resolved.real_model_id,
         }));
         let _ = tx
@@ -1382,10 +1455,10 @@ pub fn run_agent_turn(
                 "type": "meta",
                 "provider": resolved.provider_display_name,
                 "resolved_model": resolved.real_model_id,
-                "upstream_provider": resolved.shape,
+                "upstream_provider": resolved.shape(),
             }))
             .await;
-        if resolved.api_key.trim().is_empty() {
+        if !resolved.configured {
             let _ = tx
                 .send(json!({
                     "type": "needs_setup",
@@ -1398,7 +1471,7 @@ pub fn run_agent_turn(
         }
         let model = build_model(&resolved, &resolved.real_model_id);
         let compaction_model = {
-            let id = compaction_model_id(&resolved.shape, &resolved.real_model_id);
+            let id = compaction_model_id(resolved.shape(), &resolved.real_model_id);
             build_model(&resolved, &id)
         };
 
@@ -1846,7 +1919,7 @@ async fn spawn_subagent_durable(
         HarnessOptions {
             provider: model.provider.clone(),
             model_id: model.id.clone(),
-            thinking_level: crate::harness::types::ThinkingLevel::Off,
+            thinking_level: thinking_level_for(&model),
             active_tool_names: tools.iter().map(|t| t.name().to_string()).collect(),
             config,
         },
@@ -1945,7 +2018,7 @@ pub async fn spawn_subagent_at_depth(
 
     let s = settings::load();
     let resolved = resolve_model(model_id, &s);
-    if resolved.api_key.trim().is_empty() {
+    if !resolved.configured {
         let _ = tx.send(json!({ "type": "subagent_done", "task_id": task_id, "error": "No credentials configured" })).await;
         return Err("No credentials configured".to_string());
     }
@@ -2157,7 +2230,7 @@ async fn resume_one_interrupted(
     // Rebuild the provider context from current settings.
     let s = settings::load();
     let resolved = resolve_model(&model_product_id, &s);
-    if resolved.api_key.trim().is_empty() {
+    if !resolved.configured {
         return "no-credentials";
     }
     let model = build_model(&resolved, &resolved.real_model_id);
@@ -2245,7 +2318,7 @@ async fn resume_one_interrupted(
     config.stream = Some(Arc::new(crate::harness::providers::stream) as StreamFn);
     config.stream_options = crate::harness::session::types::HarnessStreamOptionsSnapshot {
         api_key: Some(resolved.api_key.clone()),
-        max_tokens: Some(super::max_tokens_for(&model.id)),
+        max_tokens: Some(model.max_tokens),
         max_retries: Some(MAX_TRANSIENT_RETRIES),
         session_id: Some(chat_id.clone()),
         ..Default::default()
@@ -2267,7 +2340,7 @@ async fn resume_one_interrupted(
         HarnessOptions {
             provider: model.provider.clone(),
             model_id: model.id.clone(),
-            thinking_level: crate::harness::types::ThinkingLevel::Off,
+            thinking_level: thinking_level_for(&model),
             active_tool_names: tools.iter().map(|t| t.name().to_string()).collect(),
             config,
         },
@@ -2378,16 +2451,23 @@ Only read-only tools are available: read_file, list_dir, read_skill, extract_doc
         let r = Resolved {
             api_key: "zw_abc".into(),
             base_url: "https://api.tryzwork.app/api/".into(),
-            shape: "anthropic".into(),
+            provider: "zwork_router".into(),
+            api: Some(Api::AnthropicMessages),
             real_model_id: "claude-sonnet-4-5".into(),
             provider_display_name: "zWork Cloud Router".into(),
+            configured: true,
         };
         let m = build_model(&r, &r.real_model_id);
         assert_eq!(m.api, Api::AnthropicMessages);
         assert_eq!(m.base_url, "https://api.tryzwork.app/api");
         assert_eq!(m.headers.unwrap()["authorization"], "Bearer zw_abc");
-        let anthropic = Resolved { api_key: "sk-ant-x".into(), ..r };
-        assert!(build_model(&anthropic, "claude-sonnet-4-5").headers.is_none());
+        assert!(!m.reasoning, "router pins its own thinking policy");
+        let anthropic = Resolved { api_key: "sk-ant-x".into(), provider: "anthropic".into(), api: None, ..r };
+        let m = build_model(&anthropic, "claude-sonnet-4-5");
+        assert!(m.headers.is_none());
+        assert_eq!(m.api, Api::AnthropicMessages);
+        assert!(m.reasoning && m.max_tokens >= 64_000);
+        assert!(m.context_window <= 200_000);
     }
 
     #[test]

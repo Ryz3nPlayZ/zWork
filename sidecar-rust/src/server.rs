@@ -12,6 +12,8 @@ use std::convert::Infallible;
 use tokio_stream::StreamExt;
 
 use crate::chatstore;
+use crate::harness::providers::catalog;
+use crate::harness::types::Api;
 use crate::settings;
 use crate::agent::run_agent_turn;
 
@@ -299,267 +301,161 @@ pub fn read_claude_code_model() -> Option<String> {
     val.get("model").and_then(|m| m.as_str()).map(|s| s.to_string())
 }
 
+/// Resolve a credential id to a key + endpoint + protocol.
+///
+/// `claude_code` (reuse ~/.claude config) and `zwork_router` (the managed
+/// gateway) are zWork's own; every other id is a models.dev provider id, so
+/// anything opencode can talk to resolves here — key from Settings, else the
+/// provider's env vars; endpoint from the per-model override, Settings, a
+/// `<ID>_BASE_URL` env var, else the catalog.
 pub fn resolve(credential: &str, settings: &settings::Settings, override_base_url: &str) -> Option<Credentials> {
-    let shape = if credential == "anthropic" || credential == "claude_code" {
-        "anthropic".to_string()
-    } else {
-        "openai".to_string()
-    };
-
-    if credential == "claude_code" {
-        if !settings.use_claude_code_config {
-            return None;
-        }
-        let env = read_claude_code_env();
-        let tok = env.get("ANTHROPIC_AUTH_TOKEN")
-            .or_else(|| env.get("ANTHROPIC_API_KEY"))
-            .cloned();
-        if let Some(tok_str) = tok {
-            if !tok_str.trim().is_empty() {
-                let base = if !override_base_url.is_empty() {
-                    override_base_url.to_string()
-                } else {
-                    env.get("ANTHROPIC_BASE_URL")
-                        .cloned()
-                        .unwrap_or_else(|| "https://api.anthropic.com".to_string())
-                };
-                return Some(Credentials {
-                    shape,
-                    api_key: tok_str,
-                    base_url: base.trim_end_matches('/').to_string(),
-                    source: "claude_code".to_string(),
-                });
-            }
-        }
-        return None;
+    match credential {
+        "claude_code" => resolve_claude_code(settings, override_base_url),
+        "zwork_router" => resolve_router(settings, override_base_url),
+        _ => resolve_catalog(credential, settings, override_base_url),
     }
-
-    if credential == "anthropic" {
-        let key = settings.api_keys.get("anthropic").cloned().unwrap_or_default();
-        if !key.trim().is_empty() {
-            let base = if !override_base_url.is_empty() {
-                override_base_url.to_string()
-            } else {
-                settings.provider_config.get("anthropic")
-                    .and_then(|m| m.get("base_url"))
-                    .cloned()
-                    .unwrap_or_else(|| "https://api.anthropic.com".to_string())
-            };
-            return Some(Credentials {
-                shape,
-                api_key: key,
-                base_url: base,
-                source: "byok".to_string(),
-            });
-        }
-        if let Ok(tok) = std::env::var("ANTHROPIC_API_KEY").or_else(|_| std::env::var("ANTHROPIC_AUTH_TOKEN")) {
-            if !tok.trim().is_empty() {
-                let base = if !override_base_url.is_empty() {
-                    override_base_url.to_string()
-                } else {
-                    std::env::var("ANTHROPIC_BASE_URL").unwrap_or_else(|_| "https://api.anthropic.com".to_string())
-                };
-                return Some(Credentials {
-                    shape,
-                    api_key: tok,
-                    base_url: base,
-                    source: "env".to_string(),
-                });
-            }
-        }
-        return None;
-    }
-
-    if credential == "openai" {
-        let key = settings.api_keys.get("openai").cloned().unwrap_or_default();
-        if !key.trim().is_empty() {
-            let base = if !override_base_url.is_empty() {
-                override_base_url.to_string()
-            } else {
-                settings.provider_config.get("openai")
-                    .and_then(|m| m.get("base_url"))
-                    .cloned()
-                    .unwrap_or_else(|| "https://api.openai.com/v1".to_string())
-            };
-            return Some(Credentials {
-                shape,
-                api_key: key,
-                base_url: base,
-                source: "byok".to_string(),
-            });
-        }
-        if let Ok(tok) = std::env::var("OPENAI_API_KEY") {
-            if !tok.trim().is_empty() {
-                let base = if !override_base_url.is_empty() {
-                    override_base_url.to_string()
-                } else {
-                    std::env::var("OPENAI_BASE_URL").unwrap_or_else(|_| "https://api.openai.com/v1".to_string())
-                };
-                return Some(Credentials {
-                    shape,
-                    api_key: tok,
-                    base_url: base,
-                    source: "env".to_string(),
-                });
-            }
-        }
-        return None;
-    }
-
-    if credential == "zwork_router" {
-        let key = settings.api_keys.get("zwork_router")
-            .or_else(|| settings.api_keys.get("openai"))
-            .cloned()
-            .unwrap_or_default();
-        if !key.trim().is_empty() {
-            let base = if !override_base_url.is_empty() {
-                override_base_url.to_string()
-            } else {
-                settings.provider_config.get("zwork_router")
-                    .and_then(|m| m.get("base_url"))
-                    .or_else(|| settings.provider_config.get("openai").and_then(|m| m.get("base_url")))
-                    .cloned()
-                    .unwrap_or_else(|| "https://api.tryzwork.app/api".to_string())
-            };
-            return Some(Credentials {
-                shape,
-                api_key: key,
-                base_url: base,
-                source: "byok".to_string(),
-            });
-        }
-        if let Ok(tok) = std::env::var("ZWORK_GATEWAY_TOKEN") {
-            if !tok.trim().is_empty() {
-                let base = if !override_base_url.is_empty() {
-                    override_base_url.to_string()
-                } else {
-                    "https://api.tryzwork.app/api".to_string()
-                };
-                return Some(Credentials {
-                    shape,
-                    api_key: tok,
-                    base_url: base,
-                    source: "env".to_string(),
-                });
-            }
-        }
-        return None;
-    }
-
-    if credential == "ollama" {
-        let base = if !override_base_url.is_empty() {
-            override_base_url.to_string()
-        } else {
-            settings.provider_config.get("ollama")
-                .and_then(|m| m.get("base_url"))
-                .cloned()
-                .unwrap_or_else(|| "http://localhost:11434/v1".to_string())
-        };
-        // Local Ollama doesn't require an API key
-        let key = settings.api_keys.get("ollama").cloned().unwrap_or_default();
-        return Some(Credentials {
-            shape: "openai".to_string(),
-            api_key: key,
-            base_url: base.trim_end_matches('/').to_string(),
-            source: "ollama".to_string(),
-        });
-    }
-
-    // Default for other compatibility providers
-    let key = settings.api_keys.get(credential).cloned().unwrap_or_default();
-    if !key.trim().is_empty() {
-        let base = if !override_base_url.is_empty() {
-            override_base_url.to_string()
-        } else {
-            settings.provider_config.get(credential)
-                .and_then(|m| m.get("base_url"))
-                .cloned()
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| default_base_url(credential))
-        };
-        return Some(Credentials {
-            shape,
-            api_key: key,
-            base_url: base,
-            source: "byok".to_string(),
-        });
-    }
-
-    // Check uppercase env var
-    let env_var_name = format!("{}_API_KEY", credential.to_uppercase());
-    if let Ok(tok) = std::env::var(&env_var_name) {
-        if !tok.trim().is_empty() {
-            let base = if !override_base_url.is_empty() {
-                override_base_url.to_string()
-            } else {
-                std::env::var(format!("{}_BASE_URL", credential.to_uppercase()))
-                    .ok()
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or_else(|| default_base_url(credential))
-            };
-            return Some(Credentials {
-                shape,
-                api_key: tok,
-                base_url: base,
-                source: "env".to_string(),
-            });
-        }
-    }
-
-    None
 }
 
-/// Hard-coded default base URLs for OpenAI-compatible providers that aren't
-/// given a dedicated `resolve` branch. Without these, a user who enters only a
-/// Groq/DeepSeek/etc. API key resolves to an empty base_url and every request
-/// fails. Mirrors Python's `OPENAI_COMPAT_PROVIDERS` table.
-fn default_base_url(credential: &str) -> String {
-    match credential {
-        "groq" => "https://api.groq.com/openai/v1".to_string(),
-        "cerebras" => "https://api.cerebras.ai/v1".to_string(),
-        "deepseek" => "https://api.deepseek.com/v1".to_string(),
-        "zai" => "https://api.z.ai/api/paas/v4".to_string(),
-        "together" => "https://api.together.xyz/v1".to_string(),
-        "mistral" => "https://api.mistral.ai/v1".to_string(),
-        "perplexity" => "https://api.perplexity.ai".to_string(),
-        "fireworks" => "https://api.fireworks.ai/inference/v1".to_string(),
-        "openrouter" => "https://openrouter.ai/api/v1".to_string(),
-        _ => String::new(),
+fn resolve_claude_code(settings: &settings::Settings, override_base_url: &str) -> Option<Credentials> {
+    if !settings.use_claude_code_config {
+        return None;
     }
+    let env = read_claude_code_env();
+    let tok = env.get("ANTHROPIC_AUTH_TOKEN").or_else(|| env.get("ANTHROPIC_API_KEY")).filter(|t| !t.trim().is_empty())?;
+    let (base, custom) = match (override_base_url.is_empty(), env.get("ANTHROPIC_BASE_URL")) {
+        (false, _) => (override_base_url.to_string(), true),
+        (true, Some(b)) if !b.is_empty() => (b.clone(), true),
+        _ => ("https://api.anthropic.com".to_string(), false),
+    };
+    Some(Credentials {
+        api_key: tok.clone(),
+        base_url: base.trim_end_matches('/').to_string(),
+        source: "claude_code".to_string(),
+        provider: "anthropic".to_string(),
+        api: Api::AnthropicMessages,
+        custom_endpoint: custom,
+    })
+}
+
+fn resolve_router(settings: &settings::Settings, override_base_url: &str) -> Option<Credentials> {
+    const ROUTER: &str = "https://api.tryzwork.app/api";
+    let saved = settings.api_keys.get("zwork_router").or_else(|| settings.api_keys.get("openai")).filter(|k| !k.trim().is_empty());
+    let (key, source) = match saved {
+        Some(k) => (k.clone(), "byok"),
+        None => (std::env::var("ZWORK_GATEWAY_TOKEN").ok().filter(|t| !t.trim().is_empty())?, "env"),
+    };
+    let configured = || {
+        settings.provider_config.get("zwork_router").and_then(|m| m.get("base_url")).filter(|b| !b.is_empty()).cloned()
+    };
+    let base = if !override_base_url.is_empty() {
+        override_base_url.to_string()
+    } else if source == "byok" {
+        configured().unwrap_or_else(|| ROUTER.to_string())
+    } else {
+        ROUTER.to_string()
+    };
+    Some(Credentials {
+        api_key: key,
+        base_url: base.trim_end_matches('/').to_string(),
+        source: source.to_string(),
+        provider: "zwork_router".to_string(),
+        api: Api::AnthropicMessages,
+        custom_endpoint: true,
+    })
+}
+
+fn resolve_catalog(credential: &str, settings: &settings::Settings, override_base_url: &str) -> Option<Credentials> {
+    let catalog = catalog::global();
+    let provider = catalog.provider(credential);
+    let config = settings.provider_config.get(credential);
+    let env_prefix = credential.to_uppercase().replace('-', "_");
+    let nonempty = |v: Option<String>| v.filter(|s| !s.trim().is_empty());
+
+    let saved_key = nonempty(settings.api_keys.get(credential).cloned());
+    let env_key = provider
+        .map(|p| p.env.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .chain([format!("{env_prefix}_API_KEY")])
+        .find_map(|name| nonempty(std::env::var(name).ok()));
+    let keyless = provider.map_or(false, |p| p.keyless);
+    let (api_key, source) = match (saved_key, env_key) {
+        (Some(k), _) => (k, "byok"),
+        (None, Some(k)) => (k, "env"),
+        // Local servers ignore auth, but the adapters refuse an empty key.
+        (None, None) if keyless => ("local".to_string(), "local"),
+        _ => return None,
+    };
+
+    let explicit_base = [
+        Some(override_base_url.to_string()),
+        config.and_then(|c| c.get("base_url").cloned()),
+        std::env::var(format!("{env_prefix}_BASE_URL")).ok(),
+    ]
+    .into_iter()
+    .find_map(nonempty);
+    let custom_endpoint = explicit_base.is_some();
+    let template = explicit_base.or_else(|| provider.map(|p| p.base_url.clone()))?;
+    // `${AZURE_RESOURCE_NAME}`-style placeholders come from Settings or env.
+    let base_url = catalog::interpolate(&template, |var| {
+        config
+            .and_then(|c| c.get(var).or_else(|| c.get(&var.to_lowercase())).cloned())
+            .or_else(|| std::env::var(var).ok())
+    });
+    if base_url.is_empty() || base_url.contains("${") {
+        return None;
+    }
+    let api = match provider.and_then(|p| p.api) {
+        Some(api) => api,
+        // Unknown id or unsupported auth: only usable through an explicit
+        // OpenAI-compatible endpoint.
+        None if custom_endpoint => Api::OpenAICompletions,
+        None => return None,
+    };
+    Some(Credentials {
+        api_key,
+        base_url: base_url.trim_end_matches('/').to_string(),
+        source: source.to_string(),
+        provider: provider.map_or_else(|| credential.to_string(), |p| p.id.clone()),
+        api,
+        custom_endpoint,
+    })
 }
 
 #[derive(Debug, Clone)]
 pub struct Credentials {
-    pub shape: String,
     pub api_key: String,
     pub base_url: String,
     pub source: String,
+    /// models.dev provider id (or zWork's own `zwork_router`).
+    pub provider: String,
+    /// The provider's default protocol; individual models may differ.
+    pub api: Api,
+    /// The endpoint was set by the user rather than taken from the catalog,
+    /// so the model's declared protocol (shape) wins over the catalog's.
+    pub custom_endpoint: bool,
 }
 
 pub async fn get_providers() -> impl IntoResponse {
     let s = settings::load();
     
-    // 1. Build credentials status
+    // 1. Credential status: the built-ins plus every provider a model uses.
     let mut credentials_status = serde_json::Map::new();
-    let sources = vec![
-        "anthropic",
-        "openai",
-        "claude_code",
-        "zwork_router",
-        "groq",
-        "cerebras",
-        "deepseek",
-        "zai",
-    ];
-    for src in sources {
+    let mut sources: Vec<String> = ["anthropic", "openai", "claude_code", "zwork_router"].map(String::from).to_vec();
+    sources.extend(s.custom_models.iter().map(|m| m.credential.clone()));
+    sources.extend(s.api_keys.iter().filter(|(_, v)| !v.is_empty()).map(|(k, _)| k.clone()));
+    sources.sort();
+    sources.dedup();
+    for src in &sources {
         let cred = resolve(src, &s, "");
         credentials_status.insert(
-            src.to_string(),
+            src.clone(),
             serde_json::json!({
                 "configured": cred.is_some(),
                 "source": cred.as_ref().map(|c| c.source.clone()),
                 "base_url": cred.as_ref().map(|c| c.base_url.clone()),
-                "shape": if src == "anthropic" || src == "claude_code" { "anthropic" } else { "openai" },
+                "api": cred.as_ref().map(|c| c.api.as_str()),
+                "shape": if cred.as_ref().map_or(false, |c| c.api == Api::AnthropicMessages) { "anthropic" } else { "openai" },
             }),
         );
     }
@@ -606,28 +502,16 @@ pub async fn get_providers() -> impl IntoResponse {
                 cred.as_ref().map(|c| c.base_url.clone()).unwrap_or_default()
             };
             
+            let catalog = catalog::global();
             let label = match m.credential.as_str() {
-                "anthropic" => "Anthropic",
-                "openai" => "OpenAI-compatible",
-                "claude_code" => "Local credentials",
-                "zwork_router" => "Managed",
-                "ollama" => "Ollama",
-                "groq" => "Groq",
-                "cerebras" => "Cerebras",
-                "deepseek" => "DeepSeek",
-                "zai" => "z.ai",
-                "together" => "Together AI",
-                "mistral" => "Mistral",
-                "perplexity" => "Perplexity",
-                "fireworks" => "Fireworks AI",
-                "openrouter" => "OpenRouter",
-                other => other,
+                "claude_code" => "Local credentials".to_string(),
+                other => catalog.provider(other).map_or_else(|| other.to_string(), |p| p.name.clone()),
             };
-            
+
             if !base.is_empty() {
                 format!("{} · {}", label, base)
             } else {
-                label.to_string()
+                label
             }
         };
 
@@ -672,6 +556,42 @@ pub async fn get_providers() -> impl IntoResponse {
     }))
 }
 
+
+/// Every provider zWork can talk to (models.dev + local), without models.
+/// `GET /api/providers/catalog`
+pub async fn get_provider_catalog() -> impl IntoResponse {
+    let s = settings::load();
+    let catalog = catalog::global();
+    let providers: Vec<Value> = catalog
+        .providers()
+        .map(|p| {
+            json!({
+                "id": p.id,
+                "name": p.name,
+                "supported": p.supported(),
+                "api": p.api.map(|a| a.as_str()),
+                "base_url": p.base_url,
+                "env": p.env,
+                "vars": p.vars,
+                "doc": p.doc,
+                "keyless": p.keyless,
+                "model_count": p.models.len(),
+                "configured": p.supported() && resolve(&p.id, &s, "").is_some(),
+            })
+        })
+        .collect();
+    Json(json!({ "providers": providers }))
+}
+
+/// One provider's models with limits, pricing and capabilities.
+/// `GET /api/providers/catalog/:id`
+pub async fn get_provider_catalog_models(Path(id): Path<String>) -> impl IntoResponse {
+    let catalog = catalog::global();
+    match catalog.provider(&id) {
+        Some(p) => Json(json!({ "id": p.id, "name": p.name, "models": p.models })).into_response(),
+        None => (axum::http::StatusCode::NOT_FOUND, Json(json!({ "error": "unknown provider" }))).into_response(),
+    }
+}
 
 pub async fn get_settings() -> impl IntoResponse {
     let s = settings::load();
@@ -1449,15 +1369,18 @@ pub async fn upsert_custom_model(
     // Validate shape + credential so garbage values can't be persisted. The
     // Python backend rejected these with a 400; without this, a bad shape
     // silently produces malformed provider requests later.
-    let valid_shapes = ["anthropic", "openai"];
-    if !valid_shapes.contains(&req.shape.as_str()) {
+    let shape_ok = matches!(req.shape.as_str(), "" | "auto") || catalog::api_for_shape(&req.shape).is_some();
+    if !shape_ok {
         return (axum::http::StatusCode::BAD_REQUEST, Json(json!({
-            "error": format!("invalid shape '{}': must be one of {:?}", req.shape, valid_shapes)
+            "error": format!("invalid shape '{}': use auto, anthropic, openai, openai-responses or google", req.shape)
         }))).into_response();
     }
-    if !settings::KNOWN_CREDENTIALS.contains(&req.credential.as_str()) {
+    let credential_ok = settings::KNOWN_CREDENTIALS.contains(&req.credential.as_str())
+        || catalog::global().provider(&req.credential).is_some()
+        || (!req.base_url_override.trim().is_empty() && crate::paths::is_safe_id(&req.credential));
+    if !credential_ok {
         return (axum::http::StatusCode::BAD_REQUEST, Json(json!({
-            "error": format!("invalid credential '{}': must be one of {:?}", req.credential, settings::KNOWN_CREDENTIALS)
+            "error": format!("unknown provider '{}'", req.credential)
         }))).into_response();
     }
 
@@ -1974,78 +1897,20 @@ pub struct RefactorRequest {
 fn default_clean() -> String { "clean".to_string() }
 
 pub async fn refactor_code(Json(body): Json<RefactorRequest>) -> impl IntoResponse {
-    // Simple refactor: use LLM with non-streaming call
-    let s = settings::load();
-    let model_id = if !s.default_model.is_empty() { &s.default_model } else { "deepseek-flash" };
-
-    let (api_key, base_url, shape, real_model) = if let Some(m) = s.custom_models.iter().find(|m| m.id == model_id) {
-        let real = if m.model_id.is_empty() { "deepseek-flash".to_string() } else { m.model_id.clone() };
-        if let Some(cred) = resolve(&m.credential, &s, &m.base_url_override) {
-            (cred.api_key, cred.base_url, m.shape.clone(), real)
-        } else {
-            return Json(json!({ "error": "No credentials configured for refactoring model" }));
-        }
-    } else {
-        match resolve("zwork_router", &s, "") {
-            Some(cred) => (cred.api_key, cred.base_url, "anthropic".to_string(), "deepseek-flash".to_string()),
-            None => return Json(json!({ "error": "No model credentials available" })),
-        }
-    };
-
-    let endpoint = if shape == "anthropic" {
-        format!("{}/v1/messages", base_url)
-    } else {
-        format!("{}/chat/completions", base_url)
-    };
-
     let system = format!(
         "You are a code refactoring assistant. Given code and an instruction, return ONLY a JSON object with keys: refactored_code, explanation, steps (array of strings). No markdown fences.\n\nMODE: {}\nINSTRUCTION: {}",
         body.mode, body.instruction
     );
-
     let user_msg = format!("MODE: {}\nINSTRUCTION: {}\n\nCode:\n{}", body.mode, body.instruction, body.code);
-    let convo = json!([
-        {"role": "user", "content": user_msg}
-    ]);
-
-    let req_body = if shape == "anthropic" {
-        json!({ "model": real_model, "system": system, "messages": convo, "max_tokens": 4096 })
-    } else {
-        let mut msgs = vec![json!({"role": "system", "content": system})];
-        if let Some(arr) = convo.as_array() { msgs.extend(arr.clone()); }
-        json!({ "model": real_model, "messages": msgs, "max_tokens": 4096 })
-    };
-
-    let client = reqwest::Client::new();
-    let mut req = client.post(&endpoint).json(&req_body);
-    if shape == "anthropic" {
-        req = req.header("x-api-key", &api_key).header("anthropic-version", "2023-06-01");
-    } else {
-        req = req.header("authorization", format!("Bearer {}", api_key));
-    }
-
-    match req.send().await {
-        Ok(resp) => {
-            let text = resp.text().await.unwrap_or_default();
-            // Try to extract the content from the response
-            if let Ok(val) = serde_json::from_str::<Value>(&text) {
-                let content = if shape == "anthropic" {
-                    val.get("content").and_then(|c| c.get(0)).and_then(|c| c.get("text")).and_then(|t| t.as_str()).unwrap_or(&text).to_string()
-                } else {
-                    val.get("choices").and_then(|c| c.get(0)).and_then(|c| c.get("message")).and_then(|m| m.get("content")).and_then(|t| t.as_str()).unwrap_or(&text).to_string()
-                };
-                // Try parsing as JSON, strip markdown fences if present
-                let cleaned = content.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
-                if let Ok(parsed) = serde_json::from_str::<Value>(cleaned) {
-                    Json(parsed)
-                } else {
-                    Json(json!({ "refactored_code": content, "explanation": "", "steps": [] }))
-                }
-            } else {
-                Json(json!({ "error": "Failed to parse LLM response", "raw": text }))
+    match crate::agent::harness_turn::complete_text(&system, &user_msg, 4096).await {
+        Ok(content) => {
+            let cleaned = content.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
+            match serde_json::from_str::<Value>(cleaned) {
+                Ok(parsed) => Json(parsed),
+                Err(_) => Json(json!({ "refactored_code": content, "explanation": "", "steps": [] })),
             }
         }
-        Err(e) => Json(json!({ "error": format!("LLM request failed: {}", e) })),
+        Err(e) => Json(json!({ "error": e })),
     }
 }
 

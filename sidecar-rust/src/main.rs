@@ -155,6 +155,8 @@ async fn main() {
         .route("/api/browser-bridge/status", get(server::browser_bridge_status))
         .route("/api/me", get(server::me))
         .route("/api/providers", get(server::get_providers))
+        .route("/api/providers/catalog", get(server::get_provider_catalog))
+        .route("/api/providers/catalog/:id", get(server::get_provider_catalog_models))
         .route("/api/settings", get(server::get_settings).put(server::put_settings))
         .route("/api/chats", get(server::list_chats).post(server::create_chat))
         .route(
@@ -271,6 +273,11 @@ async fn main() {
     // schedules (every N min, or daily at HH:MM) and posts findings to the
     // inbox. See scheduler::scheduler_loop.
     tokio::spawn(scheduler::scheduler_loop());
+
+    // Provider/model catalog: cached models.dev copy, refreshed daily in the
+    // background (the embedded snapshot covers offline and first launch).
+    harness::providers::catalog::set_cache_path(paths::home_dir().join("cache").join("models.json"));
+    tokio::spawn(harness::providers::catalog::refresh_if_stale());
 
     // Resume-on-restart: scan durable sessions for interrupted runs and
     // drive them to settlement (recovery output persists to chatstore).

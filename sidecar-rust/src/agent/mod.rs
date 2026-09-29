@@ -38,33 +38,6 @@ fn log_agent_event(chat_id: &str, run_id: &str, event: &str, payload: Value) {
     }
 }
 
-/// Sensible output-token ceiling per model family. Anthropic *requires*
-/// `max_tokens` in every request (the API 400s without it), and other providers
-/// apply a sensible cap when one is supplied. Mirrors the Python
-/// `providers._max_tokens_for`.
-fn max_tokens_for(model_id: &str) -> u64 {
-    let mid = model_id.to_lowercase();
-    if mid.contains("claude-sonnet-4") || mid.contains("claude-opus-4") || mid.contains("claude-4") {
-        return 64000;
-    }
-    if mid.contains("claude-3-5") || mid.contains("claude-3.5") {
-        return 8192;
-    }
-    if mid.contains("claude") {
-        return 8192;
-    }
-    if mid.contains("deepseek-flash") || mid.contains("deepseek-v4-flash") || mid.contains("deepseek-v4.1-flash") {
-        return 65536;
-    }
-    // z-ai/glm-5.x ("zWork Ultimate" via OpenRouter) supports a large output
-    // window; cap at a generous default like other frontier models.
-    if mid.contains("glm-5.2") || mid.contains("glm-5.3") || mid.contains("zwork-ultimate") {
-        return 16384;
-    }
-    // OpenAI / OpenAI-compatible: a safe general default.
-    16384
-}
-
 /// Map a router-facing model id ("zwork-pro" / "zwork-flash", as registered in
 /// Settings) to the real upstream model the zWork Cloud Router serves.
 /// Explicit ids only — unknown ids fall back to flash WITH a log line, never

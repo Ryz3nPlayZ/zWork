@@ -96,10 +96,11 @@ pub fn load() -> Settings {
     let mut data: Settings = serde_json::from_str(&content).unwrap_or_default();
     
     // Load keys from secretstore
-    let mut credential_names = HashMap::new();
+    // Every slot settings.json marks (save() writes a placeholder per key, so
+    // any models.dev provider the user added survives) plus the built-ins.
+    let mut credential_names: HashMap<String, String> = data.api_keys.clone();
     for cred in KNOWN_CREDENTIALS {
-        let key_in_json = data.api_keys.get(*cred).cloned().unwrap_or_default();
-        credential_names.insert(cred.to_string(), key_in_json);
+        credential_names.entry(cred.to_string()).or_default();
     }
     
     let loaded_keys = secretstore::load_api_keys(&credential_names);
