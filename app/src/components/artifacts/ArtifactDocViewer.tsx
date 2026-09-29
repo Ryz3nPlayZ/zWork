@@ -27,6 +27,7 @@ import {
 import type { Artifact } from "../../lib/store";
 import { useApp } from "../../lib/store";
 import { cn } from "../../lib/cn";
+import { protectCurrency } from "../../lib/markdown";
 import { api } from "../../lib/api";
 
 const AUTOSAVE_MS = 600;
@@ -450,7 +451,7 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
                   },
                 }}
               >
-                {serializeBlocksToMarkdown(blocks)}
+                {protectCurrency(serializeBlocksToMarkdown(blocks))}
               </ReactMarkdown>
             </article>
           </div>

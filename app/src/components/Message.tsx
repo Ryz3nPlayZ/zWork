@@ -33,6 +33,7 @@ import {
   GitFork,
 } from "lucide-react";
 import { cn } from "../lib/cn";
+import { protectCurrency } from "../lib/markdown";
 import { ThinkingOrb, type OrbState } from "thinking-orbs";
 import { getIcon } from "./ActivityBlocks";
 import type { Activity, Artifact, MessagePart, MessageUsage } from "../lib/store";
@@ -357,7 +358,7 @@ function AssistantMarkdown({
         },
       }}
     >
-      {content}
+      {protectCurrency(content)}
     </ReactMarkdown>
   );
 }
