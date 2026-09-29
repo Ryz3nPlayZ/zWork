@@ -43,7 +43,7 @@ export function SlashMenu({
       <div ref={listRef} className="max-h-[min(180px,30vh)] overflow-y-auto py-1">
         {matches.length === 0 ? (
           <div className="px-4 py-6 text-center text-[12.5px] text-ink-faint">
-            No templates match "/{query}".
+            Nothing matches "/{query}".
           </div>
         ) : (
           matches.map((tpl, i) => {
@@ -67,12 +67,17 @@ export function SlashMenu({
                     <span className="text-[12.5px] font-medium text-ink">
                       {tpl.title}
                     </span>
-                    <span className="rounded-full border border-line bg-paper px-1.5 py-px font-mono text-[10.5px] text-ink-muted">
-                      /{tpl.trigger}
-                    </span>
+                    {!tpl.kind && (
+                      <span className="rounded-full border border-line bg-paper px-1.5 py-px font-mono text-[10.5px] text-ink-muted">
+                        /{tpl.trigger}
+                      </span>
+                    )}
+                    {tpl.kind && (
+                      <span className="text-[10.5px] uppercase tracking-wide text-ink-faint">{tpl.kind}</span>
+                    )}
                   </div>
                   <div className="mt-0.5 truncate text-[11.5px] text-ink-muted">
-                    {tpl.body.replace(/\s+/g, " ").trim().slice(0, 80)}
+                    {tpl.body.replace(/\s+/g, " ").trim().slice(0, 120)}
                   </div>
                 </div>
                 {active && (

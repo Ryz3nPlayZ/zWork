@@ -1516,10 +1516,12 @@ pub fn run_agent_turn(
         };
         let history = history_to_messages(history_rows, &model);
 
+        // `/command args` → the prompt it stands for (the chat keeps what was typed).
+        let prompt_text = crate::commands::expand(&user_message).unwrap_or_else(|| user_message.clone());
         let prompt_message: AgentMessage = if attachments.is_empty() {
-            AgentMessage::user_text(format!("{prefix}\n\n{user_message}"))
+            AgentMessage::user_text(format!("{prefix}\n\n{prompt_text}"))
         } else {
-            let mut blocks = blocks_to_user_content(&prompts::build_user_content(&user_message, &attachments));
+            let mut blocks = blocks_to_user_content(&prompts::build_user_content(&prompt_text, &attachments));
             blocks.push(UserContent::text(prefix));
             AgentMessage::Llm(Message::user_blocks(blocks))
         };

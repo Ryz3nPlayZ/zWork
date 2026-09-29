@@ -41,6 +41,7 @@ import { api, IS_WEB, type QueuedItem, type UploadedFile } from "../lib/api";
 import { isDemoMode } from "../lib/preview";
 import {
   filterTemplates,
+  mergeCommands,
   findSlashTrigger,
   loadTemplates,
   newTemplateId,
@@ -258,6 +259,8 @@ export function ChatInput({
   const [dragOver, setDragOver] = useState(false);
   const dragCounter = useRef(0);
   const [templates, setTemplates] = useState<PromptTemplate[]>(() => loadTemplates());
+  const [commands, setCommands] = useState<Awaited<ReturnType<typeof api.commands>>["commands"]>([]);
+  const slashItems = useMemo(() => mergeCommands(templates, commands), [templates, commands]);
   const [slashState, setSlashState] = useState<
     { start: number; end: number; query: string } | null
   >(null);
@@ -308,8 +311,8 @@ export function ChatInput({
   const modelLabel = currentModel?.name ?? (providers?.models.length ? "Model" : "No models");
 
   const slashMatches = useMemo(
-    () => (slashState ? filterTemplates(templates, slashState.query) : []),
-    [templates, slashState],
+    () => (slashState ? filterTemplates(slashItems, slashState.query) : []),
+    [slashItems, slashState],
   );
   const slashOpen = !!slashState && slashMatches.length > 0;
 
@@ -388,7 +391,16 @@ export function ChatInput({
   // Refresh templates when the window regains focus, so edits made in the
   // Settings page show up immediately when the user comes back to chat.
   useEffect(() => {
-    const onFocus = () => setTemplates(loadTemplates());
+    const refreshCommands = () =>
+      void api
+        .commands()
+        .then((r) => setCommands(r.commands))
+        .catch(() => {});
+    const onFocus = () => {
+      setTemplates(loadTemplates());
+      refreshCommands();
+    };
+    refreshCommands();
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
@@ -632,11 +644,12 @@ export function ChatInput({
     if (!slashState) return;
     const before = value.slice(0, slashState.start);
     const after = value.slice(slashState.end);
-    const next = before + tpl.body + after;
+    const text = tpl.kind ? `/${tpl.trigger} ` : tpl.body;
+    const next = before + text + after;
     setValue(next);
     setSlashState(null);
     setSlashIndex(0);
-    const caret = before.length + tpl.body.length;
+    const caret = before.length + text.length;
     requestAnimationFrame(() => {
       const el = areaRef.current;
       if (!el) return;
@@ -859,7 +872,7 @@ export function ChatInput({
 
   const slashMenu = slashOpen && slashState && (
     <SlashMenu
-      templates={templates}
+      templates={slashItems}
       query={slashState.query}
       activeIndex={slashIndex}
       onActiveIndexChange={setSlashIndex}

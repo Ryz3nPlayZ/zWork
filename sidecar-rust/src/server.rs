@@ -290,15 +290,30 @@ fn read_claude_code_env() -> std::collections::HashMap<String, String> {
     out
 }
 
+/// The model Claude Code would use, by its rules: `ANTHROPIC_MODEL` (process
+/// env, then settings env) over the `model` setting, and aliases (`opus`,
+/// `sonnet[1m]`, ...) through `ANTHROPIC_DEFAULT_<ALIAS>_MODEL`.
 pub fn read_claude_code_model() -> Option<String> {
-    let home = dirs::home_dir()?;
-    let path = home.join(".claude").join("settings.json");
-    if !path.exists() {
-        return None;
-    }
-    let content = std::fs::read_to_string(&path).ok()?;
-    let val: serde_json::Value = serde_json::from_str(&content).ok()?;
-    val.get("model").and_then(|m| m.as_str()).map(|s| s.to_string())
+    let env = read_claude_code_env();
+    let var = |k: &str| std::env::var(k).ok().or_else(|| env.get(k).cloned()).filter(|v| !v.trim().is_empty());
+    let setting = || -> Option<String> {
+        let path = dirs::home_dir()?.join(".claude").join("settings.json");
+        let val: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+        val.get("model").and_then(|m| m.as_str()).map(str::to_string)
+    };
+    let chosen = var("ANTHROPIC_MODEL").or_else(setting)?;
+    Some(resolve_claude_alias(&chosen, var))
+}
+
+fn resolve_claude_alias(model: &str, var: impl Fn(&str) -> Option<String>) -> String {
+    let base = model.trim().trim_end_matches("[1m]");
+    let (key, fallback) = match base {
+        "opus" | "opusplan" => ("ANTHROPIC_DEFAULT_OPUS_MODEL", "claude-opus-5-5"),
+        "sonnet" | "default" => ("ANTHROPIC_DEFAULT_SONNET_MODEL", "claude-sonnet-5-5"),
+        "haiku" => ("ANTHROPIC_DEFAULT_HAIKU_MODEL", "claude-haiku-4-5-20251001"),
+        _ => return base.to_string(),
+    };
+    var(key).unwrap_or_else(|| fallback.to_string())
 }
 
 /// Resolve a credential id to a key + endpoint + protocol.
@@ -1102,6 +1117,11 @@ pub async fn list_skills() -> impl IntoResponse {
         })
     }).collect();
     Json(serde_json::json!({ "skills": serialized }))
+}
+
+/// What `/` offers in the composer: prompt-file commands and skills.
+pub async fn list_commands() -> impl IntoResponse {
+    Json(json!({ "commands": crate::commands::list() }))
 }
 
 pub async fn list_projects() -> impl IntoResponse {
@@ -2963,4 +2983,18 @@ pub async fn ollama_pull(
     });
 
     Sse::new(sse_stream).into_response()
+}
+
+#[cfg(test)]
+mod claude_model_tests {
+    use super::resolve_claude_alias;
+
+    #[test]
+    fn aliases_follow_claude_code() {
+        let none = |_: &str| None;
+        assert_eq!(resolve_claude_alias("opus[1m]", none), "claude-opus-5-5");
+        assert_eq!(resolve_claude_alias("deepseek-v4-pro", none), "deepseek-v4-pro");
+        let pinned = |k: &str| (k == "ANTHROPIC_DEFAULT_SONNET_MODEL").then(|| "glm-5".to_string());
+        assert_eq!(resolve_claude_alias("sonnet", pinned), "glm-5");
+    }
 }

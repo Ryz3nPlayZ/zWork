@@ -3,6 +3,21 @@ export interface PromptTemplate {
   trigger: string;
   title: string;
   body: string;
+  /** Set for commands and skills served by the sidecar (`/api/commands`):
+   *  picking one inserts `/trigger ` and the sidecar expands it on send. */
+  kind?: "command" | "skill";
+}
+
+/** The user's templates, then sidecar commands/skills whose trigger is free. */
+export function mergeCommands(
+  templates: PromptTemplate[],
+  commands: { name: string; description: string; kind: "command" | "skill" }[],
+): PromptTemplate[] {
+  const taken = new Set(templates.map((t) => t.trigger.toLowerCase()));
+  const extra = commands
+    .filter((c) => !taken.has(c.name.toLowerCase()))
+    .map((c) => ({ id: `${c.kind}:${c.name}`, trigger: c.name, title: `/${c.name}`, body: c.description, kind: c.kind }));
+  return [...templates, ...extra];
 }
 
 const STORAGE_KEY = "zwork.promptTemplates";

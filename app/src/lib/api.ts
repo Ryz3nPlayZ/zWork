@@ -803,6 +803,12 @@ export const api = {
       j<{ id: string; name: string; models: CatalogModel[] }>(r),
     ),
 
+  /** Slash commands: prompt files from zWork/Claude Code/opencode/pi folders, and skills. */
+  commands: () =>
+    localFetch("/api/commands").then((r) =>
+      j<{ commands: { name: string; description: string; kind: "command" | "skill"; source: string }[] }>(r),
+    ),
+
   /** zWork's managed Python + Node (installed on first launch). */
   runtimeStatus: () => localFetch("/api/runtime").then((r) => j<{ status: RuntimeStatus; dir: string }>(r)),
 

@@ -87,6 +87,11 @@ pub fn list_skills() -> Vec<SkillMeta> {
 /// `reference.md`) resolve against its folder. Accepts the name or, for
 /// older transcripts, a `folder/name` path.
 pub fn read_skill(slug: &str) -> Option<String> {
+    invoke(slug, None)
+}
+
+/// [`read_skill`] with the user's request appended, for `/skill-name …`.
+pub fn invoke(slug: &str, instructions: Option<&str>) -> Option<String> {
     let want = slug.trim().trim_matches('/').to_lowercase();
     let want = want.rsplit('/').next().unwrap_or(&want).to_string();
     let skill = load_all().into_iter().find(|s| {
@@ -94,7 +99,7 @@ pub fn read_skill(slug: &str) -> Option<String> {
     })?;
     let raw = std::fs::read_to_string(&skill.file_path).ok()?;
     let body = parse_frontmatter(&raw).map(|fm| fm.body).unwrap_or(raw);
-    Some(format_skill_invocation(&skill, body.trim(), None))
+    Some(format_skill_invocation(&skill, body.trim(), instructions))
 }
 
 pub fn format_for_system_prompt() -> String {

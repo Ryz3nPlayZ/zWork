@@ -96,6 +96,7 @@ mod secretstore;
 mod settings;
 mod chatstore;
 mod skills;
+mod commands;
 mod academic;
 mod watchdog;
 mod tools;
@@ -204,6 +205,7 @@ async fn run() {
         .route("/api/custom-models", get(server::list_custom_models).post(server::upsert_custom_model))
         .route("/api/custom-models/:model_id", delete(server::delete_custom_model))
         .route("/api/skills", get(server::list_skills))
+        .route("/api/commands", get(server::list_commands))
         .route("/api/projects", get(server::list_projects).post(server::create_project))
         .route("/api/projects/:project_id", patch(server::update_project).delete(server::delete_project))
         .route("/api/projects/:project_id/context", get(server::get_project_context).put(server::put_project_context))
