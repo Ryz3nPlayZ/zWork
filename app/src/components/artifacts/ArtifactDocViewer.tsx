@@ -434,6 +434,17 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
                   p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
                   ul: ({ children }) => <ul className="mb-3 list-disc space-y-1 pl-5">{children}</ul>,
                   ol: ({ children }) => <ol className="mb-3 list-decimal space-y-1 pl-5">{children}</ol>,
+                  table: ({ children }) => (
+                    <div className="my-3 overflow-x-auto">
+                      <table className="w-full border-collapse text-[13px] tabular-nums">{children}</table>
+                    </div>
+                  ),
+                  th: ({ children, style }) => (
+                    <th style={style} className="border-b border-line-strong px-3 py-1.5 text-left font-semibold first:pl-0 last:pr-0">{children}</th>
+                  ),
+                  td: ({ children, style }) => (
+                    <td style={style} className="border-b border-line px-3 py-1.5 first:pl-0 last:pr-0">{children}</td>
+                  ),
                   code: ({ className, children }) => {
                     const match = /language-(\w+)/.exec(className || "");
                     if (match || String(children).includes("\n")) {

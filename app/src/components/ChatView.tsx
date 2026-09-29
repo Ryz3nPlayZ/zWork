@@ -253,13 +253,15 @@ export function ChatView() {
               </button>
             )}
           </div>
-          <div className="flex items-center gap-2" data-no-drag>
-            <span className="text-[11px] text-ink-faint font-mono mr-1">
-              {chat.messages.length} msgs
-            </span>
+          <div className="flex shrink-0 items-center gap-2 whitespace-nowrap" data-no-drag>
+            {!chat.artifactPanelOpen && (
+              <span className="text-[11px] text-ink-faint font-mono mr-1">
+                {chat.messages.length} msgs
+              </span>
+            )}
             {(() => {
               const u = chatUsageSummary(chat.messages);
-              if (!u) return null;
+              if (!u || chat.artifactPanelOpen) return null;
               const cost = u.costUsd > 0 ? ` · $${u.costUsd.toFixed(u.costUsd < 1 ? 3 : 2)}` : "";
               return (
                 <span
