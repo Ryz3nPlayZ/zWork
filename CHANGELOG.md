@@ -2,9 +2,13 @@
 
 All notable changes to zWork are documented in this file.
 
-## Unreleased
+## v0.6.0
+
+**The agent engine, rebuilt.** zWork now runs a Rust port of pi's agent core, speaks to 200+ model providers, and works with the skills, commands, instructions and MCP servers you already set up for other agents.
 
 ### New
+- **Native MCP connectors.** Persistent stdio, Streamable HTTP and SSE sessions. Add a server by command, URL or pasted config, or import the ones you set up in Claude, Cursor, VS Code or opencode. App connectors through Composio stay one click, no OAuth app to register.
+- **Web fetch.** Pages come back as clean markdown with absolute links; long pages spill to a file the agent can read in parts.
 - **Rust agent engine (pi port).** The agent loop is a function-for-function Rust port of pi's agent core: durable runs that survive a crash or restart without re-billing, compaction that keeps long jobs going, steer / follow-up messages while the agent works, forkable chats, and sub-agents that run in parallel.
 - **Works with what you already have.** Skills, slash commands, `AGENTS.md` / `CLAUDE.md` instructions and MCP servers set up for Claude Code, Codex, opencode or pi load in zWork unchanged. Type `/` for every command and skill.
 - **Any model.** 200+ providers from the models.dev catalog over OpenAI, OpenAI Responses, Anthropic and Gemini wire formats, plus your Claude Code login.
@@ -12,6 +16,21 @@ All notable changes to zWork are documented in this file.
 - **Built-in Python and Node.** Installed on first launch (checksum-verified), so document skills and `npx`/`uvx` connectors work on a stock Mac with nothing else to install.
 - **Integrated Windows title bar.** The Windows build no longer stacks the app under a native, mismatched title-bar strip. The window ships undecorated (`tauri.windows.conf.json`) and a new `TitleBar` component owns the top chrome: a full-width strip in the surface color (the sidebar/frame fill, so the window edge, sidebar, and pane seams read as one continuous surface) hosting the search + sidebar-toggle controls, the active chat's title and metadata (rename, message count, export menu, a working pulse) — or the current view's name on non-chat screens — with Windows-style minimize/maximize/close caption buttons at the right edge. Empty strip space drags the window and double-click toggles maximize. The chat pane starts below the strip and ChatView drops its in-pane header there, so there's one continuous bar instead of two stacked ones. Boot/login/onboarding screens carry their own drag strip + caption buttons. macOS (native traffic-light overlay), Linux (native decorations), and the web build are unchanged.
 - **Working-state border beams.** The chat input glows with a circling border beam ([border-beam](https://libraries.dev/beam.html)) whenever the agent is working — slowed to a 3.5s revolution (the 1.96s default's crossings read as jumps) and boosted in strength — and the send/stop button gets a spinning beam ring that exists only while the button is in Stop state (the send button stays matte). Both adapt to light/dark theme and follow `prefers-reduced-motion`.
+
+### Improvements
+- **Steps read in plain language.** "Read expenses.csv", "Ran Python script clean.py", "Used Gmail: send email" instead of raw tool names.
+- **Ask mode pauses before the agent changes your own files.** Work inside the zWork workspace runs freely; edits anywhere else wait for your OK.
+- **The status checklist folds itself** once every item is done, so it no longer sits over the answer.
+- **Local credentials show the model they run** (for example "DeepSeek V4 Pro").
+- **The attach picker accepts Office, iWork and zip files.**
+
+### Fixes
+- A dropped model stream retries with a 2 second backoff instead of ending the reply blank.
+- A reopened chat whose run failed before answering says so instead of showing an empty reply.
+- Reopened chats turn saved documents back into documents instead of showing the raw marker.
+- Dollar amounts render as text, not math.
+- Document dividers use the line color in dark mode.
+- The release version check no longer requires the removed Homebrew cask.
 
 ## v0.5.2
 
