@@ -1211,23 +1211,9 @@ pub fn execute_tool(
                     Ok(format!("Posted to inbox: {} (id={})", item.title, item.id))
                 }
             }
-            t if t.starts_with("mcp__") => {
-                // Forward to the configured MCP server's tools/call.
-                let res = crate::mcp::call_tool(&name, params.clone()).await;
-                let is_error = res.get("isError").and_then(|v| v.as_bool()).unwrap_or(false);
-                let text = res.get("content")
-                    .and_then(|c| c.as_array())
-                    .map(|blocks| blocks.iter()
-                        .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
-                        .collect::<Vec<_>>()
-                        .join("\n"))
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or_else(|| res.to_string());
-                if is_error { Err(text) } else { Ok(text) }
-            }
             t if t.starts_with("composio__") => {
                 // Forward to the zWork cloud Composio proxy (see composio.rs).
-                let res = crate::composio::call_tool(&name, params.clone()).await;
+                let res = crate::connectors::composio::call_tool(&name, params.clone()).await;
                 let is_error = res.get("isError")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);

@@ -111,13 +111,22 @@ mod zbctl;
 mod browser_bridge;
 mod memory;
 mod telegram;
-mod composio;
+mod connectors;
 mod deploy;
-mod mcp;
 mod office;
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    // Before the runtime starts threads: `set_var` is only sound while the
+    // process is single-threaded.
+    paths::hydrate_path();
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("failed to start the async runtime")
+        .block_on(run());
+}
+
+async fn run() {
     // Install the crash-capturing panic hook BEFORE anything else so a panic
     // during setup is captured to ~/.zwork/logs/crashes.jsonl.
     crash::install();
@@ -213,8 +222,13 @@ async fn main() {
         .route("/api/user-md", get(server::get_user_md).put(server::put_user_md))
         .route("/api/telemetry/event", post(server::telemetry_event))
         .route("/api/activity-logs", get(server::activity_logs))
-        .route("/api/mcp/servers", get(server::mcp_servers))
+        .route("/api/mcp/servers", get(server::mcp_servers).post(server::mcp_add))
+        .route("/api/mcp/servers/:name", delete(server::mcp_remove))
+        .route("/api/mcp/servers/:name/enabled", post(server::mcp_set_enabled))
+        .route("/api/mcp/servers/:name/connect", post(server::mcp_connect))
         .route("/api/mcp/tools", get(server::mcp_tools))
+        .route("/api/mcp/discover", get(server::mcp_discover))
+        .route("/api/mcp/import", post(server::mcp_import))
         .route("/api/tasks", get(server::list_tasks).post(server::create_task_handler))
         .route("/api/tasks/:task_id", patch(server::update_task_handler).delete(server::delete_task_handler))
         .route("/api/tasks/:task_id/column", patch(server::update_task_column_handler))
@@ -278,6 +292,10 @@ async fn main() {
     // background (the embedded snapshot covers offline and first launch).
     harness::providers::catalog::set_cache_path(paths::home_dir().join("cache").join("models.json"));
     tokio::spawn(harness::providers::catalog::refresh_if_stale());
+
+    // MCP connectors: start configured servers now so the first turn does
+    // not wait on `npx` cold starts.
+    connectors::mcp::warm_up();
 
     // Resume-on-restart: scan durable sessions for interrupted runs and
     // drive them to settlement (recovery output persists to chatstore).

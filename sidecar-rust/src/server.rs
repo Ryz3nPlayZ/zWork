@@ -2545,18 +2545,141 @@ pub async fn delete_inbox_item(Path(item_id): Path<String>) -> impl IntoResponse
 }
 
 // ─── MCP ─────────────────────────────────────────────────────────────────────
-// Reads configured stdio servers from ~/.zwork/mcp.json, probes each for
-// readiness + tool count, and lists their tools. See `mcp.rs`.
+// Connector management over `connectors::mcp`: list/add/remove/toggle servers
+// in ~/.zwork/mcp.json, retry a connection, and import from other apps.
 
 pub async fn mcp_servers() -> impl IntoResponse {
-    let config_path = crate::paths::home_dir().join("mcp.json");
-    let servers = crate::mcp::server_status();
+    let config_path = crate::connectors::mcp::config::config_path();
+    let servers = crate::connectors::mcp::status().await;
     Json(json!({ "servers": servers, "config_path": config_path.to_string_lossy() }))
 }
 
 pub async fn mcp_tools() -> impl IntoResponse {
-    let tools = crate::mcp::all_tool_schemas();
+    let tools: Vec<Value> = crate::connectors::mcp::status()
+        .await
+        .into_iter()
+        .flat_map(|s| {
+            let server = s.name;
+            s.tools.into_iter().map(move |t| {
+                json!({
+                    "name": crate::connectors::mcp::tool::tool_name(&server, &t.name),
+                    "server": server,
+                    "description": t.description,
+                    "read_only": t.read_only,
+                })
+            })
+        })
+        .collect();
     Json(json!({ "tools": tools }))
+}
+
+#[derive(Deserialize)]
+pub struct McpAddRequest {
+    /// One server: `name` + a config entry in any dialect.
+    name: Option<String>,
+    config: Option<Value>,
+    /// Or a pasted JSON snippet (`{"mcpServers": {...}}`, `{"name": {...}}`, …).
+    paste: Option<String>,
+}
+
+/// Save one or more servers, then connect them so the reply says whether
+/// they work.
+pub async fn mcp_add(Json(req): Json<McpAddRequest>) -> impl IntoResponse {
+    use crate::connectors::mcp;
+    let specs = match (&req.name, &req.config, &req.paste) {
+        (Some(name), Some(entry), _) => mcp::config::parse_entry(name.trim(), entry).into_iter().collect(),
+        (_, _, Some(text)) => {
+            let text = mcp::config::strip_jsonc(text);
+            match serde_json::from_str::<Value>(&text) {
+                Ok(doc) => mcp::parse_pasted(&doc),
+                Err(e) => return (axum::http::StatusCode::BAD_REQUEST, Json(json!({ "error": format!("That isn't valid JSON: {e}") }))),
+            }
+        }
+        _ => Vec::new(),
+    };
+    if specs.is_empty() {
+        return (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "No server found — give it a command (e.g. `npx -y …`) or a URL." })),
+        );
+    }
+    let mut results = Vec::new();
+    for spec in specs {
+        let name = spec.name.clone();
+        if let Err(e) = mcp::upsert(spec) {
+            return (axum::http::StatusCode::BAD_REQUEST, Json(json!({ "error": e })));
+        }
+        let error = mcp::connect(&name).await.err();
+        results.push(json!({ "name": name, "ok": error.is_none(), "error": error }));
+    }
+    (axum::http::StatusCode::OK, Json(json!({ "success": true, "results": results })))
+}
+
+pub async fn mcp_remove(Path(name): Path<String>) -> impl IntoResponse {
+    match crate::connectors::mcp::remove(&name) {
+        Ok(found) => Json(json!({ "success": found })),
+        Err(e) => Json(json!({ "success": false, "error": e })),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct McpEnabledRequest {
+    enabled: bool,
+}
+
+pub async fn mcp_set_enabled(Path(name): Path<String>, Json(req): Json<McpEnabledRequest>) -> impl IntoResponse {
+    use crate::connectors::mcp;
+    match mcp::set_enabled(&name, req.enabled) {
+        Ok(true) if req.enabled => {
+            let error = mcp::connect(&name).await.err();
+            Json(json!({ "success": true, "error": error }))
+        }
+        Ok(found) => Json(json!({ "success": found })),
+        Err(e) => Json(json!({ "success": false, "error": e })),
+    }
+}
+
+pub async fn mcp_connect(Path(name): Path<String>) -> impl IntoResponse {
+    match crate::connectors::mcp::connect(&name).await {
+        Ok(()) => Json(json!({ "success": true })),
+        Err(e) => Json(json!({ "success": false, "error": e })),
+    }
+}
+
+pub async fn mcp_discover() -> impl IntoResponse {
+    Json(crate::connectors::mcp::discover())
+}
+
+#[derive(Deserialize)]
+pub struct McpImportRequest {
+    /// Source id from `/api/mcp/discover` (e.g. `cursor`).
+    source: String,
+    /// Server names to import; empty imports all not already added.
+    #[serde(default)]
+    names: Vec<String>,
+}
+
+pub async fn mcp_import(Json(req): Json<McpImportRequest>) -> impl IntoResponse {
+    use crate::connectors::mcp;
+    let existing: Vec<String> = mcp::config::load().into_iter().map(|s| s.name).collect();
+    let Some((_, specs)) = mcp::config::discover().into_iter().find(|(src, _)| src.id == req.source) else {
+        return Json(json!({ "success": false, "error": "nothing to import from that app" }));
+    };
+    let mut imported = Vec::new();
+    for spec in specs {
+        let wanted = if req.names.is_empty() { !existing.contains(&spec.name) } else { req.names.contains(&spec.name) };
+        if !wanted {
+            continue;
+        }
+        let name = spec.name.clone();
+        if let Err(e) = mcp::upsert(spec) {
+            return Json(json!({ "success": false, "error": e, "imported": imported }));
+        }
+        imported.push(name);
+    }
+    // Connect in the background; the settings list shows progress.
+    crate::connectors::mcp::warm_up();
+    Json(json!({ "success": true, "imported": imported }))
 }
 
 // ─── Composio ────────────────────────────────────────────────────────────────
@@ -2565,7 +2688,7 @@ pub async fn mcp_tools() -> impl IntoResponse {
 // `cloud-src/api/src/main.rs` (composio_* handlers).
 
 pub async fn composio_status() -> impl IntoResponse {
-    Json(crate::composio::status().await)
+    Json(crate::connectors::composio::status().await)
 }
 
 /// Composio is configured entirely server-side; there's no client API key to
@@ -2574,13 +2697,13 @@ pub async fn composio_status() -> impl IntoResponse {
 pub async fn composio_set_config() -> impl IntoResponse {
     Json(json!({
         "ok": true,
-        "configured": crate::composio::is_configured(),
+        "configured": crate::connectors::composio::is_configured(),
         "note": "Composio is configured via the zWork Cloud account token (zwork_router).",
     }))
 }
 
 pub async fn composio_accounts() -> impl IntoResponse {
-    Json(crate::composio::accounts().await)
+    Json(crate::connectors::composio::accounts().await)
 }
 
 #[derive(Deserialize)]
@@ -2589,7 +2712,7 @@ pub struct ComposioAppRequest {
 }
 
 pub async fn composio_connect(Json(body): Json<ComposioAppRequest>) -> impl IntoResponse {
-    match crate::composio::connect(body.app.trim()).await {
+    match crate::connectors::composio::connect(body.app.trim()).await {
         Ok(v) => Json(v).into_response(),
         Err(msg) => (
             axum::http::StatusCode::BAD_REQUEST,
@@ -2600,7 +2723,7 @@ pub async fn composio_connect(Json(body): Json<ComposioAppRequest>) -> impl Into
 }
 
 pub async fn composio_disconnect(Json(body): Json<ComposioAppRequest>) -> impl IntoResponse {
-    match crate::composio::disconnect(body.app.trim()).await {
+    match crate::connectors::composio::disconnect(body.app.trim()).await {
         Ok(v) => Json(v).into_response(),
         Err(msg) => (
             axum::http::StatusCode::BAD_REQUEST,
@@ -2612,7 +2735,7 @@ pub async fn composio_disconnect(Json(body): Json<ComposioAppRequest>) -> impl I
 
 /// Returns a curated list of supported apps so the Connectors page grid renders.
 pub async fn composio_apps() -> impl IntoResponse {
-    Json(crate::composio::apps())
+    Json(crate::connectors::composio::apps())
 }
 
 // ---- Ollama ----

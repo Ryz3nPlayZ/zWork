@@ -436,15 +436,48 @@ fn rewrite_prompt_for_pi_tools(prompt: &str) -> String {
 struct GatedPiTool {
     inner: DynTool,
     shared: Arc<TurnShared>,
+    /// Ask before every call, with this reason (connector tools that the
+    /// server does not declare read-only).
+    confirm: Option<String>,
 }
 
 impl GatedPiTool {
+    fn new(inner: DynTool, shared: &Arc<TurnShared>) -> Self {
+        GatedPiTool { inner, shared: shared.clone(), confirm: None }
+    }
+
+    fn connector(tool: Arc<crate::connectors::mcp::McpTool>, shared: &Arc<TurnShared>) -> Self {
+        let effect = if tool.destructive { "can delete or overwrite data" } else { "can make changes" };
+        let confirm = (!tool.read_only).then(|| format!("{} {effect} in {}", tool.title, tool.server));
+        GatedPiTool { inner: tool, shared: shared.clone(), confirm }
+    }
+
+    fn is_connector(&self) -> bool {
+        self.inner.name().starts_with(crate::connectors::mcp::TOOL_PREFIX)
+    }
+
+    /// UI label for activity frames: connector tools use their own label.
+    fn activity_label(&self, params: &Value) -> String {
+        if self.is_connector() {
+            format!("Using {}", self.inner.label())
+        } else {
+            activity_label(self.inner.name(), params)
+        }
+    }
+
+    fn finished_label(&self) -> String {
+        format!("Finished {}", if self.is_connector() { self.inner.label() } else { self.inner.name() })
+    }
+
     /// Map a pi tool call onto the legacy risk evaluator's vocabulary.
     fn risk(&self, params: &Value) -> Risk {
         match self.inner.name() {
             "bash" => evaluate_tool_risk("run_command", &json!({ "command": params.get("command").cloned().unwrap_or(Value::Null) })),
             "write" | "edit" => evaluate_tool_risk("write_file", &json!({ "path": params.get("path").cloned().unwrap_or(Value::Null) })),
-            _ => Risk::Safe,
+            _ => match &self.confirm {
+                Some(reason) => Risk::Destructive { reason: reason.clone() },
+                None => Risk::Safe,
+            },
         }
     }
 
@@ -506,7 +539,7 @@ impl GatedPiTool {
         }
 
         let activity_id = format!("tool_{}_{}", name, uuid::Uuid::new_v4().simple());
-        let label = activity_label(&name, &params);
+        let label = self.activity_label(&params);
         shared.upsert_activity(json!({ "id": activity_id, "label": label, "done": false }));
         shared.persist().await;
         shared
@@ -542,10 +575,11 @@ impl GatedPiTool {
             Ok(r) => (true, r.text_content()),
             Err(e) => (false, e.clone()),
         };
-        shared.upsert_activity(json!({ "id": activity_id, "label": format!("Finished {name}"), "done": true }));
+        let finished = self.finished_label();
+        shared.upsert_activity(json!({ "id": activity_id, "label": finished, "done": true }));
         shared.persist().await;
         shared
-            .send(json!({ "type": "activity", "id": activity_id, "label": format!("Finished {name}"), "done": true, "tool_use_id": tc_id }))
+            .send(json!({ "type": "activity", "id": activity_id, "label": finished, "done": true, "tool_use_id": tc_id }))
             .await;
         shared
             .send(json!({ "type": "tool_result", "tool": name, "ok": ok, "message": text, "tool_use_id": tc_id }))
@@ -558,6 +592,34 @@ impl GatedPiTool {
         );
         outcome
     }
+}
+
+/// System-prompt section for connected MCP servers: which are live and any
+/// usage instructions they sent during `initialize`. Stable across turns, so
+/// it stays inside the cached prefix.
+fn mcp_prompt_block(mcp: &crate::connectors::mcp::Toolset) -> String {
+    if mcp.tools.is_empty() {
+        return String::new();
+    }
+    let mut servers: Vec<(&str, usize)> = Vec::new();
+    for tool in &mcp.tools {
+        match servers.iter_mut().find(|(s, _)| *s == tool.server) {
+            Some((_, n)) => *n += 1,
+            None => servers.push((&tool.server, 1)),
+        }
+    }
+    let mut out = String::from(
+        "\n\n## Connectors (MCP)\nThese services are connected. Their tools are named `mcp__<connector>__<tool>`; \
+         prefer them over the browser or shell when they cover the task.\n",
+    );
+    for (server, n) in servers {
+        out += &format!("- {server}: {n} tool{}\n", if n == 1 { "" } else { "s" });
+    }
+    for (server, text) in &mcp.instructions {
+        let text: String = text.chars().take(2000).collect();
+        out += &format!("\n### {server}\n{}\n", text.trim());
+    }
+    out
 }
 
 fn activity_label(name: &str, params: &Value) -> String {
@@ -1485,10 +1547,10 @@ pub fn run_agent_turn(
         let include_desktop = cfg!(target_os = "macos");
         let include_academic = true;
 
-        let composio_schemas = crate::composio::all_tool_schemas().await;
-        let composio_apps = crate::composio::connected_apps().await;
-        let connected_apps_block = crate::composio::build_connected_apps_block(&composio_schemas, &composio_apps);
-        let mcp_schemas = crate::mcp::all_tool_schemas();
+        let composio_schemas = crate::connectors::composio::all_tool_schemas().await;
+        let composio_apps = crate::connectors::composio::connected_apps().await;
+        let connected_apps_block = crate::connectors::composio::build_connected_apps_block(&composio_schemas, &composio_apps);
+        let mcp = crate::connectors::mcp::toolset().await;
 
         let (project_name, project_md) = if !project_id.is_empty() {
             let dir = crate::paths::project_dir(&project_id);
@@ -1519,7 +1581,7 @@ pub fn run_agent_turn(
             include_academic,
             &connected_apps_block,
         );
-        let system_prompt = rewrite_prompt_for_pi_tools(&system_prompt);
+        let system_prompt = rewrite_prompt_for_pi_tools(&system_prompt) + &mcp_prompt_block(&mcp);
         let browser_connected = crate::browser_bridge::extension_connected().await;
         let system_prompt = format!(
             "{system_prompt}\n\n## Live environment status\n{}",
@@ -1609,7 +1671,6 @@ pub fn run_agent_turn(
         // ── Tools ───────────────────────────────────────────────────────
         let mut schemas = get_tool_schemas(plan_mode);
         schemas.extend(composio_schemas);
-        schemas.extend(mcp_schemas);
         schemas.retain(|s| {
             let name = s.get("name").and_then(|v| v.as_str()).unwrap_or("");
             !SUPERSEDED_LEGACY_TOOLS.contains(&name)
@@ -1628,7 +1689,14 @@ pub fn run_agent_turn(
             if plan_mode && matches!(tool.name(), "bash" | "write" | "edit") {
                 continue;
             }
-            tools.push(Arc::new(GatedPiTool { inner: tool, shared: shared.clone() }) as DynTool);
+            tools.push(Arc::new(GatedPiTool::new(tool, &shared)) as DynTool);
+        }
+        // Connector tools. Plan mode keeps the ones the server marks read-only.
+        for tool in mcp.tools {
+            if plan_mode && !tool.read_only {
+                continue;
+            }
+            tools.push(Arc::new(GatedPiTool::connector(tool, &shared)) as DynTool);
         }
         // Stable name-sort so the tool list (and thus the tool-order
         // sensitive prompt-cache prefix) doesn't reshuffle across turns.
@@ -2285,8 +2353,7 @@ async fn resume_one_interrupted(
     // reconstructed — resume runs with the full menu; the durable operation
     // state already carries which tools each step planned).
     let mut schemas = get_tool_schemas(false);
-    schemas.extend(crate::composio::all_tool_schemas().await);
-    schemas.extend(crate::mcp::all_tool_schemas());
+    schemas.extend(crate::connectors::composio::all_tool_schemas().await);
     schemas.retain(|schema| {
         let name = schema.get("name").and_then(|v| v.as_str()).unwrap_or("");
         !SUPERSEDED_LEGACY_TOOLS.contains(&name)
@@ -2302,7 +2369,10 @@ async fn resume_one_interrupted(
         Arc::new(move || has_image)
     };
     for tool in crate::harness::tools::create_coding_tools(std::path::Path::new(&cwd), Some(supports_images)) {
-        tools.push(Arc::new(GatedPiTool { inner: tool, shared: shared.clone() }) as DynTool);
+        tools.push(Arc::new(GatedPiTool::new(tool, &shared)) as DynTool);
+    }
+    for tool in crate::connectors::mcp::toolset().await.tools {
+        tools.push(Arc::new(GatedPiTool::connector(tool, &shared)) as DynTool);
     }
     tools.sort_by(|a, b| a.name().cmp(b.name()));
 
