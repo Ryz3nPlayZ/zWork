@@ -18,12 +18,15 @@ export function TodoPanel() {
     const id = s.activeChatId;
     return id ? s.chats[id]?.todos ?? [] : [];
   });
-  const [collapsed, setCollapsed] = useState(false);
+  // null = follow the list: open while work is underway, folded once every
+  // item is done so the finished checklist doesn't sit over the answer.
+  const [collapsedPref, setCollapsed] = useState<boolean | null>(null);
 
   if (todos.length === 0) return null;
 
   const completed = todos.filter((t) => t.status === "completed").length;
   const active = todos.find((t) => t.status === "in_progress");
+  const collapsed = collapsedPref ?? completed === todos.length;
 
   return (
     <div className="pointer-events-none absolute right-4 top-[52px] z-30 w-[260px]">
@@ -36,7 +39,7 @@ export function TodoPanel() {
         {/* Header — always visible, click to collapse/expand */}
         <button
           type="button"
-          onClick={() => setCollapsed((v) => !v)}
+          onClick={() => setCollapsed(!collapsed)}
           className="press flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-paper-sunken/50"
         >
           <ListTodo className="h-3.5 w-3.5 shrink-0 text-ink-muted" />

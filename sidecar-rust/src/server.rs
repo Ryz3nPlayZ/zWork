@@ -486,9 +486,15 @@ pub async fn get_providers() -> impl IntoResponse {
         let existing = s.custom_models.iter().any(|m| m.credential == "claude_code");
         if !existing {
             let cc_model = read_claude_code_model().unwrap_or_default();
+            // Name it after the model it runs when the catalog knows it;
+            // "Local credentials" says where it comes from, not what it is.
+            let name = catalog::global()
+                .find_model(&cc_model)
+                .map(|m| m.name.clone())
+                .unwrap_or_else(|| "Local credentials".to_string());
             synthesized_cc = Some(serde_json::json!({
                 "id": "__claude_code__",
-                "name": "Local credentials",
+                "name": name,
                 "subtitle": format!("via {}", cc.as_ref().unwrap().base_url),
                 "shape": "anthropic",
                 "credential": "claude_code",
