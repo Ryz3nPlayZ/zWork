@@ -30,6 +30,7 @@ import {
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
 import { IS_TAURI } from "../lib/platform";
+import { isWebAuthClient, startWebGoogleSignIn } from "../lib/cloud";
 import { dragRegionAttrs, onDragMouseDown } from "../lib/drag";
 import {
   setTranslucencyPref,
@@ -1748,6 +1749,12 @@ function AccountPanel() {
   const signOut = useApp((s) => s.signOut);
 
   const handleSignIn = async () => {
+    // Web build: the desktop invoke("begin_desktop_auth") path doesn't exist
+    // in a browser — navigate to the Better Auth Google OAuth flow instead.
+    if (isWebAuthClient()) {
+      startWebGoogleSignIn();
+      return;
+    }
     try {
       await signInWithGoogle();
     } catch (error) {

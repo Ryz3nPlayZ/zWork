@@ -1,0 +1,141 @@
+name: Benchmark
+
+# SWE-bench Verified runs for the zWork coding agent.
+#
+# This workflow is **manually triggered by default** (workflow_dispatch) — a
+# full run is hours of wall-clock and real API cost. A tiny `smoke` subset
+# (3 instances, ~$1) runs automatically on PRs that opt in with the
+# `run-bench` label, so the harness can't silently rot.
+#
+# Inputs let the caller pick subset, model profile, and parallelism. Secrets:
+#   DEEPSEEK_API_KEY — required for the `deepseek` profile (the headline run,
+#                      same model reached by all three harnesses via the
+#                      Anthropic-compatible DeepSeek endpoint).
+#   ZWORK_ROUTER_TOKEN — required for `product-*` profiles.
+
+on:
+  workflow_dispatch:
+    inputs:
+      subset:
+        description: "smoke | subset | full | comma-separated ids"
+        required: false
+        default: "subset"
+      profile:
+        description: "Model profile (deepseek | product-pro | product-ultimate)"
+        required: false
+        default: "deepseek"
+      parallel:
+        description: "Concurrent instances (1–8)"
+        required: false
+        default: "4"
+      max_turns:
+        description: "Per-instance turn budget"
+        required: false
+        default: "40"
+  pull_request:
+    branches: [main]
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One benchmark run at a time per branch/PR — they're expensive.
+  group: benchmark-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Auto path: only the 3-instance smoke set, and only when explicitly opted in.
+  smoke:
+    name: Benchmark (smoke, opt-in)
+    if: |
+      github.event_name == 'pull_request' &&
+      contains(github.event.pull_request.labels.*.name, 'run-bench')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sidecar-rust -> target
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+      - name: Build sidecar (release)
+        working-directory: ./sidecar-rust
+        run: cargo build --release
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install harness
+        working-directory: ./bench
+        run: pip install -e .
+      - name: Run smoke subset
+        working-directory: ./bench
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          zwork-bench run \
+            --subset smoke \
+            --parallel 2 \
+            --sidecar-binary ../sidecar-rust/target/release/rwork-backend
+      - name: Upload run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-smoke-${{ github.run_id }}
+          path: bench/runs/
+          retention-days: 14
+
+  # Manual path: any subset, any profile.
+  run:
+    name: Benchmark (${{ inputs.subset || 'subset' }} · ${{ inputs.profile || 'deepseek' }})
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1440
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sidecar-rust -> target
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+      - name: Build sidecar (release)
+        working-directory: ./sidecar-rust
+        run: cargo build --release
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install harness
+        working-directory: ./bench
+        run: pip install -e .
+      - name: Run benchmark
+        working-directory: ./bench
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          ZWORK_ROUTER_TOKEN: ${{ secrets.ZWORK_ROUTER_TOKEN }}
+        run: |
+          zwork-bench run \
+            --subset "${{ inputs.subset }}" \
+            --profile "${{ inputs.profile }}" \
+            --parallel "${{ inputs.parallel }}" \
+            --max-turns "${{ inputs.max_turns }}" \
+            --sidecar-binary ../sidecar-rust/target/release/rwork-backend
+      - name: Upload run artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-${{ inputs.subset }}-${{ inputs.profile }}-${{ github.run_id }}
+          path: bench/runs/
+          retention-days: 30

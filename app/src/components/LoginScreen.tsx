@@ -5,12 +5,11 @@ import { Logo } from "./Logo";
 import LightRays from "./LightRays";
 import { useResolvedTheme } from "../lib/theme";
 import { useApp } from "../lib/store";
-import { startWebGoogleSignIn } from "../lib/cloud";
-import { IS_WEB } from "../lib/api";
+import { startWebGoogleSignIn, isWebAuthClient } from "../lib/cloud";
 import { cn } from "../lib/cn";
-import { isMacOS, needsLightweightRendering } from "../lib/platform";
-import { dragRegionAttrs, onDragMouseDown } from "../lib/drag";
+import { needsLightweightRendering } from "../lib/platform";
 import { ROTATING_WORDS } from "../lib/constants";
+import { EarlyScreenChrome } from "./TitleBar";
 
 function LeftVisual() {
   const [index, setIndex] = useState(0);
@@ -52,30 +51,15 @@ function LeftVisual() {
 }
 
 export function LoginScreen() {
-  const macOS = isMacOS();
   const isLoadingAuth = useApp((s) => s.isLoadingAuth);
   const signInWithGoogle = useApp((s) => s.signInWithGoogle);
   const theme = useResolvedTheme();
   const [error, setError] = useState<string | null>(null);
 
-  // Web vs Tauri detection. `IS_WEB` keys off `__TAURI_INTERNALS__`, which a
-  // browser extension or stray global can make truthy — that would route a web
-  // user into the desktop invoke() path and crash with "reading 'invoke' of
-  // undefined". Treat the known web origins as definitively web (the Tauri
-  // shell never serves over https to a real hostname), so a spoofed global
-  // can't force the desktop code path.
-  const isWeb = (() => {
-    if (typeof window === "undefined") return false;
-    const origin = window.location.origin;
-    if (
-      origin === "https://app.tryzwork.app" ||
-      origin === "https://tryzwork.app" ||
-      origin === "https://www.tryzwork.app"
-    ) {
-      return true;
-    }
-    return IS_WEB;
-  })();
+  // Web vs Tauri detection — shared with the Settings account panel via
+  // cloud.ts (see the comment there for why known web origins short-circuit
+  // the IS_WEB check).
+  const isWeb = isWebAuthClient();
 
   const handleGoogleSignIn = async () => {
     setError(null);
@@ -125,16 +109,10 @@ export function LoginScreen() {
         }}
       />
 
-      {/* Window drag region — these full-screen gates render without the main
-          layout's base layer, so they need their own drag strip at the top. */}
-      {macOS && (
-        <div
-          {...dragRegionAttrs()}
-          onMouseDown={onDragMouseDown}
-          className="absolute inset-x-0 top-0 z-10 h-10"
-          aria-hidden="true"
-        />
-      )}
+      {/* Window chrome — these full-screen gates render without the main
+          layout's base layer, so they need their own top strip (drag region
+          on macOS, drag region + caption buttons on Windows). */}
+      <EarlyScreenChrome />
 
       {/* Content area */}
       <div className="relative z-20 flex h-full flex-1 items-center p-5 md:p-6">

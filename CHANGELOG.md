@@ -2,6 +2,12 @@
 
 All notable changes to zWork are documented in this file.
 
+## Unreleased
+
+### New
+- **Integrated Windows title bar.** The Windows build no longer stacks the app under a native, mismatched title-bar strip. The window ships undecorated (`tauri.windows.conf.json`) and a new `TitleBar` component owns the top chrome: a full-width strip in the surface color (the sidebar/frame fill, so the window edge, sidebar, and pane seams read as one continuous surface) hosting the search + sidebar-toggle controls, the active chat's title and metadata (rename, message count, export menu, a working pulse) — or the current view's name on non-chat screens — with Windows-style minimize/maximize/close caption buttons at the right edge. Empty strip space drags the window and double-click toggles maximize. The chat pane starts below the strip and ChatView drops its in-pane header there, so there's one continuous bar instead of two stacked ones. Boot/login/onboarding screens carry their own drag strip + caption buttons. macOS (native traffic-light overlay), Linux (native decorations), and the web build are unchanged.
+- **Working-state border beams.** The chat input glows with a circling border beam ([border-beam](https://libraries.dev/beam.html)) whenever the agent is working — slowed to a 3.5s revolution (the 1.96s default's crossings read as jumps) and boosted in strength — and the send/stop button gets a spinning beam ring that exists only while the button is in Stop state (the send button stays matte). Both adapt to light/dark theme and follow `prefers-reduced-motion`.
+
 ## v0.5.2
 
 **Ship-readiness pass: stability, security, Ollama, and permission UX.**
@@ -10,7 +16,7 @@ All notable changes to zWork are documented in this file.
 - **Ollama integration works end-to-end.** Model discovery was broken in three independent ways (SSRF guard rejected the default empty URL, double-`/v1` path, response-shape mismatch) — clicking "Load models" always errored or showed an empty list. Rewritten to use Ollama's native `/api/tags` endpoint with a correct response mapping. Models now **auto-load** the moment you pick the Ollama credential. Embedding-only models are filtered out.
 - **Pull Ollama models in-app.** New `POST /api/ollama/pull` endpoint streams download progress from Ollama's `/api/pull` as SSE. The Settings panel has a pull input with live progress (`downloading — 42%`, `success`) and auto-refreshes the model list on completion. Zero-config: empty base URL defaults to `http://localhost:11434`.
 - **Crash reporting foundation.** Panic hooks in both the sidecar backend (`~/.zwork/logs/crashes.jsonl`) and the Tauri host (`host-crashes.jsonl`) capture payload, location, thread, and backtrace. Previously, native crashes vanished silently.
-- **macOS Keychain for secrets.** BYOK API keys now store in the system Keychain (encrypted at rest) with transparent migration from the legacy plaintext file and full fallback on Linux/Windows.
+- **Secrets: file-only storage — Keychain support removed.** BYOK API keys live in `secrets.json` (mode 0600) in the app's data directory, the only store on every platform. The staging Keychain integration prompted for the login password on every settings reload (~20 dialogs at launch, more on each tab switch): zWork is ad-hoc signed, so its keychain identity changes with every build and "Always Allow" grants never persist. The sidecar now contains no Keychain code at all (no direct `security-framework` dependency), making prompts impossible by construction. Keychain support returns only with a stable Developer ID signature.
 - **Legal docs.** Privacy Policy and Terms of Service added (`legal/`), with in-app links in Settings.
 
 ### Fixes (permissions — the "granted but shows Required" bug)

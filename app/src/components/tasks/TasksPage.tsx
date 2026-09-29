@@ -95,66 +95,63 @@ export function TasksPage() {
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-paper">
-      {/* Header */}
-      <div className="shrink-0 border-b border-line bg-paper-soft px-6 py-4">
-        <div className="mx-auto flex max-w-[1200px] items-center justify-between">
-          <div>
-            <h1 className="font-serif text-[28px] font-bold tracking-tight text-ink">Tasks</h1>
-            <p className="mt-0.5 text-[13px] text-ink-muted">
-              Manage your work across projects.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="inline-flex rounded-lg border border-line bg-paper p-0.5">
-              <button
-                type="button"
-                onClick={() => setViewMode("board")}
-                className={cn(
-                  "press ring-focus rounded-md px-2.5 py-1.5 text-[12px] font-medium transition-colors",
-                  viewMode === "board" ? "bg-ink text-paper" : "text-ink-muted hover:text-ink"
-                )}
-              >
-                <LayoutDashboard className="inline h-3.5 w-3.5 mr-1" />
-                Board
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode("list")}
-                className={cn(
-                  "press ring-focus rounded-md px-2.5 py-1.5 text-[12px] font-medium transition-colors",
-                  viewMode === "list" ? "bg-ink text-paper" : "text-ink-muted hover:text-ink"
-                )}
-              >
-                <List className="inline h-3.5 w-3.5 mr-1" />
-                List
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode("calendar")}
-                className={cn(
-                  "press ring-focus rounded-md px-2.5 py-1.5 text-[12px] font-medium transition-colors",
-                  viewMode === "calendar" ? "bg-ink text-paper" : "text-ink-muted hover:text-ink"
-                )}
-              >
-                <CalendarIcon className="inline h-3.5 w-3.5 mr-1" />
-                Calendar
-              </button>
-            </div>
-            <button
-              type="button"
-              onClick={() => { setEditingTask(null); setModalOpen(true); }}
-              className="press ring-focus inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-paper hover:bg-ink-soft transition-colors"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              New task
-            </button>
-          </div>
-        </div>
-      </div>
-
       {/* Body */}
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-[1200px] px-6 py-6">
+        <div className="mx-auto max-w-[1200px] px-6 pb-6 pt-8">
+          {/* Title row — in-flow, no chrome band */}
+          <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h1 className="text-[22px] font-semibold tracking-tight text-ink">Tasks</h1>
+              <p className="mt-0.5 text-[13px] text-ink-muted">
+                Manage your work across projects.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="inline-flex rounded-lg border border-line bg-paper p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setViewMode("board")}
+                  className={cn(
+                    "press ring-focus rounded-md px-2.5 py-1.5 text-[12px] font-medium transition-colors",
+                    viewMode === "board" ? "bg-ink text-paper" : "text-ink-muted hover:text-ink"
+                  )}
+                >
+                  <LayoutDashboard className="inline h-3.5 w-3.5 mr-1" />
+                  Board
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("list")}
+                  className={cn(
+                    "press ring-focus rounded-md px-2.5 py-1.5 text-[12px] font-medium transition-colors",
+                    viewMode === "list" ? "bg-ink text-paper" : "text-ink-muted hover:text-ink"
+                  )}
+                >
+                  <List className="inline h-3.5 w-3.5 mr-1" />
+                  List
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode("calendar")}
+                  className={cn(
+                    "press ring-focus rounded-md px-2.5 py-1.5 text-[12px] font-medium transition-colors",
+                    viewMode === "calendar" ? "bg-ink text-paper" : "text-ink-muted hover:text-ink"
+                  )}
+                >
+                  <CalendarIcon className="inline h-3.5 w-3.5 mr-1" />
+                  Calendar
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setEditingTask(null); setModalOpen(true); }}
+                className="press ring-focus inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-paper hover:bg-ink-soft transition-colors"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                New task
+              </button>
+            </div>
+          </div>
           {viewMode === "board" ? (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
               {COLUMNS.map((col) => (

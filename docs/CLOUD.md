@@ -91,7 +91,7 @@ serves it from `/var/www/app.tryzwork.app`.
   forwards the conversation to the first Anthropic-protocol provider (DeepSeek),
   and streams the raw Anthropic-shaped SSE response back through
   `sse_stream_with_usage`. The model is the provider's `primary_model`
-  (`DEEPSEEK_MODEL_PRIMARY`, default `deepseek-v4-flash`); `max_tokens` is 2 048.
+  (`DEEPSEEK_MODEL_PRIMARY`, default `deepseek-flash`); `max_tokens` is 2 048.
   A locked demo system prompt is injected server-side so the client can't
   override it. The body is `{ messages: [{ role, content }] }` and the assistant
   message is appended live as `content_block_delta` / `message_stop` events.
@@ -160,7 +160,7 @@ STRIPE_PRICE_PRO_ANNUAL=price_...
 DEEPSEEK_API_KEY=...
 DEEPSEEK_BASE_URL=https://api.deepseek.com/anthropic
 DEEPSEEK_PROTOCOL=anthropic
-DEEPSEEK_MODEL_PRIMARY=deepseek-v4-flash
+DEEPSEEK_MODEL_PRIMARY=deepseek-flash
 DEEPSEEK_MODEL_FALLBACK=
 
 AUTH_INTERNAL_BASE=http://better_auth:3000/api/auth

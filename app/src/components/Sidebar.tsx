@@ -18,7 +18,7 @@ import {
   Clock,
 } from "lucide-react";
 import { cn } from "../lib/cn";
-import { isMacOS } from "../lib/platform";
+import { isMacOS, usesIntegratedTitleBar } from "../lib/platform";
 import { isDemoMode } from "../lib/preview";
 import { nativeVibrancySupported, useTranslucencyPref } from "../lib/translucency";
 import { Logo } from "./Logo";
@@ -97,9 +97,15 @@ export function Sidebar() {
           window-level controls (see App.tsx) pinned at the top-left so
           they don't slide with the pane. On macOS this row is pushed
           below the traffic lights (≈28px) and the floating control row
-          (≈35px) so the logo clears both.
+          (≈35px) so the logo clears both. On Windows it clears the
+          integrated title bar strip (40px + 6px breathing room).
         */}
-        <div className={cn("flex shrink-0 items-center px-2 pb-1", isMac ? "pt-[40px]" : "pt-3")}>
+        <div
+          className={cn(
+            "flex shrink-0 items-center px-2 pb-1",
+            isMac ? "pt-[40px]" : usesIntegratedTitleBar() ? "pt-[46px]" : "pt-3",
+          )}
+        >
           <button
             type="button"
             onClick={() => openLanding()}

@@ -64,6 +64,10 @@ struct DemoConfig {
     max_messages: usize,
     /// Max total content characters across all messages.
     max_total_chars: usize,
+    /// Upstream output cap. 2048 used to silently truncate long demo answers
+    /// mid-sentence (stop_reason=max_tokens) with no client-side indication;
+    /// 8192 keeps full-length answers flowing while bounding demo spend.
+    max_tokens: i64,
     /// zWork-flavored system prompt prepended upstream-side.
     system_prompt: String,
 }
@@ -228,8 +232,22 @@ fn auth_endpoint_url(auth_internal_base: &Url, endpoint: &str) -> Url {
 }
 
 /// Allowed model IDs that the router will serve (includes app aliases).
+///
+/// Product lineup (all three tiers are served via OpenRouter):
+///   - zwork-flash    → deepseek/deepseek-v4-flash-0731
+///   - zwork-pro      → z-ai/glm-5.3-flash
+///   - zwork-ultimate → deepseek/deepseek-v4.1-flash
+/// `deepseek-flash` (DeepSeek's own API id) serves the public demo and
+/// compaction through the DeepSeek providers directly. The bare v4 names are
+/// legacy client spellings; resolve_upstream_model normalizes them.
 const ALLOWED_MODELS: &[&str] = &[
+    "deepseek-flash",
+    "deepseek/deepseek-v4-flash-0731",
+    "z-ai/glm-5.3-flash",
+    "deepseek/deepseek-v4.1-flash",
+    // Legacy DeepSeek ids from older desktop clients.
     "deepseek-v4-flash",
+    "deepseek-v4.1-flash",
     "deepseek-v4-pro",
     "zwork-flash",
     "zwork-pro",
@@ -241,6 +259,9 @@ const ALLOWED_MODELS: &[&str] = &[
 ];
 /// Models restricted to pro+ tiers.
 const PRO_ONLY_MODELS: &[&str] = &[
+    "z-ai/glm-5.3-flash",
+    // Legacy pro-tier spellings from older desktop clients.
+    "deepseek-v4.1-flash",
     "deepseek-v4-pro",
     "zwork-pro",
     "zwork-vision",
@@ -251,16 +272,18 @@ const PRO_ONLY_MODELS: &[&str] = &[
 /// Checked in BOTH gateway handlers; the OpenAI-shape path (`ai_proxy`) did not
 /// previously validate models at all, so this gate is added there alongside
 /// the allowlist check.
-const MAX_ONLY_MODELS: &[&str] = &["zwork-ultimate"];
+const MAX_ONLY_MODELS: &[&str] = &["zwork-ultimate", "deepseek/deepseek-v4.1-flash"];
 
-/// Resolve app-facing model aliases to the actual upstream model ID.
+/// Resolve app-facing model aliases and legacy ids to the actual upstream
+/// model ID. Legacy DeepSeek spellings keep their PRODUCT TIER: v4-flash was
+/// the flash tier and v4.1-flash/v4-pro were the pro tier, so they map onto
+/// the current tier's model, not the id that most resembles them.
 fn resolve_upstream_model(model: &str) -> &str {
     match model {
-        "zwork-flash" => "deepseek-v4-flash",
-        "zwork-pro" => "deepseek-v4-pro",
+        "zwork-flash" | "deepseek-v4-flash" => "deepseek/deepseek-v4-flash-0731",
+        "zwork-pro" | "deepseek-v4-pro" | "deepseek-v4.1-flash" => "z-ai/glm-5.3-flash",
+        "zwork-ultimate" => "deepseek/deepseek-v4.1-flash",
         "zwork-vision" => "gemma4:31b",
-        // "zWork Ultimate" — frontier tier, served via OpenRouter as z-ai/glm-5.2.
-        "zwork-ultimate" => "z-ai/glm-5.2",
         other => other,
     }
 }
@@ -285,8 +308,8 @@ fn load_gateway_providers() -> Vec<GatewayProvider> {
         // longer exclusive: if it pins "anthropic" or "openai" explicitly, only
         // that variant registers; otherwise (unset / "both" / anything else)
         // both variants register.
-        let primary = env_or("DEEPSEEK_MODEL_PRIMARY", "deepseek-v4-flash");
-        let fallback = env_or("DEEPSEEK_MODEL_FALLBACK", "deepseek-v4-flash");
+        let primary = env_or("DEEPSEEK_MODEL_PRIMARY", "deepseek-flash");
+        let fallback = env_or("DEEPSEEK_MODEL_FALLBACK", "deepseek-flash");
         let pin = std::env::var("DEEPSEEK_PROTOCOL")
             .unwrap_or_default()
             .trim()
@@ -329,20 +352,38 @@ fn load_gateway_providers() -> Vec<GatewayProvider> {
         });
     }
 
-    // Load OpenRouter provider (powers "zWork Ultimate" / z-ai/glm-5.2).
+    // Load OpenRouter providers (the whole hosted lineup runs through
+    // OpenRouter: pro = z-ai/glm-5.3-flash, flash =
+    // deepseek/deepseek-v4-flash-0731, ultra = deepseek/deepseek-v4.1-flash —
+    // the v4.1 id only exists on OpenRouter; DeepSeek's own API rejects it).
     // OpenRouter is OpenAI-compatible: POST {base_url}/chat/completions with
     // `Authorization: Bearer {key}`. The X-Title and HTTP-Referer headers are
     // optional but set them for attribution/ranking on the OpenRouter dashboard.
+    // One provider entry per tier: the gateway routes by matching the resolved
+    // model id against each provider's primary/fallback slot.
     let openrouter_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
     if !openrouter_key.trim().is_empty() {
-        providers.push(GatewayProvider {
+        let base_url = env_or("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1");
+        let openrouter_tier = |primary: String| GatewayProvider {
             name: "OpenRouter".to_string(),
-            base_url: env_or("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
-            api_key: openrouter_key,
-            primary_model: env_or("OPENROUTER_MODEL", "z-ai/glm-5.2"),
-            fallback_model: env_or("OPENROUTER_MODEL", "z-ai/glm-5.2"),
+            base_url: base_url.clone(),
+            api_key: openrouter_key.clone(),
+            fallback_model: primary.clone(),
+            primary_model: primary,
             protocol: GatewayProtocol::OpenAi,
-        });
+        };
+        // Pro tier.
+        providers.push(openrouter_tier(env_or("OPENROUTER_MODEL", "z-ai/glm-5.3-flash")));
+        // Flash tier.
+        providers.push(openrouter_tier(env_or(
+            "OPENROUTER_MODEL_FLASH",
+            "deepseek/deepseek-v4-flash-0731",
+        )));
+        // Ultra tier (max).
+        providers.push(openrouter_tier(env_or(
+            "OPENROUTER_MODEL_ULTRA",
+            "deepseek/deepseek-v4.1-flash",
+        )));
     }
 
     // Load up to 5 Ollama/Vision providers
@@ -1794,19 +1835,20 @@ async fn resolve_user_5h_limit(state: &AppState, tier: &str) -> i64 {
 }
 
 /// Enforce rate limits with dynamic free-tier pooling.
-/// Pro model requests (deepseek-v4-pro / zwork-pro) count as 3x usage.
+/// Pro model requests (deepseek-v4-pro / zwork-pro and the legacy
+/// deepseek-v4.1-flash spelling) count as 3x usage.
 async fn enforce_root_rate_limit(state: &AppState, user_id: &str, tier: &str, requested_model: &str) -> Result<(), StatusCode> {
     let limit_5h = resolve_user_5h_limit(state, tier).await;
 
     // Weight pro model requests as 3x in the usage count
-    let pro_models = ["deepseek-v4-pro", "zwork-pro"];
+    let pro_models = ["z-ai/glm-5.3-flash", "deepseek-v4.1-flash", "deepseek-v4-pro", "zwork-pro"];
     let request_weight: i64 = if pro_models.contains(&requested_model) { 3 } else { 1 };
 
     // Count historical usage with pro-model weighting
     let used_last_5h: i64 = sqlx::query_scalar(
         r#"
         SELECT COALESCE(SUM(
-            CASE WHEN model_id IN ('deepseek-v4-pro', 'zwork-pro') THEN 3 ELSE 1 END
+            CASE WHEN model_id IN ('z-ai/glm-5.3-flash', 'deepseek-v4.1-flash', 'deepseek-v4-pro', 'zwork-pro') THEN 3 ELSE 1 END
         ), 0)
         FROM gateway_requests
         WHERE user_id = $1
@@ -1827,7 +1869,7 @@ async fn enforce_root_rate_limit(state: &AppState, user_id: &str, tier: &str, re
     let used_last_7d: i64 = sqlx::query_scalar(
         r#"
         SELECT COALESCE(SUM(
-            CASE WHEN model_id IN ('deepseek-v4-pro', 'zwork-pro') THEN 3 ELSE 1 END
+            CASE WHEN model_id IN ('z-ai/glm-5.3-flash', 'deepseek-v4.1-flash', 'deepseek-v4-pro', 'zwork-pro') THEN 3 ELSE 1 END
         ), 0)
         FROM gateway_requests
         WHERE user_id = $1
@@ -1957,10 +1999,17 @@ fn redact_image_data(value: &Value) -> Value {
 fn estimate_cost(provider: &str, model: &str, input: Option<i64>, output: Option<i64>) -> Option<f64> {
     let (input_price_1m, output_price_1m): (f64, f64) = match (provider, model) {
         ("DeepSeek", "deepseek-v4-pro") => (1.74, 3.48),
+        ("DeepSeek", "deepseek-flash") => (0.14, 0.28),
+        // OpenRouter lineup (prices per OpenRouter's model catalog, per 1M).
+        ("OpenRouter", "deepseek/deepseek-v4-flash-0731") => (0.04, 0.08),
+        ("OpenRouter", "z-ai/glm-5.3-flash") => (0.09, 0.30),
+        ("OpenRouter", "deepseek/deepseek-v4.1-flash") => (0.15, 0.60),
+        // Legacy flash spellings kept so historical rows still estimate.
+        ("DeepSeek", "deepseek-v4.1-flash") => (0.14, 0.28),
         ("DeepSeek", "deepseek-v4-flash") => (0.14, 0.28),
         ("Groq", _) => (0.15, 0.30),
         ("OllamaCloud_1", _) => (0.0, 0.0),
-        // z-ai/glm-5.2 on OpenRouter (zWork Ultimate). Per 1M tokens.
+        // z-ai/glm-5.2 on OpenRouter (former zWork Ultimate model). Per 1M tokens.
         ("OpenRouter", "z-ai/glm-5.2") => (1.25, 9.0),
         _ => return None,
     };
@@ -2905,10 +2954,22 @@ async fn ai_proxy_anthropic(
 
         attempt_number += 1;
         let attempt_started = Utc::now();
-        let upstream_model = resolved_model.to_string();
+        // Legacy desktop clients send router aliases (e.g. zwork-flash) over
+        // the Anthropic path, but the current lineup is served via OpenRouter
+        // (OpenAI shape). When no Anthropic provider serves the resolved id,
+        // fall back to this provider's primary model (DeepSeek direct) rather
+        // than forwarding an id the upstream rejects.
+        let upstream_model = if provider.primary_model == resolved_model
+            || provider.fallback_model == resolved_model
+        {
+            resolved_model.to_string()
+        } else {
+            provider.primary_model.clone()
+        };
 
         if let Some(obj) = body_json.as_object_mut() {
-            // Resolve app aliases (zwork-flash → deepseek-v4-flash) before sending upstream
+            // Resolve app aliases (zwork-flash → deepseek/deepseek-v4-flash-0731)
+            // before sending upstream
             obj.insert(
                 "model".to_string(),
                 Value::String(upstream_model.clone()),
@@ -3201,7 +3262,7 @@ async fn demo_chat(
     let model = provider.primary_model.clone();
     let mut upstream_body = serde_json::json!({
         "model": model,
-        "max_tokens": 2048,
+        "max_tokens": state.demo.max_tokens,
         "stream": true,
         "system": state.demo.system_prompt,
         "messages": upstream_messages,
@@ -4164,9 +4225,9 @@ async fn admin_list_users(
         let (input_rate, output_rate) = if model == "max" {
             (0.435, 0.87) // pro model rates for max users
         } else if model == "pro" {
-            (0.435, 0.87) // deepseek-v4-pro rates
+            (0.435, 0.87) // pro-tier model rates (conservative; pre-v4.1 pricing)
         } else {
-            (0.14, 0.28) // deepseek-v4-flash rates
+            (0.14, 0.28) // deepseek-flash rates
         };
         let cost = (prompt as f64 / 1_000_000.0) * input_rate + (completion as f64 / 1_000_000.0) * output_rate;
         AdminUserRow {
@@ -6762,7 +6823,7 @@ async fn analytics_summary(
     let five_hour_used: i64 = sqlx::query_scalar(
         r#"
         SELECT COALESCE(SUM(
-            CASE WHEN model_id IN ('deepseek-v4-pro', 'zwork-pro') THEN 3 ELSE 1 END
+            CASE WHEN model_id IN ('z-ai/glm-5.3-flash', 'deepseek-v4.1-flash', 'deepseek-v4-pro', 'zwork-pro') THEN 3 ELSE 1 END
         ), 0)
         FROM gateway_requests
         WHERE user_id = $1
@@ -6778,7 +6839,7 @@ async fn analytics_summary(
     let weekly_used: i64 = sqlx::query_scalar(
         r#"
         SELECT COALESCE(SUM(
-            CASE WHEN model_id IN ('deepseek-v4-pro', 'zwork-pro') THEN 3 ELSE 1 END
+            CASE WHEN model_id IN ('z-ai/glm-5.3-flash', 'deepseek-v4.1-flash', 'deepseek-v4-pro', 'zwork-pro') THEN 3 ELSE 1 END
         ), 0)
         FROM gateway_requests
         WHERE user_id = $1
@@ -7327,6 +7388,10 @@ async fn main() {
             daily_counts: Arc::new(DailyCounter::default()),
             max_messages: 20,
             max_total_chars: 32_000,
+            max_tokens: std::env::var("DEMO_MAX_TOKENS")
+                .ok()
+                .and_then(|v| v.parse::<i64>().ok())
+                .unwrap_or(8192),
             system_prompt: env_or(
                 "DEMO_SYSTEM_PROMPT",
                 "You are zWork, an action-oriented AI work assistant created by Zemu Liu. \

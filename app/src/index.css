@@ -449,3 +449,17 @@ textarea {
 .animate-typing-cursor {
   animation: typing-cursor 1s step-end infinite;
 }
+
+/* --------------------------------------------------------
+   border-beam (composer working glow).
+   The library's wrapper ([data-beam]) forces overflow:hidden,
+   which would clip the composer's slash menu and the overlay
+   tools menu — both open ABOVE the pill via absolute
+   bottom-full inside it. The md beam's stroke/inner glow are
+   inset-bounded, so visible overflow only lets the soft bloom
+   breathe slightly outward. Higher specificity than the
+   library's [data-beam="..."] rule wins regardless of order.
+   -------------------------------------------------------- */
+[data-beam].composer-beam {
+  overflow: visible;
+}

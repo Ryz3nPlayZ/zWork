@@ -17,11 +17,6 @@ import { ChatInput } from "./ChatInput";
 import { IconButton } from "./IconButton";
 import { api } from "../lib/api";
 
-const EMOJI_OPTIONS = [
-  "📁", "📊", "💡", "🚀", "🎯", "🔧", "💼", "📝", "🎨", "🏗️",
-  "⚡", "🌟", "🔬", "📈", "🎮", "🤝", "🏆", "📱", "🌐", "✅",
-];
-
 /**
  * Detail view for a single project. Layout:
  *   left column — header + composer + past chats
@@ -54,31 +49,28 @@ function ProjectListPage() {
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-paper">
-      {/* Header — consistent with Scheduled and Inbox */}
-      <div className="shrink-0 border-b border-line bg-paper-soft px-6 py-4">
-        <div className="mx-auto flex max-w-[1200px] items-center justify-between">
-          <div>
-            <h1 className="text-[28px] font-semibold tracking-tight text-ink">
-              Projects
-            </h1>
-            <p className="mt-0.5 text-[13px] text-ink-muted">
-              {projects.length} project{projects.length === 1 ? "" : "s"}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setModalOpen(true)}
-            className="press ring-focus inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-paper hover:bg-ink/90 transition-colors"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            New project
-          </button>
-        </div>
-      </div>
-
       {/* Body */}
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-[1200px] px-6 py-6">
+        <div className="mx-auto max-w-[1200px] px-6 pb-6 pt-8">
+          {/* Title row — in-flow, no chrome band */}
+          <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h1 className="text-[22px] font-semibold tracking-tight text-ink">
+                Projects
+              </h1>
+              <p className="mt-0.5 text-[13px] text-ink-muted">
+                {projects.length} project{projects.length === 1 ? "" : "s"}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setModalOpen(true)}
+              className="press ring-focus inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-paper hover:bg-ink/90 transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              New project
+            </button>
+          </div>
           {projects.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-line p-16 text-center">
               <FolderOpen className="mx-auto h-8 w-8 text-ink-faint" />
@@ -117,8 +109,6 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const setActiveProject = useApp((s) => s.setActiveProject);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [selectedIcon, setSelectedIcon] = useState<string | null>(null);
-  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
 
@@ -139,7 +129,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
     if (!n || busy) return;
     setBusy(true);
     try {
-      await createProject(n, description.trim() || undefined, selectedIcon ?? undefined);
+      await createProject(n, description.trim() || undefined);
       const all = useApp.getState().projects;
       const latest = all[all.length - 1];
       if (latest) setActiveProject(latest.id);
@@ -151,7 +141,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 animate-fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4 animate-fade-in"
       onClick={onClose}
     >
       <div
@@ -170,48 +160,6 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="px-5 py-4 space-y-4">
-          {/* Icon picker row */}
-          <div>
-            <label className="block text-[12.5px] font-medium text-ink-muted mb-1.5">
-              Icon <span className="font-normal text-ink-faint">(optional)</span>
-            </label>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setEmojiPickerOpen((v) => !v)}
-                className="press flex h-9 w-9 items-center justify-center rounded-xl border border-line bg-paper hover:border-line-strong text-[20px]"
-              >
-                {selectedIcon ?? <FolderOpen className="h-4 w-4 text-ink-muted" />}
-              </button>
-              {selectedIcon && (
-                <button
-                  type="button"
-                  onClick={() => { setSelectedIcon(null); setEmojiPickerOpen(false); }}
-                  className="press rounded-md px-2 py-1 text-[11.5px] text-ink-faint hover:bg-paper-sunken hover:text-ink"
-                >
-                  Clear
-                </button>
-              )}
-            </div>
-            {emojiPickerOpen && (
-              <div className="mt-2 flex flex-wrap gap-1 rounded-xl border border-line bg-paper p-2 animate-fade-in">
-                {EMOJI_OPTIONS.map((e) => (
-                  <button
-                    key={e}
-                    type="button"
-                    onClick={() => { setSelectedIcon(e); setEmojiPickerOpen(false); }}
-                    className={cn(
-                      "press flex h-8 w-8 items-center justify-center rounded-lg text-[18px] hover:bg-paper-sunken",
-                      selectedIcon === e && "bg-paper-sunken ring-1 ring-line-strong",
-                    )}
-                  >
-                    {e}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
           <div>
             <label className="block text-[12.5px] font-medium text-ink-muted mb-1.5">
               Name
@@ -295,13 +243,8 @@ function ProjectCard({ project }: { project: { id: string; name: string; descrip
         className="text-left w-full"
       >
         <div className="flex items-start justify-between gap-2">
-          {/* Task 4: show emoji icon if set, otherwise FolderOpen */}
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-paper-sunken text-[20px]">
-            {project.icon ? (
-              <span>{project.icon}</span>
-            ) : (
-              <FolderOpen className="h-4 w-4 text-ink-muted" />
-            )}
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-paper-sunken">
+            <FolderOpen className="h-4 w-4 text-ink-muted" />
           </div>
           <div
             className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100"
@@ -578,7 +521,6 @@ function ProjectDetail() {
                     onClick={() => setEditingField("name")}
                     className="cursor-text text-[28px] font-semibold tracking-tight text-ink"
                   >
-                    {project.icon && <span className="mr-2 text-[36px]">{project.icon}</span>}
                     {project.name}
                   </h1>
                 )}
@@ -810,7 +752,7 @@ function ProjectDetail() {
       {/* Delete file confirmation modal */}
       {deleteModal.open && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 animate-fade-in px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4 animate-fade-in"
           onClick={() => setDeleteModal({ open: false, filename: "" })}
         >
           <div
@@ -947,7 +889,7 @@ function EditModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 animate-fade-in px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4 animate-fade-in"
       onClick={onClose}
     >
       <div

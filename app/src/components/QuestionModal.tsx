@@ -18,12 +18,11 @@ interface QuestionModalProps {
  * interaction until the user picks an answer.
  *
  * Design: clean centered card with backdrop blur, option rows with hover
- * states, and an optional "Other" free-text input. Mirrors the clarify
- * pattern from Hermes desktop and Vellum's question card.
+ * states, and an "Other" free-text input that sits at the bottom of the same
+ * list (options stay visible and clickable while you type).
  */
 export function QuestionModal({ question, options, onSubmit, onDismiss }: QuestionModalProps) {
   const [selected, setSelected] = useState<string | null>(null);
-  const [otherActive, setOtherActive] = useState(false);
   const [otherText, setOtherText] = useState("");
 
   // Filter out meta-options the agent shouldn't show as clickable choices.
@@ -31,7 +30,6 @@ export function QuestionModal({ question, options, onSubmit, onDismiss }: Questi
     const o = opt.toLowerCase();
     return !o.includes("tell me what to do") && !o.includes("instead");
   });
-  const hasOther = options.some((o) => o.toLowerCase().includes("other"));
 
   function submit(choice: string) {
     if (!choice.trim()) return;
@@ -39,14 +37,14 @@ export function QuestionModal({ question, options, onSubmit, onDismiss }: Questi
   }
 
   function handleSubmit() {
-    if (otherActive && otherText.trim()) {
+    if (otherText.trim()) {
       submit(otherText.trim());
     } else if (selected) {
       submit(selected);
     }
   }
 
-  const canSubmit = (selected !== null) || (otherActive && otherText.trim().length > 0);
+  const canSubmit = (selected !== null) || otherText.trim().length > 0;
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center">
@@ -83,14 +81,14 @@ export function QuestionModal({ question, options, onSubmit, onDismiss }: Questi
         {/* Options */}
         <div className="px-3 pb-3 flex flex-col gap-1">
           {cleanOptions.map((opt) => {
-            const isActive = selected === opt && !otherActive;
+            const isActive = selected === opt && !otherText.trim();
             return (
               <button
                 key={opt}
                 type="button"
                 onClick={() => {
                   setSelected(opt);
-                  setOtherActive(false);
+                  setOtherText("");
                 }}
                 className={cn(
                   "press flex items-center justify-between rounded-lg px-3 py-2.5 text-left text-[13px] transition-colors",
@@ -107,41 +105,22 @@ export function QuestionModal({ question, options, onSubmit, onDismiss }: Questi
             );
           })}
 
-          {/* Other option */}
-          {hasOther && (
-            <button
-              type="button"
-              onClick={() => {
-                setOtherActive((v) => !v);
-                if (!otherActive) setSelected(null);
+          {/* Free-text answer — part of the same list, not a separate view */}
+          <div className="px-1 pt-1">
+            <input
+              type="text"
+              value={otherText}
+              onChange={(e) => {
+                setOtherText(e.target.value);
+                if (e.target.value) setSelected(null);
               }}
-              className={cn(
-                "press flex items-center justify-between rounded-lg px-3 py-2.5 text-left text-[13px] transition-colors",
-                otherActive
-                  ? "bg-line/40 text-ink font-medium"
-                  : "text-ink-muted hover:bg-line/30 hover:text-ink",
-              )}
-            >
-              <span>Other…</span>
-            </button>
-          )}
-
-          {/* Free-text input for "Other" */}
-          {otherActive && (
-            <div className="px-1 pt-1">
-              <input
-                type="text"
-                value={otherText}
-                onChange={(e) => setOtherText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && canSubmit) handleSubmit();
-                }}
-                placeholder="Type your answer…"
-                autoFocus
-                className="w-full rounded-lg border border-line bg-paper px-3 py-2 text-[13px] text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-ink/10"
-              />
-            </div>
-          )}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && canSubmit) handleSubmit();
+              }}
+              placeholder="Other — type your own answer…"
+              className="w-full rounded-lg border border-line bg-paper px-3 py-2 text-[13px] text-ink placeholder:text-ink-faint focus:outline-none focus:ring-2 focus:ring-ink/10"
+            />
+          </div>
         </div>
 
         {/* Footer */}

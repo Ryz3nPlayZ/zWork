@@ -27,6 +27,8 @@ The `/ws` endpoint (browser bridge, `sidecar-rust/src/browser_bridge.rs`) is exe
 
 Integration secrets (API keys, OAuth tokens for connected services) are stored plaintext in `secrets.json` under the zWork data dir with file permissions chmod 600 (owner-only). OS keychain migration is deferred until after launch — accepted risk: any process running as the same user can read the file.
 
+**Guard:** do not re-add macOS Keychain access until the app carries a stable Developer ID signature. The v0.5.2-staging integration was removed before release because ad-hoc-signed binaries get a fresh code identity on every rebuild, so "Always Allow" grants never persisted and every settings load re-prompted for the login password (~20 dialogs at launch, more per tab switch). The sidecar deliberately contains no Keychain code — there is no direct `security-framework` dependency in `sidecar-rust/Cargo.toml`; re-adding one is a reviewable red flag.
+
 ### Cloud bearer token
 
 Cloud sign-in yields a 30-day bearer token stored in the webview's `localStorage` (`zwork:cloud-token`). Accepted for beta: the webview CSP restricts script sources to `'self'`, and the token can be revoked server-side. Refresh-token rotation and shorter lifetimes are post-launch work.

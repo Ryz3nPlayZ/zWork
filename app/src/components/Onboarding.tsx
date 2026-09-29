@@ -6,10 +6,10 @@ import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
 import { recordTelemetry } from "../lib/telemetry";
 import { useResolvedTheme } from "../lib/theme";
-import { isMacOS, needsLightweightRendering } from "../lib/platform";
-import { dragRegionAttrs, onDragMouseDown } from "../lib/drag";
+import { needsLightweightRendering } from "../lib/platform";
 import { api, type OnboardingAnswer, type OnboardingCredential } from "../lib/api";
 import LightRays from "./LightRays";
+import { EarlyScreenChrome } from "./TitleBar";
 
 const ZWORK_ROUTER_TARGET_MODEL_ID = "zwork-flash";
 
@@ -323,7 +323,6 @@ const CUSTOM_MODEL_SENTINEL = "__custom__";
  * ------------------------------------------------------------------ */
 
 export function Onboarding() {
-  const macOS = isMacOS();
   const setOnboardingDone = useApp((s) => s.setOnboardingDone);
   const refreshProviders = useApp((s) => s.refreshProviders);
   const refreshSettings = useApp((s) => s.refreshSettings);
@@ -476,16 +475,10 @@ export function Onboarding() {
         }}
       />
 
-      {/* Window drag region — these full-screen gates render without the main
-          layout's base layer, so they need their own drag strip at the top. */}
-      {macOS && (
-        <div
-          {...dragRegionAttrs()}
-          onMouseDown={onDragMouseDown}
-          className="absolute inset-x-0 top-0 z-10 h-10"
-          aria-hidden="true"
-        />
-      )}
+      {/* Window chrome — these full-screen gates render without the main
+          layout's base layer, so they need their own top strip (drag region
+          on macOS, drag region + caption buttons on Windows). */}
+      <EarlyScreenChrome />
 
       {/* Content area — card spans full viewport height, pinned right. */}
       <div className="relative z-20 flex h-full flex-1 items-center p-5 md:p-6">

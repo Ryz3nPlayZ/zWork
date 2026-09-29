@@ -1015,7 +1015,7 @@ pub fn execute_tool(
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| {
                         let s = crate::settings::load();
-                        if !s.default_model.is_empty() { s.default_model } else { "deepseek-v4-flash".to_string() }
+                        if !s.default_model.is_empty() { s.default_model } else { "deepseek-flash".to_string() }
                     });
                 match crate::agent::spawn_subagent(&chat_id, &chat_id, &desc, &model_id, &tx).await {
                     Ok(result) => Ok(format!("Sub-agent completed the task. Result:\n\n{}", result)),

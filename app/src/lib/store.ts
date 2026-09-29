@@ -15,6 +15,7 @@ import {
   type Project,
   type ScheduledTask,
   type InboxItem,
+  type QueuedItem,
 } from "./api";
 import { fetchCloudSession, getCloudToken, logoutCloudSession, startDesktopGoogleSignIn } from "./cloud";
 import { isDemoMode } from "./preview";
@@ -128,6 +129,14 @@ export type MessagePart =
   | { kind: "text"; text: string }
   | { kind: "thinking"; text: string }
   | {
+      /** Process narration: text the model speaks between tool calls ("Let me
+       *  check that file…"). It is NOT the answer — a later tool call demotes
+       *  the preceding text run to narration so the final answer (the trailing
+       *  text run) stands alone. Rendered inside the process panel. */
+      kind: "narration";
+      text: string;
+    }
+  | {
       kind: "tool";
       id: string;
       tool: string;
@@ -152,6 +161,50 @@ export type MessagePart =
       message: string;
     };
 
+/**
+ * Normalized token/cost usage for one assistant run. Built from either the
+ * live `usage` SSE event (snake_case wire shape) or a persisted chat row
+ * (camelCase harness Usage JSON).
+ */
+export interface MessageUsage {
+  /** Prompt-side tokens, including cache reads/writes. */
+  input: number;
+  output: number;
+  totalTokens: number;
+  /** Present only when the model's pricing is known (non-zero). */
+  costUsd?: number;
+}
+
+function usageFromWire(evt: {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cost_usd?: number;
+}): MessageUsage {
+  return {
+    input: evt.prompt_tokens,
+    output: evt.completion_tokens,
+    totalTokens: evt.total_tokens,
+    costUsd: evt.cost_usd && evt.cost_usd > 0 ? evt.cost_usd : undefined,
+  };
+}
+
+function usageFromRow(u: unknown): MessageUsage | undefined {
+  if (!u || typeof u !== "object") return undefined;
+  const r = u as {
+    input?: number; output?: number; cacheRead?: number; cacheWrite?: number;
+    totalTokens?: number; cost?: { total?: number };
+  };
+  if (r.input == null && r.output == null && r.totalTokens == null) return undefined;
+  const cost = r.cost?.total;
+  return {
+    input: (r.input ?? 0) + (r.cacheRead ?? 0) + (r.cacheWrite ?? 0),
+    output: r.output ?? 0,
+    totalTokens: r.totalTokens ?? ((r.input ?? 0) + (r.output ?? 0)),
+    costUsd: cost && cost > 0 ? cost : undefined,
+  };
+}
+
 export interface Message {
   id: string;
   role: Role;
@@ -170,6 +223,8 @@ export interface Message {
   providerLabel?: string;
   resolvedModel?: string;
   upstreamProvider?: string;
+  /** Token/cost usage for this assistant run (live event or reloaded row). */
+  usage?: MessageUsage;
   /** @deprecated use parts[] — kept only for legacy migration / API shape. */
   activities?: Activity[];
   /** Files the user attached when sending this message. */
@@ -271,6 +326,20 @@ export function appendThinkingPart(parts: MessagePart[], text: string): MessageP
 }
 
 /**
+ * Reclassify the trailing run of text parts as process narration. Called when
+ * a tool call opens: any text the model streamed before deciding to use a tool
+ * is mid-process commentary ("middle thoughts"), not the final answer, so it
+ * moves into the process panel and out of the response body. The answer is
+ * whatever text streams after the LAST tool call of the run.
+ */
+export function demoteTrailingTextToNarration(parts: MessagePart[]): MessagePart[] {
+  let end = parts.length;
+  while (end > 0 && parts[end - 1].kind === "text") end -= 1;
+  if (end === parts.length) return parts;
+  return parts.map((p, i) => (i >= end && p.kind === "text" ? { kind: "narration" as const, text: p.text } : p));
+}
+
+/**
  * Replace all `text` parts with a single text part containing `newText`,
  * inserted at the position of the first text part. Used by artifact
  * extraction, which post-processes the concatenated answer text and writes
@@ -342,6 +411,32 @@ export function readCachedChats(): Record<string, Chat> | null {
   }
 }
 
+/**
+ * Derive sidebar summaries from in-memory chats. Used in web demo mode,
+ * which has no backend chat persistence — the local store (kept alive across
+ * refreshes via the localStorage cache) is the source of truth.
+ */
+function demoSummariesFromChats(chats: Record<string, Chat>): ApiChatSummary[] {
+  return Object.values(chats)
+    .filter((c) => c.messages.length > 0)
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, 40)
+    .map((c) => {
+      const lastTextMsg = [...c.messages].reverse().find((m) => m.content?.trim());
+      return {
+        id: c.id,
+        title: c.title,
+        created_at: c.messages[0]?.createdAt ?? c.updatedAt,
+        updated_at: c.updatedAt,
+        message_count: c.messages.length,
+        model: "zwork-flash",
+        kind: "chat",
+        project_id: c.projectId ?? undefined,
+        preview: lastTextMsg?.content?.slice(0, 140) ?? "",
+      };
+    });
+}
+
 export interface SubagentTask {
   id: string;
   description: string;
@@ -386,6 +481,10 @@ export interface Chat {
     options: string[];
   } | null;
   projectId?: string | null;
+  /** Messages queued against the live run (steer / follow-up / next-run),
+   *  rendered as chips in the composer. Authoritative copy comes from
+   *  `queue` events on the stream. */
+  queuedItems?: QueuedItem[];
 }
 
 export type View = "chat" | "settings" | "projects" | "analytics" | "plan" | "connectors" | "admin" | "tasks" | "inbox" | "scheduled";
@@ -521,14 +620,19 @@ function needsManagedRouterMigration(settings: SettingsPublic): boolean {
   const hasOldRouter = customModels.some((model) => model.id === "zwork-router");
   const hasLegacyCustomModel = customModels.some((model) => LEGACY_MANAGED_MODEL_IDS.has(model.id) || LEGACY_MANAGED_MODEL_IDS.has(model.model_id));
 
-  // Check that flash/pro/vision/ultimate exist AND have correct names/model_ids
+  // Check that flash/pro/vision/ultimate exist AND have correct
+  // names/model_ids/shapes. The hosted lineup runs via OpenRouter (OpenAI
+  // shape); a stale install still holding DeepSeek-shaped entries gets
+  // migrated by migrateManagedRouterSettings.
   const flashCorrupted = !flash
     || flash.name !== "zWork Flash"
-    || flash.model_id !== "deepseek-v4-flash"
+    || flash.model_id !== "deepseek/deepseek-v4-flash-0731"
+    || flash.shape !== "openai"
     || flash.credential !== "zwork_router";
   const proCorrupted = !pro
     || pro.name !== "zWork Pro"
-    || pro.model_id !== "deepseek-v4-pro"
+    || pro.model_id !== "z-ai/glm-5.3-flash"
+    || pro.shape !== "openai"
     || pro.credential !== "zwork_router";
   const visionMissing = !vision
     || vision.name !== "zWork Vision"
@@ -536,7 +640,8 @@ function needsManagedRouterMigration(settings: SettingsPublic): boolean {
     || vision.credential !== "zwork_router";
   const ultimateMissing = !ultimate
     || ultimate.name !== "zWork Ultimate"
-    || ultimate.model_id !== "zwork-ultimate"
+    || ultimate.model_id !== "deepseek/deepseek-v4.1-flash"
+    || ultimate.shape !== "openai"
     || ultimate.credential !== "zwork_router";
 
   return (
@@ -575,18 +680,18 @@ async function migrateManagedRouterSettings(settings: SettingsPublic): Promise<S
   await api.upsertCustomModel({
     id: "zwork-flash",
     name: "zWork Flash",
-    shape: "anthropic",
+    shape: "openai",
     credential: "zwork_router",
-    model_id: "deepseek-v4-flash",
+    model_id: "deepseek/deepseek-v4-flash-0731",
     base_url_override: ROUTER_BASE_URL,
   });
 
   await api.upsertCustomModel({
     id: "zwork-pro",
     name: "zWork Pro",
-    shape: "anthropic",
+    shape: "openai",
     credential: "zwork_router",
-    model_id: "deepseek-v4-pro",
+    model_id: "z-ai/glm-5.3-flash",
     base_url_override: ROUTER_BASE_URL,
   });
 
@@ -604,7 +709,7 @@ async function migrateManagedRouterSettings(settings: SettingsPublic): Promise<S
     name: "zWork Ultimate",
     shape: "openai",
     credential: "zwork_router",
-    model_id: "zwork-ultimate",
+    model_id: "deepseek/deepseek-v4.1-flash",
     base_url_override: ROUTER_BASE_URL,
   });
 
@@ -624,18 +729,18 @@ async function syncManagedRouterToken() {
   await api.upsertCustomModel({
     id: "zwork-flash",
     name: "zWork Flash",
-    shape: "anthropic",
+    shape: "openai",
     credential: "zwork_router",
-    model_id: "deepseek-v4-flash",
+    model_id: "deepseek/deepseek-v4-flash-0731",
     base_url_override: ROUTER_BASE_URL,
   });
 
   await api.upsertCustomModel({
     id: "zwork-pro",
     name: "zWork Pro",
-    shape: "anthropic",
+    shape: "openai",
     credential: "zwork_router",
-    model_id: "deepseek-v4-pro",
+    model_id: "z-ai/glm-5.3-flash",
     base_url_override: ROUTER_BASE_URL,
   });
 
@@ -653,7 +758,7 @@ async function syncManagedRouterToken() {
     name: "zWork Ultimate",
     shape: "openai",
     credential: "zwork_router",
-    model_id: "zwork-ultimate",
+    model_id: "deepseek/deepseek-v4.1-flash",
     base_url_override: ROUTER_BASE_URL,
   });
 }
@@ -851,7 +956,29 @@ interface AppState {
   flagBadResponse: (messageId: string) => void;
   /** Edit a previously sent user message and re-run the conversation from that point. */
   editAndResend: (messageId: string, newText: string) => Promise<void>;
+  /** Fork the active chat at a message — ancestry copies into a new chat, which opens. */
+  forkFromMessage: (messageId: string, before?: boolean) => Promise<void>;
+  /** Restore a parked rewind branch as the active tail (current tail is parked in turn). */
+  restoreBranch: (branchId: string) => Promise<void>;
+  /** Permanently discard a parked rewind branch. */
+  deleteBranch: (branchId: string) => Promise<void>;
   stop: () => void;
+
+  /** Send while a run is live: queues the message against the run instead of
+   *  starting a new one. `kind` picks the semantics — steer joins the
+   *  in-flight context at its next checkpoint; follow_up drives a next run
+   *  when this one finishes; next_run queues a whole additional run. If the
+   *  race is lost (run finished first), falls back to a normal send. */
+  sendWhileBusy: (text: string, kind?: QueuedItem["kind"]) => Promise<void>;
+  /** Cancel one queued message (composer chip ×). Consumed items are left
+   *  alone — the run already took them. */
+  cancelQueued: (entryId: string) => Promise<void>;
+  /** Set steering / follow-up queue modes ("all" | "one-at-a-time"). */
+  setQueueModes: (modes: { steering?: "all" | "one-at-a-time"; followUp?: "all" | "one-at-a-time" }) => Promise<void>;
+  /** Composer draft pushed from the store (Stop returning unconsumed queued
+   *  messages back to the composer). ChatInput consumes + clears it. */
+  draftInject: { chatId: string; text: string; nonce: number } | null;
+  clearDraftInject: () => void;
 
   saveSettings: (patch: Partial<SettingsPublic> & { api_keys?: Record<string, string> }) => Promise<void>;
   upsertCustomModel: (m: Omit<CustomModel, "id"> & { id?: string }) => Promise<void>;
@@ -954,6 +1081,14 @@ export const useApp = create<AppState>((set, get) => ({
   user: null,
   isLoadingAuth: false,
   signInWithGoogle: async () => {
+    // Backstop: the desktop flow below calls Tauri invoke(), which doesn't
+    // exist in a browser. Web callers must route through the browser OAuth
+    // flow (see isWebAuthClient/startWebGoogleSignIn in cloud.ts) before
+    // reaching this action.
+    if (IS_WEB) {
+      set({ isLoadingAuth: false });
+      throw new Error("Web sign-in must use the browser Google OAuth flow.");
+    }
     set({ isLoadingAuth: true });
     try {
       const cloudUser = await startDesktopGoogleSignIn();
@@ -1023,6 +1158,8 @@ export const useApp = create<AppState>((set, get) => ({
   chats: {},
   activeChatId: null,
   _abort: null,
+  draftInject: null,
+  clearDraftInject: () => set({ draftInject: null }),
 
   artifacts: [],
   openArtifact: (a) => {
@@ -1479,6 +1616,23 @@ export const useApp = create<AppState>((set, get) => ({
       };
 
       set({ onboardingDone: true, model: "zwork-flash", providers: webProviders, backendReady: true });
+
+      if (isDemoMode()) {
+        // Anonymous demo: hydrate previously-cached demo chats so the session
+        // survives a refresh. The offline-cache subscriber doubles as the
+        // demo's persistence layer (demo mode has no backend chat store).
+        const cachedChats = readCachedChats();
+        if (cachedChats) {
+          set({
+            chats: cachedChats,
+            chatSummaries: demoSummariesFromChats(cachedChats),
+          });
+        }
+      } else {
+        // Signed-in web: load the server-side chat list so the sidebar
+        // populates on first paint, not only after the first send.
+        await get().refreshChats().catch(() => {});
+      }
       return;
     }
 
@@ -1561,9 +1715,13 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   refreshChats: async () => {
-    // Demo mode: no server-side chat persistence. Chat history lives only in
-    // the local store for the session; nothing to refresh from a backend.
-    if (isDemoMode()) return;
+    // Demo mode: no server-side chat persistence. History lives in the local
+    // store (hydrated from the localStorage cache at bootstrap) — derive the
+    // sidebar list from it so new/deleted/renamed demo chats show up.
+    if (isDemoMode()) {
+      set({ chatSummaries: demoSummariesFromChats(get().chats) });
+      return;
+    }
     if (get().backendOffline) {
       const cached = localStorage.getItem("zwork:cached-summaries");
       if (cached) set({ chatSummaries: JSON.parse(cached) });
@@ -1722,6 +1880,7 @@ export const useApp = create<AppState>((set, get) => ({
               parts,
               createdAt: m.created_at,
               activities,
+              usage: usageFromRow((m as { usage?: unknown }).usage),
             } as Message;
           });
         const latestActivities = [...messages].reverse().find((m) => m.role === "assistant" && (m.activities || []).length > 0)?.activities || [];
@@ -1868,9 +2027,13 @@ export const useApp = create<AppState>((set, get) => ({
 
   stop: async () => {
     const id = get().activeChatId;
+    // Unconsumed steer / follow-up texts come back so the composer can
+    // restore them — stopping shouldn't eat what the user queued.
+    let restore: string[] = [];
     if (id && !id.startsWith("tmp_")) {
       try {
-        await api.stopChat(id);
+        const res = await api.stopChat(id);
+        restore = [...(res.steer ?? []), ...(res.follow_up ?? [])];
       } catch (e) {
         console.warn("stopChat failed:", e);
       }
@@ -1885,10 +2048,78 @@ export const useApp = create<AppState>((set, get) => ({
         _abort: null,
         chats: {
           ...s.chats,
-          [activeId]: { ...c, working: false, status: undefined },
+          [activeId]: { ...c, working: false, status: undefined, queuedItems: [] },
+        },
+        ...(restore.length
+          ? { draftInject: { chatId: activeId, text: restore.join("\n\n"), nonce: Date.now() } }
+          : {}),
+      };
+    });
+  },
+
+  sendWhileBusy: async (text, kind = "follow_up") => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const id = get().activeChatId;
+    if (!id || id.startsWith("tmp_")) return; // no server chat → no live run to queue against
+    const call = kind === "steer" ? api.steerChat : kind === "next_run" ? api.queueNextRun : api.queueFollowUp;
+    try {
+      const res = await call(id, trimmed);
+      if (!res.queued) {
+        // Race lost: the run finished between typing and sending. A normal
+        // send is exactly what the user meant. (Errors fall through silently —
+        // the message stays in the composer for a deliberate retry.)
+        if (res.reason === "not-busy") {
+          await get().send(trimmed);
+        }
+        return;
+      }
+      // Optimistic chip; the next `queue` event brings the authoritative list.
+      set((s) => {
+        const c = s.chats[id];
+        if (!c) return s;
+        const queuedItems = [
+          ...(c.queuedItems ?? []),
+          { entry_id: res.result ?? uid(), kind, text: trimmed } as QueuedItem,
+        ];
+        return { chats: { ...s.chats, [id]: { ...c, queuedItems } } };
+      });
+    } catch (e) {
+      console.warn("queue-while-busy failed:", e);
+    }
+  },
+
+  cancelQueued: async (entryId) => {
+    const id = get().activeChatId;
+    if (!id) return;
+    let consumed = false;
+    try {
+      const res = await api.cancelChatQueue(id, entryId);
+      consumed = res.result === "consumed";
+    } catch {
+      /* fall through to local removal */
+    }
+    if (consumed) return; // the run already took it — the queue event will show it
+    set((s) => {
+      const c = s.chats[id];
+      if (!c) return s;
+      return {
+        chats: {
+          ...s.chats,
+          [id]: { ...c, queuedItems: (c.queuedItems ?? []).filter((q) => q.entry_id !== entryId) },
         },
       };
     });
+  },
+
+  setQueueModes: async (modes) => {
+    const id = get().activeChatId;
+    if (!id || id.startsWith("tmp_")) return;
+    try {
+      await api.setChatQueueMode(id, modes);
+    } catch (e) {
+      console.warn("setQueueMode failed:", e);
+    }
   },
 
   retry: async () => {
@@ -2041,6 +2272,42 @@ export const useApp = create<AppState>((set, get) => ({
     await get().send(trimmed);
   },
 
+  forkFromMessage: async (messageId, before) => {
+    const id = get().activeChatId;
+    if (!id) return;
+    try {
+      const res = await api.forkChat(id, messageId, before);
+      if (res.success && res.chat?.id) {
+        await get().openChat(res.chat.id);
+      }
+    } catch (e) {
+      console.warn("forkChat failed:", e);
+    }
+  },
+
+  restoreBranch: async (branchId) => {
+    const id = get().activeChatId;
+    if (!id) return;
+    try {
+      const res = await api.restoreBranch(id, branchId);
+      if (res.success && res.chat) {
+        await get().openChat(id);
+      }
+    } catch (e) {
+      console.warn("restoreBranch failed:", e);
+    }
+  },
+
+  deleteBranch: async (branchId) => {
+    const id = get().activeChatId;
+    if (!id) return;
+    try {
+      await api.deleteBranch(id, branchId);
+    } catch (e) {
+      console.warn("deleteBranch failed:", e);
+    }
+  },
+
   send: async (text, options) => {
     const attachments = options?.attachments ?? [];
     const trimmed = text.trim();
@@ -2151,6 +2418,11 @@ export const useApp = create<AppState>((set, get) => ({
       };
     });
 
+    // Rotation target for streamed output. Starts as this send's placeholder;
+    // a consumed queued message (user_message event) rotates it so the rest of
+    // the run streams into a fresh assistant bubble.
+    let activeAsstId = asstId;
+
     const controller = new AbortController();
     set({ _abort: controller });
 
@@ -2244,7 +2516,7 @@ export const useApp = create<AppState>((set, get) => ({
               const c = s.chats[localId];
               if (!c) return s;
               const msgs = c.messages.map((m) =>
-                m.id === asstId
+                m.id === activeAsstId
                   ? withParts(m, appendTextPart(m.parts, evt.text))
                   : m,
               );
@@ -2265,7 +2537,7 @@ export const useApp = create<AppState>((set, get) => ({
               const c = s.chats[localId];
               if (!c) return s;
               const msgs = c.messages.map((m) =>
-                m.id === asstId
+                m.id === activeAsstId
                   ? withParts(m, appendThinkingPart(m.parts, evt.text))
                   : m,
               );
@@ -2311,7 +2583,7 @@ export const useApp = create<AppState>((set, get) => ({
               const c = s.chats[localId];
               if (!c) return s;
               const msgs = c.messages.map((m) => {
-                if (m.id !== asstId) return m;
+                if (m.id !== activeAsstId) return m;
                 // If a tool part with this id already exists (e.g. a replayed
                 // event), don't duplicate.
                 if (m.parts.some((p) => p.kind === "tool" && p.id === evt.id)) return m;
@@ -2323,7 +2595,9 @@ export const useApp = create<AppState>((set, get) => ({
                   input: evt.input,
                   done: false,
                 };
-                return withParts(m, [...m.parts, toolPart]);
+                // Text streamed before this tool call is narration, not the
+                // answer — demote it into the process panel.
+                return withParts(m, [...demoteTrailingTextToNarration(m.parts), toolPart]);
               });
               return {
                 chats: {
@@ -2337,7 +2611,7 @@ export const useApp = create<AppState>((set, get) => ({
               const c = s.chats[localId];
               if (!c) return s;
               const msgs = c.messages.map((m) =>
-                m.id === asstId
+                m.id === activeAsstId
                   ? {
                       ...m,
                       providerLabel: evt.provider,
@@ -2352,6 +2626,16 @@ export const useApp = create<AppState>((set, get) => ({
                   [localId]: { ...c, messages: msgs },
                 },
               };
+            });
+          } else if (evt.type === "usage") {
+            // Running token/cost total for the run — stamped on the working
+            // assistant message; the last event equals the run total.
+            const u = usageFromWire(evt as unknown as Parameters<typeof usageFromWire>[0]);
+            set((s) => {
+              const c = s.chats[localId];
+              if (!c) return s;
+              const msgs = c.messages.map((m) => (m.id === activeAsstId ? { ...m, usage: u } : m));
+              return { chats: { ...s.chats, [localId]: { ...c, messages: msgs } } };
             });
           } else if (evt.type === "needs_setup") {
             set((s) => {
@@ -2392,7 +2676,7 @@ export const useApp = create<AppState>((set, get) => ({
               if (!c) return s;
               const partId = `recovery-${evt.tool_use_id ?? crypto.randomUUID()}`;
               const msgs = c.messages.map((m) => {
-                if (m.id !== asstId) return m;
+                if (m.id !== activeAsstId) return m;
                 // De-duplicate: one recovery card per tool_use_id.
                 if (m.parts.some((p) => p.kind === "permission_recovery" && p.id === partId)) return m;
                 const recoveryPart: MessagePart = {
@@ -2445,7 +2729,7 @@ export const useApp = create<AppState>((set, get) => ({
               // the activity still renders in the timeline.
               const toolKey = evt.tool_use_id || evt.id;
               const msgs = c.messages.map((m) => {
-                if (m.id !== asstId) return m;
+                if (m.id !== activeAsstId) return m;
                 const idx = m.parts.findIndex(
                   (p) => p.kind === "tool" && p.id === toolKey,
                 );
@@ -2471,7 +2755,7 @@ export const useApp = create<AppState>((set, get) => ({
                   icon: evt.icon,
                   done: evt.done ?? false,
                 };
-                return withParts(m, [...m.parts, toolPart]);
+                return withParts(m, [...demoteTrailingTextToNarration(m.parts), toolPart]);
               });
               return {
                 chats: {
@@ -2496,7 +2780,7 @@ export const useApp = create<AppState>((set, get) => ({
               const permIcon = evt.risk === "destructive" ? "shield-alert" : evt.risk === "sensitive" ? "shield" : "check";
               const msgs = toolKey
                 ? c.messages.map((m) => {
-                    if (m.id !== asstId) return m;
+                    if (m.id !== activeAsstId) return m;
                     const idx = m.parts.findIndex(
                       (p) => p.kind === "tool" && p.id === toolKey,
                     );
@@ -2511,7 +2795,7 @@ export const useApp = create<AppState>((set, get) => ({
                           ? { ok: undefined, done: false, pendingGate: { gateId: evt.gate_id!, reason: evt.reason } }
                           : { ok: !evt.blocked, done: true }),
                       };
-                      return withParts(m, [...m.parts, toolPart]);
+                      return withParts(m, [...demoteTrailingTextToNarration(m.parts), toolPart]);
                     }
                     const part = m.parts[idx];
                     if (part.kind !== "tool") return m;
@@ -2567,7 +2851,7 @@ export const useApp = create<AppState>((set, get) => ({
               const toolKey = evt.tool_use_id;
               if (!toolKey) return s;
               const msgs = c.messages.map((m) => {
-                if (m.id !== asstId) return m;
+                if (m.id !== activeAsstId) return m;
                 const idx = m.parts.findIndex(
                   (p) => p.kind === "tool" && p.id === toolKey,
                 );
@@ -2695,6 +2979,59 @@ export const useApp = create<AppState>((set, get) => ({
                 },
               };
             });
+          } else if (evt.type === "queue") {
+            // Live queue snapshot (drives the composer chips).
+            set((s) => {
+              const c = s.chats[localId];
+              if (!c) return s;
+              return {
+                chats: {
+                  ...s.chats,
+                  [localId]: { ...c, queuedItems: evt.items },
+                },
+              };
+            });
+          } else if (evt.type === "user_message") {
+            // A queued message (steer / follow-up / next-run) was consumed
+            // and committed mid-run: it becomes a real user bubble, and the
+            // run's remaining output streams into a fresh assistant bubble.
+            set((s) => {
+              const c = s.chats[localId];
+              if (!c) return s;
+              const msgs = [...c.messages];
+              // Stamp the closing bubble's activities (mirrors the done
+              // handler) so they stay on the message they belong to.
+              const closingIdx = msgs.findIndex((m) => m.id === activeAsstId);
+              if (closingIdx >= 0) {
+                msgs[closingIdx] = { ...msgs[closingIdx], activities: [...c.activities] };
+              }
+              msgs.push(
+                {
+                  id: uid(),
+                  role: "user",
+                  content: evt.text,
+                  parts: [{ kind: "text", text: evt.text }],
+                  createdAt: Date.now(),
+                },
+                {
+                  id: evt.assistant_id ?? uid(),
+                  role: "assistant",
+                  content: "",
+                  parts: [],
+                  createdAt: Date.now(),
+                },
+              );
+              activeAsstId = msgs[msgs.length - 1].id;
+              // The authoritative queue event lands within moments; drop the
+              // matching chip immediately so it doesn't flash twice.
+              const queuedItems = (c.queuedItems ?? []).filter((q) => q.text !== evt.text);
+              return {
+                chats: {
+                  ...s.chats,
+                  [localId]: { ...c, messages: msgs, queuedItems },
+                },
+              };
+            });
           } else if (evt.type === "heartbeat") {
             return;
           } else if (evt.type === "done" || evt.type === "end") {
@@ -2703,12 +3040,18 @@ export const useApp = create<AppState>((set, get) => ({
               if (!c) return s;
               // Final sync of activities to the assistant message
               const msgs = c.messages.map((m) =>
-                m.id === asstId ? { ...m, activities: [...c.activities] } : m,
+                m.id === activeAsstId ? { ...m, activities: [...c.activities] } : m,
               );
               return {
                 chats: {
                   ...s.chats,
-                  [localId]: { ...c, working: false, status: undefined, messages: msgs },
+                  [localId]: {
+                    ...c,
+                    working: false,
+                    status: undefined,
+                    messages: msgs,
+                    queuedItems: [],
+                  },
                 },
               };
             });
@@ -2717,7 +3060,7 @@ export const useApp = create<AppState>((set, get) => ({
         controller.signal,
       );
 
-      const assistantContent = get().chats[localId]?.messages.find((m) => m.id === asstId)?.content || "";
+      const assistantContent = get().chats[localId]?.messages.find((m) => m.id === activeAsstId)?.content || "";
       set((s) => {
         const c = s.chats[localId];
         if (!c || !c.working) return s;
@@ -2728,7 +3071,7 @@ export const useApp = create<AppState>((set, get) => ({
           },
         };
       });
-      const { cleaned, artifacts } = extractArtifacts(assistantContent, asstId);
+      const { cleaned, artifacts } = extractArtifacts(assistantContent, activeAsstId);
       if (artifacts.length > 0) {
         for (const artifact of artifacts) {
           get().openArtifact(artifact);
@@ -2739,7 +3082,7 @@ export const useApp = create<AppState>((set, get) => ({
           if (!c) return s;
           const replacement = cleaned || (artifacts.length === 1 ? "Here's the artifact:" : "Here are the artifacts:");
           const msgs = c.messages.map((m) =>
-            m.id === asstId ? withParts(m, replaceTextParts(m.parts, replacement)) : m,
+            m.id === activeAsstId ? withParts(m, replaceTextParts(m.parts, replacement)) : m,
           );
           return {
             chats: {
@@ -2749,7 +3092,7 @@ export const useApp = create<AppState>((set, get) => ({
           };
         });
       } else if (artifactMode) {
-        const assistantContent = get().chats[localId]?.messages.find((m) => m.id === asstId)?.content || "";
+        const assistantContent = get().chats[localId]?.messages.find((m) => m.id === activeAsstId)?.content || "";
         if (inferredArtifactKind && assistantContent.trim()) {
           const title = userMsgText
             .replace(/^(create|write|draft|make|generate|build)\s+(a|an|the)?\s*/i, "")
@@ -2769,7 +3112,7 @@ export const useApp = create<AppState>((set, get) => ({
             title: title || "Artifact",
             content: sanitizeArtifactContent(assistantContent),
             createdAt: Date.now(),
-            sourceMessageId: asstId,
+            sourceMessageId: activeAsstId,
           };
           if (artifact.kind === "sheet") {
             artifact.rows = assistantContent
@@ -2787,7 +3130,7 @@ export const useApp = create<AppState>((set, get) => ({
             if (!c) return s;
             const replacement = cleaned || "Here's the artifact:";
             const msgs = c.messages.map((m) =>
-              m.id === asstId ? withParts(m, replaceTextParts(m.parts, replacement)) : m,
+              m.id === activeAsstId ? withParts(m, replaceTextParts(m.parts, replacement)) : m,
             );
             return {
               chats: {

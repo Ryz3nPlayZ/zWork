@@ -593,10 +593,10 @@ fn format_chicago(authors: &[String], year: Option<u32>, title: &str, journal: &
 
 async fn call_llm(system: &str, prompt: &str) -> Result<String, String> {
     let s = crate::settings::load();
-    let model_id = if !s.default_model.is_empty() { &s.default_model } else { "deepseek-v4-flash" };
+    let model_id = if !s.default_model.is_empty() { &s.default_model } else { "deepseek-flash" };
 
     let (api_key, base_url, shape, real_model) = if let Some(m) = s.custom_models.iter().find(|m| m.id == model_id) {
-        let real = if m.model_id.is_empty() { "deepseek-v4-flash".to_string() } else { m.model_id.clone() };
+        let real = if m.model_id.is_empty() { "deepseek-flash".to_string() } else { m.model_id.clone() };
         if let Some(cred) = crate::server::resolve(&m.credential, &s, &m.base_url_override) {
             (cred.api_key, cred.base_url, m.shape.clone(), real)
         } else {
@@ -604,7 +604,7 @@ async fn call_llm(system: &str, prompt: &str) -> Result<String, String> {
         }
     } else {
         match crate::server::resolve("zwork_router", &s, "") {
-            Some(cred) => (cred.api_key, cred.base_url, "anthropic".to_string(), "deepseek-v4-flash".to_string()),
+            Some(cred) => (cred.api_key, cred.base_url, "anthropic".to_string(), "deepseek-flash".to_string()),
             None => {
                 // Try fallback to anthropic or openai directly from env
                 if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {

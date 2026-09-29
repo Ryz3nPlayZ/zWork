@@ -1,9 +1,32 @@
 import { invoke } from "@tauri-apps/api/core";
+import { IS_WEB } from "./api";
 
 const CLOUD_BASE = "https://api.tryzwork.app";
 const IS_TAURI = typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
 const TOKEN_KEY = "zwork:cloud-token";
 const AUTH_CHANGED_EVENT = "zwork:cloud-auth-changed";
+
+/** True when Google sign-in must use the web OAuth flow instead of the
+ *  desktop `invoke("begin_desktop_auth")` path (which crashes in a browser:
+ *  "Cannot read properties of undefined (reading 'invoke')").
+ *
+ *  Known web origins are treated as definitively web — `IS_WEB` keys off
+ *  `__TAURI_INTERNALS__`, which a browser extension or stray global can make
+ *  truthy, routing a web user into the desktop invoke() path. The Tauri shell
+ *  never serves over https to a real hostname, so a spoofed global can't force
+ *  the desktop code path. */
+export function isWebAuthClient(): boolean {
+  if (typeof window === "undefined") return false;
+  const origin = window.location.origin;
+  if (
+    origin === "https://app.tryzwork.app" ||
+    origin === "https://tryzwork.app" ||
+    origin === "https://www.tryzwork.app"
+  ) {
+    return true;
+  }
+  return IS_WEB;
+}
 
 /** Start Better Auth Google social sign-in for web (non-Tauri) environments.
  *

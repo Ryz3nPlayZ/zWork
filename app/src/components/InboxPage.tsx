@@ -83,33 +83,31 @@ export function InboxPage() {
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-paper">
-      {/* Header — consistent with Scheduled and Projects */}
-      <div className="shrink-0 border-b border-line bg-paper-soft px-6 py-4">
-        <div className="mx-auto flex max-w-[1200px] items-center justify-between">
-          <div>
-            <h1 className="text-[28px] font-semibold tracking-tight text-ink">
-              Inbox
-            </h1>
-            <p className="mt-0.5 text-[13px] text-ink-muted">
-              {unread.length} unread · updates from scheduled runs and the agent
-            </p>
-          </div>
-          {unread.length > 0 && (
-            <button
-              type="button"
-              onClick={() => void markAllRead()}
-              className="press ring-focus inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-line bg-paper px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-paper-sunken transition-colors"
-            >
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              Mark all read
-            </button>
-          )}
-        </div>
-      </div>
-
       {/* Body */}
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-[860px] px-6 py-6">
+        <div className="mx-auto max-w-[860px] px-6 pb-6 pt-8">
+          {/* Title row — in-flow, no chrome band */}
+          <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h1 className="text-[22px] font-semibold tracking-tight text-ink">
+                Inbox
+              </h1>
+              <p className="mt-0.5 text-[13px] text-ink-muted">
+                {unread.length} unread · updates from scheduled runs and the agent
+              </p>
+            </div>
+            {unread.length > 0 && (
+              <button
+                type="button"
+                onClick={() => void markAllRead()}
+                className="press ring-focus inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-line bg-paper px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-paper-sunken transition-colors"
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Mark all read
+              </button>
+            )}
+          </div>
+
           {/* Unread items */}
           <div className="flex flex-col gap-4">
             {inboxItems.length === 0 && (
