@@ -561,7 +561,7 @@ function ProcessPanel({
   } else {
     const bits: string[] = [];
     if (thoughtCount + narrationCount > 0) bits.push("Thought");
-    if (toolCount > 0) bits.push(`${toolCount} tool${toolCount === 1 ? "" : "s"}`);
+    if (toolCount > 0) bits.push(`${toolCount} step${toolCount === 1 ? "" : "s"}`);
     summary = bits.join(" · ") || "Process";
   }
 

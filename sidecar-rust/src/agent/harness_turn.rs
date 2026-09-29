@@ -258,6 +258,7 @@ impl NativeTool {
             return Err(shared.denied(&self.name, tc_id).await);
         }
 
+        let (running, finished) = step_labels(&self.name, &params);
         let mut stream = Box::pin(execute_tool(&self.name, params, &shared.chat_id));
         let mut result_txt = String::new();
         let mut result_ok = true;
@@ -276,10 +277,12 @@ impl NativeTool {
             };
             match evt.get("type").and_then(|v| v.as_str()).unwrap_or("") {
                 "activity" => {
+                    let done = evt.get("done").and_then(|v| v.as_bool()).unwrap_or(false);
+                    evt["label"] = json!(if done { &finished } else { &running });
                     shared.upsert_activity(json!({
                         "id": evt.get("id").cloned().unwrap_or(Value::Null),
-                        "label": evt.get("label").cloned().unwrap_or(Value::Null),
-                        "done": evt.get("done").and_then(|v| v.as_bool()).unwrap_or(false),
+                        "label": evt["label"].clone(),
+                        "done": done,
                     }));
                     shared.persist().await;
                     // Stamp the model's tool_use_id so the frontend can
@@ -383,17 +386,14 @@ impl GatedTool {
         self.inner.name().starts_with(crate::connectors::mcp::TOOL_PREFIX)
     }
 
-    /// UI label for activity frames: connector tools use their own label.
-    fn activity_label(&self, params: &Value) -> String {
+    /// Activity labels for this call: what it is doing while it runs, and
+    /// what it did once finished. Connector tools use their own title.
+    fn step_labels(&self, params: &Value) -> (String, String) {
         if self.is_connector() {
-            format!("Using {}", self.inner.label())
+            (format!("Using {}", self.inner.label()), format!("Used {}", self.inner.label()))
         } else {
-            activity_label(self.inner.name(), params)
+            step_labels(self.inner.name(), params)
         }
-    }
-
-    fn finished_label(&self) -> String {
-        format!("Finished {}", if self.is_connector() { self.inner.label() } else { self.inner.name() })
     }
 
     fn risk(&self, params: &Value) -> Risk {
@@ -414,7 +414,7 @@ impl GatedTool {
         }
 
         let activity_id = format!("tool_{}_{}", name, uuid::Uuid::new_v4().simple());
-        let label = self.activity_label(&params);
+        let (label, finished) = self.step_labels(&params);
         shared.upsert_activity(json!({ "id": activity_id, "label": label, "done": false }));
         shared.persist().await;
         shared
@@ -450,7 +450,6 @@ impl GatedTool {
             Ok(r) => (true, r.text_content()),
             Err(e) => (false, e.clone()),
         };
-        let finished = self.finished_label();
         shared.upsert_activity(json!({ "id": activity_id, "label": finished, "done": true }));
         shared.persist().await;
         shared
@@ -497,18 +496,108 @@ fn mcp_prompt_block(mcp: &crate::connectors::mcp::Toolset) -> String {
     out
 }
 
-fn activity_label(name: &str, params: &Value) -> String {
-    let arg = |k: &str| params.get(k).and_then(|v| v.as_str()).unwrap_or("");
+/// Plain-language step labels, (while running, once finished). The people
+/// reading these don't know what `bash` or `update_todos` means, so each
+/// says what happened in their terms: "Read expenses.csv", "Ran Python
+/// script clean.py", "Updated the plan".
+fn step_labels(name: &str, params: &Value) -> (String, String) {
+    let arg = |k: &str| params.get(k).and_then(|v| v.as_str()).unwrap_or("").trim();
+    let file = |k: &str| {
+        let path = arg(k);
+        std::path::Path::new(path).file_name().and_then(|f| f.to_str()).unwrap_or(path).to_string()
+    };
+    let pair = |doing: &str, done: &str, what: String| {
+        if what.is_empty() {
+            (doing.to_string(), done.to_string())
+        } else {
+            (format!("{doing} {what}"), format!("{done} {what}"))
+        }
+    };
     match name {
-        "bash" => format!("Running: {}", arg("command").lines().next().unwrap_or("").chars().take(80).collect::<String>()),
-        "read" => format!("Reading {}", arg("path")),
-        "write" => format!("Writing {}", arg("path")),
-        "edit" => format!("Editing {}", arg("path")),
-        "grep" => format!("Searching for {}", arg("pattern")),
-        "find" => format!("Finding {}", arg("pattern")),
-        "ls" => format!("Listing {}", if arg("path").is_empty() { "." } else { arg("path") }),
-        _ => format!("Running {name}"),
+        "read" => pair("Reading", "Read", file("path")),
+        "write" => pair("Writing", "Wrote", file("path")),
+        "edit" => pair("Editing", "Edited", file("path")),
+        "bash" => pair("Running", "Ran", command_summary(arg("command"))),
+        "grep" => pair("Searching files for", "Searched files for", quoted(arg("pattern"))),
+        "find" => pair("Looking for files matching", "Looked for files matching", quoted(arg("pattern"))),
+        "ls" => pair("Looking in", "Looked in", if arg("path").is_empty() { "the folder".into() } else { file("path") }),
+        "update_todos" => pair("Updating the plan", "Updated the plan", String::new()),
+        "web_search" => pair("Searching the web for", "Searched the web for", quoted(arg("query"))),
+        "browser_navigate" => pair("Opening", "Opened", arg("url").to_string()),
+        "extract_document" => pair("Reading", "Read", file("path")),
+        "spawn_agent" => pair("Handing off a subtask", "Handed off a subtask", String::new()),
+        "save_memory" => pair("Saving to memory", "Saved to memory", String::new()),
+        "read_skill" => pair("Loading a skill", "Loaded a skill", String::new()),
+        "ask_user" | "ask_question" | "ask_user_for_permission" => pair("Asking you", "Asked you", String::new()),
+        "manage_tasks" => pair("Updating tasks", "Updated tasks", String::new()),
+        "manage_events" => pair("Updating the calendar", "Updated the calendar", String::new()),
+        "manage_schedules" => pair("Setting up a schedule", "Set up a schedule", String::new()),
+        "post_to_inbox" => pair("Posting to your inbox", "Posted to your inbox", String::new()),
+        "get_stock_data" => pair("Looking up market data", "Looked up market data", String::new()),
+        "search_papers" => pair("Searching papers for", "Searched papers for", quoted(arg("query"))),
+        "review_paper" => pair("Reviewing the paper", "Reviewed the paper", String::new()),
+        "write_research_paper" => pair("Writing the paper", "Wrote the paper", String::new()),
+        "format_citation" => pair("Formatting citations", "Formatted citations", String::new()),
+        "check_novelty" => pair("Checking prior work", "Checked prior work", String::new()),
+        "deploy_web_app" => pair("Publishing the web app", "Published the web app", String::new()),
+        "send_telegram_message" => pair("Sending a Telegram message", "Sent a Telegram message", String::new()),
+        n if n.starts_with("browser_") => pair("Using the browser", "Used the browser", String::new()),
+        n if n.starts_with("desktop_") => pair("Using your computer", "Used your computer", String::new()),
+        // App actions arrive as `GMAIL_SEND_EMAIL`: "Using Gmail: send email".
+        n if n.contains('_') && !n.chars().any(|c| c.is_ascii_lowercase()) => {
+            let (app, action) = n.split_once('_').unwrap_or((n, ""));
+            let app = app.chars().next().map(|c| c.to_string()).unwrap_or_default() + &app[1..].to_lowercase();
+            let what = format!("{app}: {}", action.replace('_', " ").to_lowercase());
+            (format!("Using {what}"), format!("Used {what}"))
+        }
+        n => {
+            let words = n.replace('_', " ");
+            (format!("Running {words}"), format!("Ran {words}"))
+        }
     }
+}
+
+fn quoted(s: &str) -> String {
+    if s.is_empty() { String::new() } else { format!("\"{}\"", s.chars().take(60).collect::<String>()) }
+}
+
+/// The part of a shell command worth showing: leading `cd … &&` hops are
+/// dropped, and a script run reads as "Python script clean.py".
+fn command_summary(command: &str) -> String {
+    let line = command.lines().next().unwrap_or("");
+    let mut rest = line.trim();
+    while let Some(head) = rest.split("&&").next() {
+        let head = head.trim();
+        let hop = head.starts_with("cd ") || head.starts_with("source ") || head.starts_with("export ") || head.starts_with("mkdir ");
+        if !hop || !rest.contains("&&") {
+            break;
+        }
+        rest = rest.splitn(2, "&&").nth(1).unwrap_or("").trim();
+    }
+    let mut words = rest.split_whitespace().peekable();
+    if words.peek() == Some(&"uv") {
+        words.next();
+        if words.peek() == Some(&"run") {
+            words.next();
+        }
+    }
+    let program = words.peek().copied().unwrap_or("");
+    let lang = match program.rsplit('/').next().unwrap_or(program) {
+        p if p.starts_with("python") => Some("Python"),
+        "node" => Some("Node"),
+        _ => None,
+    };
+    if let Some(lang) = lang {
+        words.next();
+        return match words.find(|w| !w.starts_with('-')) {
+            Some(script) if !script.starts_with('<') && !command.contains("<<") => {
+                format!("{lang} script {}", script.rsplit('/').next().unwrap_or(script))
+            }
+            _ => format!("a {lang} snippet"),
+        };
+    }
+    let shown: String = rest.chars().take(60).collect();
+    if shown.is_empty() { "a command".into() } else { format!("a command: {shown}") }
 }
 
 impl AgentTool for GatedTool {
@@ -2329,6 +2418,22 @@ async fn resume_one_interrupted(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn step_labels_read_as_plain_language() {
+        let done = |name: &str, params: Value| step_labels(name, &params).1;
+        assert_eq!(done("read", json!({"path": "/w/Q3/expenses.csv"})), "Read expenses.csv");
+        assert_eq!(done("update_todos", json!({})), "Updated the plan");
+        assert_eq!(
+            done("bash", json!({"command": "cd /w/outputs && python3 clean.py --in x.csv"})),
+            "Ran Python script clean.py"
+        );
+        assert_eq!(done("bash", json!({"command": "python3 - <<'PY'\nprint(1)\nPY"})), "Ran a Python snippet");
+        assert_eq!(done("bash", json!({"command": "ls -la"})), "Ran a command: ls -la");
+        assert_eq!(done("browser_click", json!({})), "Used the browser");
+        assert_eq!(done("detect_hardware", json!({})), "Ran detect hardware");
+        assert_eq!(done("GMAIL_SEND_EMAIL", json!({})), "Used Gmail: send email");
+    }
 
     fn row(role: &str, content: &str) -> chatstore::ChatMessage {
         chatstore::ChatMessage {
