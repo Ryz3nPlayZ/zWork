@@ -67,21 +67,27 @@ impl AbortSignal {
 // Model
 // ---------------------------------------------------------------------------
 
-/// Wire protocol a model speaks. pi has more (responses, bedrock, gemini…);
-/// zWork ships the two its gateway fronts.
+/// Wire protocol a model speaks. Covers every protocol reachable with a plain
+/// API key; cloud-IAM protocols (Bedrock SigV4, Vertex ADC) are out of scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 pub enum Api {
     #[serde(rename = "openai-completions")]
     OpenAICompletions,
+    #[serde(rename = "openai-responses")]
+    OpenAIResponses,
     #[serde(rename = "anthropic-messages")]
     AnthropicMessages,
+    #[serde(rename = "google-generative-ai")]
+    GoogleGenerativeAI,
 }
 
 impl Api {
     pub fn as_str(&self) -> &'static str {
         match self {
             Api::OpenAICompletions => "openai-completions",
+            Api::OpenAIResponses => "openai-responses",
             Api::AnthropicMessages => "anthropic-messages",
+            Api::GoogleGenerativeAI => "google-generative-ai",
         }
     }
 }
