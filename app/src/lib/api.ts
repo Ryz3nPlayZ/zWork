@@ -94,6 +94,8 @@ export interface ApiChat {
   updated_at: number;
   model: string;
   messages: ApiMessage[];
+  /** True while a run is still writing this chat's reply. */
+  running?: boolean;
 }
 
 export interface ApiChatSummary {

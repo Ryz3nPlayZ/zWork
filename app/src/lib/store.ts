@@ -1902,6 +1902,10 @@ export const useApp = create<AppState>((set, get) => ({
           }
         }
         const fetchedProjectId = (full as any).project_id || null;
+        // A run that failed before its answer leaves a reply with no text;
+        // say so instead of showing a blank bubble.
+        const last = messages[messages.length - 1];
+        const unfinished = !full.running && last?.role === "assistant" && !last.content.trim();
         set((s) => ({
           activeProjectId: fetchedProjectId,
           view: "chat",
@@ -1917,6 +1921,7 @@ export const useApp = create<AppState>((set, get) => ({
               artifactPanelOpen: false,
               activeArtifactId: null,
               projectId: fetchedProjectId,
+              error: unfinished ? "This reply didn't finish. Send your message again to retry." : undefined,
             },
           },
         }));

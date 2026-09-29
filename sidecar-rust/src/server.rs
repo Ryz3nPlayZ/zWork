@@ -702,7 +702,13 @@ pub async fn create_chat(Json(req): Json<CreateChatRequest>) -> impl IntoRespons
 
 pub async fn get_chat(Path(chat_id): Path<String>) -> impl IntoResponse {
     match chatstore::get(&chat_id) {
-        Some(chat) => Json(json!(chat)),
+        Some(chat) => {
+            let mut body = json!(chat);
+            // Lets the app tell a reply still being written apart from one
+            // that ended without any text (a failed run).
+            body["running"] = json!(crate::agent::run_state::live_run(&chat_id).is_some());
+            Json(body)
+        }
         None => Json(json!({ "error": "Chat not found" })),
     }
 }
