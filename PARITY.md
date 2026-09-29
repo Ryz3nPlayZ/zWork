@@ -207,6 +207,34 @@ with M6 durable compaction (deferred is excluded from the port).
       implemented + typechecked in the uncommitted app/ tree) and the
       release decision (releases push to ALL users).
 
+## M8 — Ecosystem compatibility (pi + opencode + Claude Code + Codex) — ✅ done (2026-09-28..29)
+
+Anything a user already set up for another agent works in zWork unchanged.
+
+- ✅ Providers: models.dev catalog (223 providers, ab6bf1d) over four wire
+      adapters — OpenAI Completions, OpenAI Responses, Anthropic Messages,
+      Google Gemini (fe3eb91); Local credentials read Claude Code's
+      settings and honour `ANTHROPIC_MODEL` + `opus`/`sonnet`/`haiku` aliases
+- ✅ Tools: pi's coding set (bash/read/write/edit/grep/find/ls) as the only
+      file/shell tools (d89ba51); `web_fetch` (opencode webfetch parity,
+      22c840c); native document extraction — PDF incl. OCR, Office,
+      OpenDocument (27ab390)
+- ✅ MCP: persistent stdio / Streamable HTTP / legacy SSE sessions; every
+      config dialect (Claude, Cursor, VS Code, Windsurf, Gemini, opencode,
+      Codex TOML); one-click import (232925f, 895cd99). Composio stays the
+      managed connector layer (no OAuth apps to register)
+- ✅ Context files: `AGENTS.md` / `CLAUDE.md` — one global file (zWork,
+      opencode, pi, Claude Code, Codex) plus the root→cwd walk (0f8559d)
+- ✅ Skills: Agent Skills spec via `harness::skills`, loaded from zWork,
+      project (`.zwork` `.claude` `.agents` `.pi` `.opencode`) and the
+      global folders of Claude Code / Codex / opencode / pi (cd97c71)
+- ✅ Slash commands: markdown prompt files from zWork, project and
+      Claude Code / opencode / pi / Codex command folders, expanded with
+      `$1` `$@` `$ARGUMENTS` `${@:N}`; every skill is a `/command` too
+      (d86eb52)
+- ✅ Runtime: managed Python 3.12 + Node 22 installed on first launch so
+      skills scripts and `npx`/`uvx` MCP servers run on a stock Mac (0e9199c)
+
 ## Excluded (serve pi's TUI/multi-client architecture, not the agent)
 
 - ➖ `pico3/*` — experimental successor kernel; tracked, not ported
@@ -217,5 +245,6 @@ with M6 durable compaction (deferred is excluded from the port).
 - ➖ Deferred/background generation — OpenAI background mode unused here
 - ➖ Telemetry spans — mapped onto existing `agent.jsonl` traces
 - ➖ `legacy-v3` session migration — pi's own old format
-- ➖ Additional wire adapters (google-native, openai-responses, bedrock, …) —
-      zWork's matrix is OpenAI-compat + Anthropic (confirmed 2026-09-23)
+- ➖ Bedrock / Vertex SigV4-style auth adapters — reachable through their
+      OpenAI-compatible gateways instead (OpenAI Responses + Google Gemini
+      adapters landed in fe3eb91)
