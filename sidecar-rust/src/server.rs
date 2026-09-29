@@ -129,7 +129,7 @@ pub async fn desktop_status() -> impl IntoResponse {
             source: String::new(),
             error: "Desktop control is only available on macOS (it requires the \
                     CuaDriver accessibility daemon). On this platform, use the \
-                    browser_* tools or run_command instead."
+                    browser_* tools or bash instead."
                 .to_string(),
             wrong_identity_hint: None,
             zwork_self_trusted: None,

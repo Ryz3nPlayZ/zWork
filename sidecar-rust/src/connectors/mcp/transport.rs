@@ -213,13 +213,19 @@ impl Peer {
                 None => std::future::pending().await,
             }
         };
+        // Also covers the future being dropped (Stop aborts the whole turn).
+        let mut guard = CancelOnDrop { peer: self, id, reason: "cancelled" };
         let outcome = tokio::select! {
-            r = rx => return r.unwrap_or_else(|_| Err(RpcError::Transport("connection closed".into()))),
+            r = rx => {
+                guard.id = u64::MAX;
+                return r.unwrap_or_else(|_| Err(RpcError::Transport("connection closed".into())));
+            }
             _ = tokio::time::sleep(timeout) => RpcError::Timeout,
             _ = aborted => RpcError::Cancelled,
         };
-        self.shared.pending.lock().unwrap().remove(&id);
-        self.notify("notifications/cancelled", json!({ "requestId": id, "reason": outcome.to_string() }));
+        if matches!(outcome, RpcError::Timeout) {
+            guard.reason = "timeout";
+        }
         Err(outcome)
     }
 
@@ -229,6 +235,24 @@ impl Peer {
             msg["params"] = params;
         }
         let _ = self.shared.outbound.send(msg);
+    }
+}
+
+/// Withdraws an unanswered request: forgets its reply slot and tells the
+/// server to stop working on it. `id == u64::MAX` means it was answered.
+struct CancelOnDrop<'a> {
+    peer: &'a Peer,
+    id: u64,
+    reason: &'static str,
+}
+
+impl Drop for CancelOnDrop<'_> {
+    fn drop(&mut self) {
+        if self.id == u64::MAX {
+            return;
+        }
+        self.peer.shared.pending.lock().unwrap().remove(&self.id);
+        self.peer.notify("notifications/cancelled", json!({ "requestId": self.id, "reason": self.reason }));
     }
 }
 

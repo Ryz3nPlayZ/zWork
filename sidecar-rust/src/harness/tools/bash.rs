@@ -73,6 +73,20 @@ fn kill_process_group(pid: u32) {
     }
 }
 
+/// Kills the command's process group if the tool future is dropped mid-run
+/// (the user pressed Stop and the turn task was aborted). `kill_on_drop`
+/// only reaches `bash` itself, not the build/test processes it spawned.
+/// Disarmed once the command exits, so `nohup … &` servers survive.
+struct GroupGuard(Option<u32>);
+
+impl Drop for GroupGuard {
+    fn drop(&mut self) {
+        if let Some(pid) = self.0.take().filter(|p| *p != 0) {
+            kill_process_group(pid);
+        }
+    }
+}
+
 enum ExecOutcome {
     Exited(Option<i32>),
     Aborted,
@@ -199,6 +213,7 @@ impl AgentTool for BashTool {
             }
             let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn bash: {e}"))?;
             let pid = child.id().unwrap_or(0);
+            let mut guard = GroupGuard(Some(pid));
             let stdout = child.stdout.take();
             let stderr = child.stderr.take();
 
@@ -278,6 +293,7 @@ impl AgentTool for BashTool {
                     _ = timeout => { kill_process_group(pid); let _ = wait.await; ExecOutcome::TimedOut(timeout_secs.unwrap_or(0)) }
                 }
             };
+            guard.0 = None;
 
             let _ = h1.await;
             let _ = h2.await;
@@ -351,6 +367,20 @@ mod tests {
         });
         let err = tool.execute("2", json!({"command": "echo partial; sleep 5"}), Some(&signal), noop()).await.unwrap_err();
         assert_eq!(err, "partial\n\n\nCommand aborted");
+    }
+
+    #[tokio::test]
+    async fn dropping_the_run_kills_grandchildren() {
+        // Stop aborts the turn task, which drops this future mid-command.
+        let pidfile = std::env::temp_dir().join(format!("zwork-bash-drop-{}", std::process::id()));
+        let tool = BashTool::new(std::env::temp_dir());
+        let cmd = format!("sleep 30 & echo $! > {}; wait", pidfile.display());
+        let _ = tokio::time::timeout(Duration::from_millis(500), tool.execute("1", json!({"command": cmd}), None, noop())).await;
+        let pid: i32 = std::fs::read_to_string(&pidfile).unwrap().trim().parse().unwrap();
+        let _ = std::fs::remove_file(&pidfile);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let alive = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok();
+        assert!(!alive, "grandchild {pid} survived the dropped run");
     }
 
     #[tokio::test]

@@ -163,6 +163,55 @@ impl TurnShared {
             .await;
     }
 
+    /// The single permission gate for every tool: ask the user before a
+    /// destructive call. `true` = go ahead. A bash command the user already
+    /// approved this run (via `ask_user_for_permission`) skips the prompt.
+    async fn permission_gate(&self, tool: &str, risk: Risk, tc_id: &str, params: &Value) -> bool {
+        let Risk::Destructive { reason } = risk else {
+            return true;
+        };
+        let already_approved = tool == "bash"
+            && params.get("command").and_then(|v| v.as_str()).is_some_and(|c| is_command_approved(&self.chat_id, c));
+        if self.auto_approve || already_approved {
+            return true;
+        }
+        let (gate_id, gate_rx) = super::run_state::open_gate(&self.chat_id, tool, &reason, tc_id);
+        self.send(json!({
+            "type": "permission",
+            "tool": tool,
+            "reason": reason,
+            "blocked": true,
+            "gate_id": gate_id,
+            "tool_use_id": tc_id
+        }))
+        .await;
+        // Long safety timeout so an unanswered prompt (UI closed, SSE stream
+        // dropped) can't hang the loop forever; expiry auto-denies.
+        let outcome = tokio::time::timeout(GATE_TIMEOUT, gate_rx).await;
+        super::run_state::drop_gate(&gate_id);
+        match outcome {
+            Ok(Ok(approved)) => approved,
+            Ok(Err(_)) => false,
+            Err(_) => {
+                self.send(json!({
+                    "type": "status",
+                    "text": "Permission request timed out after 10 minutes and was auto-denied."
+                }))
+                .await;
+                false
+            }
+        }
+    }
+
+    /// Report a call the user declined; returns the error the model sees.
+    async fn denied(&self, tool: &str, tc_id: &str) -> String {
+        let msg = "Permission denied by user. Action aborted.".to_string();
+        self.send(json!({ "type": "tool_result", "tool": tool, "ok": false, "message": msg, "tool_use_id": tc_id }))
+            .await;
+        llm_trace(&self.chat_id, self.turn(), "tool_result", json!({ "name": tool, "ok": false, "len": msg.len(), "preview": msg, "denied": true }));
+        msg
+    }
+
     fn upsert_activity(&self, entry: Value) {
         let mut acts = self.activities.lock_unpoisoned();
         let id = entry.get("id").cloned().unwrap_or(Value::Null);
@@ -178,17 +227,17 @@ impl TurnShared {
 // Legacy tool adapter
 // ---------------------------------------------------------------------------
 
-/// A zWork tool (from `tools::get_tool_schemas` / Composio / MCP) exposed to
-/// the harness. Execution goes through `tools::execute_tool`; permission
-/// gating and event forwarding match the legacy loop exactly.
-struct LegacyTool {
+/// One of zWork's own tools (desktop, browser, research, tasks, memory, …)
+/// or a Composio app action, dispatched through `tools::execute_tool`, whose
+/// activity/tool_result frames are forwarded stamped with the tool-call id.
+struct NativeTool {
     name: String,
     description: String,
     parameters: Value,
     shared: Arc<TurnShared>,
 }
 
-impl LegacyTool {
+impl NativeTool {
     fn from_schema(schema: &Value, shared: Arc<TurnShared>) -> Option<Self> {
         let name = schema.get("name")?.as_str()?.to_string();
         let description = schema.get("description").and_then(|d| d.as_str()).unwrap_or("").to_string();
@@ -200,76 +249,13 @@ impl LegacyTool {
         Some(Self { name, description, parameters, shared })
     }
 
-    /// Ask the user before a destructive action. `Ok(true)` = go ahead.
-    async fn permission_gate(&self, tc_id: &str, params: &Value) -> bool {
-        let shared = &self.shared;
-        let Risk::Destructive { reason } = evaluate_tool_risk(&self.name, params) else {
-            return true;
-        };
-        // A command the user already approved this run (via
-        // ask_user_for_permission) skips the gate entirely.
-        let already_approved = self.name == "run_command"
-            && params
-                .get("command")
-                .and_then(|v| v.as_str())
-                .map(|c| is_command_approved(&shared.chat_id, c))
-                .unwrap_or(false);
-        if shared.auto_approve || already_approved {
-            return true;
-        }
-        let (gate_id, gate_rx) = super::run_state::open_gate(&shared.chat_id, &self.name, &reason, tc_id);
-        shared
-            .send(json!({
-                "type": "permission",
-                "tool": self.name,
-                "reason": reason,
-                "blocked": true,
-                "gate_id": gate_id,
-                "tool_use_id": tc_id
-            }))
-            .await;
-        // Long safety timeout so an unanswered prompt (UI closed, SSE stream
-        // dropped) can't hang the loop forever; expiry auto-denies.
-        let outcome = tokio::time::timeout(GATE_TIMEOUT, gate_rx).await;
-        super::run_state::drop_gate(&gate_id);
-        match outcome {
-            Ok(Ok(approved)) => approved,
-            Ok(Err(_)) => false,
-            Err(_) => {
-                shared
-                    .send(json!({
-                        "type": "status",
-                        "text": "Permission request timed out after 10 minutes and was auto-denied."
-                    }))
-                    .await;
-                false
-            }
-        }
-    }
-
     async fn run(&self, tc_id: &str, params: Value, signal: Option<&AbortSignal>) -> Result<AgentToolResult, String> {
         let shared = self.shared.clone();
         let turn = shared.turn();
         llm_trace(&shared.chat_id, turn, "tool_dispatch", json!({ "id": tc_id, "name": self.name, "input": params }));
 
-        if !self.permission_gate(tc_id, &params).await {
-            let msg = "Permission denied by user. Action aborted.".to_string();
-            shared
-                .send(json!({
-                    "type": "tool_result",
-                    "tool": self.name,
-                    "ok": false,
-                    "message": msg,
-                    "tool_use_id": tc_id
-                }))
-                .await;
-            llm_trace(
-                &shared.chat_id,
-                turn,
-                "tool_result",
-                json!({ "name": self.name, "ok": false, "len": msg.len(), "preview": msg, "denied": true }),
-            );
-            return Err(msg);
+        if !shared.permission_gate(&self.name, evaluate_tool_risk(&self.name, &params), tc_id, &params).await {
+            return Err(shared.denied(&self.name, tc_id).await);
         }
 
         let mut stream = Box::pin(execute_tool(&self.name, params, &shared.chat_id));
@@ -345,7 +331,7 @@ impl LegacyTool {
     }
 }
 
-impl AgentTool for LegacyTool {
+impl AgentTool for NativeTool {
     fn name(&self) -> &str {
         &self.name
     }
@@ -370,70 +356,11 @@ impl AgentTool for LegacyTool {
 // pi core tools (read/bash/edit/write/grep/find/ls) with zWork gating
 // ---------------------------------------------------------------------------
 
-/// Legacy tools superseded by pi's core tools. Filtered out of the menu so
-/// the model sees exactly one way to touch files and the shell.
-const SUPERSEDED_LEGACY_TOOLS: &[&str] =
-    &["read_file", "write_file", "replace_file_content", "run_command", "grep_search", "list_dir"];
-
-/// Legacy → pi tool names, applied to the system prompt so its workflow
-/// guidance references the tools the model actually has.
-const TOOL_RENAMES: &[(&str, &str)] = &[
-    ("replace_file_content", "edit"),
-    ("run_command", "bash"),
-    ("write_file", "write"),
-    ("read_file", "read"),
-    ("grep_search", "grep"),
-    ("list_dir", "ls"),
-];
-
-/// Rewrite the legacy tool references in `prompt` for the pi toolset. The
-/// per-tool signature lines are replaced wholesale (their parameters differ);
-/// everything else is a plain name swap.
-fn rewrite_prompt_for_pi_tools(prompt: &str) -> String {
-    const LEGACY_LINES: &[&str] = &[
-        "- `read_file(path)` — read a text file. Always inspect existing code before editing.",
-        "- `replace_file_content(path, target_content, replacement_content, start_line?, end_line?)` — replace a target substring in a file. Preferred for edits.",
-        "- `grep_search(query, path?, is_regex?, case_insensitive?)` — search recursively for query or regex in files. Excludes build/dependency dirs.",
-        "- `list_dir(path)` — list immediate contents of a directory.",
-        "- `write_file(path, content)` — create or overwrite a file with the ENTIRE contents. Parent dirs auto-created.",
-        "- `run_command(command, cwd?, background?)` — run shell. Set `background=true` for servers; foreground has 180s timeout.",
-    ];
-    const PI_LINES: &str = "\
-- `read(path, offset?, limit?)` — read a file (text, or an image the model can see). Always inspect existing code before editing. Long files are truncated; use offset/limit to page.
-- `edit(path, oldText, newText)` — replace an exact, unique text span in a file. Preferred for targeted edits; `oldText` must match exactly once.
-- `grep(pattern, path?, glob?, ignoreCase?, literal?, context?, limit?)` — regex search across files (honours .gitignore).
-- `find(pattern, path?, limit?)` — find files by glob pattern (e.g. `**/*.rs`), honours .gitignore.
-- `ls(path?, limit?)` — list a directory's contents.
-- `write(path, content)` — create or overwrite a file with the ENTIRE contents. Parent dirs auto-created.
-- `bash(command, timeout?)` — run a shell command in the workspace; stdout+stderr are returned (tail-truncated, full output saved to a temp file). Long-lived servers: redirect output and background them (`nohup cmd > server.log 2>&1 &`) or use `deploy_web_app`.";
-    let mut out = prompt.to_string();
-    let mut first = true;
-    for line in LEGACY_LINES {
-        if out.contains(line) {
-            out = out.replace(line, if first { PI_LINES } else { "" });
-            first = false;
-        }
-    }
-    // Collapse the blank lines left by the removed signature lines.
-    while out.contains("\n\n\n") {
-        out = out.replace("\n\n\n", "\n\n");
-    }
-    out = out.replace(
-        "start it in the background with `run_command(..., background=true)` OR `deploy_web_app(...)`",
-        "start it in the background with `bash` (`nohup cmd > server.log 2>&1 &`) OR `deploy_web_app(...)`",
-    );
-    out = out.replace("read_file, list_dir, read_skill", "read, ls, grep, find, read_skill");
-    out = out.replace("foreground has 180s timeout", "pass `timeout` for long commands");
-    for (from, to) in TOOL_RENAMES {
-        out = out.replace(from, to);
-    }
-    out
-}
-
-/// A pi core tool run through zWork's permission gate and event plumbing:
+/// A harness [`AgentTool`] (pi core tool or MCP connector tool) run through
+/// zWork's permission gate and event plumbing:
 /// `activity` start/finish frames, streamed bash output as `status` lines,
 /// and a `tool_result` frame, all stamped with the tool-call id.
-struct GatedPiTool {
+struct GatedTool {
     inner: DynTool,
     shared: Arc<TurnShared>,
     /// Ask before every call, with this reason (connector tools that the
@@ -441,15 +368,15 @@ struct GatedPiTool {
     confirm: Option<String>,
 }
 
-impl GatedPiTool {
+impl GatedTool {
     fn new(inner: DynTool, shared: &Arc<TurnShared>) -> Self {
-        GatedPiTool { inner, shared: shared.clone(), confirm: None }
+        GatedTool { inner, shared: shared.clone(), confirm: None }
     }
 
     fn connector(tool: Arc<crate::connectors::mcp::McpTool>, shared: &Arc<TurnShared>) -> Self {
         let effect = if tool.destructive { "can delete or overwrite data" } else { "can make changes" };
         let confirm = (!tool.read_only).then(|| format!("{} {effect} in {}", tool.title, tool.server));
-        GatedPiTool { inner: tool, shared: shared.clone(), confirm }
+        GatedTool { inner: tool, shared: shared.clone(), confirm }
     }
 
     fn is_connector(&self) -> bool {
@@ -469,57 +396,10 @@ impl GatedPiTool {
         format!("Finished {}", if self.is_connector() { self.inner.label() } else { self.inner.name() })
     }
 
-    /// Map a pi tool call onto the legacy risk evaluator's vocabulary.
     fn risk(&self, params: &Value) -> Risk {
-        match self.inner.name() {
-            "bash" => evaluate_tool_risk("run_command", &json!({ "command": params.get("command").cloned().unwrap_or(Value::Null) })),
-            "write" | "edit" => evaluate_tool_risk("write_file", &json!({ "path": params.get("path").cloned().unwrap_or(Value::Null) })),
-            _ => match &self.confirm {
-                Some(reason) => Risk::Destructive { reason: reason.clone() },
-                None => Risk::Safe,
-            },
-        }
-    }
-
-    async fn permission_gate(&self, tc_id: &str, params: &Value) -> bool {
-        let shared = &self.shared;
-        let Risk::Destructive { reason } = self.risk(params) else {
-            return true;
-        };
-        let already_approved = self.inner.name() == "bash"
-            && params
-                .get("command")
-                .and_then(|v| v.as_str())
-                .map(|c| is_command_approved(&shared.chat_id, c))
-                .unwrap_or(false);
-        if shared.auto_approve || already_approved {
-            return true;
-        }
-        let (gate_id, gate_rx) = super::run_state::open_gate(&shared.chat_id, self.inner.name(), &reason, tc_id);
-        shared
-            .send(json!({
-                "type": "permission",
-                "tool": self.inner.name(),
-                "reason": reason,
-                "blocked": true,
-                "gate_id": gate_id,
-                "tool_use_id": tc_id
-            }))
-            .await;
-        let outcome = tokio::time::timeout(GATE_TIMEOUT, gate_rx).await;
-        super::run_state::drop_gate(&gate_id);
-        match outcome {
-            Ok(Ok(approved)) => approved,
-            Ok(Err(_)) => false,
-            Err(_) => {
-                shared
-                    .send(json!({
-                        "type": "status",
-                        "text": "Permission request timed out after 10 minutes and was auto-denied."
-                    }))
-                    .await;
-                false
-            }
+        match &self.confirm {
+            Some(reason) => Risk::Destructive { reason: reason.clone() },
+            None => evaluate_tool_risk(self.inner.name(), params),
         }
     }
 
@@ -529,13 +409,8 @@ impl GatedPiTool {
         let turn = shared.turn();
         llm_trace(&shared.chat_id, turn, "tool_dispatch", json!({ "id": tc_id, "name": name, "input": params }));
 
-        if !self.permission_gate(tc_id, &params).await {
-            let msg = "Permission denied by user. Action aborted.".to_string();
-            shared
-                .send(json!({ "type": "tool_result", "tool": name, "ok": false, "message": msg, "tool_use_id": tc_id }))
-                .await;
-            llm_trace(&shared.chat_id, turn, "tool_result", json!({ "name": name, "ok": false, "len": msg.len(), "preview": msg, "denied": true }));
-            return Err(msg);
+        if !shared.permission_gate(&name, self.risk(&params), tc_id, &params).await {
+            return Err(shared.denied(&name, tc_id).await);
         }
 
         let activity_id = format!("tool_{}_{}", name, uuid::Uuid::new_v4().simple());
@@ -546,7 +421,7 @@ impl GatedPiTool {
             .send(json!({ "type": "activity", "id": activity_id, "label": label, "done": false, "tool_use_id": tc_id }))
             .await;
 
-        // Stream bash output as `status` lines, the way run_command did:
+        // Stream bash output as `status` lines:
         // each update carries the full accumulated output, so only the
         // newly completed lines are forwarded.
         let tx = shared.tx.clone();
@@ -636,7 +511,7 @@ fn activity_label(name: &str, params: &Value) -> String {
     }
 }
 
-impl AgentTool for GatedPiTool {
+impl AgentTool for GatedTool {
     fn name(&self) -> &str {
         self.inner.name()
     }
@@ -1581,7 +1456,7 @@ pub fn run_agent_turn(
             include_academic,
             &connected_apps_block,
         );
-        let system_prompt = rewrite_prompt_for_pi_tools(&system_prompt) + &mcp_prompt_block(&mcp);
+        let system_prompt = system_prompt + &mcp_prompt_block(&mcp);
         let browser_connected = crate::browser_bridge::extension_connected().await;
         let system_prompt = format!(
             "{system_prompt}\n\n## Live environment status\n{}",
@@ -1671,13 +1546,9 @@ pub fn run_agent_turn(
         // ── Tools ───────────────────────────────────────────────────────
         let mut schemas = get_tool_schemas(plan_mode);
         schemas.extend(composio_schemas);
-        schemas.retain(|s| {
-            let name = s.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            !SUPERSEDED_LEGACY_TOOLS.contains(&name)
-        });
         let mut tools: Vec<DynTool> = schemas
             .iter()
-            .filter_map(|s| LegacyTool::from_schema(s, shared.clone()))
+            .filter_map(|s| NativeTool::from_schema(s, shared.clone()))
             .map(|t| Arc::new(t) as DynTool)
             .collect();
         // pi core tools. Plan mode keeps only the read-only ones.
@@ -1689,14 +1560,14 @@ pub fn run_agent_turn(
             if plan_mode && matches!(tool.name(), "bash" | "write" | "edit") {
                 continue;
             }
-            tools.push(Arc::new(GatedPiTool::new(tool, &shared)) as DynTool);
+            tools.push(Arc::new(GatedTool::new(tool, &shared)) as DynTool);
         }
         // Connector tools. Plan mode keeps the ones the server marks read-only.
         for tool in mcp.tools {
             if plan_mode && !tool.read_only {
                 continue;
             }
-            tools.push(Arc::new(GatedPiTool::connector(tool, &shared)) as DynTool);
+            tools.push(Arc::new(GatedTool::connector(tool, &shared)) as DynTool);
         }
         // Stable name-sort so the tool list (and thus the tool-order
         // sensitive prompt-cache prefix) doesn't reshuffle across turns.
@@ -1798,12 +1669,7 @@ impl AgentTool for SubagentPiTool {
         _on_update: AgentToolUpdateCallback,
     ) -> ToolFuture<'a> {
         let tool_name = self.inner.name().to_string();
-        let risk = match tool_name.as_str() {
-            "bash" => evaluate_tool_risk("run_command", &json!({ "command": params.get("command").cloned().unwrap_or(Value::Null) })),
-            "write" | "edit" => evaluate_tool_risk("write_file", &json!({ "path": params.get("path").cloned().unwrap_or(Value::Null) })),
-            _ => Risk::Safe,
-        };
-        if let Risk::Destructive { reason } = risk {
+        if let Risk::Destructive { reason } = evaluate_tool_risk(&tool_name, &params) {
             return Box::pin(async move {
                 Err(format!(
                     "Denied: {reason}. Sub-agents cannot take destructive actions — report what needs doing and let the parent agent ask the user."
@@ -2354,14 +2220,10 @@ async fn resume_one_interrupted(
     // state already carries which tools each step planned).
     let mut schemas = get_tool_schemas(false);
     schemas.extend(crate::connectors::composio::all_tool_schemas().await);
-    schemas.retain(|schema| {
-        let name = schema.get("name").and_then(|v| v.as_str()).unwrap_or("");
-        !SUPERSEDED_LEGACY_TOOLS.contains(&name)
-    });
     let cwd = read_str("turn.cwd").unwrap_or_else(|| ".".into());
     let mut tools: Vec<DynTool> = schemas
         .iter()
-        .filter_map(|schema| LegacyTool::from_schema(schema, shared.clone()))
+        .filter_map(|schema| NativeTool::from_schema(schema, shared.clone()))
         .map(|t| Arc::new(t) as DynTool)
         .collect();
     let supports_images: crate::harness::tools::SupportsImagesFn = {
@@ -2369,10 +2231,10 @@ async fn resume_one_interrupted(
         Arc::new(move || has_image)
     };
     for tool in crate::harness::tools::create_coding_tools(std::path::Path::new(&cwd), Some(supports_images)) {
-        tools.push(Arc::new(GatedPiTool::new(tool, &shared)) as DynTool);
+        tools.push(Arc::new(GatedTool::new(tool, &shared)) as DynTool);
     }
     for tool in crate::connectors::mcp::toolset().await.tools {
-        tools.push(Arc::new(GatedPiTool::connector(tool, &shared)) as DynTool);
+        tools.push(Arc::new(GatedTool::connector(tool, &shared)) as DynTool);
     }
     tools.sort_by(|a, b| a.name().cmp(b.name()));
 
@@ -2498,22 +2360,6 @@ mod tests {
         let out = blocks_to_user_content(&blocks);
         assert_eq!(out.len(), 2);
         assert!(matches!(&out[1], UserContent::Image(i) if i.mime_type == "image/jpeg" && i.data == "QUJD"));
-    }
-
-    #[test]
-    fn prompt_rewrite_swaps_tool_names_and_signatures() {
-        let prompt = "- `read_file(path)` — read a text file. Always inspect existing code before editing.\n\
-- `list_dir(path)` — list immediate contents of a directory.\n\
-Use `grep_search` to locate, `read_file` to read, then `write_file` or `replace_file_content`. Use `run_command` for shell.\n\
-Only read-only tools are available: read_file, list_dir, read_skill, extract_document, web_search.";
-        let out = rewrite_prompt_for_pi_tools(prompt);
-        for legacy in SUPERSEDED_LEGACY_TOOLS {
-            assert!(!out.contains(legacy), "{legacy} still referenced in:\n{out}");
-        }
-        assert!(out.contains("- `bash(command, timeout?)`"));
-        assert!(out.contains("Use `grep` to locate, `read` to read, then `write` or `edit`. Use `bash` for shell."));
-        assert!(out.contains("read, ls, grep, find, read_skill"));
-        assert!(!out.contains("\n\n\n"));
     }
 
     #[test]

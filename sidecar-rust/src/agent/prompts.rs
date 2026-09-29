@@ -49,7 +49,7 @@ pub fn build_user_content(text: &str, attachments: &[crate::server::Attachment])
             }
         } else {
             // For non-image attachments, include a reference block. The agent
-            // can use read_file or extract_document to access the contents.
+            // can use read or extract_document to access the contents.
             blocks.push(json!({
                 "type": "text",
                 "text": format!("[Attached file: {} (path: {}, mime: {})]", att.name, att.path, mime)

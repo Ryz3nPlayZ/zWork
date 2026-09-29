@@ -5,8 +5,6 @@ use futures_util::stream::Stream;
 use futures_util::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 
-pub mod fs;
-pub mod shell;
 pub mod search;
 pub mod doc_extract;
 pub mod stock;
@@ -20,7 +18,7 @@ pub enum Risk {
 
 pub fn evaluate_tool_risk(name: &str, params: &Value) -> Risk {
     match name {
-        "run_command" => {
+        "bash" => {
             let cmd = params.get("command").and_then(|v| v.as_str()).unwrap_or("");
             if targets_zwork_backend(cmd) {
                 Risk::Destructive {
@@ -44,7 +42,7 @@ pub fn evaluate_tool_risk(name: &str, params: &Value) -> Risk {
                 }
             }
         }
-        "write_file" => {
+        "write" | "edit" => {
             let path = params.get("path").and_then(|v| v.as_str()).unwrap_or("");
             // Writing to settings or credentials directly can be risky
             if path.contains("settings.json") || path.contains("secrets.json") {
@@ -150,41 +148,6 @@ fn redirect_overwrites_outside(cmd: &str, cwd: Option<&str>) -> bool {
 
 pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
     let mut schemas = vec![
-        json!({
-            "name": "read_file",
-            "description": "Read and return the UTF-8 contents of a file. Use this to inspect files before editing.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "Relative or absolute file path" }
-                },
-                "required": ["path"]
-            }
-        }),
-        json!({
-            "name": "list_dir",
-            "description": "List immediate children of a directory.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "Directory path (default: '.')" }
-                }
-            }
-        }),
-        json!({
-            "name": "grep_search",
-            "description": "Search recursively inside a directory for matching queries. Returns paths, line numbers, and matching line content.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": { "type": "string", "description": "The query string or regex pattern to search for" },
-                    "path": { "type": "string", "description": "Search directory path (default: '.')" },
-                    "is_regex": { "type": "boolean", "description": "Treat query as regex (default: false)" },
-                    "case_insensitive": { "type": "boolean", "description": "Perform case-insensitive search (default: false)" }
-                },
-                "required": ["query"]
-            }
-        }),
         json!({
             "name": "web_search",
             "description": "Search the web/news for current information without opening a browser.",
@@ -344,47 +307,6 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
     if !plan_mode {
         // Add modifying / executing tools
         schemas.push(json!({
-            "name": "write_file",
-            "description": "Write entire contents to a file. Overwrites existing files.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "File path" },
-                    "content": { "type": "string", "description": "Full content" }
-                },
-                "required": ["path", "content"]
-            }
-        }));
-        schemas.push(json!({
-            "name": "replace_file_content",
-            "description": "Replace a target substring in a file with a replacement substring. Use start_line and end_line if the target content matches multiple lines in the file.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "Relative or absolute file path" },
-                    "target_content": { "type": "string", "description": "The exact string block to replace" },
-                    "replacement_content": { "type": "string", "description": "The new string block to replace the target block with" },
-                    "start_line": { "type": "integer", "description": "Optional 1-based starting line range" },
-                    "end_line": { "type": "integer", "description": "Optional 1-based ending line range" }
-                },
-                "required": ["path", "target_content", "replacement_content"]
-            }
-        }));
-        schemas.push(json!({
-            "name": "run_command",
-            "description": "Run a shell command. Set background=true to detach servers. Set timeout (seconds, default 180, 0=unbounded) for long-running commands.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "command": { "type": "string", "description": "Shell command to run" },
-                    "cwd": { "type": "string", "description": "Directory context" },
-                    "background": { "type": "boolean", "description": "Run in background" },
-                    "timeout": { "type": "integer", "description": "Max seconds before the command is killed. Default 180. Use 0 for no timeout (servers, watchers)." }
-                },
-                "required": ["command"]
-            }
-        }));
-        schemas.push(json!({
             "name": "save_memory",
             "description": "Save a fact to the agent's persistent memory. Use target='user' for facts about the user (preferences, style, goals, habits, job, family, constraints) and target='memory' for everything else (project facts, conventions, deadlines, things learned). Use target='task' ONLY inside a scheduled-task run to save findings for future runs of that task.",
             "parameters": {
@@ -424,7 +346,7 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
         // accessibility tree; it has no Windows/Linux build. Advertising these
         // tools on other platforms made the model attempt them, fail to find
         // the driver, and burn turn after turn retrying. Gate the whole toolset
-        // to macOS so the model routes to run_command / browser_* elsewhere.
+        // to macOS so the model routes to bash / browser_* elsewhere.
         // (`desktop_office`, below, is platform-independent document editing.)
         if cfg!(target_os = "macos") {
             schemas.push(json!({
@@ -746,12 +668,6 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
     // use; the env var is never set outside the benchmark driver.
     if std::env::var("ZWORK_CODING_ONLY").is_ok() {
         const CODING_ALLOWLIST: &[&str] = &[
-            "read_file",
-            "list_dir",
-            "grep_search",
-            "write_file",
-            "replace_file_content",
-            "run_command",
             "web_search",
             "update_todos",
             "save_memory",
@@ -789,12 +705,6 @@ pub fn execute_tool(
         })).await;
         
         let result = match name.as_str() {
-            "read_file" => fs::execute_read_file(&params).await,
-            "write_file" => fs::execute_write_file(&params).await,
-            "replace_file_content" => fs::execute_replace_file_content(&params).await,
-            "grep_search" => fs::execute_grep_search(&params).await,
-            "list_dir" => fs::execute_list_dir(&params).await,
-            "run_command" => shell::execute_run_command(&params, &chat_id, &tx).await,
             "web_search" => search::execute_web_search(&params).await,
             "search_papers" => {
                 let query = params.get("query").and_then(|v| v.as_str()).unwrap_or("");
@@ -1641,14 +1551,14 @@ mod tests {
 
     fn gated(cmd: &str) -> bool {
         matches!(
-            evaluate_tool_risk("run_command", &json!({ "command": cmd })),
+            evaluate_tool_risk("bash", &json!({ "command": cmd })),
             Risk::Destructive { .. }
         )
     }
 
     fn gated_with_cwd(cmd: &str, cwd: &str) -> bool {
         matches!(
-            evaluate_tool_risk("run_command", &json!({ "command": cmd, "cwd": cwd })),
+            evaluate_tool_risk("bash", &json!({ "command": cmd, "cwd": cwd })),
             Risk::Destructive { .. }
         )
     }
