@@ -504,7 +504,7 @@ fn step_labels(name: &str, params: &Value) -> (String, String) {
     let arg = |k: &str| params.get(k).and_then(|v| v.as_str()).unwrap_or("").trim();
     let file = |k: &str| {
         let path = arg(k);
-        std::path::Path::new(path).file_name().and_then(|f| f.to_str()).unwrap_or(path).to_string()
+        readable_name(std::path::Path::new(path).file_name().and_then(|f| f.to_str()).unwrap_or(path))
     };
     let pair = |doing: &str, done: &str, what: String| {
         if what.is_empty() {
@@ -561,6 +561,14 @@ fn quoted(s: &str) -> String {
     if s.is_empty() { String::new() } else { format!("\"{}\"", s.chars().take(60).collect::<String>()) }
 }
 
+/// Drops the 32-hex id the uploads folder prefixes to attached files, so
+/// "a1b2…_expenses.csv" reads as the name the user gave it.
+fn readable_name(text: &str) -> String {
+    static UPLOAD_ID: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"\b[0-9a-f]{32}_").unwrap());
+    UPLOAD_ID.replace_all(text, "").into_owned()
+}
+
 /// The part of a shell command worth showing: leading `cd … &&` hops are
 /// dropped, and a script run reads as "Python script clean.py".
 fn command_summary(command: &str) -> String {
@@ -589,14 +597,21 @@ fn command_summary(command: &str) -> String {
     };
     if let Some(lang) = lang {
         words.next();
-        return match words.find(|w| !w.starts_with('-')) {
-            Some(script) if !script.starts_with('<') && !command.contains("<<") => {
-                format!("{lang} script {}", script.rsplit('/').next().unwrap_or(script))
-            }
-            _ => format!("a {lang} snippet"),
+        // `python3 script.py`, not `python3 -c "…"` or a heredoc.
+        let script = words.next().filter(|w| {
+            let ext = w.rsplit('.').next().unwrap_or("");
+            w.contains('.') && matches!(ext, "py" | "js" | "mjs" | "cjs" | "ts")
+        });
+        return match script {
+            Some(script) => format!("{lang} script {}", readable_name(script.rsplit('/').next().unwrap_or(script))),
+            None => format!("a {lang} snippet"),
         };
     }
-    let shown: String = rest.chars().take(60).collect();
+    let rest = readable_name(rest);
+    let mut shown: String = rest.chars().take(60).collect();
+    if shown.len() < rest.len() {
+        shown.push('…');
+    }
     if shown.is_empty() { "a command".into() } else { format!("a command: {shown}") }
 }
 
@@ -2423,6 +2438,11 @@ mod tests {
     fn step_labels_read_as_plain_language() {
         let done = |name: &str, params: Value| step_labels(name, &params).1;
         assert_eq!(done("read", json!({"path": "/w/Q3/expenses.csv"})), "Read expenses.csv");
+        assert_eq!(
+            done("read", json!({"path": "/w/uploads/db46d6782aba41aa854191eb82966f1a_expenses.csv"})),
+            "Read expenses.csv"
+        );
+        assert_eq!(done("bash", json!({"command": "python3 -c \"import pandas\""})), "Ran a Python snippet");
         assert_eq!(done("update_todos", json!({})), "Updated the plan");
         assert_eq!(
             done("bash", json!({"command": "cd /w/outputs && python3 clean.py --in x.csv"})),
