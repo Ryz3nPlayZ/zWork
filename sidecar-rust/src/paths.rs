@@ -224,7 +224,8 @@ pub fn is_safe_id(id_str: &str) -> bool {
     id_str.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
-/// Give the process the user's real `PATH`.
+/// Give the process the user's real `PATH`, plus zWork's managed runtime
+/// (see [`crate::runtime`]).
 ///
 /// An app launched from Finder or the Dock inherits launchd's minimal
 /// `/usr/bin:/bin:/usr/sbin:/sbin`, so `npx`/`uvx` MCP servers and the CLIs
@@ -241,7 +242,10 @@ pub fn hydrate_path() {
     // launchd default needs the (slow-ish) login-shell round trip.
     let minimal = current.split(':').all(|d| matches!(d, "" | "/usr/bin" | "/bin" | "/usr/sbin" | "/sbin"));
     let shell_path = if minimal { login_shell_path() } else { None };
-    let mut dirs: Vec<String> = shell_path.map(|p| p.split(':').map(str::to_string).collect()).unwrap_or_default();
+    let (ahead, behind) = crate::runtime::path_dirs();
+    let as_strings = |v: Vec<PathBuf>| v.into_iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>();
+    let mut dirs: Vec<String> = as_strings(ahead);
+    dirs.extend(shell_path.map(|p| p.split(':').map(str::to_string).collect::<Vec<_>>()).unwrap_or_default());
     dirs.extend(current.split(':').map(str::to_string));
     if let Some(home) = dirs::home_dir() {
         for rel in [".local/bin", ".cargo/bin", ".bun/bin", ".volta/bin", ".deno/bin", "go/bin"] {
@@ -249,14 +253,20 @@ pub fn hydrate_path() {
         }
     }
     dirs.extend(["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"].map(String::from));
+    dirs.extend(as_strings(behind));
 
     let mut seen = std::collections::HashSet::new();
     let merged: Vec<String> = dirs.into_iter().filter(|d| !d.is_empty() && seen.insert(d.clone())).collect();
     let merged = merged.join(":");
+    // SAFETY: called at the top of `main`, before the runtime spawns worker
+    // threads that could read the environment concurrently.
     if merged != current {
-        // SAFETY: called at the top of `main`, before the runtime spawns
-        // worker threads that could read the environment concurrently.
         unsafe { env::set_var("PATH", merged) };
+    }
+    for (key, value) in crate::runtime::process_env() {
+        if env::var_os(key).is_none() {
+            unsafe { env::set_var(key, value) };
+        }
     }
 }
 

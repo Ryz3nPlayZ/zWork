@@ -114,6 +114,7 @@ mod telegram;
 mod connectors;
 mod deploy;
 mod office;
+mod runtime;
 
 fn main() {
     // Before the runtime starts threads: `set_var` is only sound while the
@@ -222,6 +223,7 @@ async fn run() {
         .route("/api/user-md", get(server::get_user_md).put(server::put_user_md))
         .route("/api/telemetry/event", post(server::telemetry_event))
         .route("/api/activity-logs", get(server::activity_logs))
+        .route("/api/runtime", get(server::runtime_status).post(server::runtime_install))
         .route("/api/mcp/servers", get(server::mcp_servers).post(server::mcp_add))
         .route("/api/mcp/servers/:name", delete(server::mcp_remove))
         .route("/api/mcp/servers/:name/enabled", post(server::mcp_set_enabled))
@@ -292,6 +294,10 @@ async fn run() {
     // background (the embedded snapshot covers offline and first launch).
     harness::providers::catalog::set_cache_path(paths::home_dir().join("cache").join("models.json"));
     tokio::spawn(harness::providers::catalog::refresh_if_stale());
+
+    // Python + Node for office files, skills and `npx`/`uvx` connectors;
+    // a no-op once installed.
+    runtime::ensure_in_background();
 
     // MCP connectors: start configured servers now so the first turn does
     // not wait on `npx` cold starts.

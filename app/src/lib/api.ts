@@ -175,6 +175,14 @@ export interface ProvidersResponse {
 
 export type McpServerState = "connected" | "connecting" | "error" | "idle" | "disabled";
 
+/** State of the managed runtime (`/api/runtime`). */
+export type RuntimeStatus =
+  | { state: "missing" }
+  | { state: "installing"; step: string }
+  | { state: "ready"; python: string; node: string }
+  | { state: "failed"; error: string }
+  | { state: "unsupported" };
+
 /** An MCP connector as served by `/api/mcp/servers`. */
 export interface McpServer {
   name: string;
@@ -794,6 +802,12 @@ export const api = {
     localFetch(`/api/providers/catalog/${encodeURIComponent(id)}`).then((r) =>
       j<{ id: string; name: string; models: CatalogModel[] }>(r),
     ),
+
+  /** zWork's managed Python + Node (installed on first launch). */
+  runtimeStatus: () => localFetch("/api/runtime").then((r) => j<{ status: RuntimeStatus; dir: string }>(r)),
+
+  runtimeInstall: () =>
+    localFetch("/api/runtime", { method: "POST" }).then((r) => j<{ status: RuntimeStatus }>(r)),
 
   mcpServers: () =>
     localFetch("/api/mcp/servers").then((r) => j<{ servers: McpServer[]; config_path: string }>(r)),

@@ -56,7 +56,7 @@ import {
   type PromptTemplate,
 } from "../lib/templates";
 import { IconButton } from "./IconButton";
-import { api, IS_WEB, type CatalogModel, type CatalogProvider, type Integration } from "../lib/api";
+import { api, IS_WEB, type CatalogModel, type CatalogProvider, type Integration, type RuntimeStatus } from "../lib/api";
 import { KeybindRecorder } from "./KeybindRecorder";
 
 type Section = "account" | "appearance" | "general" | "memory" | "models" | "integrations";
@@ -1562,6 +1562,8 @@ function GeneralPanel({
         </div>
       </section>
 
+      {!IS_WEB && <RuntimeSection />}
+
       {/* Default model */}
       <section className="rounded-xl border border-line bg-paper-raised p-4">
         <Field label="Default model" description="Used when starting a new chat.">
@@ -2039,5 +2041,94 @@ function Field({
         <p className="mt-1.5 text-[11.5px] text-ink-muted">{description}</p>
       )}
     </div>
+  );
+}
+
+/** Python + Node that zWork installs for itself, so office files, skills and
+ *  `npx` / `uvx` connectors work without the user installing developer tools. */
+function RuntimeSection() {
+  const [status, setStatus] = useState<RuntimeStatus | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      try {
+        const r = await api.runtimeStatus();
+        if (cancelled) return;
+        setStatus(r.status);
+        if (r.status.state === "installing") timer = setTimeout(poll, 1500);
+      } catch {
+        /* sidecar restarting — the next open of Settings re-polls */
+      }
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
+
+  if (!status || status.state === "unsupported") return null;
+
+  const retry = async () => {
+    const r = await api.runtimeInstall().catch(() => null);
+    if (r) setStatus(r.status);
+    // Pick up progress from here.
+    const tick = async () => {
+      const s = await api.runtimeStatus().catch(() => null);
+      if (!s) return;
+      setStatus(s.status);
+      if (s.status.state === "installing") setTimeout(tick, 1500);
+    };
+    setTimeout(tick, 800);
+  };
+
+  let detail: string;
+  switch (status.state) {
+    case "ready":
+      detail = `Python ${status.python} with document and data libraries, Node ${status.node}.`;
+      break;
+    case "installing":
+      detail = `${status.step}…`;
+      break;
+    case "failed":
+      detail = status.error;
+      break;
+    default:
+      detail = "Not installed yet.";
+  }
+
+  return (
+    <section className="rounded-xl border border-line bg-paper-raised p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="text-[13px] font-medium text-ink flex items-center gap-2">
+            Built-in tools
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                status.state === "ready"
+                  ? "bg-emerald-500"
+                  : status.state === "failed"
+                    ? "bg-red-500"
+                    : "bg-amber-500 animate-pulse"
+              }`}
+            />
+          </div>
+          <div className="mt-0.5 text-[12px] text-ink-muted">
+            What zWork uses to create Word, Excel, PowerPoint and PDF files and to run connectors.{" "}
+            <span className={status.state === "failed" ? "text-red-500" : undefined}>{detail}</span>
+          </div>
+        </div>
+        {(status.state === "failed" || status.state === "missing") && (
+          <button
+            onClick={retry}
+            className="ring-focus shrink-0 rounded-lg border border-line px-3 py-1.5 text-[12.5px] font-medium text-ink hover:bg-paper-sunken transition-colors"
+          >
+            {status.state === "failed" ? "Retry" : "Install"}
+          </button>
+        )}
+      </div>
+    </section>
   );
 }

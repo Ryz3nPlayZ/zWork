@@ -334,7 +334,7 @@ All tools below are available every turn — pick the right one for the job rath
 
 **Desktop automation:** Use `desktop_*` tools to drive native apps. `desktop_capture` first to see current state, then act on coordinates from that capture. Re-capture after any state change before the next action.
 
-**Research & data:** Use `search_papers` / `format_citation` for academic work, `extract_document` for PDFs/DOCX/XLSX, `get_stock_data` for market data. Don't hand-write citations or parse documents in prose when these tools exist.
+{runtime_block}**Research & data:** Use `search_papers` / `format_citation` for academic work, `extract_document` for PDFs/DOCX/XLSX, `get_stock_data` for market data. Don't hand-write citations or parse documents in prose when these tools exist.
 
 ## Skills
 
@@ -898,7 +898,25 @@ pub fn build_system_prompt(
         .replace("{skills_list}", skills_list)
         .replace("{skill_example_slug}", example_slug)
         .replace("{tools_list_block}", &tools_list_block)
+        .replace("{runtime_block}", runtime_block())
         .replace("{tool_priority_block}", &tool_priority_block)
         .replace("{desktop_browser_behavior_block}", &desktop_browser_behavior_block)
         .replace("{connected_apps_block}", connected_apps_block)
+}
+
+/// What the managed runtime (crate::runtime) puts on PATH, once it's there.
+fn runtime_block() -> &'static str {
+    match crate::runtime::status() {
+        crate::runtime::Status::Ready { .. } => {
+            "**Making files:** `python3` comes with python-docx, openpyxl, xlsxwriter, python-pptx, fpdf2, reportlab, \
+             pypdf, pdfplumber, pandas, matplotlib, pillow, beautifulsoup4 and requests. To produce a real Word, Excel, \
+             PowerPoint or PDF file or a chart, write a script and run it with `bash` — don't hand the user text to paste. \
+             Use `uv pip install --python python3 <pkg>` for anything else. `node`, `npm` and `npx` are available too.\n\n"
+        }
+        crate::runtime::Status::Installing { .. } => {
+            "**Making files:** zWork is still installing its Python and Node tools in the background; if `python3` lacks a \
+             library or `node` is missing, say so and use what's available rather than asking the user to install anything.\n\n"
+        }
+        _ => "",
+    }
 }

@@ -31,6 +31,7 @@ pdf-extract = "0.12.1"
 calamine = "0.36.1"
 zip = "8.6.0"
 quick-xml = "0.41"
+sha2 = "0.11.0"
 
 # NOTE: no security-framework here, deliberately. The binary must not be able
 # to touch the macOS Keychain at all — see src/secretstore.rs for why, and do

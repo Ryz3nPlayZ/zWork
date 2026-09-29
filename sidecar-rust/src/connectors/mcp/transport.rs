@@ -442,6 +442,19 @@ fn spawn_error(command: &str, err: &std::io::Error) -> String {
         return format!("could not start `{command}`: {err}");
     }
     let bin = std::path::Path::new(command).file_name().and_then(|n| n.to_str()).unwrap_or(command);
+    // zWork installs these itself (crate::runtime); say so instead of
+    // sending the user off to install developer tools.
+    if matches!(bin, "npx" | "node" | "npm" | "uvx" | "uv" | "python" | "python3" | "pip") {
+        match crate::runtime::status() {
+            crate::runtime::Status::Installing { step } => {
+                return format!("zWork is still setting up `{bin}` ({step}) — this connector will start when it's done");
+            }
+            crate::runtime::Status::Failed { error } => {
+                return format!("`{bin}` isn't available because zWork's tool setup failed ({error}). Retry it in Settings.");
+            }
+            _ => {}
+        }
+    }
     let hint = match bin {
         "npx" | "node" | "npm" | "pnpm" => " — install Node.js from https://nodejs.org",
         "uvx" | "uv" => " — install uv from https://docs.astral.sh/uv/",

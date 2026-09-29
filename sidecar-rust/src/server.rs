@@ -2503,6 +2503,17 @@ pub async fn delete_inbox_item(Path(item_id): Path<String>) -> impl IntoResponse
 // Connector management over `connectors::mcp`: list/add/remove/toggle servers
 // in ~/.zwork/mcp.json, retry a connection, and import from other apps.
 
+/// Managed runtime (Python + Node) status for Settings.
+pub async fn runtime_status() -> impl IntoResponse {
+    Json(json!({ "status": crate::runtime::status(), "dir": crate::runtime::dir() }))
+}
+
+/// Start (or retry) the managed runtime install.
+pub async fn runtime_install() -> impl IntoResponse {
+    crate::runtime::ensure_in_background();
+    Json(json!({ "status": crate::runtime::status() }))
+}
+
 pub async fn mcp_servers() -> impl IntoResponse {
     let config_path = crate::connectors::mcp::config::config_path();
     let servers = crate::connectors::mcp::status().await;

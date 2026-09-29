@@ -277,6 +277,16 @@ pub async fn status() -> Vec<ServerStatus> {
     out
 }
 
+/// Reconnect every enabled server whose last attempt failed — e.g. once the
+/// managed runtime has installed the `npx` / `uvx` it was missing.
+pub async fn retry_failed() {
+    let failed: Vec<ServerSpec> = config::load()
+        .into_iter()
+        .filter(|s| s.enabled && slot(&s.name).failure.lock().unwrap().is_some())
+        .collect();
+    futures_util::future::join_all(failed.iter().map(|s| ensure(s, true))).await;
+}
+
 /// Connect one server now, ignoring backoff (the UI's "Retry"/"Connect").
 pub async fn connect(name: &str) -> Result<(), String> {
     let spec = config::load().into_iter().find(|s| s.name == name).ok_or_else(|| format!("no connector named `{name}`"))?;
