@@ -19,12 +19,11 @@ const IS_TAURI =
     !!(window as any).__TAURI__ ||
     (window.location && window.location.protocol === "tauri:"));
 
-/** True when running as a web app (not Tauri, not vite dev server). */
+/** True when running as a web app (not Tauri, not a local vite dev server on any port). */
 export const IS_WEB =
   typeof window !== "undefined" &&
   !IS_TAURI &&
-  window.location.origin !== "http://localhost:1420" &&
-  window.location.origin !== "http://127.0.0.1:1420";
+  !["localhost", "127.0.0.1"].includes(window.location.hostname);
 
 const APP_VERSION = packageJson.version ?? "unknown";
 
@@ -560,6 +559,25 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ at_message_id: atMessageId, before }),
     }).then((r) => j<{ success: boolean; chat: any; error?: string }>(r)),
+
+  /** Opens a file the agent made in the user's own app, or shows it in the folder. */
+  openFile: async (path: string, reveal = false) => {
+    const r = await localFetch("/api/files/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, reveal }),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.error || "Couldn't open the file.");
+    return body as { ok: boolean; path: string; revealed: boolean };
+  },
+
+  statFiles: (paths: string[]) =>
+    localFetch("/api/files/stat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paths }),
+    }).then((r) => j<{ existing: string[] }>(r)),
 
   listBranches: (chatId: string) =>
     localFetch(`/api/chats/${chatId}/branches`).then((r) =>

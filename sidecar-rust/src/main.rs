@@ -120,6 +120,7 @@ mod connectors;
 mod deploy;
 mod office;
 mod runtime;
+mod fileopen;
 
 fn main() {
     // Before the runtime starts threads: `set_var` is only sound while the
@@ -257,6 +258,8 @@ async fn run() {
         )
         .route("/api/uploads", get(server::list_uploads).post(server::upload_files))
         .route("/api/uploads/:filename", get(server::get_upload))
+        .route("/api/files/open", post(fileopen::open_file))
+        .route("/api/files/stat", post(fileopen::stat_files))
         .route("/api/screenshot", post(server::screenshot))
         .route("/api/run-python", post(server::run_python))
         .route("/api/telegram/send", post(server::telegram_send))

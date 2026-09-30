@@ -6,12 +6,14 @@ export default defineConfig({
   plugins: [react()],
   clearScreen: false,
   server: {
-    port: 1420,
+    // ZWORK_VITE_PORT / ZWORK_PORT let a second browser-dev copy run beside
+    // an open zWork app, which holds 1420/8787.
+    port: Number(process.env.ZWORK_VITE_PORT) || 1420,
     strictPort: true,
     host: "127.0.0.1",
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:8787",
+        target: `http://127.0.0.1:${process.env.ZWORK_PORT || 8787}`,
         changeOrigin: true,
         // Browser dev against a sidecar started with the same
         // ZWORK_SIDECAR_TOKEN (the Tauri host injects it in the app).

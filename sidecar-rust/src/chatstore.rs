@@ -303,6 +303,23 @@ pub fn content_to_text(v: &Value) -> String {
     }
 }
 
+/// The provisional title for a chat: its first line, cut at a word
+/// boundary. The agent replaces it with a model-written one shortly after.
+pub fn auto_title(text: &str) -> String {
+    const MAX: usize = 60;
+    let first_line = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    // Count chars, not bytes, so emoji/CJK first lines don't panic.
+    if first_line.chars().count() <= MAX {
+        return first_line.to_string();
+    }
+    let cut: String = first_line.chars().take(MAX).collect();
+    let cut = match cut.rfind(char::is_whitespace) {
+        Some(i) if i > MAX / 2 => &cut[..i],
+        _ => cut.as_str(),
+    };
+    format!("{}…", cut.trim_end_matches(|c: char| c.is_whitespace() || c == ',' || c == '.'))
+}
+
 pub fn append_message(chat_id: &str, role: &str, content: Value) -> Option<ChatMessage> {
     let mut c = get(chat_id)?;
     let msg = ChatMessage {
@@ -322,10 +339,7 @@ pub fn append_message(chat_id: &str, role: &str, content: Value) -> Option<ChatM
     if c.title == "New chat" && role == "user" {
         let txt = content_to_text(&content);
         if !txt.is_empty() {
-            let first_line = txt.lines().next().unwrap_or("").trim();
-            // Slice on char boundaries so multi-byte (emoji/CJK) first lines
-            // don't panic the backend mid-turn.
-            let title: String = first_line.chars().take(64).collect();
+            let title = auto_title(&txt);
             if !title.is_empty() {
                 c.title = title;
             }
@@ -598,6 +612,16 @@ mod tests {
     /// Env is process-global and tests run in parallel: serialize the
     /// env-mutating tests (see the convention note in harness_turn tests).
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn auto_title_cuts_at_a_word() {
+        assert_eq!(auto_title("\n  Clean up my Q3 expenses\nmore"), "Clean up my Q3 expenses");
+        let long = "Please go through the Q3 expenses export and flag every duplicate charge you find";
+        let t = auto_title(long);
+        assert!(t.ends_with('…') && t.chars().count() <= 61, "{t}");
+        assert!(long.starts_with(t.trim_end_matches('…')));
+        assert_eq!(auto_title(&"日本語".repeat(40)).chars().count(), 61);
+    }
 
     fn usage(input: u64, output: u64) -> Usage {
         Usage {

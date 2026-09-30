@@ -1310,13 +1310,62 @@ fn build_model(r: &Resolved, model_id: &str) -> Model {
 
 /// One-shot completion on the user's default model — for side features
 /// (refactor, paper pipeline) that need text back, not an agent run.
-pub async fn complete_text(system: &str, prompt: &str, max_tokens: u64) -> Result<String, String> {
-    let s = settings::load();
-    let model_id = if s.default_model.is_empty() { "zwork-flash" } else { s.default_model.as_str() };
-    let resolved = resolve_model(model_id, &s);
-    if !resolved.configured {
-        return Err("No model credentials configured. Add an API key in Settings.".into());
+/// Names a new chat from its first message ("Q3 expenses cleanup") in the
+/// background, so the sidebar doesn't show the prompt cut off mid-sentence.
+/// Keeps the first-line title if the model is unavailable.
+fn spawn_title(chat_id: String, model_id: String, first_message: String, tx: mpsc::Sender<Value>) {
+    tokio::spawn(async move {
+        let prompt: String = first_message.chars().take(2000).collect();
+        // Bounded: this task holds the turn's event stream open until it ends.
+        // Generous token cap: reasoning models spend some before answering.
+        let call = complete_text_on(Some(&model_id), TITLE_PROMPT, &prompt, 400);
+        let Ok(Ok(raw)) = tokio::time::timeout(std::time::Duration::from_secs(20), call).await else { return };
+        let Some(title) = clean_title(&raw) else { return };
+        // The user may have renamed it while we waited.
+        let Some(chat) = chatstore::get(&chat_id) else { return };
+        if chat.title != chatstore::auto_title(&first_message) {
+            return;
+        }
+        if chatstore::rename(&chat_id, &title).is_some() {
+            let _ = tx.send(json!({ "type": "chat", "id": chat_id, "title": title })).await;
+        }
+    });
+}
+
+const TITLE_PROMPT: &str = "Write a short title (2 to 6 words) for a conversation that starts with the user's message below. \
+Plain words, sentence case, no quotes, no trailing punctuation, no emoji. Reply with the title only.";
+
+fn clean_title(raw: &str) -> Option<String> {
+    let line = raw.lines().map(str::trim).find(|l| !l.is_empty())?;
+    let line = line
+        .trim_start_matches(|c: char| c == '#' || c == '*' || c.is_whitespace())
+        .trim_start_matches("Title:")
+        .trim()
+        .trim_matches(|c: char| matches!(c, '"' | '\'' | '`' | '*' | '“' | '”' | '.'))
+        .trim();
+    if line.is_empty() || line.chars().count() > 60 {
+        return None;
     }
+    Some(line.to_string())
+}
+
+pub async fn complete_text(system: &str, prompt: &str, max_tokens: u64) -> Result<String, String> {
+    complete_text_on(None, system, prompt, max_tokens).await
+}
+
+/// `complete_text` on `preferred` when it has credentials, else the default
+/// model, else the first model the user has a key for — so side features
+/// work for BYOK users whose default is still the (unconfigured) router.
+async fn complete_text_on(preferred: Option<&str>, system: &str, prompt: &str, max_tokens: u64) -> Result<String, String> {
+    let s = settings::load();
+    let default = if s.default_model.is_empty() { "zwork-flash" } else { s.default_model.as_str() };
+    let resolved = preferred
+        .into_iter()
+        .chain([default])
+        .chain(s.custom_models.iter().map(|m| m.id.as_str()))
+        .map(|id| resolve_model(id, &s))
+        .find(|r| r.configured)
+        .ok_or_else(|| "No model credentials configured. Add an API key in Settings.".to_string())?;
     let model = build_model(&resolved, &resolved.real_model_id);
     let context = crate::harness::transcript::normalize_context(Some(system), None, vec![Message::user_text(prompt)]);
     let options = crate::harness::types::StreamOptions {
@@ -1485,6 +1534,10 @@ pub fn run_agent_turn(
             }
         }
         let _ = tx.send(json!({ "type": "chat", "id": chat.id, "title": chat.title })).await;
+        let first_message = !is_dup && chat.messages.iter().filter(|m| m.role == "user").count() == 1;
+        if first_message && !user_message.trim().is_empty() {
+            spawn_title(chat.id.clone(), model_id.clone(), user_message.clone(), tx.clone());
+        }
 
         // ── Credentials / model ─────────────────────────────────────────
         let resolved = resolve_model(&model_id, &s);
@@ -2432,6 +2485,15 @@ async fn resume_one_interrupted(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn titles_are_cleaned_or_rejected() {
+        use super::clean_title;
+        assert_eq!(clean_title("\"Q3 expenses cleanup.\"\n").as_deref(), Some("Q3 expenses cleanup"));
+        assert_eq!(clean_title("## Title: Weekly report").as_deref(), Some("Weekly report"));
+        assert_eq!(clean_title("   \n"), None);
+        assert_eq!(clean_title(&"word ".repeat(30)), None);
+    }
+
     use super::*;
 
     #[test]

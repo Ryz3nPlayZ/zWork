@@ -42,6 +42,7 @@ import { Logo } from "./Logo";
 import { IconButton } from "./IconButton";
 import type { Message as Msg } from "../lib/store";
 import { api } from "../lib/api";
+import { FileChip, looksLikeFile, useFileCheck } from "./FileChip";
 
 function formatTime(ts: number): string {
   if (!ts) return "";
@@ -264,6 +265,12 @@ function AssistantMarkdown({
   content: string;
   onOpenPanel?: (code: string, lang: string) => void;
 }) {
+  // Inline `path/to/file.xlsx` spans that exist on disk render as file chips.
+  const candidates = useMemo(
+    () => Array.from(new Set(Array.from(content.matchAll(/`([^`\n]+)`/g), (m) => m[1].trim()).filter(looksLikeFile))),
+    [content],
+  );
+  const isFile = useFileCheck(candidates);
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkMath]}
@@ -282,6 +289,9 @@ function AssistantMarkdown({
                 onOpenPanel={onOpenPanel}
               />
             );
+          }
+          if (looksLikeFile(codeStr) && isFile(codeStr)) {
+            return <FileChip path={codeStr} />;
           }
           // Inline code
           return (

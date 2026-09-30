@@ -2507,6 +2507,17 @@ export const useApp = create<AppState>((set, get) => ({
               // A brand-new chat just got its real id — tell the other window
               // so its sidebar picks it up.
               void emitChatListChanged();
+            } else if (evt.title && evt.title !== "New chat" && get().chats[evt.id]?.title !== evt.title) {
+              // The backend named the chat from its first message.
+              const title = evt.title;
+              set((s) => {
+                const c = s.chats[evt.id];
+                return {
+                  chats: c ? { ...s.chats, [evt.id]: { ...c, title } } : s.chats,
+                  chatSummaries: s.chatSummaries.map((x) => (x.id === evt.id ? { ...x, title } : x)),
+                };
+              });
+              void emitChatListChanged();
             }
           } else if (evt.type === "status") {
             set((s) => {

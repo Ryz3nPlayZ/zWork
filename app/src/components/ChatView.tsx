@@ -90,6 +90,21 @@ export function ChatView() {
     }
   };
   const exportRef = useRef<HTMLDivElement>(null);
+  const branchRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!branchOpen) return;
+    const close = (e: MouseEvent) => {
+      if (!branchRef.current?.contains(e.target as Node)) setBranchOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setBranchOpen(false); };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [branchOpen]);
 
   useEffect(() => {
     if (!exportOpen) return;
@@ -272,21 +287,21 @@ export function ChatView() {
                 </span>
               );
             })()}
-            <div className="relative">
+            <div ref={branchRef} className="relative">
               <button
                 type="button"
                 onClick={openBranchPicker}
                 className="press inline-flex items-center gap-1 rounded-md border border-line bg-paper px-2 py-1 text-[11px] font-medium text-ink hover:bg-paper-sunken"
-                title="Rewind history — parked branches"
+                title="Earlier versions of this chat"
               >
                 <GitBranch className="h-3 w-3" />
                 <span>Branches</span>
               </button>
               {branchOpen && (
-                <div className="absolute top-[calc(100%+4px)] right-0 z-40 w-[280px] animate-fade-in rounded-lg border border-line bg-paper p-1 shadow-pop">
+                <div className="absolute top-[calc(100%+4px)] right-0 z-40 w-[280px] animate-fade-in whitespace-normal rounded-lg border border-line bg-paper p-1 shadow-pop">
                   {branches.length === 0 && (
                     <div className="px-2.5 py-2 text-[12px] text-ink-faint">
-                      No parked branches. Editing a sent message rewinds the chat and parks the dropped tail here.
+                      Nothing here yet. When you edit a message you already sent, the replies that came after it are kept here so you can bring them back.
                     </div>
                   )}
                   {branches.map((b) => (
@@ -298,7 +313,7 @@ export function ChatView() {
                           await restoreBranch(b.id);
                         }}
                         className="min-w-0 flex-1 text-left"
-                        title="Restore this branch as the active tail"
+                        title="Bring this version back"
                       >
                         <div className="truncate text-[12px] font-medium text-ink">
                           {b.message_count} message{b.message_count === 1 ? "" : "s"} — {b.preview || "(empty)"}
@@ -312,7 +327,7 @@ export function ChatView() {
                           deleteBranch(b.id);
                         }}
                         className="press rounded p-1 text-ink-faint hover:text-error"
-                        title="Discard this branch"
+                        title="Delete this version"
                       >
                         <X className="h-3 w-3" />
                       </button>
