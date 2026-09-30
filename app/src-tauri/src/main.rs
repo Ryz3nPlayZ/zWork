@@ -218,6 +218,14 @@ fn start_packaged_backend(app: &tauri::AppHandle) -> Option<BackendChild> {
         .env("PYTHONIOENCODING", "utf-8")
         .env("ZWORK_HOME", zwork_sidecar_home().display().to_string());
 
+    // `tauri dev` serves the webview from Vite, not tauri://localhost, so the
+    // sidecar's CORS allowlist has to admit that origin too. Release builds
+    // never set this.
+    #[cfg(debug_assertions)]
+    {
+        sidecar = sidecar.env("ZWORK_DEV_ORIGIN", "http://127.0.0.1:1420");
+    }
+
     // The agent works from its workspace. A Finder launch inherits `/`, which
     // the backend already settles, but a Windows or Linux launch inherits the
     // install folder, which it can't tell apart from a folder the user chose.

@@ -59,8 +59,11 @@ fn cors_layer() -> CorsLayer {
     // the extension (chrome-extension:// origin) reach us: modern Chrome
     // blocks cross-context requests to private/loopback addresses (Private
     // Network Access) unless the preflight echoes this header back.
+    // ZWORK_DEV_ORIGIN is set only by a debug (`tauri dev`) host, whose
+    // webview is served by Vite.
+    let dev_origin = std::env::var("ZWORK_DEV_ORIGIN").ok().filter(|o| !o.is_empty());
     CorsLayer::new()
-        .allow_origin(AllowOrigin::predicate(|origin: &HeaderValue, _| {
+        .allow_origin(AllowOrigin::predicate(move |origin: &HeaderValue, _| {
             let Ok(origin) = origin.to_str() else {
                 return false;
             };
@@ -68,6 +71,7 @@ fn cors_layer() -> CorsLayer {
                 origin,
                 "tauri://localhost" | "http://tauri.localhost" | "https://tauri.localhost"
             ) || origin.starts_with("chrome-extension://")
+                || dev_origin.as_deref() == Some(origin)
         }))
         .allow_methods([
             Method::GET,
