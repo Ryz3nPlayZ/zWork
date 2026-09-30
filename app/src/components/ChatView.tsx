@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Pencil, Check, X, AlertCircle, Settings as SettingsIcon, RefreshCcw, Download, ChevronDown, ArrowLeft, NotebookPen, GitBranch } from "lucide-react";
+import { Pencil, Check, X, AlertCircle, Settings as SettingsIcon, RefreshCcw, Download, ChevronDown, ArrowLeft, NotebookPen, History } from "lucide-react";
 import { useApp } from "../lib/store";
 import { api } from "../lib/api";
 import { ChatInput } from "./ChatInput";
@@ -22,9 +22,6 @@ function chatUsageSummary(messages: { usage?: { input: number; output: number; t
   return has ? sum : null;
 }
 
-function formatTokens(n: number): string {
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
-}
 import { isMacOS, usesIntegratedTitleBar } from "../lib/platform";
 import { downloadChatJson, downloadChatMarkdown } from "../lib/chatExport";
 import { cn } from "../lib/cn";
@@ -269,21 +266,17 @@ export function ChatView() {
             )}
           </div>
           <div className="flex shrink-0 items-center gap-2 whitespace-nowrap" data-no-drag>
-            {!chat.artifactPanelOpen && (
-              <span className="text-[11px] text-ink-faint font-mono mr-1">
-                {chat.messages.length} msgs
-              </span>
-            )}
             {(() => {
+              // Only a cost means anything to a non-developer; token counts
+              // stay in the tooltip.
               const u = chatUsageSummary(chat.messages);
-              if (!u || chat.artifactPanelOpen) return null;
-              const cost = u.costUsd > 0 ? ` · $${u.costUsd.toFixed(u.costUsd < 1 ? 3 : 2)}` : "";
+              if (!u || u.costUsd <= 0 || chat.artifactPanelOpen) return null;
               return (
                 <span
-                  className="text-[11px] text-ink-faint font-mono mr-1"
-                  title={`${u.input.toLocaleString()} tokens in / ${u.output.toLocaleString()} out${cost}`}
+                  className="text-[11px] text-ink-faint tabular-nums mr-1"
+                  title={`${u.input.toLocaleString()} tokens in / ${u.output.toLocaleString()} out`}
                 >
-                  · {formatTokens(u.input + u.output)} tok{cost}
+                  ${u.costUsd.toFixed(u.costUsd < 1 ? 3 : 2)} used
                 </span>
               );
             })()}
@@ -294,8 +287,8 @@ export function ChatView() {
                 className="press inline-flex items-center gap-1 rounded-md border border-line bg-paper px-2 py-1 text-[11px] font-medium text-ink hover:bg-paper-sunken"
                 title="Earlier versions of this chat"
               >
-                <GitBranch className="h-3 w-3" />
-                <span>Branches</span>
+                <History className="h-3 w-3" />
+                <span>Versions</span>
               </button>
               {branchOpen && (
                 <div className="absolute top-[calc(100%+4px)] right-0 z-40 w-[280px] animate-fade-in whitespace-normal rounded-lg border border-line bg-paper p-1 shadow-pop">
@@ -384,7 +377,7 @@ export function ChatView() {
             {planMode && (
               <div className="flex items-center gap-2 rounded-xl border border-accent/20 bg-accent/5 px-3 py-2 text-[12px] text-ink-muted">
                 <NotebookPen className="h-3.5 w-3.5 shrink-0 text-accent" />
-                <span>Plan mode is active — zWork will plan and investigate without making changes. Toggle it in the security preset picker below.</span>
+                <span>Plan first is on — zWork will look into it and suggest a plan without changing anything. Switch it in the menu below the message box.</span>
               </div>
             )}
             <ConcurrentWorkBanner />

@@ -100,22 +100,22 @@ const PRESET_META: Record<
   ask: {
     icon: <Hand className="h-4 w-4" />,
     label: "Ask before changes",
-    description: "Ask before file changes.",
+    description: "Checks with you before changing anything.",
   },
   edit: {
     icon: <ShieldCheck className="h-4 w-4" />,
     label: "Edit automatically",
-    description: "Edit files automatically.",
+    description: "Changes files without asking first.",
   },
   plan: {
     icon: <NotebookPen className="h-4 w-4" />,
-    label: "Plan mode",
-    description: "Plan before editing.",
+    label: "Plan first",
+    description: "Suggests a plan and changes nothing.",
   },
   full: {
     icon: <ShieldAlert className="h-4 w-4" />,
     label: "Full access",
-    description: "Run with fewer confirmations.",
+    description: "Fewest check-ins. Use with care.",
   },
 };
 
@@ -1334,7 +1334,7 @@ export function ChatInput({
             />
             <IconButton
               icon={<FileText className="h-4 w-4" />}
-              label={artifactMode ? "Artifact: on" : "Artifact"}
+              label={artifactMode ? "Make a document: on" : "Make a document"}
               tooltipSide="top"
               variant="ghost"
               size="md"
@@ -1382,7 +1382,7 @@ export function ChatInput({
           )}
           <OverlayToolItem
             icon={<FileText className="h-4 w-4" />}
-            label={artifactMode ? "Artifact: on" : "Artifact"}
+            label={artifactMode ? "Make a document: on" : "Make a document"}
             active={artifactMode}
             onClick={() => setArtifactMode((v) => !v)}
           />

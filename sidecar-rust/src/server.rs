@@ -495,7 +495,7 @@ pub async fn get_providers() -> impl IntoResponse {
             synthesized_cc = Some(serde_json::json!({
                 "id": "__claude_code__",
                 "name": name,
-                "subtitle": format!("via {}", cc.as_ref().unwrap().base_url),
+                "subtitle": "Your Claude Code sign-in",
                 "shape": "anthropic",
                 "credential": "claude_code",
                 "model_id": if cc_model.is_empty() { "(default)".to_string() } else { cc_model },

@@ -93,7 +93,7 @@ export function InboxPage() {
                 Inbox
               </h1>
               <p className="mt-0.5 text-[13px] text-ink-muted">
-                {unread.length} unread · updates from scheduled runs and the agent
+                {unread.length} unread · results from scheduled tasks, and anything zWork wants you to see
               </p>
             </div>
             {unread.length > 0 && (
@@ -117,8 +117,8 @@ export function InboxPage() {
                   All clear
                 </h3>
                 <p className="mx-auto mt-1 max-w-[280px] text-[12.5px] text-ink-muted">
-                  Nothing waiting for you. Scheduled-task results and agent
-                  flags will appear here.
+                  Nothing waiting for you. When a scheduled task finishes or
+                  zWork needs your attention, it shows up here.
                 </p>
               </div>
             )}
