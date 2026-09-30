@@ -62,10 +62,10 @@ export function McpConnectors() {
     <section className="mt-14">
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="text-[17px] font-semibold text-ink">More connectors (MCP)</h2>
+          <h2 className="text-[17px] font-semibold text-ink">More connectors</h2>
           <p className="mt-1 max-w-[520px] text-[13px] leading-relaxed text-ink-soft">
-            Plug in any MCP server — thousands of tools publish one. Paste the setup snippet from its
-            instructions, or bring over what you already use in other apps.
+            Many apps offer an &ldquo;MCP&rdquo; connector for AI assistants. If an app&rsquo;s help page
+            gives you one, paste its setup text here and zWork can use that app too.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -91,7 +91,7 @@ export function McpConnectors() {
       {importable.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-dashed border-line bg-paper-raised/60 px-4 py-3 text-[12.5px] text-ink-soft">
           <Download className="h-4 w-4 text-ink-muted" />
-          <span>Found servers in</span>
+          <span>Bring over connectors from</span>
           {importable.map((src) => (
             <button
               key={src.id}
@@ -111,7 +111,7 @@ export function McpConnectors() {
         </div>
       ) : servers.length === 0 ? (
         <div className="rounded-2xl border border-line bg-paper-raised px-5 py-8 text-center text-[13px] text-ink-soft">
-          No MCP connectors yet.
+          Nothing added yet.
         </div>
       ) : (
         <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-paper-raised">
@@ -454,7 +454,7 @@ function AddDialog({ onClose, onAdded }: { onClose: () => void; onAdded: () => v
   const input =
     "ring-focus w-full rounded-xl border border-line bg-paper px-3 py-2 text-[13px] text-ink placeholder:text-ink-muted";
   return (
-    <Modal title="Add an MCP connector" onClose={onClose}>
+    <Modal title="Add a connector" onClose={onClose}>
       <div className="mb-4 inline-flex rounded-xl border border-line bg-paper p-0.5 text-[12.5px]">
         {(
           [

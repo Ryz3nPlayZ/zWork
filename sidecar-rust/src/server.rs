@@ -509,13 +509,14 @@ pub async fn get_providers() -> impl IntoResponse {
         let cred = resolve(&m.credential, &s, &m.base_url_override);
         
         let subtitle = if m.credential == "zwork_router" {
-            if m.model_id.to_lowercase().contains("vision") {
-                "Vision and images".to_string()
-            } else if m.model_id.to_lowercase().contains("pro") {
-                "Most capable model".to_string()
-            } else {
-                "Fast and efficient".to_string()
-            }
+            // Keyed on the lineup slot, not the upstream model it's pinned to.
+            let blurb = match m.id.as_str() {
+                "zwork-pro" => "Most capable model",
+                "zwork-ultimate" => "Frontier model · Max plan",
+                "zwork-vision" => "Vision and images",
+                _ => "Fast and efficient",
+            };
+            if cred.is_some() { blurb.to_string() } else { format!("{blurb} · sign in to zWork to use") }
         } else {
             let base = if !m.base_url_override.is_empty() {
                 m.base_url_override.clone()

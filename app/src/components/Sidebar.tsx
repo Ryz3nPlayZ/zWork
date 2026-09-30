@@ -165,6 +165,14 @@ export function Sidebar() {
             }}
             active={view === "projects"}
           />
+          {!demo && (
+            <SidebarButton
+              icon={<Plug />}
+              label="Connectors"
+              onClick={() => setView("connectors")}
+              active={view === "connectors"}
+            />
+          )}
         </nav>
 
         {/* Chat history */}
@@ -263,7 +271,7 @@ export function Sidebar() {
 }
 
 /**
- * "More" — a persistent toggle that expands Analytics / Plan / Connectors
+ * "More" — a persistent toggle that expands Analytics / Plan
  * INLINE within the sidebar footer. Previously this floated out to the right
  * (clipped by overflow-x-hidden) and auto-collapsed on selection. Now it stays
  * open after picking an item so the user doesn't have to re-expand it every
@@ -281,7 +289,6 @@ function MoreMenuButton({
   const items: { id: View; label: string; icon: React.ReactNode }[] = [
     { id: "analytics", label: "Analytics", icon: <BarChart3 className="h-4 w-4" /> },
     { id: "plan", label: "Plan", icon: <CreditCard className="h-4 w-4" /> },
-    { id: "connectors", label: "Connectors", icon: <Plug className="h-4 w-4" /> },
   ];
 
   return (

@@ -79,17 +79,17 @@ const SECTION_META: Record<Section, { title: string; description: string; icon: 
   },
   memory: {
     title: "Memory",
-    description: "Persistent notes zWork remembers.",
+    description: "What zWork remembers about you.",
     icon: <Brain className="h-4 w-4" />,
   },
   models: {
     title: "Models",
-    description: "Register and manage AI models.",
+    description: "The AI models zWork can use.",
     icon: <Cpu className="h-4 w-4" />,
   },
   integrations: {
-    title: "Integrations",
-    description: "Detect and reuse local tooling.",
+    title: "AI apps",
+    description: "AI apps on this computer zWork can reuse.",
     icon: <Plug className="h-4 w-4" />,
   },
 };
@@ -620,16 +620,17 @@ function ModelsPanel({
                 <div className="flex items-center gap-2">
                   <span className="text-[13.5px] font-semibold text-ink">{m.name}</span>
                   {live?.configured ? (
-                    <CircleCheck className="h-3.5 w-3.5 text-success" />
+                    <CircleCheck className="h-3.5 w-3.5 text-success" aria-label="Ready" />
                   ) : (
-                    <CircleDashed className="h-3.5 w-3.5 text-ink-faint" />
+                    <CircleDashed className="h-3.5 w-3.5 text-ink-faint" aria-label="Not set up yet" />
                   )}
                 </div>
                 <p className="mt-0.5 truncate text-[12px] text-ink-muted">
                   {live?.subtitle || `${m.credential} · ${m.model_id}`}
                 </p>
               </div>
-              <div className="flex items-center gap-1">
+              {/* zWork's own lineup is managed by zWork: nothing to edit. */}
+              {m.credential !== "zwork_router" && <div className="flex items-center gap-1">
                 <button
                   type="button"
                   onClick={() => startEdit(m.id)}
@@ -638,7 +639,7 @@ function ModelsPanel({
                   Edit
                 </button>
                 <IconButton icon={<Trash2 />} label="Delete" size="sm" onClick={async () => { await onDelete(m.id); }} />
-              </div>
+              </div>}
             </div>
           </div>
         );
@@ -648,7 +649,7 @@ function ModelsPanel({
         <div className="rounded-xl border border-dashed border-line bg-paper p-6 text-center">
           <p className="text-[13px] font-medium text-ink">No models configured</p>
           <p className="mt-1 text-[12.5px] text-ink-muted">
-            Add a model above, or set a provider key in your environment so it's detected automatically.
+            Add a model above with a key from any AI provider, or sign in to zWork to use its models.
           </p>
         </div>
       )}
@@ -956,9 +957,9 @@ function IntegrationsPanel({
     <div className="flex flex-col gap-4">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-[17px] font-semibold tracking-tight text-ink">Integrations</h2>
+          <h2 className="text-[17px] font-semibold tracking-tight text-ink">AI apps</h2>
           <p className="mt-1 text-[13px] leading-5 text-ink-muted">
-            Reuse credentials from local AI tools zWork detects.
+            AI apps already on this computer. zWork can use their accounts so you don't need a separate key. To connect Gmail, Slack, Drive and others, use Connectors in the sidebar.
           </p>
         </div>
         <IconButton
@@ -1264,10 +1265,10 @@ function GeneralPanel({
           <div>
             <h3 className="text-[14px] font-semibold text-ink flex items-center gap-1.5">
               <ShieldAlert className="h-4 w-4 text-accent" />
-              Desktop Control & System Permissions
+              Using your apps
             </h3>
             <p className="text-[12px] text-ink-muted mt-1 leading-relaxed">
-              Desktop automation runs through CuaDriver.app — grant these macOS permissions to <span className="font-medium text-ink">CuaDriver</span>, not zWork. (zWork's own grant only covers its hotkey.) These are one-time OS permission requests.
+              To work in other apps for you, zWork uses a small helper called <span className="font-medium text-ink">CuaDriver</span>. macOS asks you once to allow it. Turn it on for CuaDriver, not zWork.
             </p>
           </div>
 
@@ -1284,11 +1285,11 @@ function GeneralPanel({
                 <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
                 <div className="flex-1 min-w-0">
                   <div className="text-[12px] font-medium text-ink">
-                    Granted to zWork, but automation needs CuaDriver
+                    Allowed for zWork, but it's CuaDriver that needs it
                   </div>
                   <p className="text-[11px] text-ink-muted leading-relaxed mt-0.5">
                     {wrongIdentityHint ??
-                      "macOS shows Accessibility granted to zWork, but the automation runs through CuaDriver.app. In System Settings → Privacy & Security, toggle the permission on for CuaDriver (not zWork), then retry."}
+                      "In System Settings → Privacy & Security → Accessibility, switch on CuaDriver (not zWork), then try again."}
                   </p>
                 </div>
               </div>
@@ -1302,11 +1303,11 @@ function GeneralPanel({
               <ShieldAlert className="h-4 w-4 shrink-0 text-warning mt-0.5" />
               <div className="flex-1 min-w-0">
                 <div className="text-[12px] font-medium text-ink">
-                  CuaDriver isn&rsquo;t reachable
+                  The helper app isn&rsquo;t running
                 </div>
                 <p className="text-[11px] text-ink-muted leading-relaxed mt-0.5">
-                  Desktop control runs through CuaDriver.app. Install it from
-                  &ldquo;trycua/cua&rdquo; on GitHub, then relaunch zWork.
+                  zWork installs CuaDriver on first launch. Quit and reopen zWork
+                  to set it up again. Everything else works without it.
                 </p>
               </div>
             </div>
@@ -1318,18 +1319,18 @@ function GeneralPanel({
           <div className="flex items-center justify-between gap-4">
             <div className="space-y-0.5">
               <div className="text-[13px] font-medium text-ink flex items-center gap-2">
-                <span>Accessibility Access</span>
+                <span>Control apps</span>
                 <span className={cn(
                   "px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase",
                   accessibilityPermissionGranted
                     ? "bg-success/10 text-success border border-success/20"
                     : "bg-warning/10 text-warning border border-warning/20"
                 )}>
-                  {accessibilityPermissionGranted ? "Granted" : "Required"}
+                  {accessibilityPermissionGranted ? "Allowed" : "Not allowed"}
                 </span>
               </div>
               <p className="text-[11.5px] text-ink-muted">
-                Read app UI trees, click, and type. Granted on the <span className="font-medium text-ink">CuaDriver</span> identity — not zWork.
+                Lets zWork read what's in a window, click, and type, like you would.
               </p>
             </div>
             {!accessibilityPermissionGranted && (
@@ -1337,7 +1338,7 @@ function GeneralPanel({
                 onClick={requestAccessibility}
                 className="press px-3 py-1.5 text-[11px] font-medium border border-line bg-paper-raised hover:bg-paper-sunken text-ink rounded-lg transition-colors cursor-pointer shrink-0"
               >
-                Grant to CuaDriver
+                Allow
               </button>
             )}
           </div>
@@ -1348,18 +1349,18 @@ function GeneralPanel({
           <div className="flex items-center justify-between gap-4">
             <div className="space-y-0.5">
               <div className="text-[13px] font-medium text-ink flex items-center gap-2">
-                <span>Screen Recording</span>
+                <span>See the screen</span>
                 <span className={cn(
                   "px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase",
                   screenRecordingPermissionGranted
                     ? "bg-success/10 text-success border border-success/20"
                     : "bg-ink-faint/10 text-ink-muted border border-line"
                 )}>
-                  {screenRecordingPermissionGranted ? "Granted" : "Optional"}
+                  {screenRecordingPermissionGranted ? "Allowed" : "Optional"}
                 </span>
               </div>
               <p className="text-[11.5px] text-ink-muted">
-                Optional — only needed for future screenshot/vision mode. Current desktop control uses the accessibility tree and does not require this. If enabled, grant on the <span className="font-medium text-ink">CuaDriver</span> identity.
+                Lets zWork take screenshots when an app can't be read directly. Not needed for most tasks.
               </p>
             </div>
             <button
@@ -1376,18 +1377,18 @@ function GeneralPanel({
           <div className="flex items-center justify-between gap-4">
             <div className="space-y-0.5">
               <div className="text-[13px] font-medium text-ink flex items-center gap-2">
-                <span>Browser Bridge</span>
+                <span>Chrome extension</span>
                 <span className={cn(
                   "px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase",
                   extensionConnected
                     ? "bg-success/10 text-success border border-success/20"
                     : "bg-warning/10 text-warning border border-warning/20"
                 )}>
-                  {extensionConnected === null ? "…" : extensionConnected ? "Connected" : "Disconnected"}
+                  {extensionConnected === null ? "…" : extensionConnected ? "Connected" : "Not connected"}
                 </span>
               </div>
               <p className="text-[11.5px] text-ink-muted">
-                The zbctl Chrome extension for direct browser control. Load it unpacked from the zWork app&rsquo;s extension folder; it connects to the backend on port 8787.
+                Optional. Lets zWork work in your own Chrome, where you're already signed in. Without it, zWork uses its own browser.
               </p>
             </div>
           </div>
@@ -1398,18 +1399,18 @@ function GeneralPanel({
           <div className="flex items-start justify-between gap-4 pt-1">
             <div className="space-y-1 flex-1">
               <div className="text-[13px] font-medium text-ink flex items-center gap-2">
-                <span>Auto-Approve Destructive Actions</span>
+                <span>Skip the check before risky actions</span>
                 <span className={cn(
                   "px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase",
                   autoApproveDestructive
                     ? "bg-success/10 text-success border border-success/20"
                     : "bg-paper-sunken text-ink-faint border border-line"
                 )}>
-                  {autoApproveDestructive ? "Enabled" : "Disabled"}
+                  {autoApproveDestructive ? "On" : "Off"}
                 </span>
               </div>
               <p className="text-[11.5px] leading-relaxed text-ink-muted">
-                When enabled, the agent skips the per-action confirmation prompt for a small blocklist of destructive operations — commands like <code className="font-mono text-ink">rm&nbsp;-rf</code>, <code className="font-mono text-ink">format</code>, or <code className="font-mono text-ink">dropdb</code>, and writes to <code className="font-mono text-ink">settings.json</code> or <code className="font-mono text-ink">secrets.json</code>. Ordinary file edits, most commands, and the agent's clarifying questions are unaffected.
+                zWork normally stops and asks before anything that can't be undone, like deleting a folder or wiping a disk. Turn this on only if you want it to go ahead without asking. Keep it off unless you're sure.
               </p>
             </div>
             
@@ -1433,12 +1434,12 @@ function GeneralPanel({
 
       {/* Version check */}
       <section className="rounded-xl border border-line bg-paper-raised p-4">
-        <Field label="Version" description="The installed app and running backend build. If these don't match after an update, fully quit (Cmd+Q) and relaunch zWork.">
+        <Field label="Version" description="If these two numbers differ after an update, quit zWork completely (Cmd+Q) and open it again.">
           <div className="inline-flex flex-wrap items-center gap-2 rounded-lg border border-line bg-paper px-3 py-2 text-[12.5px] text-ink">
             <span className="font-medium">zWork</span>
             <span className="font-mono text-ink-muted">{appVersion}</span>
             <span className="text-ink-faint">·</span>
-            <span className="text-ink-muted">backend</span>
+            <span className="text-ink-muted">engine</span>
             <span className="font-mono text-ink-muted">{backendVersion ?? "…"}</span>
           </div>
         </Field>
@@ -1466,11 +1467,11 @@ function GeneralPanel({
       <section className="rounded-xl border border-line bg-paper-raised p-5 space-y-4 select-none">
         <div>
           <h3 className="text-[14px] font-semibold text-ink flex items-center gap-1.5">
-            <ShieldAlert className="h-4 w-4 text-accent animate-[pulse_3s_infinite]" />
-            Privacy & Telemetry Dashboard
+            <ShieldAlert className="h-4 w-4 text-accent" />
+            Privacy
           </h3>
           <p className="text-[12px] text-ink-muted mt-1 leading-relaxed">
-            Manage your data preferences. We prioritize your privacy and comply with strict security standards.
+            Your chats and files stay on this computer. They only go to the AI model you picked, to get an answer.
           </p>
         </div>
 
@@ -1481,19 +1482,19 @@ function GeneralPanel({
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-1 flex-1">
               <div className="text-[13px] font-medium text-ink flex items-center gap-2">
-                <span>Usage Analytics & Telemetry</span>
+                <span>Share anonymous usage stats</span>
                 <span className={cn(
                   "px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase",
                   telemetryEnabled
                     ? "bg-success/10 text-success border border-success/20"
                     : "bg-paper-sunken text-ink-faint border border-line"
                 )}>
-                  {telemetryEnabled ? "Active" : "Disabled"}
+                  {telemetryEnabled ? "On" : "Off"}
                 </span>
               </div>
               <p className="text-[11.5px] leading-relaxed text-ink-muted">
-                Tracks application installs, active usage hours, onboarding success rates, and feature usage. 
-                We never collect prompts, model outputs, file names, API keys, or screenshots.
+                Counts like how often zWork is opened and which features get used, so we know what to improve.
+                Never your messages, replies, file names, keys, or screenshots.
               </p>
             </div>
             
@@ -1524,13 +1525,13 @@ function GeneralPanel({
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-1 flex-1">
               <div className="text-[13px] font-medium text-ink flex items-center gap-2">
-                <span>Zero Prompt & Content Leak Policy</span>
+                <span>Your content is never collected</span>
                 <span className="bg-success/10 text-success border border-success/20 px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase">
-                  Locked
+                  Always
                 </span>
               </div>
               <p className="text-[11.5px] leading-relaxed text-ink-muted">
-                Prompt inputs, model completions, file uploads, local text index data, and desktop screen controls are processed locally. They are never sent to external servers for tracking.
+                What you type, what zWork writes back, and your files are never sent to us. This can't be turned off.
               </p>
             </div>
           </div>
@@ -1540,8 +1541,8 @@ function GeneralPanel({
           {/* Wipe Local Cache Action */}
           <div className="flex items-center justify-between gap-4 pt-1">
             <div className="space-y-0.5">
-              <div className="text-[12.5px] font-medium text-ink">Clear Offline Chat Cache</div>
-              <p className="text-[11.5px] text-ink-muted">Removes the cached chats and summaries used to display history while offline. Reopens empty until the next sync.</p>
+              <div className="text-[12.5px] font-medium text-ink">Clear saved copy of chats</div>
+              <p className="text-[11.5px] text-ink-muted">zWork keeps a copy of your chat list to show while it starts up. Clearing it doesn't delete any chats.</p>
             </div>
             <button
               onClick={() => {
@@ -1549,14 +1550,14 @@ function GeneralPanel({
                   localStorage.removeItem("zwork:cached-chats");
                   localStorage.removeItem("zwork:cached-summaries");
                   localStorage.removeItem("zwork:cache-version");
-                  alert("Offline chat cache cleared.");
+                  alert("Cleared. Your chats are still there.");
                 } catch {
-                  alert("Failed to clear cache.");
+                  alert("Couldn't clear it. Try again.");
                 }
               }}
               className="press ring-focus px-3 py-1.5 text-[11px] font-medium border border-error/20 bg-error/5 hover:bg-error/10 text-error rounded-lg transition-colors cursor-pointer"
             >
-              Clear Cache
+              Clear
             </button>
           </div>
         </div>
@@ -1566,7 +1567,7 @@ function GeneralPanel({
 
       {/* Default model */}
       <section className="rounded-xl border border-line bg-paper-raised p-4">
-        <Field label="Default model" description="Used when starting a new chat.">
+        <Field label="Default model" description="The AI model new chats start with. You can switch in any chat.">
           <div className="relative">
             <select
               value={defaultModel}
@@ -1600,12 +1601,9 @@ function GeneralPanel({
             className="mt-[3px] h-4 w-4 accent-ink"
           />
           <div>
-            <div className="text-[13px] font-medium text-ink">Reuse local credentials</div>
+            <div className="text-[13px] font-medium text-ink">Use my Claude Code sign-in</div>
             <div className="text-[12px] text-ink-muted">
-              When enabled and no BYOK key is set, zWork reads{" "}
-              <code className="font-mono text-[11.5px]">~/.claude/settings.json</code>{" "}
-              and uses <code className="font-mono text-[11.5px]">ANTHROPIC_AUTH_TOKEN</code>{" "}
-              and <code className="font-mono text-[11.5px]">ANTHROPIC_BASE_URL</code>.
+              If you use Claude Code on this computer and haven't added a key here, zWork can use the same account.
             </div>
           </div>
         </label>
@@ -1705,7 +1703,7 @@ function MemoryPanel() {
       <div>
         <h2 className="text-[17px] font-semibold tracking-tight text-ink">Memory</h2>
         <p className="mt-1 text-[13px] leading-5 text-ink-muted">
-          Notes zWork persists across sessions. Only saves when you tell it to "remember" something.
+          Things zWork remembers about you and your work, in every chat. It only adds to this when you ask it to remember something. You can edit it here.
         </p>
       </div>
 

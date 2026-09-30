@@ -44,11 +44,14 @@ const APP_DETAILED_DESCRIPTIONS: Record<string, string> = {
 const ALLOWED_APPS = new Set([
   "gmail",
   "googlecalendar",
-  "notion",
   "googledrive",
+  "notion",
   "github",
   "linear"
 ]);
+
+/** Near-black brand marks (Notion, GitHub) are drawn in ink so they show in dark mode. */
+const INK_LOGOS = new Set(["notion", "github"]);
 
 export function ConnectorsPage() {
   const composioAccounts = useApp((s) => s.composioAccounts);
@@ -76,6 +79,7 @@ export function ConnectorsPage() {
     setConnectError(null);
     try {
       await connectComposioApp(appId);
+      setExpandedApp(null);
     } catch (e: any) {
       setConnectError(e?.message || String(e));
     } finally {
@@ -86,7 +90,7 @@ export function ConnectorsPage() {
   const allowedComposioApps = composioApps.filter((app) => ALLOWED_APPS.has(app.id));
   const expandedAppData = allowedComposioApps.find((a) => a.id === expandedApp);
   const isExpandedConnected = expandedApp ? connectedApps.has(expandedApp) : false;
-  const expandedAppColor = expandedAppData?.id === "notion" ? "rgb(var(--ink))" : expandedAppData?.color;
+  const expandedAppColor = expandedAppData && INK_LOGOS.has(expandedAppData.id) ? "rgb(var(--ink))" : expandedAppData?.color;
 
   return (
     <div className="flex h-full min-w-0 flex-1 overflow-y-auto bg-paper">
@@ -120,20 +124,23 @@ export function ConnectorsPage() {
             const isConnecting = connecting === app.id;
             const desc = APP_DESCRIPTIONS[app.id] ?? `Use ${app.name} from zWork`;
             const hasLogo = hasBrandLogo(app.id);
-            const appColor = app.id === "notion" ? "rgb(var(--ink))" : app.color;
+            const appColor = INK_LOGOS.has(app.id) ? "rgb(var(--ink))" : app.color;
 
             return (
               <button
                 key={app.id}
                 type="button"
-                onClick={() => setExpandedApp(app.id)}
+                onClick={() => {
+                  setConnectError(null);
+                  setExpandedApp(app.id);
+                }}
                 className="group text-left flex flex-col gap-3 rounded-2xl border border-line bg-paper-raised p-4 transition-colors hover:border-line-strong"
               >
                 <div className="flex items-center gap-3">
                   <div
                     className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl overflow-hidden"
                     style={{
-                    backgroundColor: app.id === "notion" ? "rgb(var(--ink) / 0.08)" : hasLogo ? `${appColor}14` : "rgb(var(--paper-sunken))",
+                    backgroundColor: INK_LOGOS.has(app.id) ? "rgb(var(--ink) / 0.08)" : hasLogo ? `${appColor}14` : "rgb(var(--paper-sunken))",
                       color: hasLogo ? appColor : "rgb(var(--ink-muted))",
                     }}
                   >
@@ -200,7 +207,7 @@ export function ConnectorsPage() {
                 <div
                   className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl overflow-hidden"
                   style={{
-                    backgroundColor: expandedAppData.id === "notion" ? "rgb(var(--ink) / 0.08)" : hasBrandLogo(expandedAppData.id)
+                    backgroundColor: INK_LOGOS.has(expandedAppData.id) ? "rgb(var(--ink) / 0.08)" : hasBrandLogo(expandedAppData.id)
                       ? `${expandedAppColor}14`
                       : "rgb(var(--paper-sunken))",
                     color: hasBrandLogo(expandedAppData.id)
@@ -265,10 +272,7 @@ export function ConnectorsPage() {
                 <>
                   <button
                     type="button"
-                    onClick={() => {
-                      void handleConnect(expandedAppData.id);
-                      setExpandedApp(null);
-                    }}
+                    onClick={() => void handleConnect(expandedAppData.id)}
                     disabled={connecting === expandedAppData.id}
                     className="press ring-focus flex-1 rounded-xl border border-line bg-paper px-4 py-2.5 text-[13px] font-medium text-ink hover:bg-paper-sunken disabled:opacity-40 transition-colors"
                   >
