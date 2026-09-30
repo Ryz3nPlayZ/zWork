@@ -293,7 +293,7 @@ export function ChatView() {
               {branchOpen && (
                 <div className="absolute top-[calc(100%+4px)] right-0 z-40 w-[280px] animate-fade-in whitespace-normal rounded-lg border border-line bg-paper p-1 shadow-pop">
                   {branches.length === 0 && (
-                    <div className="px-2.5 py-2 text-[12px] text-ink-faint">
+                    <div className="px-2.5 py-2 text-[12px] leading-relaxed text-ink-muted">
                       Nothing here yet. When you edit a message you already sent, the replies that came after it are kept here so you can bring them back.
                     </div>
                   )}
