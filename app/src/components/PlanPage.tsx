@@ -35,11 +35,10 @@ const TIERS: PricingTier[] = [
     annualPerMonth: 0,
     description: "Everything you need to try zWork on real work.",
     features: [
-      "Shared request pool (up to 200 per 5 hours)",
-      "Up to 1,000 requests per week",
-      "Standard processing",
-      "Local backend only",
-      "Single agent worker only",
+      "Up to 200 messages every 5 hours (shared)",
+      "Up to 1,000 messages a week",
+      "Runs on your computer",
+      "One task at a time",
     ],
     cta: "Get started",
   },
@@ -51,11 +50,11 @@ const TIERS: PricingTier[] = [
     annualPerMonth: 10,
     description: "Higher limits and hosted access for serious work.",
     features: [
-      "200 root requests per 5 hours",
-      "1,000 requests per week",
-      "Hosted AI gateway access",
-      "Up to 5 multi-agent workers",
-      "Advanced analytics",
+      "200 messages every 5 hours, just for you",
+      "1,000 messages a week",
+      "zWork's hosted AI models",
+      "Up to 5 tasks at once",
+      "Detailed usage stats",
       "Priority support",
     ],
     cta: "Upgrade to Pro",
@@ -69,11 +68,11 @@ const TIERS: PricingTier[] = [
     annualPerMonth: 41.67,
     description: "Maximum capacity for power users and teams.",
     features: [
-      "1,000 root requests per 5 hours",
-      "5,000 requests per week",
-      "Up to 10 multi-agent workers",
+      "1,000 messages every 5 hours",
+      "5,000 messages a week",
+      "Up to 10 tasks at once",
       "Everything in Pro",
-      "Priority processing",
+      "Faster replies when it's busy",
       "Dedicated support",
     ],
     cta: "Upgrade to Max",
@@ -171,7 +170,7 @@ export function PlanPage({ cloudUser, onUserChanged }: { cloudUser: CloudUser; o
         <header className="mb-14 text-center">
           <h1 className="font-serif text-[42px] font-bold tracking-tight text-ink">Pricing</h1>
           <p className="mx-auto mt-4 max-w-[500px] text-[15px] leading-relaxed text-ink-soft">
-            Upgrade to unlock faster models, higher concurrency, and more powerful capabilities.
+            Upgrade for faster models, more tasks at once, and higher limits.
           </p>
         </header>
 

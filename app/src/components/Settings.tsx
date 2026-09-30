@@ -177,8 +177,8 @@ export function SettingsPage() {
                   className={cn(
                     "press flex items-center gap-2.5 whitespace-nowrap px-4 py-3 text-[13px] font-medium transition-colors lg:rounded-lg lg:px-3 lg:py-2",
                     isActive
-                      ? "text-ink border-b-2 border-ink lg:border-b-0 lg:bg-line/70"
-                      : "text-ink-muted border-b-2 border-transparent hover:text-ink lg:border-b-0 lg:hover:bg-line/60",
+                      ? "text-ink border-b-2 border-ink lg:border-b-0 lg:bg-line"
+                      : "text-ink-muted border-b-2 border-transparent hover:text-ink lg:border-b-0 lg:hover:bg-line/40",
                   )}
                 >
                   <span className={cn("flex h-5 w-5 items-center justify-center", isActive ? "text-ink" : "text-ink-faint")}>
