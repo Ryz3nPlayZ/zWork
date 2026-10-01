@@ -2,6 +2,23 @@
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
 
+/* Instrument Serif, the same files the app bundles for onboarding. Used only for
+   the italic accent words in headlines. */
+@font-face {
+  font-family: "Instrument Serif";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/instrument-serif-regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Instrument Serif";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/instrument-serif-italic.woff2") format("woff2");
+}
+
 /* Tokens ported from app/src/index.css so the page reads as the same product.
    Light surfaces step darker as they come forward (the app's "OpenCode mirror"
    rule): sunken is lightest, raised is darkest. */
@@ -14,6 +31,7 @@
   --ink-muted: 102 98 88; /* one step darker than the app's, AA on paper for body copy */
   --line: 218 214 202;
   --line-strong: 200 196 184;
+  --ok: 5 150 105;
   color-scheme: light;
 }
 
@@ -27,6 +45,7 @@
     --ink-muted: 160 160 157;
     --line: 45 45 49;
     --line-strong: 62 62 66;
+    --ok: 52 211 153;
     color-scheme: dark;
   }
 }
@@ -40,8 +59,10 @@
   --color-ink-muted: rgb(var(--ink-muted));
   --color-line: rgb(var(--line));
   --color-line-strong: rgb(var(--line-strong));
+  --color-ok: rgb(var(--ok));
   --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, monospace;
+  --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
 }
 
 html {
@@ -53,6 +74,7 @@ body {
   background: rgb(var(--paper));
   color: rgb(var(--ink));
   font-family: var(--font-sans);
+  overflow-x: clip;
 }
 
 ::selection {
@@ -66,6 +88,22 @@ body {
   border-radius: 6px;
 }
 
+/* Headline accent: the serif italic sits a touch larger so its x-height matches Geist. */
+.accent {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 1.08em;
+  letter-spacing: -0.01em;
+}
+
+/* Dot grid behind the hero, fading out toward the edges. */
+.dot-grid {
+  background-image: radial-gradient(rgb(var(--ink) / 0.13) 1px, transparent 1px);
+  background-size: 22px 22px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, black 30%, transparent 75%);
+}
+
 @keyframes marquee {
   from { transform: translateX(0); }
   to { transform: translateX(-50%); }
@@ -75,7 +113,16 @@ body {
   animation: marquee 48s linear infinite;
 }
 
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.pulse-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  .marquee-track { animation: none; }
+  .marquee-track, .pulse-dot { animation: none; }
 }

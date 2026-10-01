@@ -17,7 +17,7 @@ const STEPS = [
 
 export function How() {
   return (
-    <Section id="how" className="scroll-mt-20 py-28 sm:py-36">
+    <Section id="how" className="py-28 sm:py-36">
       <Reveal>
         <h2 className="max-w-[18ch] text-4xl font-semibold leading-[1.05] tracking-[-0.035em] sm:text-5xl">
           Brief it like a person. Get work back like one.

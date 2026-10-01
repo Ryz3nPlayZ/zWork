@@ -1,6 +1,7 @@
-import { useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
-import { Eyebrow, Reveal, Section } from "./ui";
+import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion, useInView, useReducedMotion } from "motion/react";
+import { CheckCircle, CircleNotch } from "@phosphor-icons/react";
+import { Eyebrow, H2, Reveal, Section } from "./ui";
 
 type Task = { id: string; label: string; ask: string; chat: string[]; zwork: string[] };
 
@@ -83,9 +84,9 @@ export function Gap() {
     <Section className="py-28 sm:py-40">
       <Reveal>
         <Eyebrow>The gap</Eyebrow>
-        <h2 className="max-w-[22ch] text-4xl font-semibold leading-[1.05] tracking-[-0.035em] sm:text-6xl">
-          Developers got agents. Everyone else got a chat box.
-        </h2>
+        <H2 className="max-w-[22ch] sm:text-6xl">
+          Developers got agents. Everyone else got a <span className="accent">chat box.</span>
+        </H2>
         <p className="mt-6 max-w-[58ch] text-lg leading-relaxed text-ink-soft">
           A chatbot talks about your work. You still do the copying, pasting and fixing. zWork opens the files, runs the
           steps and hands back the finished thing.
@@ -121,8 +122,8 @@ export function Gap() {
           >
             <p className="font-mono text-sm text-ink-muted">"{task.ask}"</p>
             <div className="mt-6 grid gap-px overflow-hidden rounded-2xl border border-line bg-line md:grid-cols-2">
-              <Column title="In a chat window" steps={task.chat} muted />
-              <Column title="In zWork" steps={task.zwork} />
+              <Column title="In a chat window" steps={task.chat} />
+              <Run steps={task.zwork} />
             </div>
           </motion.div>
         </AnimatePresence>
@@ -131,18 +132,65 @@ export function Gap() {
   );
 }
 
-function Column({ title, steps, muted = false }: { title: string; steps: string[]; muted?: boolean }) {
+function Column({ title, steps }: { title: string; steps: string[] }) {
   return (
-    <div className={`p-7 sm:p-9 ${muted ? "bg-paper-sunken" : "bg-paper-raised"}`}>
-      <h3 className={`text-sm font-semibold ${muted ? "text-ink-muted" : "text-ink"}`}>{title}</h3>
+    <div className="bg-paper-sunken p-7 sm:p-9">
+      <h3 className="text-sm font-semibold text-ink-muted">{title}</h3>
       <ol className="mt-6 space-y-4">
         {steps.map((s, i) => (
           <li key={s} className="grid grid-cols-[2rem_1fr] items-baseline">
             <span className="font-mono text-xs text-ink-muted">0{i + 1}</span>
-            <span className={muted ? "text-ink-muted" : "text-ink"}>{s}</span>
+            <span className="text-ink-muted">{s}</span>
           </li>
         ))}
       </ol>
+      <p className="mt-8 text-sm text-ink-muted">You do every step.</p>
+    </div>
+  );
+}
+
+/** zWork's side ticks through its steps once it scrolls into view, the way the
+ *  app's plan checklist does. */
+function Run({ steps }: { steps: string[] }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const inView = useInView(ref, { once: true, margin: "-120px" });
+  const reduce = useReducedMotion();
+  const [ticked, setTicked] = useState(0);
+
+  useEffect(() => {
+    if (reduce || !inView) return;
+    const timers = steps.map((_, i) => setTimeout(() => setTicked(i + 1), 650 * (i + 1)));
+    return () => timers.forEach(clearTimeout);
+  }, [inView, reduce, steps]);
+
+  const done = reduce ? steps.length : ticked;
+
+  const finished = done >= steps.length;
+  return (
+    <div ref={ref} className="bg-paper-raised p-7 sm:p-9">
+      <h3 className="text-sm font-semibold text-ink">In zWork</h3>
+      <ol className="mt-6 space-y-4">
+        {steps.map((s, i) => {
+          const state = i < done ? "done" : i === done ? "running" : "todo";
+          return (
+            <li key={s} className="grid grid-cols-[2rem_1fr] items-start">
+              <span className="pt-0.5">
+                {state === "done" ? (
+                  <CheckCircle weight="fill" className="size-[18px] text-ok" />
+                ) : state === "running" && inView ? (
+                  <CircleNotch weight="bold" className="size-[18px] animate-spin text-ink-muted" />
+                ) : (
+                  <span className="ml-[3px] block size-3 rounded-full border border-line-strong" />
+                )}
+              </span>
+              <span className={`transition-colors duration-300 ${state === "done" ? "text-ink" : "text-ink-muted"}`}>{s}</span>
+            </li>
+          );
+        })}
+      </ol>
+      <p className={`mt-8 text-sm font-medium transition-opacity duration-500 ${finished ? "text-ok opacity-100" : "opacity-0"}`}>
+        Done. You review the result.
+      </p>
     </div>
   );
 }

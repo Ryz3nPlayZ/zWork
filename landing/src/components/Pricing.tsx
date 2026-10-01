@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Check } from "@phosphor-icons/react";
 import { detectPlatform, downloadUrl } from "../lib/site";
-import { Reveal, Section } from "./ui";
+import { H2, Reveal, Section } from "./ui";
 
 type Tier = { name: string; monthly: number; annualPerMonth: number; blurb: string; features: string[]; featured?: boolean };
 
@@ -11,15 +11,15 @@ const TIERS: Tier[] = [
     name: "Free",
     monthly: 0,
     annualPerMonth: 0,
-    blurb: "Bring your own model key or Claude login.",
-    features: ["Every tool, skill and connector", "Up to 3 scheduled tasks", "One task at a time"],
+    blurb: "Everything you need to try it on real work.",
+    features: ["Hosted models from a shared pool, or your own key", "Every tool, skill and connector", "Up to 3 active schedules", "One task at a time"],
   },
   {
     name: "Pro",
     monthly: 12,
     annualPerMonth: 10,
-    blurb: "Models included. No keys, no setup.",
-    features: ["200 requests every 5 hours", "1,000 requests a week", "Up to 5 tasks in parallel", "Unlimited scheduled tasks", "Priority support"],
+    blurb: "Higher limits, just for you. No keys, no setup.",
+    features: ["200 messages every 5 hours", "1,000 messages a week", "Up to 5 tasks at once", "Unlimited schedules", "Detailed usage stats", "Priority support"],
     featured: true,
   },
   {
@@ -27,7 +27,7 @@ const TIERS: Tier[] = [
     monthly: 50,
     annualPerMonth: 41.67,
     blurb: "For the people who hand it everything.",
-    features: ["1,000 requests every 5 hours", "5,000 requests a week", "Up to 10 tasks in parallel", "Priority processing", "Dedicated support"],
+    features: ["1,000 messages every 5 hours", "5,000 messages a week", "Up to 10 tasks at once", "Everything in Pro", "Faster replies when it's busy", "Dedicated support"],
   },
 ];
 
@@ -35,11 +35,11 @@ export function Pricing() {
   const href = useMemo(() => downloadUrl(detectPlatform()), []);
   const [annual, setAnnual] = useState(true);
   return (
-    <Section id="pricing" className="scroll-mt-20 py-28 sm:py-36">
+    <Section id="pricing" className="py-28 sm:py-36">
       <Reveal className="flex flex-col gap-8 md:flex-row md:items-end md:justify-between">
-        <h2 className="max-w-[14ch] text-4xl font-semibold leading-[1.05] tracking-[-0.035em] sm:text-5xl">
-          Cheaper than the hour it saves.
-        </h2>
+        <H2 className="max-w-[14ch]">
+          Cheaper than the <span className="accent">hour it saves.</span>
+        </H2>
         <div role="radiogroup" aria-label="Billing period" className="inline-flex self-start rounded-full border border-line bg-paper-sunken p-1 md:self-auto">
           {[
             [false, "Monthly"],

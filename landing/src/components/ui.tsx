@@ -1,13 +1,13 @@
 import { useMemo, type ReactNode } from "react";
 import { motion } from "motion/react";
-import { DownloadSimple } from "@phosphor-icons/react";
-import { detectPlatform, downloadUrl } from "../lib/site";
+import { ArrowUpRight, DownloadSimple } from "@phosphor-icons/react";
+import { DEMO_URL, detectPlatform, downloadUrl } from "../lib/site";
 
 /* Radius rule for the page: anything you press is a pill, every surface
    (screenshots, panels) is rounded-2xl. */
 
 export function DownloadButton({ size = "md" }: { size?: "sm" | "md" }) {
-  const platform = useMemo(detectPlatform, []);
+  const platform = useMemo(() => detectPlatform(), []);
   const pad = size === "sm" ? "h-9 px-4 text-sm" : "h-12 px-6 text-[15px]";
   return (
     <a
@@ -16,6 +16,19 @@ export function DownloadButton({ size = "md" }: { size?: "sm" | "md" }) {
     >
       <DownloadSimple weight="bold" className={size === "sm" ? "size-4" : "size-[18px]"} />
       {platform ? `Download for ${platform}` : "Get zWork"}
+    </a>
+  );
+}
+
+/** Opens the real app in the browser, no sign-in (app.tryzwork.app). */
+export function TryButton() {
+  return (
+    <a
+      href={DEMO_URL}
+      className="group inline-flex h-12 items-center gap-1.5 whitespace-nowrap rounded-full border border-line-strong bg-paper px-6 text-[15px] font-medium text-ink transition-colors hover:bg-paper-raised"
+    >
+      Try it in your browser
+      <ArrowUpRight weight="bold" className="size-4 transition-transform group-hover:-translate-y-px group-hover:translate-x-px" />
     </a>
   );
 }
@@ -61,13 +74,38 @@ export function Shot({ name, alt, className = "", eager = false }: { name: strin
   );
 }
 
+/** A desktop window around a screenshot, so it reads as an app and not a crop. */
+export function AppWindow({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-line-strong bg-paper-raised shadow-[0_40px_100px_-40px_rgb(var(--ink)/0.45)]">
+      <div className="relative flex h-9 items-center border-b border-line px-4">
+        <div className="flex gap-1.5" aria-hidden="true">
+          <span className="size-2.5 rounded-full bg-line-strong" />
+          <span className="size-2.5 rounded-full bg-line-strong" />
+          <span className="size-2.5 rounded-full bg-line-strong" />
+        </div>
+        <span className="absolute inset-x-0 text-center text-xs text-ink-muted">{title}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 export function Eyebrow({ children }: { children: ReactNode }) {
   return <p className="mb-5 font-mono text-xs uppercase tracking-[0.14em] text-ink-muted">{children}</p>;
 }
 
+export function H2({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return (
+    <h2 className={`text-4xl font-semibold leading-[1.05] tracking-[-0.035em] text-balance sm:text-5xl ${className}`}>
+      {children}
+    </h2>
+  );
+}
+
 export function Section({ id, children, className = "" }: { id?: string; children: ReactNode; className?: string }) {
   return (
-    <section id={id} className={`mx-auto w-full max-w-[1200px] px-4 sm:px-8 ${className}`}>
+    <section id={id} className={`mx-auto w-full max-w-[1200px] scroll-mt-20 px-4 sm:px-8 ${className}`}>
       {children}
     </section>
   );

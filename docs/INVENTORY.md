@@ -48,6 +48,10 @@ opens a shell on it. Caddy config is `cloud-src/Caddyfile`; services are in
    (matching `docs/DEVELOPER_GUIDE.md`). Fixed in the README.
 6. **The landing has no deploy script in the repo.** It deploys through Vercel's
    git integration, so a push to `main` that touches `landing/` ships it.
+7. **The live apex is an old page.** As of 2026-10-01 `tryzwork.app` serves an
+   earlier build ("AI that works on your machine") whose og:url is `zwork.ai`
+   and which claims "no cloud, no telemetry". Both are now wrong. The redesigned
+   `landing/` is on `harness/pi-port`, so merge it to `main` to replace the page.
 
 ## What the dashboard measures
 

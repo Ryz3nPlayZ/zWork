@@ -3,11 +3,14 @@ import { Nav, Hero } from "./components/Hero";
 import { Gap } from "./components/Gap";
 import { Proof } from "./components/Proof";
 import { How } from "./components/How";
+import { Schedules } from "./components/Schedules";
+import { Capabilities } from "./components/Capabilities";
 import { Apps } from "./components/Apps";
 import { Power } from "./components/Power";
 import { Private } from "./components/Private";
 import { Pricing } from "./components/Pricing";
-import { FinalCta, Footer } from "./components/Footer";
+import { Faq } from "./components/Faq";
+import { Footer, Install } from "./components/Footer";
 
 export default function App() {
   return (
@@ -18,11 +21,14 @@ export default function App() {
         <Gap />
         <Proof />
         <How />
+        <Schedules />
+        <Capabilities />
         <Apps />
         <Power />
         <Private />
         <Pricing />
-        <FinalCta />
+        <Faq />
+        <Install />
       </main>
       <Footer />
     </MotionConfig>
