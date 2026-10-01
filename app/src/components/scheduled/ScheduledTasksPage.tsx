@@ -1,21 +1,22 @@
 /* Hallmark · genre: modern-minimal · macrostructure: Workbench · design-system: design.md · designed-as-app */
 
 import { useState, useEffect } from "react";
-import {
-  Clock,
-  Plus,
-  Play,
-  MoreHorizontal,
-  Trash2,
-  Pencil,
-  Power,
-  CalendarDays,
-  Repeat,
-  Bot,
-} from "lucide-react";
-import { useApp, type View } from "../../lib/store";
+import { Clock, Plus, Play, Trash2, Pencil, CalendarDays, Repeat, ArrowRight, Loader2 } from "lucide-react";
+import { useApp } from "../../lib/store";
 import type { ScheduledTask } from "../../lib/api";
-import { cn } from "../../lib/cn";
+import {
+  Button,
+  EmptyState,
+  IconTile,
+  ListGroup,
+  ListRow,
+  OverflowMenu,
+  PageShell,
+  RowIconButton,
+  Segmented,
+  Switch,
+  useConfirm,
+} from "../page/Page";
 import { ScheduleModal } from "./ScheduleModal";
 
 /** Human-readable trigger description. */
@@ -46,14 +47,14 @@ function formatTimestamp(ms: number | null): string {
 }
 
 function formatNext(ms: number | null): string {
-  if (!ms) return "—";
+  if (!ms) return "not set";
   const d = new Date(ms);
   const now = Date.now();
   const diff = ms - now;
-  if (diff < 0) return "Overdue";
-  if (diff < 60_000) return "In <1m";
-  if (diff < 3_600_000) return `In ${Math.floor(diff / 60_000)}m`;
-  if (diff < 86_400_000) return `In ${Math.floor(diff / 3_600_000)}h`;
+  if (diff < 0) return "overdue";
+  if (diff < 60_000) return "in under a minute";
+  if (diff < 3_600_000) return `in ${Math.floor(diff / 60_000)}m`;
+  if (diff < 86_400_000) return `in ${Math.floor(diff / 3_600_000)}h`;
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
@@ -64,234 +65,161 @@ export function ScheduledTasksPage() {
   const updateSchedule = useApp((s) => s.updateSchedule);
   const runScheduleNow = useApp((s) => s.runScheduleNow);
   const openChat = useApp((s) => s.openChat);
-  const setView = useApp((s) => s.setView);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<ScheduledTask | null>(null);
-  const [menuTaskId, setMenuTaskId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [running, setRunning] = useState<string | null>(null);
+  const [filter, setFilter] = useState<"all" | "active" | "paused">("all");
+  const [confirmDialog, confirm] = useConfirm();
 
   useEffect(() => {
     void fetchSchedules();
   }, [fetchSchedules]);
 
-  // Close the row menu on outside click.
-  useEffect(() => {
-    if (!menuTaskId) return;
-    const onClick = () => setMenuTaskId(null);
-    window.addEventListener("click", onClick);
-    return () => window.removeEventListener("click", onClick);
-  }, [menuTaskId]);
+  const activeCount = scheduledTasks.filter((t) => t.enabled).length;
+  const pausedCount = scheduledTasks.length - activeCount;
+  const showFilter = activeCount > 0 && pausedCount > 0;
+  const shown = scheduledTasks.filter((t) =>
+    !showFilter || filter === "all" ? true : filter === "active" ? t.enabled : !t.enabled,
+  );
 
-  const enabledCount = scheduledTasks.filter((t) => t.enabled).length;
-
-  const handleToggle = async (t: ScheduledTask) => {
-    await updateSchedule(t.id, { enabled: !t.enabled });
+  const openEditor = (t: ScheduledTask | null) => {
+    setEditingTask(t);
+    setModalOpen(true);
   };
 
   const handleRunNow = async (t: ScheduledTask) => {
-    await runScheduleNow(t.id);
-  };
-
-  const handleOpenRunChat = (t: ScheduledTask) => {
-    if (t.last_chat_id) {
-      openChat(t.last_chat_id);
-    } else {
-      setView("inbox" as View);
+    setRunning(t.id);
+    try {
+      await runScheduleNow(t.id);
+    } finally {
+      setRunning(null);
     }
   };
 
+  const handleDelete = async (t: ScheduledTask) => {
+    const ok = await confirm({
+      title: `Delete "${t.title}"?`,
+      body: "The task stops running. Results already in your Inbox stay there.",
+      confirmLabel: "Delete task",
+    });
+    if (ok) void deleteSchedule(t.id);
+  };
+
   return (
-    <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-paper">
-      {/* Body */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-[1200px] px-6 pb-6 pt-8">
-          {/* Title row — in-flow, no chrome band */}
-          <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <h1 className="text-[22px] font-semibold tracking-tight text-ink">
-                Scheduled
-              </h1>
-              <p className="mt-0.5 text-[13px] text-ink-muted">
-                {enabledCount} active task{enabledCount === 1 ? "" : "s"} · results land in your Inbox
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => { setEditingTask(null); setModalOpen(true); }}
-              className="press ring-focus inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-paper hover:bg-ink/90 transition-colors"
-            >
-              <Plus className="h-3.5 w-3.5" />
+    <PageShell
+      title="Scheduled"
+      subtitle={
+        scheduledTasks.length > 0
+          ? `${activeCount} active. Results land in your Inbox.`
+          : "Tasks zWork runs on a schedule. Results land in your Inbox."
+      }
+      actions={
+        <Button variant="primary" icon={<Plus />} onClick={() => openEditor(null)}>
+          New task
+        </Button>
+      }
+      toolbar={
+        showFilter ? (
+          <Segmented
+            label="Show"
+            value={filter}
+            onChange={setFilter}
+            options={[
+              { value: "all", label: "All", count: scheduledTasks.length },
+              { value: "active", label: "Active", count: activeCount },
+              { value: "paused", label: "Paused", count: pausedCount },
+            ]}
+          />
+        ) : undefined
+      }
+    >
+      {scheduledTasks.length === 0 ? (
+        <EmptyState
+          icon={<Clock />}
+          title="No scheduled tasks yet"
+          body="Have zWork check your email, watch a page or sum up the week on a schedule. Results land in your Inbox."
+          action={
+            <Button variant="primary" icon={<Plus />} onClick={() => openEditor(null)}>
               New task
-            </button>
-          </div>
-          {scheduledTasks.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-line p-16 text-center">
-              <Clock className="mx-auto h-8 w-8 text-ink-faint" />
-              <h3 className="mt-3 text-[13.5px] font-semibold text-ink">
-                No scheduled tasks yet
-              </h3>
-              <p className="mt-1 text-[12.5px] text-ink-muted max-w-[320px] mx-auto">
-                Create a recurring task and the agent will run it on a schedule — checking
-                email, monitoring sources, summarizing changes — then post findings to your Inbox.
-              </p>
-              <button
-                type="button"
-                onClick={() => { setEditingTask(null); setModalOpen(true); }}
-                className="press ring-focus mt-4 inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-paper hover:bg-ink/90 transition-colors"
+            </Button>
+          }
+        />
+      ) : (
+        <ListGroup>
+          {shown.map((t) => {
+            const open = openId === t.id;
+            const isRunning = running === t.id;
+            return (
+              <ListRow
+                key={t.id}
+                icon={
+                  <IconTile>
+                    {t.interval_minutes ? <Repeat /> : <CalendarDays />}
+                  </IconTile>
+                }
+                title={t.title}
+                meta={
+                  t.enabled ? (
+                    <>
+                      {describeTrigger(t)} · Next {formatNext(t.next_run_at)}
+                      {t.last_run_at ? ` · Last run ${formatTimestamp(t.last_run_at).replace("Just now", "just now")}` : ""}
+                    </>
+                  ) : (
+                    <>Paused · {describeTrigger(t)}</>
+                  )
+                }
+                muted={!t.enabled}
+                onClick={() => setOpenId(open ? null : t.id)}
+                expanded={open}
+                actions={
+                  <RowIconButton label="Run now" disabled={isRunning} onClick={() => void handleRunNow(t)}>
+                    {isRunning ? <Loader2 className="animate-spin" /> : <Play />}
+                  </RowIconButton>
+                }
+                trailing={
+                  <>
+                    <Switch
+                      checked={t.enabled}
+                      label={t.enabled ? `Pause ${t.title}` : `Resume ${t.title}`}
+                      onChange={() => void updateSchedule(t.id, { enabled: !t.enabled })}
+                    />
+                    <OverflowMenu
+                      items={[
+                        { label: "Edit", icon: <Pencil />, onSelect: () => openEditor(t) },
+                        { label: "Delete", icon: <Trash2 />, danger: true, onSelect: () => void handleDelete(t) },
+                      ]}
+                    />
+                  </>
+                }
               >
-                <Plus className="h-3.5 w-3.5" />
-                Create your first task
-              </button>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-3">
-              {scheduledTasks.map((t) => (
-                <div
-                  key={t.id}
-                  className={cn(
-                    "group rounded-2xl border border-line bg-paper-raised p-4 transition-colors",
-                    !t.enabled && "opacity-60"
+                <p className="max-w-[68ch] whitespace-pre-wrap text-[13px] leading-relaxed text-ink-soft">{t.prompt}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {t.last_chat_id && (
+                    <Button variant="primary" icon={<ArrowRight />} onClick={() => openChat(t.last_chat_id!)}>
+                      Open last run
+                    </Button>
                   )}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    {/* Left: title + prompt */}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[13.5px] font-semibold text-ink">{t.title}</span>
-                        <span
-                          className={cn(
-                            "inline-flex items-center gap-1 rounded-full px-2 py-px text-[10px] font-medium",
-                            t.enabled
-                              ? "bg-success/10 text-success"
-                              : "bg-paper-sunken text-ink-muted"
-                          )}
-                        >
-                          {t.enabled ? (
-                            <>
-                              <span className="h-1.5 w-1.5 rounded-full bg-success" />
-                              Active
-                            </>
-                          ) : (
-                            "Paused"
-                          )}
-                        </span>
-                      </div>
-                      <p className="mt-1 line-clamp-2 text-[12.5px] leading-relaxed text-ink-muted">
-                        {t.prompt}
-                      </p>
-
-                      {/* Meta row */}
-                      <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] text-ink-faint">
-                        <span className="inline-flex items-center gap-1">
-                          {t.interval_minutes ? (
-                            <Repeat className="h-3 w-3" />
-                          ) : (
-                            <CalendarDays className="h-3 w-3" />
-                          )}
-                          {describeTrigger(t)}
-                        </span>
-                        <span className="inline-flex items-center gap-1">
-                          <Clock className="h-3 w-3" />
-                          Last run: {formatTimestamp(t.last_run_at)}
-                        </span>
-                        <span className="inline-flex items-center gap-1">
-                          Next: {formatNext(t.next_run_at)}
-                        </span>
-                        {t.last_chat_id && (
-                          <button
-                            type="button"
-                            onClick={() => handleOpenRunChat(t)}
-                            className="press inline-flex items-center gap-1 text-ink-muted hover:text-ink"
-                          >
-                            <Bot className="h-3 w-3" />
-                            View last run
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Right: actions */}
-                    <div className="flex shrink-0 items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => handleRunNow(t)}
-                        title="Run now"
-                        aria-label="Run now"
-                        className="press ring-focus rounded-lg p-1.5 text-ink-faint hover:bg-paper-sunken hover:text-ink"
-                      >
-                        <Play className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleToggle(t)}
-                        title={t.enabled ? "Pause" : "Enable"}
-                        aria-label={t.enabled ? "Pause" : "Enable"}
-                        className="press ring-focus rounded-lg p-1.5 text-ink-faint hover:bg-paper-sunken hover:text-ink"
-                      >
-                        <Power className="h-3.5 w-3.5" />
-                      </button>
-                      <div className="relative">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setMenuTaskId(menuTaskId === t.id ? null : t.id);
-                          }}
-                          title="More"
-                          aria-label="More actions"
-                          aria-haspopup="menu"
-                          aria-expanded={menuTaskId === t.id}
-                          className="press ring-focus rounded-lg p-1.5 text-ink-faint hover:bg-paper-sunken hover:text-ink"
-                        >
-                          <MoreHorizontal className="h-3.5 w-3.5" />
-                        </button>
-                        {menuTaskId === t.id && (
-                          <div
-                            className="absolute right-0 top-full z-50 mt-1 w-36 overflow-hidden rounded-lg border border-line bg-paper-raised shadow-pop"
-                            role="menu"
-                            aria-label="Task actions"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingTask(t);
-                                setModalOpen(true);
-                                setMenuTaskId(null);
-                              }}
-                              className="press flex w-full items-center gap-2 px-3 py-2 text-[12px] text-ink hover:bg-paper-sunken"
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                              Edit
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (confirm("Delete this scheduled task? This cannot be undone.")) {
-                                  void deleteSchedule(t.id);
-                                }
-                                setMenuTaskId(null);
-                              }}
-                              className="press flex w-full items-center gap-2 px-3 py-2 text-[12px] text-error hover:bg-error/10"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                              Delete
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                  <Button
+                    icon={isRunning ? <Loader2 className="animate-spin" /> : <Play />}
+                    disabled={isRunning}
+                    onClick={() => void handleRunNow(t)}
+                  >
+                    Run now
+                  </Button>
+                  <Button icon={<Pencil />} onClick={() => openEditor(t)}>
+                    Edit
+                  </Button>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {modalOpen && (
-        <ScheduleModal task={editingTask} onClose={() => setModalOpen(false)} />
+              </ListRow>
+            );
+          })}
+        </ListGroup>
       )}
-    </div>
+
+      {modalOpen && <ScheduleModal task={editingTask} onClose={() => setModalOpen(false)} />}
+      {confirmDialog}
+    </PageShell>
   );
 }

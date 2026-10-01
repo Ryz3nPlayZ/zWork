@@ -1,53 +1,34 @@
 /* Hallmark · genre: modern-minimal · macrostructure: Workbench · design-system: design.md · designed-as-app */
 
-import { useState, useEffect } from "react";
-import {
-  Inbox,
-  CheckCircle2,
-  AlertTriangle,
-  HelpCircle,
-  Eye,
-  X,
-  Clock,
-  Bot,
-  ArrowRight,
-} from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Inbox, Check, CheckCheck, AlertTriangle, HelpCircle, X, Bot, ArrowRight, CalendarClock } from "lucide-react";
 import { useApp } from "../lib/store";
 import type { InboxItem } from "../lib/api";
-import { cn } from "../lib/cn";
+import {
+  Button,
+  EmptyState,
+  IconTile,
+  ListGroup,
+  ListRow,
+  PageShell,
+  RowIconButton,
+  SectionHeading,
+  Segmented,
+  type Tone,
+} from "./page/Page";
 
-/** Visual treatment per inbox item kind. */
-function kindMeta(kind: InboxItem["kind"]) {
+/** Icon and tone per inbox item kind. */
+function kindMeta(kind: InboxItem["kind"]): { icon: typeof Bot; tone: Tone; label: string } {
   switch (kind) {
     case "flag":
-      return {
-        icon: AlertTriangle,
-        dot: "bg-warning",
-        iconWrap: "border-warning/20 bg-warning/10 text-warning",
-        label: "Needs attention",
-      };
+      return { icon: AlertTriangle, tone: "warning", label: "Needs attention" };
     case "question":
-      return {
-        icon: HelpCircle,
-        dot: "bg-info",
-        iconWrap: "border-info/20 bg-info/10 text-info",
-        label: "Question",
-      };
+      return { icon: HelpCircle, tone: "info", label: "Question" };
     case "error":
-      return {
-        icon: AlertTriangle,
-        dot: "bg-error",
-        iconWrap: "border-error/20 bg-error/10 text-error",
-        label: "Error",
-      };
+      return { icon: AlertTriangle, tone: "error", label: "Failed" };
     case "summary":
     default:
-      return {
-        icon: Bot,
-        dot: "bg-ink-faint",
-        iconWrap: "border-line bg-paper text-ink-muted",
-        label: "Summary",
-      };
+      return { icon: Bot, tone: "neutral", label: "Summary" };
   }
 }
 
@@ -62,6 +43,9 @@ function timeAgo(ms: number): string {
   return `${days}d ago`;
 }
 
+/** How long a dismissed item can be brought back before it is deleted. */
+const UNDO_MS = 5000;
+
 export function InboxPage() {
   const inboxItems = useApp((s) => s.inboxItems);
   const fetchInbox = useApp((s) => s.fetchInbox);
@@ -69,7 +53,11 @@ export function InboxPage() {
   const markAllRead = useApp((s) => s.markAllInboxRead);
   const deleteItem = useApp((s) => s.deleteInboxItem);
   const openChat = useApp((s) => s.openChat);
-  const [revealedId, setRevealedId] = useState<string | null>(null);
+  const setView = useApp((s) => s.setView);
+  const [tab, setTab] = useState<"unread" | "all">("unread");
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const timers = useRef(new Map<string, number>());
 
   useEffect(() => {
     void fetchInbox();
@@ -78,194 +66,185 @@ export function InboxPage() {
     return () => clearInterval(id);
   }, [fetchInbox]);
 
+  // Leaving the page commits any pending dismissals.
+  useEffect(() => {
+    const t = timers.current;
+    return () => {
+      for (const [id, handle] of t) {
+        window.clearTimeout(handle);
+        void deleteItem(id);
+      }
+    };
+  }, [deleteItem]);
+
+  function dismiss(id: string) {
+    setDismissed((d) => new Set(d).add(id));
+    if (openId === id) setOpenId(null);
+    timers.current.set(
+      id,
+      window.setTimeout(() => {
+        timers.current.delete(id);
+        void deleteItem(id);
+      }, UNDO_MS),
+    );
+  }
+
+  function undo(id: string) {
+    window.clearTimeout(timers.current.get(id));
+    timers.current.delete(id);
+    setDismissed((d) => {
+      const next = new Set(d);
+      next.delete(id);
+      return next;
+    });
+  }
+
   const unread = inboxItems.filter((i) => !i.read);
   const read = inboxItems.filter((i) => i.read);
+  const showTabs = read.length > 0;
+  const view = showTabs ? tab : "unread";
+
+  function renderRow(item: InboxItem) {
+    if (dismissed.has(item.id)) {
+      return (
+        <li key={item.id} className="flex items-center justify-between gap-3 px-3.5 py-2.5 text-[12.5px] text-ink-muted">
+          <span className="truncate">Dismissed &ldquo;{item.title}&rdquo;</span>
+          <button
+            type="button"
+            onClick={() => undo(item.id)}
+            className="press ring-focus shrink-0 rounded-md px-2 py-0.5 font-medium text-ink hover:bg-line/40"
+          >
+            Undo
+          </button>
+        </li>
+      );
+    }
+    const meta = kindMeta(item.kind);
+    const Icon = meta.icon;
+    const open = openId === item.id;
+    return (
+      <ListRow
+        key={item.id}
+        icon={
+          <IconTile tone={meta.tone}>
+            <Icon />
+          </IconTile>
+        }
+        title={item.title}
+        meta={
+          <>
+            {meta.label}
+            {!open && item.body && <span className="text-ink-faint"> · {item.body.split("\n")[0]}</span>}
+          </>
+        }
+        muted={item.read}
+        onClick={() => setOpenId(open ? null : item.id)}
+        expanded={open}
+        trailing={<span>{timeAgo(item.created_at)}</span>}
+        actions={
+          <>
+            {!item.read && (
+              <RowIconButton label="Mark read" onClick={() => void markRead(item.id)}>
+                <Check />
+              </RowIconButton>
+            )}
+            <RowIconButton label="Dismiss" onClick={() => dismiss(item.id)}>
+              <X />
+            </RowIconButton>
+          </>
+        }
+      >
+        <p className="max-w-[68ch] whitespace-pre-wrap text-[13px] leading-relaxed text-ink-soft">{item.body}</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {item.chat_id && (
+            <Button
+              variant="primary"
+              icon={<ArrowRight />}
+              onClick={() => {
+                void markRead(item.id);
+                void openChat(item.chat_id!);
+              }}
+            >
+              Open run
+            </Button>
+          )}
+          {!item.read && (
+            <Button icon={<Check />} onClick={() => void markRead(item.id)}>
+              Mark read
+            </Button>
+          )}
+          <Button icon={<X />} onClick={() => dismiss(item.id)}>
+            Dismiss
+          </Button>
+        </div>
+      </ListRow>
+    );
+  }
 
   return (
-    <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-paper">
-      {/* Body */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-[860px] px-6 pb-6 pt-8">
-          {/* Title row — in-flow, no chrome band */}
-          <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <h1 className="text-[22px] font-semibold tracking-tight text-ink">
-                Inbox
-              </h1>
-              <p className="mt-0.5 text-[13px] text-ink-muted">
-                {unread.length} unread · results from scheduled tasks, and anything zWork wants you to see
-              </p>
-            </div>
-            {unread.length > 0 && (
-              <button
-                type="button"
-                onClick={() => void markAllRead()}
-                className="press ring-focus inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-line bg-paper px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-paper-sunken transition-colors"
-              >
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                Mark all read
-              </button>
-            )}
-          </div>
-
-          {/* Unread items */}
-          <div className="flex flex-col gap-4">
-            {inboxItems.length === 0 && (
-              <div className="rounded-2xl border border-dashed border-line p-12 text-center">
-                <Inbox className="mx-auto h-8 w-8 text-ink-faint" />
-                <h3 className="mt-3 text-[13.5px] font-semibold text-ink">
-                  All clear
-                </h3>
-                <p className="mx-auto mt-1 max-w-[280px] text-[12.5px] text-ink-muted">
-                  Nothing waiting for you. When a scheduled task finishes or
-                  zWork needs your attention, it shows up here.
-                </p>
-              </div>
-            )}
-
-            {unread.map((item) => {
-              const meta = kindMeta(item.kind);
-              const Icon = meta.icon;
-              const revealed = revealedId === item.id || item.kind === "flag" || item.kind === "error";
-              return (
-                <div
-                  key={item.id}
-                  className="relative rounded-2xl border border-line bg-paper-raised p-5"
-                >
-                  {/* Top row: icon + title + time + dismiss */}
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={cn(
-                          "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border",
-                          meta.iconWrap,
-                        )}
-                      >
-                        <Icon className="h-4 w-4" />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[13px] font-semibold text-ink">
-                            {item.title}
-                          </span>
-                          <span className={cn("h-1.5 w-1.5 rounded-full", meta.dot)} aria-hidden />
-                          <span className="inline-flex items-center gap-1 text-[10.5px] text-ink-faint">
-                            <Clock className="h-3 w-3" />
-                            {timeAgo(item.created_at)}
-                          </span>
-                        </div>
-                        <p className="mt-0.5 max-w-[520px] text-[12.5px] leading-relaxed text-ink-muted">
-                          {item.body}
-                        </p>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (confirm("Dismiss this inbox item?")) {
-                          void deleteItem(item.id);
-                        }
-                      }}
-                      title="Dismiss"
-                      aria-label="Dismiss"
-                      className="press ring-focus rounded-lg p-1 text-ink-faint hover:bg-paper-sunken hover:text-ink"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-
-                  {/* Action area */}
-                  <div className="mt-4 flex items-center gap-2">
-                    {item.kind === "summary" && !revealed && (
-                      <button
-                        type="button"
-                        onClick={() => setRevealedId(item.id)}
-                        className="press ring-focus inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-paper hover:bg-ink/90 transition-colors"
-                      >
-                        <Eye className="h-3.5 w-3.5" />
-                        Reveal summary
-                      </button>
-                    )}
-
-                    {item.chat_id && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void markRead(item.id);
-                          void openChat(item.chat_id!);
-                        }}
-                        className="press ring-focus inline-flex items-center gap-1.5 rounded-lg border border-line bg-paper px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-paper-sunken transition-colors"
-                      >
-                        <ArrowRight className="h-3.5 w-3.5" />
-                        Open run
-                      </button>
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={() => void markRead(item.id)}
-                      className="press ring-focus inline-flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:bg-paper-sunken transition-colors"
-                    >
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      Mark read
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Read items */}
-          {read.length > 0 && (
-            <div className="mt-8">
-              <div className="mb-3 flex items-center gap-2 border-b border-line pb-2">
-                <CheckCircle2 className="h-3.5 w-3.5 text-ink-faint" />
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
-                  Read ({read.length})
-                </span>
-              </div>
-              <div className="flex flex-col gap-3">
-                {read.map((item) => {
-                  const meta = kindMeta(item.kind);
-                  const Icon = meta.icon;
-                  return (
-                    <div
-                      key={item.id}
-                      className="group flex items-center justify-between rounded-xl border border-line bg-paper-soft px-4 py-3"
-                    >
-                      <div className="flex min-w-0 items-center gap-3">
-                        <Icon className="h-4 w-4 shrink-0 text-ink-faint" />
-                        <span className="truncate text-[12.5px] text-ink-muted">
-                          {item.title}: {item.body.slice(0, 60)}
-                          {item.body.length > 60 ? "…" : ""}
-                        </span>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        <span className="text-[10.5px] text-ink-faint">
-                          {timeAgo(item.created_at)}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (confirm("Delete this read item?")) {
-                              void deleteItem(item.id);
-                            }
-                          }}
-                          title="Delete"
-                          aria-label="Delete"
-                          className="press ring-focus rounded p-1 text-ink-faint hover:bg-paper-sunken hover:text-ink"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+    <PageShell
+      title="Inbox"
+      subtitle={
+        unread.length > 0
+          ? `${unread.length} new. Results from scheduled tasks and anything zWork wants you to see.`
+          : "Results from scheduled tasks and anything zWork wants you to see."
+      }
+      actions={
+        unread.length > 0 ? (
+          <Button icon={<CheckCheck />} onClick={() => void markAllRead()}>
+            Mark all read
+          </Button>
+        ) : undefined
+      }
+      toolbar={
+        showTabs ? (
+          <Segmented
+            label="Show"
+            value={tab}
+            onChange={setTab}
+            options={[
+              { value: "unread", label: "New", count: unread.length },
+              { value: "all", label: "All", count: inboxItems.length },
+            ]}
+          />
+        ) : undefined
+      }
+    >
+      {inboxItems.length === 0 ? (
+        <EmptyState
+          icon={<Inbox />}
+          title="All clear"
+          body="When a scheduled task finishes or zWork needs your attention, it shows up here."
+          action={
+            <Button icon={<CalendarClock />} onClick={() => setView("scheduled")}>
+              Schedule a task
+            </Button>
+          }
+        />
+      ) : view === "unread" ? (
+        unread.length > 0 ? (
+          <ListGroup>{unread.map(renderRow)}</ListGroup>
+        ) : (
+          <EmptyState
+            compact
+            icon={<Check />}
+            title="Nothing new"
+            body="You've seen everything. Earlier items are under All."
+            action={<Button onClick={() => setTab("all")}>Show all</Button>}
+          />
+        )
+      ) : (
+        <>
+          {unread.length > 0 && (
+            <>
+              <SectionHeading title="New" count={unread.length} className="mt-0" />
+              <ListGroup>{unread.map(renderRow)}</ListGroup>
+            </>
           )}
-        </div>
-      </div>
-    </div>
+          <SectionHeading title="Earlier" count={read.length} className={unread.length > 0 ? undefined : "mt-0"} />
+          <ListGroup>{read.map(renderRow)}</ListGroup>
+        </>
+      )}
+    </PageShell>
   );
 }

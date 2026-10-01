@@ -295,7 +295,8 @@ export function SearchField({
 
 export function ListGroup({ children }: { children: ReactNode }) {
   return (
-    <ul className="divide-y divide-line overflow-hidden rounded-2xl border border-line bg-paper-raised">
+    // No overflow-hidden: row menus must be able to hang outside the group.
+    <ul className="divide-y divide-line rounded-2xl border border-line bg-paper-raised [&>li:first-child]:rounded-t-2xl [&>li:last-child]:rounded-b-2xl">
       {children}
     </ul>
   );

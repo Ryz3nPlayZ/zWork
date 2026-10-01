@@ -54,7 +54,7 @@ function AppLogoTile({ app, size = "md" }: { app: ComposioApp; size?: "md" | "lg
   const ink = INK_LOGOS.has(app.id);
   const hasLogo = hasBrandLogo(app.id);
   const color = ink ? "rgb(var(--ink))" : app.color;
-  const box = size === "md" ? "h-9 w-9 rounded-[10px]" : "h-11 w-11 rounded-xl";
+  const box = size === "md" ? "h-10 w-10 rounded-xl" : "h-11 w-11 rounded-xl";
   return (
     <div
       className={`flex shrink-0 items-center justify-center overflow-hidden ${box}`}
