@@ -21,6 +21,20 @@ import { Badge, Button, Segmented, type Tone } from "../page/Page";
 
 export type ApiFetch = <T>(path: string) => Promise<T>;
 
+export type AdminTabId =
+  | "overview"
+  | "finance"
+  | "revenue"
+  | "growth"
+  | "users"
+  | "usage"
+  | "models"
+  | "engagement"
+  | "health"
+  | "live"
+  | "status"
+  | "audit";
+
 // Semantic series colors, resolved from the theme tokens so charts follow
 // light/dark like the rest of the UI. Use these for good/bad series and the
 // categorical palette below for everything else.
@@ -156,6 +170,7 @@ export function AreaChartCard({
   xKey,
   height = 240,
   valueFormatter,
+  stacked,
 }: {
   title: string;
   sub?: string;
@@ -164,6 +179,7 @@ export function AreaChartCard({
   xKey: string;
   height?: number;
   valueFormatter?: (v: number) => string;
+  stacked?: boolean;
 }) {
   // Gradient ids are document-global; two charts with the same series key
   // would otherwise share (and overwrite) one gradient.
@@ -202,8 +218,10 @@ export function AreaChartCard({
                 dataKey={s.key}
                 name={s.label}
                 stroke={color}
-                strokeWidth={2}
-                fill={`url(#${gid}-${s.key})`}
+                strokeWidth={stacked ? 1.5 : 2}
+                fill={stacked ? color : `url(#${gid}-${s.key})`}
+                fillOpacity={stacked ? 0.35 : 1}
+                stackId={stacked ? "stack" : undefined}
                 connectNulls
               />
             );
@@ -445,6 +463,7 @@ export function StatCard({
   icon: Icon,
   tone = "default",
   hint,
+  delta,
 }: {
   label: string;
   value: string;
@@ -453,6 +472,8 @@ export function StatCard({
   tone?: StatTone;
   /** Shown on hover: how the number is computed. */
   hint?: string;
+  /** Change vs the previous period, as a ratio (0.12 = +12%). */
+  delta?: { ratio: number | null; good: "up" | "down"; label?: string };
 }) {
   return (
     <div className="min-w-0 rounded-2xl border border-line bg-paper-raised p-4" title={hint}>
@@ -460,10 +481,63 @@ export function StatCard({
         {Icon && <Icon className="h-3.5 w-3.5 shrink-0" />}
         <span className="truncate text-[12px] font-medium">{label}</span>
       </div>
-      <div className={cn("mt-1.5 truncate text-[22px] font-semibold tabular-nums tracking-tight", STAT_TONE[tone])}>
-        {value}
+      <div className="mt-1.5 flex min-w-0 items-baseline gap-2">
+        <span className={cn("truncate text-[22px] font-semibold tabular-nums tracking-tight", STAT_TONE[tone])}>
+          {value}
+        </span>
+        {delta && <DeltaPill {...delta} />}
       </div>
       {sub && <div className="mt-0.5 truncate text-[11.5px] text-ink-faint">{sub}</div>}
+    </div>
+  );
+}
+
+/** "+12%" / "−4%", green when the change is in the good direction. */
+export function DeltaPill({ ratio, good, label }: { ratio: number | null; good: "up" | "down"; label?: string }) {
+  if (ratio === null || !Number.isFinite(ratio)) return null;
+  const up = ratio >= 0;
+  const flat = Math.abs(ratio) < 0.005;
+  const fine = flat || (up ? good === "up" : good === "down");
+  return (
+    <span
+      title={label ?? "vs previous period"}
+      className={cn(
+        "shrink-0 rounded-full px-1.5 py-px text-[10.5px] font-medium tabular-nums",
+        flat ? "bg-paper-sunken text-ink-muted" : fine ? "bg-success/10 text-success" : "bg-error/10 text-error",
+      )}
+    >
+      {flat ? "±0%" : `${up ? "+" : "−"}${Math.abs(ratio * 100).toFixed(Math.abs(ratio) < 0.1 ? 1 : 0)}%`}
+    </span>
+  );
+}
+
+/** Change from `prev` to `cur` as a ratio; null when there is no baseline. */
+export function change(cur: number, prev: number | null | undefined): number | null {
+  if (prev === null || prev === undefined || prev === 0) return null;
+  return (cur - prev) / Math.abs(prev);
+}
+
+/** Heading for a group of cards inside a tab. */
+export function Section({ title, sub, right, children }: { title: string; sub?: ReactNode; right?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="space-y-3">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h3 className="text-[13px] font-semibold text-ink">{title}</h3>
+          {sub && <p className="mt-0.5 text-[12px] text-ink-muted">{sub}</p>}
+        </div>
+        {right}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/** Thin horizontal bar, 0..1. */
+export function Meter({ value, color = "rgb(var(--accent) / 0.55)" }: { value: number; color?: string }) {
+  return (
+    <div className="h-1.5 overflow-hidden rounded-full bg-paper-sunken">
+      <div className="h-full rounded-full" style={{ width: `${Math.max(0, Math.min(1, value)) * 100}%`, background: color }} />
     </div>
   );
 }

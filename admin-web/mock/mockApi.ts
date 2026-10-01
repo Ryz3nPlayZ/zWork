@@ -433,8 +433,9 @@ function downloads() {
       update_checks: Math.floor(base / 6),
     })),
     versions_in_use: [
-      { version: "0.5.2", users: 71, requests: 9120 },
-      { version: "0.5.1", users: 28, requests: 3011 },
+      { version: "0.5.3", users: 39, requests: 4870 },
+      { version: "0.5.2", users: 44, requests: 5210 },
+      { version: "0.5.1", users: 16, requests: 1061 },
       { version: "0.5.0", users: 11, requests: 870 },
       { version: "0.4.9", users: 6, requests: 402 },
       { version: "unknown", users: 2, requests: 55 },

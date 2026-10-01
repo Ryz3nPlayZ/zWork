@@ -1,19 +1,22 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Activity,
   BarChart3,
   Boxes,
   DollarSign,
+  Globe,
   HeartPulse,
   LayoutDashboard,
   LogOut,
   Moon,
   Radio,
   RefreshCw,
+  Rocket,
   ScrollText,
   Shield,
   Sun,
   Users,
+  Wallet,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { HealthTab } from "./admin/HealthTab";
@@ -24,6 +27,10 @@ import { AuditTab } from "./admin/AuditTab";
 import { UsersTab } from "./admin/UsersTab";
 import { ModelsTab, UsageTab } from "./admin/UsageTab";
 import { OverviewTab } from "./admin/OverviewTab";
+import { FinanceTab } from "./admin/FinanceTab";
+import { GrowthTab } from "./admin/GrowthTab";
+import { StatusTab } from "./admin/StatusTab";
+import type { AdminTabId } from "./admin/shared";
 import { formatRelative } from "./admin/format";
 
 // API base: in the admin-web SPA (admin.tryzwork.app) requests go through
@@ -39,23 +46,55 @@ interface LiveSummary {
   requests_per_min: number;
 }
 
-const TABS = [
-  { id: "overview", label: "Overview", icon: LayoutDashboard },
-  { id: "health", label: "Health", icon: HeartPulse },
-  { id: "revenue", label: "Revenue", icon: DollarSign },
-  { id: "engagement", label: "Engagement", icon: Activity },
-  { id: "users", label: "Users", icon: Users },
-  { id: "usage", label: "Usage", icon: BarChart3 },
-  { id: "models", label: "Models", icon: Boxes },
-  { id: "live", label: "Live", icon: Radio },
-  { id: "audit", label: "Audit", icon: ScrollText },
-] as const;
+interface TabDef {
+  id: AdminTabId;
+  label: string;
+  icon: React.ElementType;
+  /** One line under the page title. */
+  blurb: string;
+}
 
-type Tab = (typeof TABS)[number]["id"];
+// Sidebar order is also the 1–9 shortcut order.
+const GROUPS: { label: string | null; tabs: TabDef[] }[] = [
+  {
+    label: null,
+    tabs: [{ id: "overview", label: "Overview", icon: LayoutDashboard, blurb: "The headline numbers and anything that needs a look today." }],
+  },
+  {
+    label: "Business",
+    tabs: [
+      { id: "finance", label: "Finance", icon: Wallet, blurb: "What hosted models cost us, who spends it, and what's left after revenue." },
+      { id: "revenue", label: "Revenue", icon: DollarSign, blurb: "MRR, subscriptions and churn from Stripe." },
+      { id: "growth", label: "Growth", icon: Rocket, blurb: "Downloads, versions in use, and how sign-ups activate and stay." },
+    ],
+  },
+  {
+    label: "Product",
+    tabs: [
+      { id: "users", label: "Users", icon: Users, blurb: "Every account, its tier and its usage." },
+      { id: "usage", label: "Usage", icon: BarChart3, blurb: "Requests and tokens over time." },
+      { id: "models", label: "Models", icon: Boxes, blurb: "Traffic, latency and failures by model." },
+      { id: "engagement", label: "Engagement", icon: Activity, blurb: "How often people come back and what they do." },
+    ],
+  },
+  {
+    label: "Ops",
+    tabs: [
+      { id: "health", label: "Health", icon: HeartPulse, blurb: "Gateway errors, latency and provider saturation." },
+      { id: "live", label: "Live", icon: Radio, blurb: "What's happening right now." },
+      { id: "status", label: "Status", icon: Globe, blurb: "Every public surface, the database and server integrations." },
+      { id: "audit", label: "Audit", icon: ScrollText, blurb: "Admin sign-ins and changes." },
+    ],
+  },
+];
+
+const TABS: TabDef[] = GROUPS.flatMap((g) => g.tabs);
+
+type Tab = AdminTabId;
 
 function tabFromHash(): Tab {
   const h = window.location.hash.replace(/^#\/?/, "");
-  return (TABS.find((t) => t.id === h)?.id ?? "overview") as Tab;
+  return TABS.find((t) => t.id === h)?.id ?? "overview";
 }
 
 /**
@@ -70,6 +109,7 @@ export function AdminPage({ standalone = false }: { standalone?: boolean }) {
   const [refreshedAt, setRefreshedAt] = useState(() => Date.now());
   const [, setClock] = useState(0);
   const [liveSummary, setLiveSummary] = useState<LiveSummary | null>(null);
+  const mainRef = useRef<HTMLElement>(null);
 
   const signOutLocal = useCallback(() => {
     setToken("");
@@ -116,6 +156,14 @@ export function AdminPage({ standalone = false }: { standalone?: boolean }) {
     setRefreshedAt(Date.now());
   }, []);
 
+  // Each tab starts at the top, not where the last one was scrolled to.
+  useEffect(() => {
+    mainRef.current?.scrollTo(0, 0);
+    document
+      .querySelector("#admin-tabs-narrow [aria-current=page]")
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [tab]);
+
   useEffect(() => {
     const onHash = () => setTabState(tabFromHash());
     window.addEventListener("hashchange", onHash);
@@ -128,7 +176,8 @@ export function AdminPage({ standalone = false }: { standalone?: boolean }) {
     return () => clearInterval(i);
   }, []);
 
-  // Keyboard: 1–9 jump to a tab, r refreshes. Ignored while typing.
+  // Keyboard: 1–9 jump to a tab, j/k step through them, r refreshes.
+  // Ignored while typing.
   useEffect(() => {
     if (!token) return;
     const onKey = (e: KeyboardEvent) => {
@@ -136,12 +185,15 @@ export function AdminPage({ standalone = false }: { standalone?: boolean }) {
       const el = e.target as HTMLElement | null;
       if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
       const n = Number(e.key);
-      if (n >= 1 && n <= TABS.length) setTab(TABS[n - 1].id);
+      const i = TABS.findIndex((t) => t.id === tab);
+      if (n >= 1 && n <= Math.min(9, TABS.length)) setTab(TABS[n - 1].id);
+      else if (e.key === "j") setTab(TABS[(i + 1) % TABS.length].id);
+      else if (e.key === "k") setTab(TABS[(i - 1 + TABS.length) % TABS.length].id);
       else if (e.key === "r") refresh();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [token, setTab, refresh]);
+  }, [token, tab, setTab, refresh]);
 
   // Header badge: light polling that stops while the window is hidden and
   // starts again when it comes back.
@@ -175,6 +227,8 @@ export function AdminPage({ standalone = false }: { standalone?: boolean }) {
       document.removeEventListener("visibilitychange", onVis);
     };
   }, [token, apiFetch, refreshKey]);
+
+  const current = TABS.find((t) => t.id === tab) ?? TABS[0];
 
   if (!token) {
     return (
@@ -229,16 +283,20 @@ export function AdminPage({ standalone = false }: { standalone?: boolean }) {
         </div>
       </header>
 
-      <nav className="flex gap-0.5 overflow-x-auto border-b border-line px-3" aria-label="Admin sections">
-        {TABS.map((t, i) => (
+      {/* Narrow windows: one scrolling row instead of the sidebar. */}
+      <nav
+        id="admin-tabs-narrow"
+        className="flex gap-0.5 overflow-x-auto border-b border-line px-3 md:hidden"
+        aria-label="Admin sections"
+      >
+        {TABS.map((t) => (
           <button
             key={t.id}
             type="button"
             onClick={() => setTab(t.id)}
-            title={`${t.label} (${i + 1})`}
             aria-current={tab === t.id ? "page" : undefined}
             className={cn(
-              "ring-focus -mb-px flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-[12.5px] font-medium transition-colors",
+              "ring-focus -mb-px flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-2 text-[12.5px] font-medium",
               tab === t.id ? "border-accent text-ink" : "border-transparent text-ink-muted hover:text-ink",
             )}
           >
@@ -248,19 +306,75 @@ export function AdminPage({ standalone = false }: { standalone?: boolean }) {
         ))}
       </nav>
 
-      <main className="flex-1 overflow-auto">
-        <div className="mx-auto max-w-[1200px] px-5 py-5">
-          {tab === "overview" && <OverviewTab apiFetch={apiFetch} refreshKey={refreshKey} onOpen={setTab} />}
-          {tab === "health" && <HealthTab apiFetch={apiFetch} refreshKey={refreshKey} />}
-          {tab === "revenue" && <RevenueTab apiFetch={apiFetch} refreshKey={refreshKey} />}
-          {tab === "engagement" && <EngagementTab apiFetch={apiFetch} refreshKey={refreshKey} />}
-          {tab === "users" && <UsersTab apiFetch={apiFetch} refreshKey={refreshKey} setTier={setTier} />}
-          {tab === "usage" && <UsageTab apiFetch={apiFetch} refreshKey={refreshKey} />}
-          {tab === "models" && <ModelsTab apiFetch={apiFetch} refreshKey={refreshKey} />}
-          {tab === "live" && <LiveTab apiFetch={apiFetch} refreshKey={refreshKey} />}
-          {tab === "audit" && <AuditTab apiFetch={apiFetch} refreshKey={refreshKey} />}
-        </div>
-      </main>
+      <div className="flex min-h-0 flex-1">
+        <aside className="hidden w-[208px] shrink-0 flex-col border-r border-line md:flex" aria-label="Admin sections">
+          <nav className="flex-1 space-y-4 overflow-y-auto px-2.5 py-3">
+            {GROUPS.map((g) => (
+              <div key={g.label ?? "top"}>
+                {g.label && (
+                  <div className="mb-1 px-2.5 text-[10.5px] font-semibold uppercase tracking-wider text-ink-faint">
+                    {g.label}
+                  </div>
+                )}
+                <ul className="space-y-px">
+                  {g.tabs.map((t) => {
+                    const n = TABS.indexOf(t) + 1;
+                    const active = tab === t.id;
+                    return (
+                      <li key={t.id}>
+                        <button
+                          type="button"
+                          onClick={() => setTab(t.id)}
+                          title={n <= 9 ? `${t.label} (${n})` : t.label}
+                          aria-current={active ? "page" : undefined}
+                          className={cn(
+                            "ring-focus group flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-[12.5px] font-medium transition-colors",
+                            active ? "bg-paper-sunken text-ink" : "text-ink-muted hover:bg-paper-sunken/60 hover:text-ink",
+                          )}
+                        >
+                          <t.icon className="h-3.5 w-3.5 shrink-0" />
+                          <span className="flex-1 truncate text-left">{t.label}</span>
+                          {t.id === "live" && liveSummary && (
+                            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success" />
+                          )}
+                          {n <= 9 && (
+                            <kbd className="hidden font-mono text-[10px] text-ink-faint group-hover:inline">{n}</kbd>
+                          )}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+          </nav>
+          <p className="border-t border-line px-5 py-2.5 text-[10.5px] leading-relaxed text-ink-faint">
+            <kbd className="font-mono">1</kbd>–<kbd className="font-mono">9</kbd> jump · <kbd className="font-mono">j</kbd>/
+            <kbd className="font-mono">k</kbd> step · <kbd className="font-mono">r</kbd> refresh
+          </p>
+        </aside>
+
+        <main ref={mainRef} className="min-w-0 flex-1 overflow-auto">
+          <div className="mx-auto max-w-[1240px] px-5 py-5 md:px-7 md:py-6">
+            <div className="mb-5">
+              <h2 className="text-[22px] font-semibold tracking-tight text-ink">{current.label}</h2>
+              <p className="mt-0.5 text-[12.5px] text-ink-muted">{current.blurb}</p>
+            </div>
+            {tab === "overview" && <OverviewTab apiFetch={apiFetch} refreshKey={refreshKey} onOpen={setTab} />}
+            {tab === "finance" && <FinanceTab apiFetch={apiFetch} refreshKey={refreshKey} />}
+            {tab === "revenue" && <RevenueTab apiFetch={apiFetch} refreshKey={refreshKey} />}
+            {tab === "growth" && <GrowthTab apiFetch={apiFetch} refreshKey={refreshKey} />}
+            {tab === "users" && <UsersTab apiFetch={apiFetch} refreshKey={refreshKey} setTier={setTier} />}
+            {tab === "usage" && <UsageTab apiFetch={apiFetch} refreshKey={refreshKey} />}
+            {tab === "models" && <ModelsTab apiFetch={apiFetch} refreshKey={refreshKey} />}
+            {tab === "engagement" && <EngagementTab apiFetch={apiFetch} refreshKey={refreshKey} />}
+            {tab === "health" && <HealthTab apiFetch={apiFetch} refreshKey={refreshKey} />}
+            {tab === "live" && <LiveTab apiFetch={apiFetch} refreshKey={refreshKey} />}
+            {tab === "status" && <StatusTab apiFetch={apiFetch} refreshKey={refreshKey} />}
+            {tab === "audit" && <AuditTab apiFetch={apiFetch} refreshKey={refreshKey} />}
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

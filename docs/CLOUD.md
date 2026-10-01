@@ -325,9 +325,22 @@ When you add or change an endpoint, update the matching handler in
 
 ### Dashboard tabs
 
-The frontend (`app/src/components/AdminPage.tsx` + `app/src/components/admin/`) renders nine tabs: **Overview, Health, Revenue, Engagement, Users, Usage, Models, Live, Audit**. Charts use `recharts` and the app's design tokens (CSS-variable RGB triplets), so they adapt to light/dark themes. Tables sort by any column and export the current view as CSV.
+The frontend (`app/src/components/AdminPage.tsx` + `app/src/components/admin/`) has a grouped sidebar (a scrolling tab row on narrow windows):
 
-The active tab lives in the URL hash (`#health`), so links and reloads keep it. Keys: `1`–`9` switch tabs, `r` refreshes.
+| Group | Tab | What it answers | Endpoint |
+|-------|-----|-----------------|----------|
+| | **Overview** | Headline numbers, plus a "Needs attention" list built from the other endpoints (a surface down, error rate ≥ 2%, unprofitable paying users, margin under 30%, free users over half of spend, unpriced models, spend on track for 1.5× last month, under half of active users on a week-old release, stale GitHub stats) | overview, finance, health, status, downloads |
+| Business | **Finance** | Upstream spend vs revenue and margin, month projection, free vs paying spend, spend per tier, unprofitable paying users, top spenders, spend by model, unpriced traffic | `finance` |
+| | **Revenue** | MRR, subscriptions and churn | `revenue` |
+| | **Growth** | Installer and update downloads, versions in use, the sign-up → request → 3 active days → subscribed funnel, weekly retention cohorts | `downloads`, `funnel` |
+| Product | **Users**, **Usage**, **Models**, **Engagement** | Accounts and tiers, request volume, per-model traffic and failures, retention and feature use | `users`, `usage/*`, `engagement` |
+| Ops | **Health**, **Live** | Gateway errors, latency, provider saturation; the last few minutes | `health`, `live` |
+| | **Status** | Every public host with its expected status code, database latency and largest tables, which integrations have keys | `status` |
+| | **Audit** | Admin sign-ins and changes | `audit` |
+
+Charts use `recharts` and the app's design tokens (CSS-variable RGB triplets), so they adapt to light/dark themes. Tables sort by any column and export the current view as CSV.
+
+The active tab lives in the URL hash (`#finance`), so links and reloads keep it. Keys: `1`–`9` jump to the first nine tabs in sidebar order, `j`/`k` step to the next/previous tab, `r` refreshes.
 
 ### Local development
 
