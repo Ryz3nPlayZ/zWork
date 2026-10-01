@@ -4930,11 +4930,14 @@ async fn compute_current_mrr(state: &AppState) -> (f64, i64) {
                     .unwrap_or(1)
                     .max(1) as f64;
 
+                // unit_amount is charged once per `interval_count` intervals
+                // (e.g. $30 every 3 months is $10/month), so divide by it.
+                let per_interval = (unit_amount as f64 / 100.0) / interval_count;
                 let monthly_gross = match interval {
-                    "year" => (unit_amount as f64 / 100.0) / 12.0 * interval_count,
-                    "week" => (unit_amount as f64 / 100.0) * (52.0 / 12.0) * interval_count,
-                    "day" => (unit_amount as f64 / 100.0) * (365.0 / 12.0) * interval_count,
-                    _ => (unit_amount as f64 / 100.0) * interval_count, // month + anything else
+                    "year" => per_interval / 12.0,
+                    "week" => per_interval * (52.0 / 12.0),
+                    "day" => per_interval * (365.0 / 12.0),
+                    _ => per_interval, // month + anything else
                 };
 
                 // Apply discount if present.
