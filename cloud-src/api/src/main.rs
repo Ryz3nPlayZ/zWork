@@ -2415,7 +2415,8 @@ async fn ingest_telemetry(
         "event": payload.event,
         "properties": payload.properties,
         "distinct_id": payload.session_id.unwrap_or_else(|| "anonymous".to_string()),
-        "timestamp": payload.ts,
+        // Clients send epoch ms; PostHog's capture API wants ISO 8601.
+        "timestamp": chrono::DateTime::from_timestamp_millis(payload.ts).map(|t| t.to_rfc3339()),
     });
 
     match state
