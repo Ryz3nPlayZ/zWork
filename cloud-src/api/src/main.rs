@@ -4253,8 +4253,10 @@ async fn admin_list_users(
 async fn admin_usage_by_time(
     State(state): State<AppState>,
     headers: HeaderMap,
+    Query(q): Query<AdminDaysQuery>,
 ) -> Result<Json<Vec<AdminUsageByTime>>, StatusCode> {
     let _owner = ensure_owner_or_service(&state, &headers).await?;
+    let days = q.days.clamp(1, 365);
 
     let usage: Vec<AdminUsageByTime> = sqlx::query(
         r#"
@@ -4267,11 +4269,12 @@ async fn admin_usage_by_time(
             COALESCE(SUM(completion_tokens), 0)::bigint as completion_tokens,
             COALESCE(SUM(total_tokens), 0)::bigint as tokens
         FROM gateway_requests
-        WHERE created_at > NOW() - INTERVAL '90 days'
+        WHERE created_at > NOW() - ($1 || ' days')::INTERVAL
         GROUP BY DATE(created_at)
         ORDER BY date DESC
         "#,
     )
+    .bind(days)
     .fetch_all(&state.db)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
@@ -4293,14 +4296,20 @@ async fn admin_usage_by_time(
 async fn admin_usage_by_model(
     State(state): State<AppState>,
     headers: HeaderMap,
+    Query(q): Query<AdminDaysQuery>,
 ) -> Result<Json<Vec<AdminUsageByModel>>, StatusCode> {
     let _owner = ensure_owner_or_service(&state, &headers).await?;
+    let days = q.days.clamp(1, 365);
 
-    let total: i64 =
-        sqlx::query_scalar("SELECT COALESCE(SUM(total_tokens), 0)::bigint FROM gateway_requests")
-            .fetch_one(&state.db)
-            .await
-            .unwrap_or(1);
+    // Share is of the same window, so the percentages add up to 100.
+    let total: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(total_tokens), 0)::bigint FROM gateway_requests \
+         WHERE created_at > NOW() - ($1 || ' days')::INTERVAL",
+    )
+    .bind(days)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(1);
 
     let usage: Vec<AdminUsageByModel> = sqlx::query(
         r#"
@@ -4313,10 +4322,12 @@ async fn admin_usage_by_model(
             COALESCE(SUM(total_tokens), 0)::bigint as tokens
         FROM gateway_requests
         WHERE model_id IS NOT NULL
+          AND created_at > NOW() - ($1 || ' days')::INTERVAL
         GROUP BY model_id
         ORDER BY tokens DESC
         "#,
     )
+    .bind(days)
     .fetch_all(&state.db)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?

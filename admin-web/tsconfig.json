@@ -21,6 +21,6 @@
       "@app/*": ["../app/src/*"]
     }
   },
-  "include": ["src", "../app/src/components/admin", "../app/src/components/AdminPage.tsx", "../app/src/lib/cn.ts"],
+  "include": ["src", "../app/src/components/admin", "../app/src/components/AdminPage.tsx", "../app/src/lib/cn.ts", "../app/src/components/page"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
