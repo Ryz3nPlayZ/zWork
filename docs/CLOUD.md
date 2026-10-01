@@ -278,6 +278,10 @@ All gated by `ensure_owner_or_service`. Endpoints with a window take `?days=N`
 | `GET /api/admin/metrics/revenue` | 365 | Current MRR, ARPU, paid users, new subs / cancellations in window, gross margin, daily + tier-split series |
 | `GET /api/admin/metrics/engagement` | 90 | DAU/WAU/MAU, stickiness, new-vs-returning daily, top active users |
 | `GET /api/admin/metrics/live` | | Active users / requests / tokens in the last 5 min and the recent-requests feed (the Live tab polls it every 10 s) |
+| `GET /api/admin/metrics/finance` | 365 | Upstream spend vs revenue: window and previous window, month-to-date with projection, last month, spend by tier (free/pro/max) and paying vs not, daily spend by tier, spend by model, top spenders, paying users who cost more than they pay, and how much traffic is unpriced |
+| `GET /api/admin/metrics/downloads` | | GitHub release downloads (installers by platform and release, update bundles, update checks), stars/forks/issues, daily deltas from `release_download_snapshots`, app versions and OSes seen by the gateway in the last 7 days |
+| `GET /api/admin/metrics/funnel` | 365 | Signup → first request → active on 3+ days → subscribed for users who signed up in the window, median hours to first request, and weekly retention for the last 8 signup cohorts |
+| `GET /api/admin/metrics/status` | | Every public host probed from the server (expected status per host), database size and largest tables, and which integrations and providers are configured |
 | `GET /api/admin/users` | | Full user table with usage + subscription summary |
 | `GET /api/admin/usage/by-time` | 365 | Daily request/token rollup, newest first |
 | `GET /api/admin/usage/by-model` | 365 | Per-model request/token rollup for the window |
@@ -300,6 +304,21 @@ When you add or change an endpoint, update the matching handler in
   `churned_in_window` / `cancellations` on the revenue endpoint.
 - **Provider cost** is estimated from token counts × list prices per model. It
   is not an invoice.
+- **Spend by tier** uses each user's *current* tier, because requests don't
+  record the tier they were made on. **Paying** means a live Stripe
+  subscription (`active`, `trialing` or `past_due`); coupon and dev users on a
+  paid tier count as non-paying. Per-tier revenue uses list prices
+  (`tier_monthly_price`), so it ignores Stripe discounts; the total uses MRR.
+- **Unpriced** requests returned tokens for a provider/model missing from
+  `estimate_cost`, so they stored no cost. Add the model there when the
+  finance tab shows unpriced traffic.
+- **Downloads**: GitHub only keeps lifetime counts. The API snapshots them
+  hourly into `release_download_snapshots` (one row per day) and the daily
+  series is the difference between days, so it starts the day after deploy.
+  `latest.json` is fetched on every update check, so it's reported separately
+  from installer and update-bundle downloads. Set `GITHUB_TOKEN` (no scopes
+  needed) to raise GitHub's 60 requests/hour anonymous limit; `GITHUB_REPO`
+  overrides `Ryz3nPlayZ/zWork`.
 - **Gross margin** compares like with like. Daily margin is MRR ÷ 30 minus that
   day's cost. The window margin is MRR × days ÷ 30 minus the window's cost, as a
   share of that revenue (floored at −100%).

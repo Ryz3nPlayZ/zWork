@@ -24,6 +24,8 @@ use tower_http::trace::TraceLayer;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
+mod admin_insights;
+
 #[derive(Clone)]
 struct AppState {
     posthog_client: Client,
@@ -1437,6 +1439,23 @@ async fn bootstrap_schema(db: &PgPool) -> Result<(), sqlx::Error> {
     .execute(db)
     .await?;
 
+    // GitHub only reports lifetime download counts; one row per day lets the
+    // admin dashboard show daily downloads (see admin_insights.rs).
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS release_download_snapshots (
+            day DATE PRIMARY KEY,
+            installers BIGINT NOT NULL,
+            updates BIGINT NOT NULL,
+            update_checks BIGINT NOT NULL,
+            by_platform JSONB,
+            captured_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        "#,
+    )
+    .execute(db)
+    .await?;
+
     Ok(())
 }
 
@@ -2008,7 +2027,9 @@ fn estimate_cost(provider: &str, model: &str, input: Option<i64>, output: Option
         ("DeepSeek", "deepseek-v4.1-flash") => (0.14, 0.28),
         ("DeepSeek", "deepseek-v4-flash") => (0.14, 0.28),
         ("Groq", _) => (0.15, 0.30),
-        ("OllamaCloud_1", _) => (0.0, 0.0),
+        // Ollama Cloud is a flat subscription per account (OllamaCloud_1..N),
+        // so its marginal per-token cost is zero.
+        (p, _) if p.starts_with("OllamaCloud") => (0.0, 0.0),
         // z-ai/glm-5.2 on OpenRouter (former zWork Ultimate model). Per 1M tokens.
         ("OpenRouter", "z-ai/glm-5.2") => (1.25, 9.0),
         _ => return None,
@@ -4168,8 +4189,15 @@ async fn admin_metrics_overview(
     .map(|(p, c): (i64, i64)| (p, c))
     .unwrap_or((0, 0));
 
-    // DeepSeek v4-flash pricing (cache miss): /bin/bash.14/M input, /bin/bash.28/M output
-    let estimated_cost = (total_prompt as f64 / 1_000_000.0) * 0.14 + (total_completion as f64 / 1_000_000.0) * 0.28;
+    // Sum the per-request estimates (estimate_cost at request time) so this
+    // matches the revenue and finance tabs instead of pricing every token as
+    // DeepSeek flash.
+    let estimated_cost: f64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(estimated_cost_usd), 0)::float8 FROM gateway_requests",
+    )
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(0.0);
 
     Ok(Json(AdminMetricsOverview {
         total_users,
@@ -7307,6 +7335,7 @@ async fn web_chats_add_message(
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
+    let _ = admin_insights::STARTED_AT.set(Utc::now());
 
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let pool = PgPoolOptions::new()
@@ -7516,6 +7545,17 @@ async fn main() {
             config: demo_governor_conf,
         });
 
+    // Snapshot GitHub release downloads hourly so the admin downloads chart
+    // has a daily series even on days nobody opens the dashboard.
+    let snapshot_state = state.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+        loop {
+            interval.tick().await;
+            admin_insights::refresh_downloads(&snapshot_state, true).await;
+        }
+    });
+
     let app = Router::new()
         .route("/health", get(health_check))
         // The web app (app.tryzwork.app) polls /api/health for backend
@@ -7550,6 +7590,10 @@ async fn main() {
         .route("/api/admin/metrics/revenue", get(admin_metrics_revenue))
         .route("/api/admin/metrics/engagement", get(admin_metrics_engagement))
         .route("/api/admin/metrics/live", get(admin_metrics_live))
+        .route("/api/admin/metrics/finance", get(admin_insights::admin_metrics_finance))
+        .route("/api/admin/metrics/downloads", get(admin_insights::admin_metrics_downloads))
+        .route("/api/admin/metrics/funnel", get(admin_insights::admin_metrics_funnel))
+        .route("/api/admin/metrics/status", get(admin_insights::admin_metrics_status))
         .route("/api/admin/users", get(admin_list_users))
         .route("/api/admin/usage/by-time", get(admin_usage_by_time))
         .route("/api/admin/usage/by-model", get(admin_usage_by_model))
