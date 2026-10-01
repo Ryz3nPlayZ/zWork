@@ -5025,8 +5025,12 @@ async fn admin_metrics_revenue(
     .fetch_one(&state.db)
     .await
     .unwrap_or(0.0);
-    let gross_margin_pct = if current_mrr > 0.0 {
-        ((current_mrr - est_cost_usd) / current_mrr * 100.0).max(-100.0)
+    // Compare like with like: revenue earned over the window (MRR prorated to
+    // `days`) against cost over the same window. Using a month of MRR against
+    // a 7-day or 365-day cost made the margin swing with the window size.
+    let revenue_in_window = current_mrr * days as f64 / 30.0;
+    let gross_margin_pct = if revenue_in_window > 0.0 {
+        ((revenue_in_window - est_cost_usd) / revenue_in_window * 100.0).max(-100.0)
     } else {
         0.0
     };
@@ -5089,9 +5093,10 @@ async fn admin_metrics_revenue(
         let cost: f64 = row.get("cost");
         let new_subs: i64 = row.get("new_subs");
         let cancels: i64 = row.get("cancels");
-        // Approximate day-D MRR using current MRR (best-effort since we lack
-        // historical snapshots); the cost/margin trend is what's most useful.
-        let margin = current_mrr - cost;
+        // Approximate day-D revenue as a 30th of current MRR (best-effort since
+        // we lack historical snapshots). Subtracting a day's cost from the full
+        // monthly MRR mixed units and made every day look profitable.
+        let margin = current_mrr / 30.0 - cost;
         daily.push(AdminRevenueDayPoint {
             date: date.to_string(),
             mrr: current_mrr,
