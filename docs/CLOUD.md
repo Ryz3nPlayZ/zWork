@@ -267,22 +267,55 @@ Tier changes, logins, and logouts are written to `admin_audit_log` via the `audi
 
 ### Metrics endpoints
 
-All gated by `ensure_owner_or_service`. Query param `days` (default varies) controls the lookback window.
+All gated by `ensure_owner_or_service`. Endpoints with a window take `?days=N`
+(default **7**, clamped to the max below). Days are UTC.
 
-| Endpoint | Purpose |
-|---|---|
-| `GET /api/admin/metrics/overview` | Aggregate business KPIs (users, MRR, ARPU, conversion, cost) |
-| `GET /api/admin/metrics/health?days=7` | Error rate, status-code breakdown, latency p50/p95/p99, TTFT, retries, top failing models, daily series |
-| `GET /api/admin/metrics/providers?days=7` | Per-provider request/error/latency aggregates joined with latest rate-limit snapshot |
-| `GET /api/admin/metrics/revenue?days=90` | Current MRR, ARPU, paid users, new-subs/churn counts in window, gross margin, daily + tier-split series |
-| `GET /api/admin/metrics/engagement?days=30` | DAU/WAU/MAU, stickiness, new-vs-returning daily, top active users |
-| `GET /api/admin/metrics/live` | Active users / requests / tokens in last 5m, recent-requests feed (polled every 10s by the Live tab) |
-| `GET /api/admin/users` | Full user table with usage + subscription summary |
-| `GET /api/admin/usage/by-time?days=30` | Daily request/token rollup |
-| `GET /api/admin/usage/by-model?days=30` | Per-model request/token rollup |
-| `PUT /api/admin/users/:user_id/tier` | Change a user's tier (audited) |
-| `GET /api/admin/audit?limit=200` | Recent admin actions |
+| Endpoint | Max days | Purpose |
+|---|---|---|
+| `GET /api/admin/metrics/overview` | | All-time business KPIs (users, active 7d/30d, MRR, ARPU, conversion, tokens, est. cost) |
+| `GET /api/admin/metrics/health` | 90 | Error rate, status-code breakdown, latency p50/p95/p99, TTFT, retries, top failing models, daily series |
+| `GET /api/admin/metrics/providers` | 90 | Per-provider request/error/latency aggregates joined with latest rate-limit snapshot |
+| `GET /api/admin/metrics/revenue` | 365 | Current MRR, ARPU, paid users, new subs / cancellations in window, gross margin, daily + tier-split series |
+| `GET /api/admin/metrics/engagement` | 90 | DAU/WAU/MAU, stickiness, new-vs-returning daily, top active users |
+| `GET /api/admin/metrics/live` | | Active users / requests / tokens in the last 5 min and the recent-requests feed (the Live tab polls it every 10 s) |
+| `GET /api/admin/users` | | Full user table with usage + subscription summary |
+| `GET /api/admin/usage/by-time` | 365 | Daily request/token rollup, newest first |
+| `GET /api/admin/usage/by-model` | 365 | Per-model request/token rollup for the window |
+| `PUT /api/admin/users/:user_id/tier` | | Change a user's tier (`free`, `pro`, `max`; audited). zWork only: it does not touch Stripe |
+| `GET /api/admin/audit?limit=200` | | Recent admin actions (limit 1–1000) |
+
+When you add or change an endpoint, update the matching handler in
+`admin-web/mock/mockApi.ts` so `npm run dev:mock` keeps working.
+
+### How the numbers are defined
+
+- **Active** means at least one gateway request in the window. Rows come from
+  the gateway request log, so desktop usage on a user's own API key isn't counted.
+- **MRR** comes live from Stripe on each request (`compute_current_mrr`): active
+  subscriptions, with discounts applied and annual prices divided by 12. It is 0
+  when `STRIPE_SECRET_KEY` is unset. **ARPU** is MRR ÷ *all* users, not paying users.
+- **`churn_rate`** in the overview is (active 30d − active 7d) ÷ active 30d:
+  users who were active this month but not this week. The dashboard labels it
+  **Lapsed**, because it isn't subscription churn. Subscription churn is
+  `churned_in_window` / `cancellations` on the revenue endpoint.
+- **Provider cost** is estimated from token counts × list prices per model. It
+  is not an invoice.
+- **Gross margin** compares like with like. Daily margin is MRR ÷ 30 minus that
+  day's cost. The window margin is MRR × days ÷ 30 minus the window's cost, as a
+  share of that revenue (floored at −100%).
 
 ### Dashboard tabs
 
-The frontend (`app/src/components/AdminPage.tsx` + `app/src/components/admin/`) renders nine tabs: **Overview, Health, Revenue, Engagement, Users, Usage, Models, Live, Audit**. Charts use `recharts` and the app's existing design tokens (CSS-variable RGB triplets) so they adapt to light/dark themes.
+The frontend (`app/src/components/AdminPage.tsx` + `app/src/components/admin/`) renders nine tabs: **Overview, Health, Revenue, Engagement, Users, Usage, Models, Live, Audit**. Charts use `recharts` and the app's design tokens (CSS-variable RGB triplets), so they adapt to light/dark themes. Tables sort by any column and export the current view as CSV.
+
+The active tab lives in the URL hash (`#health`), so links and reloads keep it. Keys: `1`–`9` switch tabs, `r` refreshes.
+
+### Local development
+
+```bash
+cd admin-web
+npm run dev:mock    # seeded fake API, any password works, tier changes stay in memory
+npm run dev         # proxies /api to production: real password, real data, real writes
+```
+
+Both serve on http://localhost:4311. See `admin-web/README.md`.
