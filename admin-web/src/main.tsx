@@ -5,8 +5,9 @@ import "./index.css";
 
 // Admin dashboard entry. The AdminPage component (imported from the shared
 // ../app/src tree) handles its own password auth, tab routing, and data
-// fetching — this file just mounts it and applies the persisted theme so the
-// first paint matches the user's last choice (no flash).
+// fetching. This file mounts it standalone (so it shows a theme toggle) and
+// applies the persisted theme first, so the first paint matches the last
+// choice with no flash.
 const root = document.getElementById("root");
 if (!root) throw new Error("#root not found");
 
@@ -19,6 +20,6 @@ document.documentElement.classList.toggle("light", theme === "light");
 
 createRoot(root).render(
   <StrictMode>
-    <AdminPage />
+    <AdminPage standalone />
   </StrictMode>,
 );

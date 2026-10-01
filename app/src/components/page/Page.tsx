@@ -527,6 +527,8 @@ interface ConfirmOptions {
   title: string;
   body?: string;
   confirmLabel: string;
+  /** "danger" (default) for removals; "primary" for consequential but non-destructive changes. */
+  variant?: "danger" | "primary";
 }
 
 /**
@@ -577,7 +579,7 @@ export function useConfirm(): [ReactNode, (o: ConfirmOptions) => Promise<boolean
         {pending.body && <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-muted">{pending.body}</p>}
         <div className="mt-5 flex justify-end gap-2">
           <Button onClick={() => close(false)}>Cancel</Button>
-          <Button variant="danger" autoFocus onClick={() => close(true)}>
+          <Button variant={pending.variant ?? "danger"} autoFocus onClick={() => close(true)}>
             {pending.confirmLabel}
           </Button>
         </div>
