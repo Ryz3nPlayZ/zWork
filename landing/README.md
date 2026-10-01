@@ -4,7 +4,7 @@ The marketing site for tryzwork.app. Vite + React 19 + Tailwind v4 + Motion, sta
 
 ```bash
 npm install
-npm run dev      # http://localhost:5173
+npm run dev      # http://localhost:4312
 npm run build    # static site in dist/
 ```
 

@@ -69,7 +69,6 @@ zWork/
 │   └── docker-compose.yml # Service topology
 ├── admin-web/             # Admin dashboard (admin.tryzwork.app)
 ├── landing/               # Marketing site (tryzwork.app)
-├── minimal-chat/          # Older standalone web chat demo
 ├── telemetry-collector/   # Optional self-hosted telemetry sink + analyzer
 ├── bench/                 # SWE-bench harness
 ├── zWork-Skills/          # Skills bundled into the app

@@ -44,11 +44,9 @@ endpoints changed, rebuild `axum_api` too (each script prints the command).
 |--------|---------|----|
 | `deploy-admin-web.sh` | `admin-web/`, the admin dashboard | admin.tryzwork.app |
 | `deploy-app-demo.sh` | `app/` in demo mode (the real UI, desktop features gated off) | app.tryzwork.app |
-| `deploy-web-demo.sh` | `minimal-chat/`, the old standalone demo | app.tryzwork.app |
 
-`deploy-app-demo.sh` and `deploy-web-demo.sh` write to the same host, so the
-last one run wins. `deploy-app-demo.sh` is the current one; `minimal-chat` is
-superseded (see `docs/CLOUD.md`).
+The landing at tryzwork.app has no script: Vercel deploys `landing/` from git.
+Every host and how it ships is in [`docs/INVENTORY.md`](../docs/INVENTORY.md).
 
 ## Installers
 

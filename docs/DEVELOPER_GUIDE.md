@@ -30,11 +30,12 @@ the Tauri shell. Run the same commands locally before you push.
 | `cloud-src/` | Cloud API (Rust/axum/sqlx), auth, Postgres, Caddy, docker-compose | |
 | `admin-web/` | Admin dashboard SPA, built from `app/src/components/admin` | 4311 |
 | `landing/` | Marketing site for tryzwork.app | 4312 |
-| `minimal-chat/` | Older standalone web chat demo | 4310 |
 | `telemetry-collector/` | Optional self-hosted telemetry sink + analyzer | 8765 |
 | `bench/` | SWE-bench harness for the coding agent | |
 | `zWork-Skills/` | Skills bundled into the app | |
 | `scripts/` | Build, release, deploy, install | |
+
+What runs in public, where, and how each host is deployed: [INVENTORY.md](INVENTORY.md).
 
 ## How `./run.sh` works
 

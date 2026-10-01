@@ -7,7 +7,7 @@ This is a thin Vite shell around the dashboard components that live in [`../app/
 ## Stack
 
 - Vite 5 + React 18 + TypeScript 5
-- Tailwind 3 with the same design tokens (CSS-variable RGB triplets) as the desktop app and `minimal-chat` demo
+- Tailwind 3 with the same design tokens (CSS-variable RGB triplets) as the desktop app
 - `recharts` for charts
 - No router. `AdminPage` keeps the current tab in the URL hash (`#users`, `#health`, …), so reloads and shared links land on the same tab.
 

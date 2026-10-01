@@ -126,9 +126,8 @@ container:
 ./ssh-connect.sh 'cd ~/cloud && sudo docker compose up -d --build axum_api'
 ```
 
-> **Note:** `minimal-chat/` is an earlier standalone demo SPA, now superseded.
-> `scripts/deploy-web-demo.sh` still deploys it if you ever want it back, but
-> the production demo at `app.tryzwork.app` uses `app/` in demo mode.
+> Every public host, what serves it and how it is deployed is listed in
+> [INVENTORY.md](INVENTORY.md).
 
 ## Environment variables
 
@@ -248,7 +247,7 @@ The admin dashboard is a standalone Vite SPA in `admin-web/`, deployed to **`adm
 
 **Access:** open `https://admin.tryzwork.app` in a browser and enter the admin password (`ADMIN_PASSWORD` env). Not listed in the desktop app sidebar.
 
-**Deploy:** `./scripts/deploy-admin-web.sh` (mirrors `deploy-web-demo.sh` — builds `admin-web/`, rsyncs `dist/` to `/var/www/admin.tryzwork.app` on the VM). On first deploy you also need a DNS A record for `admin.tryzwork.app` pointing at the VM, and a Caddy reload so it picks up the new host block (the script prints both reminders).
+**Deploy:** `./scripts/deploy-admin-web.sh` (builds `admin-web/`, rsyncs `dist/` to `/var/www/admin.tryzwork.app` on the VM). On first deploy you also need a DNS A record for `admin.tryzwork.app` pointing at the VM, and a Caddy reload so it picks up the new host block (the script prints both reminders).
 
 ### Auth
 
