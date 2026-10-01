@@ -139,8 +139,15 @@ async fn run() {
     // during setup is captured to ~/.zwork/logs/crashes.jsonl.
     crash::install();
 
-    // Initialize logging
-    tracing_subscriber::fmt::init();
+    // Initialize logging. RUST_LOG wins; otherwise log this crate at info so
+    // backend.log (the Tauri host captures our stdout) shows startup and
+    // warnings instead of only errors. No ANSI colour when stdout is a pipe.
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn,rwork_backend=info,harness=info"));
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stdout()))
+        .init();
 
     let host = std::env::var("ZWORK_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
     let port = std::env::var("ZWORK_PORT")
@@ -155,8 +162,9 @@ async fn run() {
             // mint a throwaway token so the token middleware still runs.
             let generated = uuid::Uuid::new_v4().to_string();
             tracing::warn!(
-                "ZWORK_SIDECAR_TOKEN not set; generated a per-run token (dev mode). \
-                 Requests must send it as the x-zwork-token header."
+                "ZWORK_SIDECAR_TOKEN not set; generated a per-run token (dev mode), \
+                 so every request will get 401. To call the API by hand, set \
+                 ZWORK_SIDECAR_TOKEN yourself and send it as the x-zwork-token header."
             );
             Arc::new(generated)
         }
