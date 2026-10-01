@@ -74,18 +74,18 @@ set above so app UI stays coherent when a non-default scheme is active.
 - Body: system sans-serif (Inter, -apple-system, BlinkMacSystemFont, Segoe UI)
 - Editorial: Instrument Serif (used sparingly for onboarding only)
 - Type scale:
-  - Page title: `text-[28px] font-semibold tracking-tight text-ink`
-  - Page subtitle: `text-[14px] text-ink-muted`
-  - Section heading: `text-[15px] font-semibold text-ink`
+  - Page title: `text-[22px] font-semibold tracking-tight text-ink`, left-aligned
+  - Page subtitle: `text-[13px] text-ink-muted`
+  - Section heading: `text-[13px] font-semibold text-ink`, count after it in `text-ink-faint`
   - Card title: `text-[14px] font-semibold text-ink`
   - Body: `text-[13px] text-ink-muted`
   - Caption/label: `text-[12px] text-ink-faint` or `text-[11px]`
 
 ## Spacing
 
-- Page max-width: 760–900px depending on content
-- Page padding: `px-6 py-8`
-- Card padding: `p-5` or `p-6`
+- Page max-width: 960px for collection pages (`PageShell`)
+- Page padding: `px-6 pt-8 pb-16`
+- Card padding: `p-4`
 - Card gap: `gap-3` or `gap-4`
 - Section gap: `mb-8`
 
@@ -106,7 +106,8 @@ set above so app UI stays coherent when a non-default scheme is active.
 
 - Primary: `bg-ink text-paper hover:bg-ink/90` (solid, rounded-lg or rounded-xl)
 - Secondary: `border border-line bg-paper text-ink hover:bg-paper-sunken`
-- Destructive: `text-ink-muted hover:text-red-500 hover:border-red-300`
+- Destructive: `border-error/30 bg-error/10 text-error` (the `danger` Button); never raw red-* classes
+- Buttons are `h-8 rounded-lg px-3 text-[12.5px]`; use `Button` from `components/page/Page.tsx`
 - NEVER use `text-white` with `bg-ink` — always use `text-paper`
 
 ## App Page Rules
@@ -116,3 +117,18 @@ set above so app UI stays coherent when a non-default scheme is active.
 - Grid layouts use `grid-cols-1 sm:grid-cols-2` or `sm:grid-cols-3`
 - All interactive elements need visible focus states
 - All buttons need aria-labels when icon-only
+
+## Collection Pages (Scheduled, Inbox, Projects, Connectors)
+
+Built from `app/src/components/page/Page.tsx`. Wireframe: `docs/wireframes/list-pages.html`.
+
+- One shell: `PageShell` (title, one-line subtitle, header actions on the right, optional toolbar row)
+- Two item patterns, chosen by what the item is:
+  - Things that happen over time (inbox items, scheduled tasks, servers): `ListGroup` + `ListRow`. Click a row to expand it in place; hover actions on the right; always-visible controls (switch, menu) in `trailing`
+  - Things you open (projects, apps): `CardGrid` + `Card`, 3 columns at `lg`
+- Status is a text `Badge` (neutral, success, warning, error). No colored dots, no "Active" pill on things that are simply on
+- Kind or tone of an item goes on its `IconTile`, not on extra chips
+- Filters (`Segmented`) and search (`SearchField`) appear only when they would change something: both states exist, or 5+ items
+- Every empty state is `EmptyState`: dashed box, one sentence, and a button with the same label as the header action
+- Destructive actions go through `useConfirm()`; never `window.confirm`. Dismissing something cheap (an inbox item) uses an inline Undo row for 5s instead of a dialog
+- Row menus use `OverflowMenu`; `ListGroup` has no `overflow-hidden` so menus can hang outside it

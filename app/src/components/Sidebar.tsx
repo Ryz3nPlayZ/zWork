@@ -18,7 +18,7 @@ import {
   Clock,
 } from "lucide-react";
 import { cn } from "../lib/cn";
-import { isMacOS } from "../lib/platform";
+import { isMacOS, usesIntegratedTitleBar } from "../lib/platform";
 import { isDemoMode } from "../lib/preview";
 import { nativeVibrancySupported, useTranslucencyPref } from "../lib/translucency";
 import { Logo } from "./Logo";
@@ -97,9 +97,15 @@ export function Sidebar() {
           window-level controls (see App.tsx) pinned at the top-left so
           they don't slide with the pane. On macOS this row is pushed
           below the traffic lights (≈28px) and the floating control row
-          (≈35px) so the logo clears both.
+          (≈35px) so the logo clears both. On Windows it clears the
+          integrated title bar strip (40px + 6px breathing room).
         */}
-        <div className={cn("flex shrink-0 items-center px-2 pb-1", isMac ? "pt-[40px]" : "pt-3")}>
+        <div
+          className={cn(
+            "flex shrink-0 items-center px-2 pb-1",
+            isMac ? "pt-[40px]" : usesIntegratedTitleBar() ? "pt-[46px]" : "pt-3",
+          )}
+        >
           <button
             type="button"
             onClick={() => openLanding()}
@@ -159,6 +165,14 @@ export function Sidebar() {
             }}
             active={view === "projects"}
           />
+          {!demo && (
+            <SidebarButton
+              icon={<Plug />}
+              label="Connectors"
+              onClick={() => setView("connectors")}
+              active={view === "connectors"}
+            />
+          )}
         </nav>
 
         {/* Chat history */}
@@ -190,9 +204,9 @@ export function Sidebar() {
                             }}
                             className={cn(
                               "press flex w-full items-center rounded-md px-2 py-1.5 text-left text-[12.5px] text-ink-muted",
-                              "hover:bg-line/60 hover:text-ink",
+                              "hover:bg-line/40 hover:text-ink",
                               isActive &&
-                              "bg-line/50 font-semibold text-ink",
+                              "bg-line hover:bg-line font-semibold text-ink",
                             )}
                           >
                             <span className="truncate pr-6">{c.title}</span>
@@ -257,7 +271,7 @@ export function Sidebar() {
 }
 
 /**
- * "More" — a persistent toggle that expands Analytics / Plan / Connectors
+ * "More" — a persistent toggle that expands Analytics / Plan
  * INLINE within the sidebar footer. Previously this floated out to the right
  * (clipped by overflow-x-hidden) and auto-collapsed on selection. Now it stays
  * open after picking an item so the user doesn't have to re-expand it every
@@ -275,7 +289,6 @@ function MoreMenuButton({
   const items: { id: View; label: string; icon: React.ReactNode }[] = [
     { id: "analytics", label: "Analytics", icon: <BarChart3 className="h-4 w-4" /> },
     { id: "plan", label: "Plan", icon: <CreditCard className="h-4 w-4" /> },
-    { id: "connectors", label: "Connectors", icon: <Plug className="h-4 w-4" /> },
   ];
 
   return (
@@ -315,8 +328,8 @@ function MoreMenuButton({
               className={cn(
                 "press flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px]",
                 view === item.id
-                  ? "bg-line/50 font-semibold text-ink"
-                  : "text-ink-muted hover:bg-line/50 hover:text-ink",
+                  ? "bg-line font-semibold text-ink"
+                  : "text-ink-muted hover:bg-line/40 hover:text-ink",
               )}
             >
               {item.icon}
@@ -360,8 +373,8 @@ function SidebarButton({
       onClick={onClick}
       className={cn(
         "press group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] text-ink-muted",
-        "hover:bg-line/60 hover:text-ink",
-        active && "bg-line/50 font-semibold text-ink",
+        "hover:bg-line/40 hover:text-ink",
+        active && "bg-line hover:bg-line font-semibold text-ink",
       )}
     >
       <span className="flex h-5 w-5 items-center justify-center text-ink-muted group-hover:text-ink [&_svg]:h-[16px] [&_svg]:w-[16px]">

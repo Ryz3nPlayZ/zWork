@@ -30,6 +30,30 @@ jobs:
         working-directory: ./app
         run: npm run build
 
+  admin-web:
+    # admin-web compiles app/src/components/admin and page/ directly, so an
+    # app change can break the dashboard without touching admin-web/.
+    name: Admin dashboard build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            app/package-lock.json
+            admin-web/package-lock.json
+      - name: Install app dependencies
+        working-directory: ./app
+        run: npm ci --ignore-scripts
+      - name: Install admin-web dependencies
+        working-directory: ./admin-web
+        run: npm ci
+      - name: Type-check and build
+        working-directory: ./admin-web
+        run: npm run build
+
   sidecar-tests:
     name: Sidecar Rust Tests
     runs-on: ubuntu-latest

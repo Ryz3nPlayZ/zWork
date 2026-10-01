@@ -36,7 +36,7 @@ Linux:
 curl -fsSL https://raw.githubusercontent.com/Ryz3nPlayZ/zWork/main/scripts/install.sh | bash
 ```
 
-Run from source:
+Run from source (needs Node 20+ and Rust; see [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md)):
 ```bash
 ./run.sh
 ```
@@ -52,7 +52,7 @@ What it does:
 
 Tech: Tauri + React frontend, Rust backend, Postgres cloud
 
-Docs: docs/ARCHITECTURE.md docs/AUTH.md docs/CLOUD.md docs/RELEASES.md CONTRIBUTING.md
+Docs: docs/DEVELOPER_GUIDE.md docs/ARCHITECTURE.md docs/AUTH.md docs/CLOUD.md docs/RELEASES.md CONTRIBUTING.md
 
 v0.5.x
 

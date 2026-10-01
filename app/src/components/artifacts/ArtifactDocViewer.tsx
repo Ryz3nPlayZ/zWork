@@ -27,6 +27,7 @@ import {
 import type { Artifact } from "../../lib/store";
 import { useApp } from "../../lib/store";
 import { cn } from "../../lib/cn";
+import { protectCurrency } from "../../lib/markdown";
 import { api } from "../../lib/api";
 
 const AUTOSAVE_MS = 600;
@@ -431,8 +432,20 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
                   h2: ({ children }) => <h3 className="mb-2 mt-5 text-[15.5px] font-semibold text-ink">{children}</h3>,
                   h3: ({ children }) => <h4 className="mb-1 mt-4 text-[13.5px] font-semibold text-ink">{children}</h4>,
                   p: ({ children }) => <p className="mb-3 last:mb-0">{children}</p>,
+                  hr: () => <hr className="my-5 border-line" />,
                   ul: ({ children }) => <ul className="mb-3 list-disc space-y-1 pl-5">{children}</ul>,
                   ol: ({ children }) => <ol className="mb-3 list-decimal space-y-1 pl-5">{children}</ol>,
+                  table: ({ children }) => (
+                    <div className="my-3 overflow-x-auto">
+                      <table className="w-full border-collapse text-[13px] tabular-nums">{children}</table>
+                    </div>
+                  ),
+                  th: ({ children, style }) => (
+                    <th style={style} className="border-b border-line-strong px-3 py-1.5 text-left font-semibold first:pl-0 last:pr-0">{children}</th>
+                  ),
+                  td: ({ children, style }) => (
+                    <td style={style} className="border-b border-line px-3 py-1.5 first:pl-0 last:pr-0">{children}</td>
+                  ),
                   code: ({ className, children }) => {
                     const match = /language-(\w+)/.exec(className || "");
                     if (match || String(children).includes("\n")) {
@@ -450,7 +463,7 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
                   },
                 }}
               >
-                {serializeBlocksToMarkdown(blocks)}
+                {protectCurrency(serializeBlocksToMarkdown(blocks))}
               </ReactMarkdown>
             </article>
           </div>

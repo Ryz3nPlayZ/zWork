@@ -11,6 +11,7 @@
     "isolatedModules": true,
     "moduleDetection": "force",
     "noEmit": true,
+    "tsBuildInfoFile": "node_modules/.tmp/tsconfig.tsbuildinfo",
     "jsx": "react-jsx",
     "strict": true,
     "noUnusedLocals": true,
@@ -21,6 +22,6 @@
       "@app/*": ["../app/src/*"]
     }
   },
-  "include": ["src", "../app/src/components/admin", "../app/src/components/AdminPage.tsx", "../app/src/lib/cn.ts"],
+  "include": ["src", "../app/src/components/admin", "../app/src/components/AdminPage.tsx", "../app/src/lib/cn.ts", "../app/src/components/page"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

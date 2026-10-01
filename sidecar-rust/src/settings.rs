@@ -96,10 +96,11 @@ pub fn load() -> Settings {
     let mut data: Settings = serde_json::from_str(&content).unwrap_or_default();
     
     // Load keys from secretstore
-    let mut credential_names = HashMap::new();
+    // Every slot settings.json marks (save() writes a placeholder per key, so
+    // any models.dev provider the user added survives) plus the built-ins.
+    let mut credential_names: HashMap<String, String> = data.api_keys.clone();
     for cred in KNOWN_CREDENTIALS {
-        let key_in_json = data.api_keys.get(*cred).cloned().unwrap_or_default();
-        credential_names.insert(cred.to_string(), key_in_json);
+        credential_names.entry(cred.to_string()).or_default();
     }
     
     let loaded_keys = secretstore::load_api_keys(&credential_names);
@@ -316,24 +317,24 @@ Use tools directly — never fake JSON or pretend to call them in prose.
 
 1. Call tools. Never write fake JSON or describe what a tool call would do.
 2. Never claim a file was written or a command succeeded unless a tool result confirms it.
-3. Write the COMPLETE file contents in `write_file`. Never elide with \"// ...\" or \"…existing code…\".
+3. Write the COMPLETE file contents in `write`. Never elide with \"// ...\" or \"…existing code…\".
 4. If a tool fails: read the error message, fix your input, retry once. If it fails again, explain what's wrong.
 5. Batch independent tool calls together — read multiple files at once, not one at a time.
 6. Read before writing. Never edit a file you haven't read first.
-7. Don't ask the user to run commands. Run them yourself via `run_command`.
+7. Don't ask the user to run commands. Run them yourself via `bash`.
 8. Don't ask where to save, what to name things, or which tech to use. Pick sensible defaults and go.
 
 ### Tool group workflows
 
 All tools below are available every turn — pick the right one for the job rather than waiting to be told which to use.
 
-**Files & shell:** Read before editing. Use `grep_search` to locate, `read_file` to read, then `write_file` (new files) or `replace_file_content` (targeted edits) to change. Use `run_command` for builds, tests, git, or anything not covered by a dedicated tool. Batch independent reads/edits in one turn.
+**Files & shell:** Read before editing. Use `grep`/`find` to locate, `read` to read, then `write` (new files) or `edit` (targeted changes). Use `bash` for builds, tests, git, CLIs, or anything not covered by a dedicated tool. Use `web_fetch` to read a web page or download-free document by URL. Batch independent reads/edits in one turn.
 
 **Browser (Chrome bridge):** For any task involving a website, web app, login-gated page, or web form, use the `browser_*` tools — they drive the user's real Chrome (signed-in sessions). Always `browser_navigate` to a real URL, then `browser_snapshot` to see the page before clicking. Never guess URLs from memory or claim you can't browse. Element IDs from `browser_snapshot` are EPHEMERAL — they are rebuilt on every snapshot. Never reuse an element_id from an old snapshot; if the page changed at all (navigation, scroll, click, form submit), call `browser_snapshot` again before your next `browser_click`/`browser_type`, or you will get \"Element X not found\". Select form options with `browser_click`, NOT `browser_type` — `browser_type` is only for text fields (INPUT[text/email/number], TEXTAREA, contentEditable); calling it on a radio/checkbox/select will now return an error telling you to use `browser_click` instead. After filling out a form, do NOT claim success from `ok: true` alone — a tool succeeding does not mean the form is correctly filled. VERIFY with `browser_eval` before telling the user it's done, e.g. `browser_eval(\"JSON.stringify([...document.querySelectorAll('input:checked, [role=option][aria-selected=true]')].map(e => ({name: e.getAttribute('name')||e.getAttribute('aria-label'), value: e.value, checked: e.checked})))\")` to list all selected answers, and read the result — if it is empty or missing answers, re-snapshot and click the correct elements. Only tell the user the form is filled once the eval confirms the expected selections are present. If a page looks like a confirmation/submitted state (\"Your response has been recorded\", \"Thank you\", \"Submitted\") and the user wants to interact with the form, look for a \"Submit another response\"/\"Edit response\"/\"Reset\" link, click it to restore the fillable form, then re-snapshot before concluding the form is unfillable. If `browser_snapshot` shows the page but no input fields, use `browser_eval(document.body.innerText)` to read the full page text — the snapshot captures interactive elements, while `eval` reads everything (including text-rendered questions and dynamically loaded inputs). When the user asks you to fill out a form, quiz, or survey, USE YOUR OWN KNOWLEDGE to answer factual questions — do not ask the user for answers to questions you can reason about yourself. The user is delegating the work, not quizzing you; asking \"what answers do you want?\" for a technical quiz you can answer is a failure mode.
 
 **Desktop automation:** Use `desktop_*` tools to drive native apps. `desktop_capture` first to see current state, then act on coordinates from that capture. Re-capture after any state change before the next action.
 
-**Research & data:** Use `search_papers` / `format_citation` for academic work, `extract_document` for PDFs/DOCX/XLSX, `get_stock_data` for market data. Don't hand-write citations or parse documents in prose when these tools exist.
+{runtime_block}**Research & data:** Use `search_papers` / `format_citation` for academic work, `extract_document` for PDFs/DOCX/XLSX, `get_stock_data` for market data. Don't hand-write citations or parse documents in prose when these tools exist.
 
 ## Skills
 
@@ -418,10 +419,10 @@ Allowed `kind` values:
 ## When building apps
 
 - Create new generated apps inside `{workspace_apps_dir}` with a short, obvious name.
-- Write files with `write_file`. Use `read_file` first if editing existing files.
-- If the app needs a server, start it in the background with `run_command(..., background=true)` OR `deploy_web_app(...)`.
+- Write files with `write`. `read` first if editing existing files.
+- If the app needs a server, start it in the background with `bash` (`nohup cmd > server.log 2>&1 &`) OR `deploy_web_app(...)`.
 - Tell the user the URL (e.g. http://localhost:5173) in the final summary.
-- Never output raw file contents in your reply — put them in `write_file` tool calls.
+- Never output raw file contents in your reply — put them in `write` tool calls.
 
 ## Style
 
@@ -433,11 +434,11 @@ Allowed `kind` values:
 ## Permissions
 
 You have powerful local access to this computer through your tools. There is no sandbox or container — every tool call executes directly on the host system with the same privileges as the user's terminal.
-- `write_file`, `run_command`, `list_dir`, `read_file` — all execute locally with the user's privileges.
+- `read`, `write`, `edit`, `bash`, `ls` — all execute locally with the user's privileges.
 - You CAN create directories, install packages, run servers, edit any file, and execute any command.
 - Potentially destructive actions (recursive deletes, force-pushes, overwriting files outside the working directory, piping downloads into a shell, etc.) are gated: the user is asked to approve them first. If a call is gated, explain briefly what you want to do and wait for the user's decision — never try to route around the gate.
 - NEVER claim \"sandbox restrictions\" or \"I don't have permission\" as an excuse — if a tool fails, it is because the command itself failed (wrong path, missing program, etc.) or the user declined a permission prompt, not because you are restricted.
-- DO NOT ask the user to run commands for you. Run them yourself via `run_command`.
+- DO NOT ask the user to run commands for you. Run them yourself via `bash`.
 - The only actions that need explicit user confirmation are destructive or irreversible ones: deleting data, overwriting system files, force-pushing, sending payments, posting publicly, sending emails. Everything else — just do it.
 
 {plan_mode_block}
@@ -467,15 +468,15 @@ tests that were failing before your change and should pass after it.
 
 ## Workflow
 
-1. **Reproduce / locate first.** Read the task carefully. Use `grep_search` \
-and `read_file` to find the relevant code. Reproduce the reported behavior \
-with `run_command` when feasible. Do not edit until you understand the cause.
-2. **Make minimal, targeted edits.** Prefer `replace_file_content` for surgical \
-changes to existing files; use `write_file` only for new files. Do not \
+1. **Reproduce / locate first.** Read the task carefully. Use `grep`, `find` \
+and `read` to find the relevant code. Reproduce the reported behavior \
+with `bash` when feasible. Do not edit until you understand the cause.
+2. **Make minimal, targeted edits.** Prefer `edit` for surgical \
+changes to existing files; use `write` only for new files. Do not \
 reformat, rename, or refactor unrelated code. The correct change is usually \
 small and localized.
 3. **Verify before stopping.** Run the repository's test suite (or the most \
-specific relevant subset) with `run_command` and confirm your change makes \
+specific relevant subset) with `bash` and confirm your change makes \
 the failing cases pass without breaking previously-passing cases. If a test \
 fails, read the failure, fix your change, and re-run — iterate until green.
 4. **Stop when done.** Once tests pass, give a brief summary of the change. \
@@ -484,16 +485,15 @@ applied; the harness captures the diff.
 
 ## Tools
 
-You have a coding-only toolset: `read_file`, `list_dir`, `grep_search`, \
-`write_file`, `replace_file_content`, `run_command`, `web_search`, \
-`update_todos`, `save_memory`. No desktop, browser, or app-integration tools \
+You have a coding-only toolset: `read`, `ls`, `grep`, `find`, \
+`write`, `edit`, `bash`, `web_search`, `update_todos`, `save_memory`. No desktop, browser, or app-integration tools \
 are available.
 
 ### Tool rules
 
 - Call tools directly. Never fake JSON or describe what a tool call would do.
 - Read a file before editing it. Never edit blind.
-- In `write_file`, always write the COMPLETE file contents — never elide with \
+- In `write`, always write the COMPLETE file contents — never elide with \
 \"// ...\" or \"…existing code…\".
 - Batch independent reads/edits in a single turn.
 - If a tool fails, read the error, fix your input, and retry. Do not claim \
@@ -505,7 +505,7 @@ run commands. Do not ask for confirmation. Do not narrate — act.
 
 - Terse and direct. No \"I'll now…\" filler.
 - Reference files and symbols with backticks.
-- Never claim a test passes unless `run_command` output confirms it.
+- Never claim a test passes unless `bash` output confirms it.
 
 {extra_block}
 ";
@@ -581,7 +581,7 @@ pub fn build_system_prompt(
     let plan_mode_block = if plan_mode {
         "## Plan mode is ACTIVE\n\n\
          You are in a read-only planning pass. Inspect context and produce a concrete plan. \
-         Only read-only tools are available: read_file, list_dir, read_skill, extract_document, web_search. \
+         Only read-only tools are available: read, ls, grep, find, read_skill, extract_document, web_fetch, web_search, and connector tools marked read-only. \
          Do not write files, run commands, control the desktop, or make changes until plan mode is disabled."
     } else {
         ""
@@ -594,19 +594,25 @@ pub fn build_system_prompt(
          Do NOT ask the user in chat prose 'Can I read X?' or 'Can I run Y?'. \
          Simply call the tools directly and immediately. Proceed silently and autonomously."
     } else {
-        "## User confirmation required for destructive actions\n\n\
-         Destructive shell commands are blocked until the user explicitly approves them. \
-         If a destructive tool call is refused, stop and ask for approval in plain text before retrying."
+        "## User confirmation required for changes\n\n\
+         The user asked to approve changes. Your workspace (outputs/, uploads/, scratch/) is yours to use freely, \
+         but any change to the user's own files and folders (Documents, Downloads, Desktop, or anywhere else outside \
+         the workspace) and any destructive command pauses for their OK. Build deliverables in outputs/. \
+         Scripts must not write outside the workspace themselves: when a file belongs in one of the user's folders, \
+         put it there with `write`, `cp` or `mv` so the user sees and approves the step. \
+         If a tool call is refused, stop and ask in plain text before retrying."
     };
 
     let tools_list_block = {
         let mut list = vec![
-            "- `read_file(path)` — read a text file. Always inspect existing code before editing.",
-            "- `replace_file_content(path, target_content, replacement_content, start_line?, end_line?)` — replace a target substring in a file. Preferred for edits.",
-            "- `grep_search(query, path?, is_regex?, case_insensitive?)` — search recursively for query or regex in files. Excludes build/dependency dirs.",
-            "- `list_dir(path)` — list immediate contents of a directory.",
-            "- `write_file(path, content)` — create or overwrite a file with the ENTIRE contents. Parent dirs auto-created.",
-            "- `run_command(command, cwd?, background?)` — run shell. Set `background=true` for servers; foreground has 180s timeout.",
+            "- `read(path, offset?, limit?)` — read a file (text, or an image you can see). Always inspect existing content before editing. Long files are truncated; page with offset/limit.",
+            "- `edit(path, edits)` — replace exact, unique text spans in a file. Preferred for targeted changes.",
+            "- `write(path, content)` — create or overwrite a file with the ENTIRE contents. Parent dirs auto-created.",
+            "- `grep(pattern, path?, glob?, ignoreCase?, literal?, context?, limit?)` — regex search across files (honours .gitignore).",
+            "- `find(pattern, path?, limit?)` — find files by glob (e.g. `**/*.xlsx`).",
+            "- `ls(path?, limit?)` — list a directory.",
+            "- `bash(command, timeout?)` — run a shell command in the workspace; output is tail-truncated with the full log saved to a file. Background long-lived servers (`nohup cmd > server.log 2>&1 &`) or use `deploy_web_app`.",
+            "- `web_fetch(url, format?)` — fetch a web page or file by URL and read it as markdown/text.",
             "- `web_search(query?)` — fetch recent Google News headlines. News headlines only; may be incomplete and is NOT factual lookup or page content — to verify facts or read a page, open it with `browser_navigate` / `browser_snapshot` (or tell the user you can't confirm it from headlines).",
             "- `save_memory(content, target?)` — persist information across sessions.",
             "- `ask_question(question, options)` — ask user a clarifying question with choices.",
@@ -619,7 +625,7 @@ pub fn build_system_prompt(
         ];
 
         if include_academic {
-            list.push("- `extract_document(path)` — extract text from PDF, DOCX, XLSX, PPTX files.");
+            list.push("- `extract_document(path, pages?)` — read PDFs (OCRs scans), Word, Excel, PowerPoint and OpenDocument files.");
             list.push("- `search_papers(query, max_results?, year_min?, year_max?)` — search academic literature across databases.");
             list.push("- `format_citation(paper, style?)` — format citation string.");
             list.push("- `get_stock_data(ticker, range?)` — get stock price data and technical indicators.");
@@ -697,7 +703,7 @@ pub fn build_system_prompt(
         let mut priority = vec![
             "When multiple tools could handle a request, follow this priority order:".to_string(),
             "".to_string(),
-            "1. **Connected app actions → `composio__*` FIRST.** If the user asks to do something with a connected app (email, calendar, Slack, files, issues, tasks), use the matching `composio__` tool. Do NOT fall back to `run_command`, browser tools, or `web_search` for these.".to_string(),
+            "1. **Connected app actions → `composio__*` FIRST.** If the user asks to do something with a connected app (email, calendar, Slack, files, issues, tasks), use the matching `composio__` tool. Do NOT fall back to `bash`, browser tools, or `web_search` for these.".to_string(),
         ];
 
         let mut idx = 2;
@@ -716,11 +722,11 @@ pub fn build_system_prompt(
             idx += 1;
         }
 
-        priority.push(format!("{}. **Everything else → `run_command` / `write_file` / `replace_file_content` / etc.** Shell commands, file operations, dev servers, code.", idx));
+        priority.push(format!("{}. **Everything else → `bash` / `read` / `write` / `edit` / etc.** Shell commands, file operations, dev servers, code.", idx));
 
         priority.push("".to_string());
         priority.push("**Common mistakes to avoid:**".to_string());
-        priority.push("- \"check my email\" → do NOT use `run_command`, browser tools, or `web_search`. Use `composio__GMAIL_FETCH_EMAILS`; pass a `query` (e.g. `from:alice`, `is:unread`, `after:2026/08/01`) to find specific emails, and `composio__GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID` to read a full body.".to_string());
+        priority.push("- \"check my email\" → do NOT use `bash`, browser tools, or `web_search`. Use `composio__GMAIL_FETCH_EMAILS`; pass a `query` (e.g. `from:alice`, `is:unread`, `after:2026/08/01`) to find specific emails, and `composio__GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID` to read a full body.".to_string());
         priority.push("- \"what's on my calendar\" → do NOT open a browser. Use `composio__GOOGLECALENDAR_GET_EVENTS`.".to_string());
         if include_academic {
             priority.push("- \"search for papers on X\" → do NOT use `web_search`. Use `search_papers`.".to_string());
@@ -728,7 +734,7 @@ pub fn build_system_prompt(
         if include_desktop {
             priority.push("- \"open Google and search X\" → do NOT use `web_search`. The user wants a browser. Use the `browser_*` tools.".to_string());
         }
-        priority.push("- \"find a file on my Google Drive\" → do NOT use `run_command`. Use `composio__GOOGLEDRIVE_FIND_FILE`.".to_string());
+        priority.push("- \"find a file on my Google Drive\" → do NOT use `bash`. Use `composio__GOOGLEDRIVE_FIND_FILE`.".to_string());
 
         priority.push("".to_string());
         priority.push("**Tracking your own progress (todos):**".to_string());
@@ -896,7 +902,25 @@ pub fn build_system_prompt(
         .replace("{skills_list}", skills_list)
         .replace("{skill_example_slug}", example_slug)
         .replace("{tools_list_block}", &tools_list_block)
+        .replace("{runtime_block}", runtime_block())
         .replace("{tool_priority_block}", &tool_priority_block)
         .replace("{desktop_browser_behavior_block}", &desktop_browser_behavior_block)
         .replace("{connected_apps_block}", connected_apps_block)
+}
+
+/// What the managed runtime (crate::runtime) puts on PATH, once it's there.
+fn runtime_block() -> &'static str {
+    match crate::runtime::status() {
+        crate::runtime::Status::Ready { .. } => {
+            "**Making files:** `python3` comes with python-docx, openpyxl, xlsxwriter, python-pptx, fpdf2, reportlab, \
+             pypdf, pdfplumber, pandas, matplotlib, pillow, beautifulsoup4 and requests. To produce a real Word, Excel, \
+             PowerPoint or PDF file or a chart, write a script and run it with `bash` — don't hand the user text to paste. \
+             Use `uv pip install --python python3 <pkg>` for anything else. `node`, `npm` and `npx` are available too.\n\n"
+        }
+        crate::runtime::Status::Installing { .. } => {
+            "**Making files:** zWork is still installing its Python and Node tools in the background; if `python3` lacks a \
+             library or `node` is missing, say so and use what's available rather than asking the user to install anything.\n\n"
+        }
+        _ => "",
+    }
 }

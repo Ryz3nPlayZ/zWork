@@ -38,14 +38,16 @@ def main() -> int:
     package_version = json.loads((ROOT / "app/package.json").read_text(encoding="utf-8"))["version"]
     tauri_version = json.loads((ROOT / "app/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))["version"]
     cargo_version = read_cargo_version(ROOT / "app/src-tauri/Cargo.toml")
-    cask_version = read_cask_version(ROOT / "Casks/zwork.rb")
 
     versions = {
         "app/package.json": package_version,
         "app/src-tauri/tauri.conf.json": tauri_version,
         "app/src-tauri/Cargo.toml": cargo_version,
-        "Casks/zwork.rb": cask_version,
     }
+    # The Homebrew cask left this repo in v0.5.2; check it only if it returns.
+    cask = ROOT / "Casks/zwork.rb"
+    if cask.exists():
+        versions["Casks/zwork.rb"] = read_cask_version(cask)
 
     unique_versions = set(versions.values())
     if len(unique_versions) == 1:

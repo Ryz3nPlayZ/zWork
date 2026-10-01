@@ -25,14 +25,23 @@ import {
   CheckCircle2,
   XCircle,
   Monitor,
+  PenLine,
+  CornerUpLeft,
+  ListPlus,
+  Play,
+  Layers,
 } from "lucide-react";
+import { BorderBeam } from "border-beam";
 import { cn } from "../lib/cn";
 import { needsLightweightRendering, isMacOS } from "../lib/platform";
+import { useResolvedTheme } from "../lib/theme";
 import { useApp } from "../lib/store";
 import type { SecurityPreset } from "../lib/store";
-import { api, IS_WEB, type UploadedFile } from "../lib/api";
+import { api, IS_WEB, type QueuedItem, type UploadedFile } from "../lib/api";
+import { isDemoMode } from "../lib/preview";
 import {
   filterTemplates,
+  mergeCommands,
   findSlashTrigger,
   loadTemplates,
   newTemplateId,
@@ -91,22 +100,22 @@ const PRESET_META: Record<
   ask: {
     icon: <Hand className="h-4 w-4" />,
     label: "Ask before changes",
-    description: "Ask before file changes.",
+    description: "Checks with you before changing anything.",
   },
   edit: {
     icon: <ShieldCheck className="h-4 w-4" />,
     label: "Edit automatically",
-    description: "Edit files automatically.",
+    description: "Changes files without asking first.",
   },
   plan: {
     icon: <NotebookPen className="h-4 w-4" />,
-    label: "Plan mode",
-    description: "Plan before editing.",
+    label: "Plan first",
+    description: "Suggests a plan and changes nothing.",
   },
   full: {
     icon: <ShieldAlert className="h-4 w-4" />,
     label: "Full access",
-    description: "Run with fewer confirmations.",
+    description: "Fewest check-ins. Use with care.",
   },
 };
 
@@ -206,8 +215,9 @@ interface Props {
   permission?: { reason: string };
   /** Callback when the user answers a question card. */
   onAnswerQuestion?: (answer: string) => void;
-  /** Callback when the user resolves a permission card. */
-  onResolvePermission?: (allow: boolean) => void;
+  /** Callback when the user resolves a permission card. On deny-with-text,
+   *  `otherText` carries the "what to do instead" instruction. */
+  onResolvePermission?: (allow: boolean, otherText?: string) => void;
 }
 
 export function ChatInput({
@@ -249,6 +259,8 @@ export function ChatInput({
   const [dragOver, setDragOver] = useState(false);
   const dragCounter = useRef(0);
   const [templates, setTemplates] = useState<PromptTemplate[]>(() => loadTemplates());
+  const [commands, setCommands] = useState<Awaited<ReturnType<typeof api.commands>>["commands"]>([]);
+  const slashItems = useMemo(() => mergeCommands(templates, commands), [templates, commands]);
   const [slashState, setSlashState] = useState<
     { start: number; end: number; query: string } | null
   >(null);
@@ -256,6 +268,12 @@ export function ChatInput({
   const [toolsOpen, setToolsOpen] = useState(false);
   const [presetOpen, setPresetOpen] = useState(false);
   const [multiline, setMultiline] = useState(false);
+  const [queueMenuOpen, setQueueMenuOpen] = useState(false);
+  const [queueModeOpen, setQueueModeOpen] = useState(false);
+  const [steeringMode, setSteeringMode] = useState<"all" | "one-at-a-time">("all");
+  const [followUpMode, setFollowUpMode] = useState<"all" | "one-at-a-time">("all");
+  const queueMenuRef = useRef<HTMLDivElement>(null);
+  const queueModeRef = useRef<HTMLDivElement>(null);
   const toolsRef = useRef<HTMLDivElement>(null);
   const presetRef = useRef<HTMLDivElement>(null);
   const areaRef = useRef<HTMLTextAreaElement>(null);
@@ -265,15 +283,26 @@ export function ChatInput({
 
   const send = useApp((s) => s.send);
   const stop = useApp((s) => s.stop);
+  const sendWhileBusy = useApp((s) => s.sendWhileBusy);
+  const cancelQueued = useApp((s) => s.cancelQueued);
+  const setQueueModes = useApp((s) => s.setQueueModes);
+  const draftInject = useApp((s) => s.draftInject);
+  const clearDraftInject = useApp((s) => s.clearDraftInject);
   const focusChatInput = useApp((s) => s.focusChatInput);
   const openSettings = useApp((s) => s.openSettings);
   const securityPreset = useApp((s) => s.securityPreset);
   const setSecurityPreset = useApp((s) => s.setSecurityPreset);
   const openLanding = useApp((s) => s.openLanding);
+  const activeChatId = useApp((s) => s.activeChatId);
   const working = useApp((s) => {
     const id = s.activeChatId;
     return id ? (s.chats[id]?.working ?? false) : false;
   });
+  const queuedItems = useApp((s) => {
+    const id = s.activeChatId;
+    return id ? (s.chats[id]?.queuedItems ?? []) : [];
+  });
+  const beamTheme = useResolvedTheme();
   const model = useApp((s) => s.model);
   const providers = useApp((s) => s.providers);
   const pendingShareImage = useApp((s) => s.pendingShareImage);
@@ -282,8 +311,8 @@ export function ChatInput({
   const modelLabel = currentModel?.name ?? (providers?.models.length ? "Model" : "No models");
 
   const slashMatches = useMemo(
-    () => (slashState ? filterTemplates(templates, slashState.query) : []),
-    [templates, slashState],
+    () => (slashState ? filterTemplates(slashItems, slashState.query) : []),
+    [slashItems, slashState],
   );
   const slashOpen = !!slashState && slashMatches.length > 0;
 
@@ -362,7 +391,16 @@ export function ChatInput({
   // Refresh templates when the window regains focus, so edits made in the
   // Settings page show up immediately when the user comes back to chat.
   useEffect(() => {
-    const onFocus = () => setTemplates(loadTemplates());
+    const refreshCommands = () =>
+      void api
+        .commands()
+        .then((r) => setCommands(r.commands))
+        .catch(() => {});
+    const onFocus = () => {
+      setTemplates(loadTemplates());
+      refreshCommands();
+    };
+    refreshCommands();
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
@@ -392,6 +430,48 @@ export function ChatInput({
   }, [presetOpen]);
 
   const canSend = (value.trim().length > 0 || attachments.length > 0) && !working && !uploading;
+  // Queue-while-busy needs the sidecar's live-run endpoints — web demo and
+  // hosted-web paths have no sidecar run to queue against.
+  const queueSupported = !IS_WEB && !isDemoMode();
+  const canQueue =
+    working && queueSupported && value.trim().length > 0 && attachments.length === 0;
+
+  // Stop hands unconsumed queued messages back to the composer — consume the
+  // injected draft (non-destructively: appended under anything already typed).
+  useEffect(() => {
+    if (!draftInject || draftInject.chatId !== activeChatId) return;
+    const text = draftInject.text;
+    setValue((prev) => (prev.trim() ? `${prev}\n\n${text}` : text));
+    clearDraftInject();
+    areaRef.current?.focus();
+  }, [draftInject, activeChatId, clearDraftInject, setValue]);
+
+  // Close the queue action / mode menus on outside click.
+  useEffect(() => {
+    if (!queueMenuOpen && !queueModeOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (queueMenuOpen && !queueMenuRef.current?.contains(e.target as Node)) {
+        setQueueMenuOpen(false);
+      }
+      if (queueModeOpen && !queueModeRef.current?.contains(e.target as Node)) {
+        setQueueModeOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [queueMenuOpen, queueModeOpen]);
+
+  /** Send while a run is live: queue the text against the run instead of
+   *  starting a new one. Default kind = follow-up (answered after the
+   *  current run); the chevron menu offers steer / next-run. */
+  const submitQueue = (kind: QueuedItem["kind"] = "follow_up") => {
+    if (!canQueue) return;
+    const text = value.trim();
+    setValue("");
+    setSlashState(null);
+    setQueueMenuOpen(false);
+    void sendWhileBusy(text, kind);
+  };
 
   const readAsDataUrl = (file: File) =>
     new Promise<string>((resolve, reject) => {
@@ -564,11 +644,12 @@ export function ChatInput({
     if (!slashState) return;
     const before = value.slice(0, slashState.start);
     const after = value.slice(slashState.end);
-    const next = before + tpl.body + after;
+    const text = tpl.kind ? `/${tpl.trigger} ` : tpl.body;
+    const next = before + text + after;
     setValue(next);
     setSlashState(null);
     setSlashIndex(0);
-    const caret = before.length + tpl.body.length;
+    const caret = before.length + text.length;
     requestAnimationFrame(() => {
       const el = areaRef.current;
       if (!el) return;
@@ -670,7 +751,11 @@ export function ChatInput({
     }
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
-      submit();
+      if (working && queueSupported) {
+        submitQueue();
+      } else {
+        submit();
+      }
     }
   };
 
@@ -787,7 +872,7 @@ export function ChatInput({
 
   const slashMenu = slashOpen && slashState && (
     <SlashMenu
-      templates={templates}
+      templates={slashItems}
       query={slashState.query}
       activeIndex={slashIndex}
       onActiveIndexChange={setSlashIndex}
@@ -797,6 +882,192 @@ export function ChatInput({
         openSettings("general");
       }}
     />
+  );
+
+  const queueKindMeta: Record<QueuedItem["kind"], { icon: typeof CornerUpLeft; label: string }> = {
+    steer: { icon: CornerUpLeft, label: "Steer" },
+    follow_up: { icon: MessageSquarePlus, label: "Queued" },
+    next_run: { icon: Play, label: "Next run" },
+    write: { icon: PenLine, label: "Write" },
+  };
+
+  // Queued-message chips (steer / follow-up / next-run waiting against the
+  // live run) + the mode picker. Rendered above the draft inside the pill.
+  const queueChips = queuedItems.length > 0 && (
+    <div className="flex flex-wrap items-center gap-1.5 px-5 pt-3 [scrollbar-width:none]">
+      {queuedItems.map((item) => {
+        const meta = queueKindMeta[item.kind] ?? queueKindMeta.follow_up;
+        const Icon = meta.icon;
+        return (
+          <span
+            key={item.entry_id}
+            className="inline-flex max-w-[260px] items-center gap-1.5 rounded-full border border-line bg-paper-sunken py-1 pl-2 pr-1 text-[12px] text-ink-muted animate-fade-in"
+            title={`${meta.label}: ${item.text}`}
+          >
+            <Icon className="h-3 w-3 shrink-0" />
+            <span className="truncate">{item.text}</span>
+            <button
+              type="button"
+              onClick={() => void cancelQueued(item.entry_id)}
+              className="press ring-focus rounded-full p-0.5 text-ink-faint hover:bg-line/60 hover:text-ink"
+              aria-label={`Cancel ${meta.label.toLowerCase()} message`}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </span>
+        );
+      })}
+      <div ref={queueModeRef} className="relative">
+        <button
+          type="button"
+          onClick={() => setQueueModeOpen((v) => !v)}
+          aria-label="Queue modes"
+          className={cn(
+            "press ring-focus inline-flex h-6 w-6 items-center justify-center rounded-full text-ink-faint hover:bg-line/60 hover:text-ink",
+            queueModeOpen && "bg-line/60 text-ink",
+          )}
+        >
+          <Layers className="h-3.5 w-3.5" />
+        </button>
+        {queueModeOpen && (
+          <div className="absolute bottom-full left-0 mb-2 w-60 animate-fade-in rounded-2xl hairline bg-paper p-2 shadow-lift z-20">
+            <p className="px-1.5 pb-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+              Queue modes
+            </p>
+            {(
+              [
+                { label: "Steering", value: steeringMode, set: (m: "all" | "one-at-a-time") => { setSteeringMode(m); void setQueueModes({ steering: m }); } },
+                { label: "Follow-ups", value: followUpMode, set: (m: "all" | "one-at-a-time") => { setFollowUpMode(m); void setQueueModes({ followUp: m }); } },
+              ] as const
+            ).map(({ label, value, set }) => (
+              <div key={label} className="flex items-center justify-between gap-2 px-1.5 py-1">
+                <span className="text-[12.5px] text-ink">{label}</span>
+                <div className="flex rounded-lg border border-line p-0.5">
+                  {(["all", "one-at-a-time"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => set(mode)}
+                      className={cn(
+                        "press rounded-md px-2 py-0.5 text-[11.5px] font-medium",
+                        value === mode ? "bg-ink text-paper" : "text-ink-muted hover:text-ink",
+                      )}
+                    >
+                      {mode === "all" ? "All" : "One at a time"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <p className="px-1.5 pt-1 text-[11px] leading-4 text-ink-faint">
+              “All” sends every queued message together; “one at a time” takes the first and keeps the rest waiting.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  // Stop button (working state). The beam ring around it mounts ONLY in
+  // Stop state (conditional mount, not active-toggled) so send-family
+  // buttons can never carry a shine.
+  const stopButton = (
+    <button
+      type="button"
+      aria-label="Stop"
+      onClick={stop}
+      className="press ring-focus inline-flex h-8 w-8 items-center justify-center rounded-full bg-paper-sunken text-ink transition-colors hover:bg-line/70"
+    >
+      <Square className="h-3 w-3 fill-ink" />
+    </button>
+  );
+
+  // Queue-while-busy: send button (default = follow-up), a chevron menu for
+  // steer / next-run, then Stop. Only when text can actually be queued.
+  const queueButtons = canQueue && (
+    <div ref={queueMenuRef} className="relative flex items-center gap-1">
+      <button
+        type="button"
+        aria-label="Queue message"
+        title="Queue after the current run"
+        onClick={() => submitQueue("follow_up")}
+        className="press ring-focus inline-flex h-8 w-8 items-center justify-center rounded-full border border-line bg-paper-sunken text-ink hover:bg-paper hover:border-line-strong"
+      >
+        <ListPlus className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        aria-label="Queue options"
+        onClick={() => setQueueMenuOpen((v) => !v)}
+        className={cn(
+          "press ring-focus inline-flex h-8 w-8 items-center justify-center rounded-full text-ink-muted hover:bg-paper-sunken hover:text-ink",
+          queueMenuOpen && "bg-paper-sunken text-ink",
+        )}
+      >
+        <ChevronDown className="h-3.5 w-3.5" />
+      </button>
+      {queueMenuOpen && (
+        <div className="absolute bottom-full right-0 mb-2 w-64 animate-fade-in rounded-2xl hairline bg-paper p-1.5 shadow-lift z-20">
+          {(
+            [
+              {
+                kind: "steer" as const,
+                icon: CornerUpLeft,
+                title: "Steer",
+                hint: "Joins the run now, at its next checkpoint",
+              },
+              {
+                kind: "follow_up" as const,
+                icon: MessageSquarePlus,
+                title: "Follow-up",
+                hint: "Answered when the current run finishes",
+              },
+              {
+                kind: "next_run" as const,
+                icon: Play,
+                title: "New run",
+                hint: "Queues an extra run after this one",
+              },
+            ]
+          ).map(({ kind, icon: Icon, title, hint }) => (
+            <button
+              key={kind}
+              type="button"
+              onClick={() => submitQueue(kind)}
+              className="press flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2 text-left hover:bg-paper-sunken"
+            >
+              <Icon className="mt-0.5 h-4 w-4 shrink-0 text-ink-muted" />
+              <span className="min-w-0">
+                <span className="block text-[13px] font-medium text-ink">{title}</span>
+                <span className="block text-[11.5px] leading-4 text-ink-faint">{hint}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  // Idle send button.
+  const sendButton = (
+    <button
+      type="button"
+      aria-label="Send"
+      disabled={!canSend}
+      onClick={submit}
+      className={cn(
+        "press ring-focus inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+        isOverlay
+          ? canSend
+            ? "bg-ink text-paper hover:bg-ink/90"
+            : "bg-paper-sunken text-ink-faint cursor-not-allowed"
+          : canSend
+            ? "bg-paper-sunken text-ink hover:bg-paper hover:border-line-strong border border-line"
+            : "bg-paper-sunken text-ink-faint cursor-not-allowed border border-line",
+      )}
+    >
+      <ArrowUp className="h-4 w-4" />
+    </button>
   );
 
   // When mode is "question" or "permission", the composer morphs into an
@@ -860,6 +1131,24 @@ export function ChatInput({
         </div>
       )}
 
+      <BorderBeam
+        // Circling border glow while the agent works. Keep the stock
+        // constant-ANGLE-rate sweep: the arc's footprint is angle-symmetric,
+        // so equal angle rates keep lit time perfectly even around the
+        // border. Re-timing for equal PERIMETER speed was tried and
+        // reverted — it dwells on the rounded ends, where the same 86° of
+        // arc wraps onto ~4× more border. Duration is the ONLY knob: 3.5s is
+        // livelier than the 4.5s that tamed the default, but still ~1.8×
+        // slower than 1.96s, whose left↔right crossings read as jumps.
+        size="md"
+        colorVariant="colorful"
+        strength={1}
+        brightness={1.6}
+        duration={3.5}
+        active={working}
+        theme={beamTheme}
+        className="composer-beam block w-full"
+      >
       <div
         ref={isOverlay ? toolsRef : undefined}
         // The pill is a SINGLE drag mechanism: the declarative
@@ -934,14 +1223,15 @@ export function ChatInput({
 
       {isOverlay ? (
         <div className="flex min-w-0 flex-1 flex-col justify-center">
+          {queueChips}
           {attachmentList}
           {slashMenu}
           <textarea
             ref={areaRef}
             rows={1}
             value={value}
-            placeholder={placeholder}
-            disabled={working}
+            placeholder={working && queueSupported ? "Queue a message while zWork works…" : placeholder}
+            disabled={working && !queueSupported}
             onChange={(e) => {
               const next = e.target.value;
               setValue(next);
@@ -969,19 +1259,20 @@ export function ChatInput({
               const el = e.currentTarget;
               refreshSlashState(el.value, el.selectionStart ?? el.value.length);
             }}
-            className="block w-full min-h-0 flex-1 resize-none overflow-y-auto bg-transparent px-2 py-0 text-[14.5px] leading-6 text-ink placeholder:text-ink-faint focus:outline-none"
+            className="block w-full min-h-0 flex-1 resize-none overflow-y-auto bg-transparent px-2 py-0 text-[15px] leading-[25px] text-ink placeholder:text-ink-faint focus:outline-none"
           />
         </div>
       ) : (
         <>
+          {queueChips}
           {attachmentList}
           {slashMenu}
           <textarea
             ref={areaRef}
             rows={1}
             value={value}
-            placeholder={placeholder}
-            disabled={working}
+            placeholder={working && queueSupported ? "Queue a message while zWork works…" : placeholder}
+            disabled={working && !queueSupported}
             onChange={(e) => {
               const next = e.target.value;
               setValue(next);
@@ -1009,7 +1300,7 @@ export function ChatInput({
               const el = e.currentTarget;
               refreshSlashState(el.value, el.selectionStart ?? el.value.length);
             }}
-            className="block w-full resize-none bg-transparent px-5 pt-4 pb-2 text-[14.5px] leading-6 text-ink placeholder:text-ink-faint focus:outline-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="block w-full resize-none bg-transparent px-5 pt-4 pb-2 text-[15px] leading-[25px] text-ink placeholder:text-ink-faint focus:outline-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           />
         </>
       )}
@@ -1018,26 +1309,17 @@ export function ChatInput({
           <span className="inline-flex max-w-[120px] items-center truncate text-[12px] font-medium text-ink-muted">
             {modelLabel}
           </span>
-          <button
-            type="button"
-            aria-label={working ? "Stop" : "Send"}
-            disabled={!working && !canSend}
-            onClick={working ? stop : submit}
-            className={cn(
-              "press ring-focus inline-flex h-8 w-8 items-center justify-center rounded-full transition-colors",
-              working
-                ? "bg-paper-sunken text-ink hover:bg-line/70"
-                : canSend
-                    ? "bg-ink text-paper hover:bg-ink/90"
-                    : "bg-paper-sunken text-ink-faint cursor-not-allowed",
-            )}
-          >
-            {working ? (
-              <Square className="h-3 w-3 fill-ink" />
-            ) : (
-              <ArrowUp className="h-4 w-4" />
-            )}
-          </button>
+          {/* Beam ring only while the button is Stop — send stays matte. */}
+          {working ? (
+            <>
+              {queueButtons}
+              <BorderBeam size="sm" colorVariant="colorful" strength={1} theme={beamTheme}>
+                {stopButton}
+              </BorderBeam>
+            </>
+          ) : (
+            sendButton
+          )}
         </div>
       ) : (
         <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5 pt-1">
@@ -1052,7 +1334,7 @@ export function ChatInput({
             />
             <IconButton
               icon={<FileText className="h-4 w-4" />}
-              label={artifactMode ? "Artifact: on" : "Artifact"}
+              label={artifactMode ? "Make a document: on" : "Make a document"}
               tooltipSide="top"
               variant="ghost"
               size="md"
@@ -1063,27 +1345,17 @@ export function ChatInput({
           </div>
           <div className="flex items-center gap-2">
             <ModelPicker />
-            <button
-              type="button"
-              aria-label={working ? "Stop" : "Send"}
-              disabled={!working && !canSend}
-              onClick={working ? stop : submit}
-              className={cn(
-                "press ring-focus inline-flex h-8 w-8 items-center justify-center rounded-full",
-                "transition-colors",
-                working
-                  ? "bg-paper-sunken text-ink hover:bg-line/70"
-                  : canSend
-                      ? "bg-paper-sunken text-ink hover:bg-paper hover:border-line-strong border border-line"
-                      : "bg-paper-sunken text-ink-faint cursor-not-allowed border border-line",
-              )}
-            >
-              {working ? (
-                <Square className="h-3 w-3 fill-ink" />
-              ) : (
-                <ArrowUp className="h-4 w-4" />
-              )}
-            </button>
+            {/* Beam ring only while the button is Stop — send stays matte. */}
+            {working ? (
+              <>
+                {queueButtons}
+                <BorderBeam size="sm" colorVariant="colorful" strength={1} theme={beamTheme}>
+                  {stopButton}
+                </BorderBeam>
+              </>
+            ) : (
+              sendButton
+            )}
           </div>
         </div>
       )}
@@ -1110,7 +1382,7 @@ export function ChatInput({
           )}
           <OverlayToolItem
             icon={<FileText className="h-4 w-4" />}
-            label={artifactMode ? "Artifact: on" : "Artifact"}
+            label={artifactMode ? "Make a document: on" : "Make a document"}
             active={artifactMode}
             onClick={() => setArtifactMode((v) => !v)}
           />
@@ -1147,9 +1419,10 @@ export function ChatInput({
           void uploadFiles(files);
           e.currentTarget.value = "";
         }}
-        accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.txt,.md,.markdown,.csv,.tsv,.json,.yaml,.yml,.py,.js,.jsx,.ts,.tsx,.html,.css,.xml,.pdf"
+        accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.txt,.md,.markdown,.csv,.tsv,.json,.yaml,.yml,.py,.js,.jsx,.ts,.tsx,.html,.css,.xml,.pdf,.xlsx,.xls,.xlsm,.docx,.doc,.pptx,.ppt,.odt,.ods,.odp,.rtf,.key,.numbers,.pages,.zip"
       />
     </div>
+      </BorderBeam>
     </>
   );
 }
@@ -1183,8 +1456,10 @@ function ComposerCardShell({
 }
 
 /**
- * Question card — renders the model's question + vertical answer choices.
- * "Other" reveals a text input. Consistent corner radius, theme-correct text.
+ * Question card — renders the model's question + vertical answer choices,
+ * with a free-text row at the bottom of the same list. The text box is
+ * always present (never a separate "Other" view you can't go back from):
+ * preset options stay visible and clickable while you type.
  */
 function QuestionCardBody({
   question,
@@ -1196,21 +1471,13 @@ function QuestionCardBody({
   onAnswer?: (answer: string) => void;
 }) {
   const [otherText, setOtherText] = useState("");
-  const [showOther, setShowOther] = useState(false);
-  // Filter out meta-options (the model sometimes includes "tell me what to do instead").
+  // Filter out meta-options (the model sometimes includes "tell me what to do
+  // instead") and bare "Other" entries — the free-text row replaces those.
   const cleanOptions = options.filter(
-    (o) => !/tell me what to do|instead/i.test(o),
+    (o) =>
+      !/tell me what to do|instead/i.test(o) &&
+      !/^other\s*(…|\.\.\.)?$/i.test(o.trim()),
   );
-  const hasOther = options.length > cleanOptions.length || !options.some((o) => /other/i.test(o));
-  const allOptions = hasOther ? [...cleanOptions, "Other"] : cleanOptions;
-
-  const handleSelect = (opt: string) => {
-    if (opt === "Other") {
-      setShowOther(true);
-      return;
-    }
-    onAnswer?.(opt);
-  };
 
   const submitOther = () => {
     if (otherText.trim()) onAnswer?.(otherText.trim());
@@ -1219,12 +1486,32 @@ function QuestionCardBody({
   return (
     <div className="flex flex-col gap-3" data-no-drag>
       <p className="text-[14px] font-medium leading-snug text-ink">{question}</p>
-      {showOther ? (
-        <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-1.5">
+        {cleanOptions.map((opt, i) => (
+          <button
+            key={`${opt}-${i}`}
+            type="button"
+            onClick={() => onAnswer?.(opt)}
+            className="press ring-focus flex items-center gap-2.5 rounded-xl border border-line bg-paper px-3 py-2 text-left text-[13px] text-ink transition-colors hover:bg-paper-sunken"
+          >
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-line text-[10px] font-medium text-ink-muted">
+              {String.fromCharCode(65 + i)}
+            </span>
+            <span className="flex-1">{opt}</span>
+          </button>
+        ))}
+
+        {/* Free-text answer — part of the list, not a separate view */}
+        <div
+          className="flex items-center gap-2.5 rounded-xl border border-line bg-paper px-3 py-2 transition-colors focus-within:border-line-strong"
+          data-no-drag
+        >
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-line text-ink-muted">
+            <PenLine className="h-3 w-3" />
+          </span>
           <input
             type="text"
             value={otherText}
-            autoFocus
             onChange={(e) => setOtherText(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
@@ -1232,44 +1519,26 @@ function QuestionCardBody({
                 submitOther();
               }
             }}
-            placeholder="Type your answer…"
-            className="flex-1 rounded-lg border border-line bg-paper px-3 py-2 text-[13px] text-ink placeholder:text-ink-faint focus:outline-none focus:border-line-strong"
+            placeholder="Other — type your own answer…"
+            className="flex-1 bg-transparent text-[13px] text-ink placeholder:text-ink-faint focus:outline-none"
           />
           <button
             type="button"
             onClick={submitOther}
             disabled={!otherText.trim()}
-            className="press ring-focus rounded-lg bg-ink px-3 py-2 text-[12.5px] font-semibold text-paper hover:bg-ink/90 disabled:opacity-50"
+            className="press ring-focus shrink-0 rounded-lg bg-ink px-2.5 py-1 text-[12px] font-semibold text-paper hover:bg-ink/90 disabled:opacity-50"
           >
             Send
           </button>
         </div>
-      ) : (
-        <div className="flex flex-col gap-1.5">
-          {allOptions.map((opt, i) => (
-            <button
-              key={`${opt}-${i}`}
-              type="button"
-              onClick={() => handleSelect(opt)}
-              className={cn(
-                "press ring-focus flex items-center gap-2.5 rounded-xl border border-line bg-paper px-3 py-2 text-left text-[13px] text-ink transition-colors hover:bg-paper-sunken",
-                opt === "Other" && "text-ink-muted",
-              )}
-            >
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-line text-[10px] font-medium text-ink-muted">
-                {String.fromCharCode(65 + i)}
-              </span>
-              <span className="flex-1">{opt}</span>
-            </button>
-          ))}
-        </div>
-      )}
+      </div>
     </div>
   );
 }
 
 /**
- * Permission card — "zWork wants to run: {command}" with Allow / Don't allow / Other.
+ * Permission card — "zWork needs your OK" plus the reason, with Allow / Don't allow
+ * and an always-present "tell zWork what to do instead" text row below them.
  * Always visible (no collapsed state) so the user sees it immediately.
  */
 function PermissionCardBody({
@@ -1277,71 +1546,72 @@ function PermissionCardBody({
   onResolve,
 }: {
   reason: string;
-  onResolve?: (allow: boolean) => void;
+  onResolve?: (allow: boolean, otherText?: string) => void;
 }) {
-  const [showOther, setShowOther] = useState(false);
   const [otherText, setOtherText] = useState("");
+
+  const submitOther = () => {
+    if (otherText.trim()) onResolve?.(false, otherText.trim());
+  };
 
   return (
     <div className="flex flex-col gap-3" data-no-drag>
       <div className="flex items-start gap-2.5">
         <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
         <div className="flex-1">
-          <p className="text-[13px] font-medium text-ink">zWork wants to run a command</p>
+          <p className="text-[13px] font-medium text-ink">zWork needs your OK</p>
           {reason && (
             <p className="mt-1 text-[12px] leading-relaxed text-ink-muted">{reason}</p>
           )}
         </div>
       </div>
-      {showOther ? (
-        <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-1.5">
+        <button
+          type="button"
+          onClick={() => onResolve?.(true)}
+          className="press ring-focus flex items-center gap-2.5 rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-left text-[13px] font-medium text-ink transition-colors hover:bg-success/20"
+        >
+          <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
+          <span className="flex-1">Allow</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => onResolve?.(false)}
+          className="press ring-focus flex items-center gap-2.5 rounded-xl border border-error/30 bg-error/5 px-3 py-2 text-left text-[13px] font-medium text-ink transition-colors hover:bg-error/10"
+        >
+          <XCircle className="h-4 w-4 shrink-0 text-error" />
+          <span className="flex-1">Don't allow</span>
+        </button>
+
+        {/* Free-text override — part of the same list, never a separate view */}
+        <div
+          className="flex items-center gap-2.5 rounded-xl border border-line bg-paper px-3 py-2 transition-colors focus-within:border-line-strong"
+          data-no-drag
+        >
+          <MessageSquarePlus className="h-4 w-4 shrink-0 text-ink-muted" />
           <input
             type="text"
             value={otherText}
-            autoFocus
             onChange={(e) => setOtherText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                submitOther();
+              }
+            }}
             placeholder="Tell zWork what to do instead…"
-            className="flex-1 rounded-lg border border-line bg-paper px-3 py-2 text-[13px] text-ink placeholder:text-ink-faint focus:outline-none focus:border-line-strong"
+            className="flex-1 bg-transparent text-[13px] text-ink placeholder:text-ink-faint focus:outline-none"
           />
           <button
             type="button"
-            onClick={() => {
-              if (otherText.trim()) onResolve?.(false);
-            }}
+            onClick={submitOther}
             disabled={!otherText.trim()}
-            className="press ring-focus rounded-lg bg-ink px-3 py-2 text-[12.5px] font-semibold text-paper hover:bg-ink/90 disabled:opacity-50"
+            className="press ring-focus shrink-0 rounded-lg bg-ink px-2.5 py-1 text-[12px] font-semibold text-paper hover:bg-ink/90 disabled:opacity-50"
           >
             Send
           </button>
         </div>
-      ) : (
-        <div className="flex flex-col gap-1.5">
-          <button
-            type="button"
-            onClick={() => onResolve?.(true)}
-            className="press ring-focus flex items-center gap-2.5 rounded-xl border border-success/30 bg-success/10 px-3 py-2 text-left text-[13px] font-medium text-ink transition-colors hover:bg-success/20"
-          >
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-success" />
-            <span className="flex-1">Allow</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onResolve?.(false)}
-            className="press ring-focus flex items-center gap-2.5 rounded-xl border border-error/30 bg-error/5 px-3 py-2 text-left text-[13px] font-medium text-ink transition-colors hover:bg-error/10"
-          >
-            <XCircle className="h-4 w-4 shrink-0 text-error" />
-            <span className="flex-1">Don't allow</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowOther(true)}
-            className="press ring-focus flex items-center gap-2.5 rounded-xl border border-line bg-paper px-3 py-2 text-left text-[13px] text-ink-muted transition-colors hover:bg-paper-sunken"
-          >
-            <MessageSquarePlus className="h-4 w-4 shrink-0" />
-            <span className="flex-1">Other (tell zWork what to do instead)</span>
-          </button>
-        </div>
-      )}
+      </div>
     </div>
   );
 }

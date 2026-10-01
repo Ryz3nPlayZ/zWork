@@ -1,12 +1,29 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Pencil, Check, X, AlertCircle, Settings as SettingsIcon, RefreshCcw, Download, ChevronDown, ArrowLeft, NotebookPen } from "lucide-react";
+import { Pencil, Check, X, AlertCircle, Settings as SettingsIcon, RefreshCcw, Download, ChevronDown, ArrowLeft, NotebookPen, History } from "lucide-react";
 import { useApp } from "../lib/store";
+import { api } from "../lib/api";
 import { ChatInput } from "./ChatInput";
 import { Message } from "./Message";
 import { ConcurrentWorkBanner } from "./ConcurrentWorkBanner";
 import { TodoPanel } from "./TodoPanel";
 import { dragRegionAttrs, onDragMouseDown } from "../lib/drag";
-import { isMacOS } from "../lib/platform";
+
+/** Chat-wide token/cost totals summed from per-message usage, when any exists. */
+function chatUsageSummary(messages: { usage?: { input: number; output: number; totalTokens: number; costUsd?: number } }[]) {
+  let has = false;
+  const sum = { input: 0, output: 0, costUsd: 0 };
+  for (const m of messages) {
+    if (!m.usage) continue;
+    has = true;
+    sum.input += m.usage.input;
+    sum.output += m.usage.output;
+    sum.costUsd += m.usage.costUsd ?? 0;
+  }
+  return has ? sum : null;
+}
+
+import { isMacOS, usesIntegratedTitleBar } from "../lib/platform";
+import { downloadChatJson, downloadChatMarkdown } from "../lib/chatExport";
 import { cn } from "../lib/cn";
 
 export function ChatView() {
@@ -20,6 +37,7 @@ export function ChatView() {
   const artifacts = useApp((s) => s.artifacts);
   const openArtifact = useApp((s) => s.openArtifact);
   const regenerateMessage = useApp((s) => s.regenerateMessage);
+  const forkFromMessage = useApp((s) => s.forkFromMessage);
   const flagBadResponse = useApp((s) => s.flagBadResponse);
   const sidebarOpen = useApp((s) => s.sidebarOpen);
   const resolveGate = useApp((s) => s.resolveGate);
@@ -55,7 +73,35 @@ export function ChatView() {
   const [editing, setEditing] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const [exportOpen, setExportOpen] = useState(false);
+  const [branchOpen, setBranchOpen] = useState(false);
+  const [branches, setBranches] = useState<
+    { id: string; created_at: number; message_count: number; preview: string }[]
+  >([]);
+  const restoreBranch = useApp((s) => s.restoreBranch);
+  const deleteBranch = useApp((s) => s.deleteBranch);
+  const openBranchPicker = () => {
+    if (!chat) return;
+    setBranchOpen((v) => !v);
+    if (!branchOpen) {
+      api.listBranches(chat.id).then((r) => setBranches(r.branches ?? [])).catch(() => setBranches([]));
+    }
+  };
   const exportRef = useRef<HTMLDivElement>(null);
+  const branchRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!branchOpen) return;
+    const close = (e: MouseEvent) => {
+      if (!branchRef.current?.contains(e.target as Node)) setBranchOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setBranchOpen(false); };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [branchOpen]);
 
   useEffect(() => {
     if (!exportOpen) return;
@@ -73,35 +119,12 @@ export function ChatView() {
 
   const exportToMarkdown = () => {
     if (!chat) return;
-    const markdown = chat.messages
-      .map((m) => `### ${m.role === "user" ? "User" : "Assistant"}\n\n${m.content}\n`)
-      .join("\n---\n\n");
-    
-    const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `${chat.title.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "chat"}.md`);
-    link.style.visibility = "hidden";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadChatMarkdown(chat);
   };
 
   const exportToJSON = () => {
     if (!chat) return;
-    const jsonString = JSON.stringify(chat.messages, null, 2);
-    const blob = new Blob([jsonString], { type: "application/json;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `${chat.title.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "chat"}.json`);
-    link.style.visibility = "hidden";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    downloadChatJson(chat);
   };
 
   useEffect(() => {
@@ -156,7 +179,19 @@ export function ChatView() {
           while interactive children (title, export, back) are excluded by
           onDragMouseDown's closest() walk. A paper→transparent gradient lets
           messages scroll under the title gracefully.
+
+          Windows replaces this header with the slim spacer below — the
+          integrated title bar (TitleBar.tsx) owns the title + metadata up in
+          the window chrome, so the pane doesn't repeat it.
         */}
+        {usesIntegratedTitleBar() ? (
+          <div
+            {...dragRegionAttrs()}
+            onMouseDown={onDragMouseDown}
+            className="absolute inset-x-0 top-0 z-20 h-[38px] bg-gradient-to-b from-paper via-paper/95 to-transparent"
+            aria-hidden="true"
+          />
+        ) : (
         <div
           {...dragRegionAttrs()}
           onMouseDown={onDragMouseDown}
@@ -230,10 +265,70 @@ export function ChatView() {
               </button>
             )}
           </div>
-          <div className="flex items-center gap-2" data-no-drag>
-            <span className="text-[10.5px] text-ink-faint font-mono mr-1">
-              {chat.messages.length} msgs
-            </span>
+          <div className="flex shrink-0 items-center gap-2 whitespace-nowrap" data-no-drag>
+            {(() => {
+              // Only a cost means anything to a non-developer; token counts
+              // stay in the tooltip.
+              const u = chatUsageSummary(chat.messages);
+              if (!u || u.costUsd <= 0 || chat.artifactPanelOpen) return null;
+              return (
+                <span
+                  className="text-[11px] text-ink-faint tabular-nums mr-1"
+                  title={`${u.input.toLocaleString()} tokens in / ${u.output.toLocaleString()} out`}
+                >
+                  ${u.costUsd.toFixed(u.costUsd < 1 ? 3 : 2)} used
+                </span>
+              );
+            })()}
+            <div ref={branchRef} className="relative">
+              <button
+                type="button"
+                onClick={openBranchPicker}
+                className="press inline-flex items-center gap-1 rounded-md border border-line bg-paper px-2 py-1 text-[11px] font-medium text-ink hover:bg-paper-sunken"
+                title="Earlier versions of this chat"
+              >
+                <History className="h-3 w-3" />
+                <span>Versions</span>
+              </button>
+              {branchOpen && (
+                <div className="absolute top-[calc(100%+4px)] right-0 z-40 w-[280px] animate-fade-in whitespace-normal rounded-lg border border-line bg-paper p-1 shadow-pop">
+                  {branches.length === 0 && (
+                    <div className="px-2.5 py-2 text-[12px] leading-relaxed text-ink-muted">
+                      Nothing here yet. When you edit a message you already sent, the replies that came after it are kept here so you can bring them back.
+                    </div>
+                  )}
+                  {branches.map((b) => (
+                    <div key={b.id} className="flex items-center gap-1 rounded px-2.5 py-1.5 hover:bg-paper-sunken">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setBranchOpen(false);
+                          await restoreBranch(b.id);
+                        }}
+                        className="min-w-0 flex-1 text-left"
+                        title="Bring this version back"
+                      >
+                        <div className="truncate text-[12px] font-medium text-ink">
+                          {b.message_count} message{b.message_count === 1 ? "" : "s"} — {b.preview || "(empty)"}
+                        </div>
+                        <div className="text-[10px] text-ink-faint">{new Date(b.created_at).toLocaleString()}</div>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBranches((prev) => prev.filter((x) => x.id !== b.id));
+                          deleteBranch(b.id);
+                        }}
+                        className="press rounded p-1 text-ink-faint hover:text-error"
+                        title="Delete this version"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             <div ref={exportRef} className="relative">
               <button
                 type="button"
@@ -272,6 +367,7 @@ export function ChatView() {
             </div>
           </div>
         </div>
+        )}
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto pb-44">
@@ -281,7 +377,7 @@ export function ChatView() {
             {planMode && (
               <div className="flex items-center gap-2 rounded-xl border border-accent/20 bg-accent/5 px-3 py-2 text-[12px] text-ink-muted">
                 <NotebookPen className="h-3.5 w-3.5 shrink-0 text-accent" />
-                <span>Plan mode is active — zWork will plan and investigate without making changes. Toggle it in the security preset picker below.</span>
+                <span>Plan first is on — zWork will look into it and suggest a plan without changing anything. Switch it in the menu below the message box.</span>
               </div>
             )}
             <ConcurrentWorkBanner />
@@ -302,6 +398,7 @@ export function ChatView() {
                   status={isStreaming ? chat.status : undefined}
                   onRetry={regenerateMessage}
                   onBadResponse={flagBadResponse}
+                  onFork={forkFromMessage}
                 />
               );
             })}
@@ -345,9 +442,14 @@ export function ChatView() {
               question={chat.pendingQuestion ? { question: chat.pendingQuestion.question, options: chat.pendingQuestion.options } : undefined}
               permission={activeGate ? { reason: activeGate.reason } : undefined}
               onAnswerQuestion={(answer) => void useApp.getState().answerQuestion(chat.id, answer)}
-              onResolvePermission={(allow) => {
+              onResolvePermission={(allow, otherText) => {
                 if (activeGate) {
                   void resolveGate(chat.id, activeGate.messageId, activeGate.gateId, allow);
+                  // Deny-with-instruction: deliver the typed text to the agent
+                  // as the next user message so it isn't silently dropped.
+                  if (!allow && otherText?.trim()) {
+                    void useApp.getState().send(otherText.trim());
+                  }
                 }
               }}
             />

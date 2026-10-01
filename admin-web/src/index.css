@@ -7,6 +7,9 @@
    app and minimal-chat demo so the shared admin components render
    identically everywhere. RGB triplets consumed by tailwind.config.js.
    -------------------------------------------------------- */
+/* Mirrors the token block in ../app/src/index.css (and design.md). The shared
+   admin components use the status colors (success/warning/error/info), so a
+   token missing here renders as an invisible badge, not a build error. */
 :root,
 :root.light {
   color-scheme: light;
@@ -26,31 +29,39 @@
   --line-strong: 200 196 184;
 
   --accent: 48 46 40;
-
   --shadow: 30 28 24;
+
+  --success: 16 185 129;
+  --warning: 245 158 11;
+  --error: 239 68 68;
+  --info: 59 130 246;
 }
 
 :root.dark,
 .dark {
   color-scheme: dark;
 
-  --paper: 42 42 46;
-  --paper-soft: 48 48 52;
-  --paper-raised: 56 56 60;
-  --paper-sunken: 36 36 40;
+  --paper: 22 22 24;
+  --paper-soft: 26 26 29;
+  --paper-raised: 31 31 34;
+  --paper-sunken: 18 18 20;
 
-  --ink: 220 218 210;
-  --ink-soft: 190 188 180;
-  --ink-muted: 140 138 130;
-  --ink-faint: 100 98 90;
+  --ink: 236 236 234;
+  --ink-soft: 213 213 211;
+  --ink-muted: 160 160 157;
+  --ink-faint: 108 108 106;
 
-  --line: 60 60 65;
-  --line-soft: 54 54 58;
-  --line-strong: 72 72 78;
+  --line: 45 45 49;
+  --line-soft: 40 40 44;
+  --line-strong: 62 62 66;
 
-  --accent: 220 218 210;
-
+  --accent: 236 236 234;
   --shadow: 0 0 0;
+
+  --success: 52 211 153;
+  --warning: 251 191 36;
+  --error: 248 113 113;
+  --info: 96 165 250;
 }
 
 html,
@@ -83,4 +94,22 @@ body {
 }
 *::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* Interaction utilities used by the shared components (same as the app). */
+.press {
+  transition:
+    transform 120ms ease,
+    background-color 140ms ease,
+    color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    opacity 140ms ease;
+}
+.press:active {
+  transform: scale(0.97);
+}
+.ring-focus:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(var(--paper)), 0 0 0 4px rgb(var(--accent));
 }

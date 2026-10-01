@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>zWork list pages wireframe</title>
+<style>
+  :root {
+    --bg: #eeece6; --frame: #f6f5f1; --side: #e7e5de; --raised: #ebe9e2; --sunken: #fbfaf7;
+    --ink: #302e28; --muted: #6e6a60; --faint: #9b968a; --line: #dad6ca; --line-strong: #c8c4b8;
+    --note: #2563eb; --note-bg: #2563eb14;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121214; --frame: #161618; --side: #141416; --raised: #1f1f22; --sunken: #121214;
+      --ink: #ececea; --muted: #a0a09d; --faint: #6c6c6a; --line: #2d2d31; --line-strong: #3e3e42;
+      --note: #60a5fa; --note-bg: #60a5fa1a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; }
+  .doc { max-width: 1180px; margin: 0 auto; padding: 40px 16px 80px; }
+  .doc > h1 { font-size: 24px; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .doc > p.lede { color: var(--muted); margin: 0 0 32px; max-width: 70ch; }
+  h2.sec { font-size: 16px; margin: 48px 0 12px; }
+  .sec-sub { color: var(--muted); margin: -6px 0 16px; max-width: 75ch; }
+
+  /* Frame = fake app window */
+  .win { display: grid; grid-template-columns: 168px 1fr; border: 1px solid var(--line-strong);
+    border-radius: 12px; overflow: hidden; background: var(--frame); min-height: 420px; }
+  .side { background: var(--side); border-right: 1px solid var(--line); padding: 14px 10px; }
+  .side .nv { padding: 5px 8px; border-radius: 6px; color: var(--muted); font-size: 12px; margin-bottom: 2px; }
+  .side .nv.on { background: var(--raised); color: var(--ink); font-weight: 600; }
+  .side .gap { height: 12px; }
+  .main { padding: 28px 32px 32px; min-width: 0; }
+  .page { max-width: 720px; margin: 0 auto; }
+
+  /* Shared header */
+  .hdr { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+  .h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .acts { display: flex; gap: 6px; align-items: center; }
+  .btn { border: 1px solid var(--line); background: var(--frame); border-radius: 8px; padding: 5px 10px;
+    font-size: 12px; font-weight: 500; white-space: nowrap; }
+  .btn.pri { background: var(--ink); color: var(--frame); border-color: var(--ink); }
+  .ib { width: 28px; height: 28px; border: 1px solid var(--line); border-radius: 8px; display: grid;
+    place-items: center; color: var(--muted); font-size: 12px; }
+
+  /* Toolbar */
+  .bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 14px; }
+  .seg { display: inline-flex; background: var(--raised); border-radius: 8px; padding: 2px; }
+  .seg span { padding: 3px 10px; border-radius: 6px; font-size: 12px; color: var(--muted); }
+  .seg span.on { background: var(--frame); color: var(--ink); font-weight: 500; box-shadow: 0 1px 2px #0000001a; }
+  .search { border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; color: var(--faint);
+    font-size: 12px; width: 220px; }
+
+  /* Section heading */
+  .sh { font-size: 13px; font-weight: 600; margin: 22px 0 8px; display: flex; justify-content: space-between; align-items: baseline; }
+  .sh em { font-style: normal; font-weight: 400; color: var(--faint); margin-left: 6px; }
+  .sh .lnk { font-weight: 500; font-size: 12px; color: var(--muted); }
+
+  /* List pattern */
+  .list { border: 1px solid var(--line); border-radius: 16px; background: var(--raised); overflow: hidden; }
+  .row { display: grid; grid-template-columns: 32px 1fr auto; gap: 12px; align-items: center; padding: 11px 14px; }
+  .row + .row { border-top: 1px solid var(--line); }
+  .row.hover { background: color-mix(in srgb, var(--raised) 60%, var(--line) 40%); }
+  .row.open { align-items: start; }
+  .tile { width: 32px; height: 32px; border-radius: 9px; background: var(--sunken); border: 1px solid var(--line);
+    display: grid; place-items: center; font-size: 11px; color: var(--muted); font-weight: 600; }
+  .t { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .t.read { font-weight: 400; color: var(--muted); }
+  .m { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .trail { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: 11.5px; white-space: nowrap; }
+  .expand { grid-column: 2 / 4; margin-top: 8px; }
+  .expand p { margin: 0 0 10px; color: var(--muted); max-width: 60ch; }
+  .expand .acts { justify-content: flex-start; }
+
+  .badge { border-radius: 999px; padding: 1px 8px; font-size: 10.5px; font-weight: 500; background: var(--sunken);
+    border: 1px solid var(--line); color: var(--muted); }
+  .badge.ok { color: #0f9f6e; border-color: #10b98140; background: #10b98114; }
+  .badge.warn { color: #b45309; border-color: #f59e0b40; background: #f59e0b14; }
+  .badge.err { color: #dc2626; border-color: #ef444440; background: #ef444414; }
+  .sw { width: 26px; height: 15px; border-radius: 999px; background: var(--ink); position: relative; }
+  .sw::after { content: ""; position: absolute; right: 2px; top: 2px; width: 11px; height: 11px; border-radius: 50%; background: var(--frame); }
+  .sw.off { background: var(--line-strong); }
+  .sw.off::after { right: auto; left: 2px; }
+
+  /* Grid pattern */
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .card { border: 1px solid var(--line); border-radius: 16px; background: var(--raised); padding: 14px;
+    display: flex; flex-direction: column; gap: 8px; min-height: 132px; }
+  .card .top { display: flex; justify-content: space-between; align-items: flex-start; }
+  .card .d { color: var(--muted); font-size: 12px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .card .ft { margin-top: auto; display: flex; justify-content: space-between; align-items: center; color: var(--faint); font-size: 11.5px; }
+
+  /* Empty state */
+  .empty { border: 1px dashed var(--line-strong); border-radius: 16px; padding: 40px 24px; text-align: center; }
+  .empty .tile { margin: 0 auto 10px; }
+  .empty b { display: block; font-size: 13.5px; }
+  .empty p { color: var(--muted); margin: 4px auto 14px; max-width: 40ch; }
+
+  /* Annotations */
+  .n { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--note);
+    color: #fff; font-size: 10.5px; font-weight: 700; flex: none; vertical-align: middle; }
+  .notes { margin: 14px 0 0; padding: 0; list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; }
+  .notes li { display: flex; gap: 8px; color: var(--muted); }
+  .notes li b { color: var(--ink); font-weight: 600; }
+  .mark { outline: 1.5px dashed var(--note); outline-offset: 3px; border-radius: 6px; position: relative; }
+  .mark > .n { position: absolute; top: -12px; left: -12px; }
+
+  table.audit { width: 100%; border-collapse: collapse; background: var(--frame); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; font-size: 12.5px; }
+  table.audit th, table.audit td { text-align: left; padding: 8px 12px; vertical-align: top; }
+  table.audit th { color: var(--muted); font-weight: 600; background: var(--raised); }
+  table.audit tr + tr td { border-top: 1px solid var(--line); }
+  table.audit td:last-child { color: var(--ink); font-weight: 500; }
+
+  .spec { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .spec > div { background: var(--frame); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .spec h3 { margin: 0 0 10px; font-size: 13px; }
+  .spec code { font-size: 11.5px; color: var(--muted); display: block; margin-top: 10px; line-height: 1.6; }
+
+  @media (max-width: 900px) {
+    .win { grid-template-columns: 1fr; } .side { display: none; } .main { padding: 20px 16px; }
+    .grid { grid-template-columns: 1fr 1fr; } .notes, .spec { grid-template-columns: 1fr; }
+    .search { width: 140px; }
+  }
+</style>
+</head>
+<body>
+<div class="doc">
+  <h1>List pages: one shell, two patterns</h1>
+  <p class="lede">Scheduled, Inbox, Projects and Connectors all do the same job: show a collection, let you act on one item, and let you add a new one. This wireframe puts them in one shared page shell. Time-ordered things (Inbox, Scheduled) use the list pattern. Things you open or connect (Projects, Connectors) use the card grid.</p>
+
+  <h2 class="sec">What drifts today</h2>
+  <table class="audit">
+    <tr><th>Thing</th><th>Scheduled</th><th>Inbox</th><th>Projects</th><th>Connectors</th><th>Proposed</th></tr>
+    <tr><td>Page width</td><td>1200px</td><td>860px</td><td>1200px</td><td>860px</td><td>960px everywhere</td></tr>
+    <tr><td>Title</td><td>22px left</td><td>22px left</td><td>22px left</td><td>42px serif bold, centered</td><td>22px semibold, left</td></tr>
+    <tr><td>Header action</td><td>ink button, 12px</td><td>outline button</td><td>ink button, 12px</td><td>floating refresh icon; MCP section has its own 13px rounded-xl button</td><td>one primary + optional icon button, same size</td></tr>
+    <tr><td>Items</td><td>separate cards, p-4</td><td>big cards p-5 with 3 buttons each</td><td>grid cards p-4</td><td>grid cards, then a divide-y list</td><td>list container or grid, nothing else</td></tr>
+    <tr><td>Grouping</td><td>none</td><td>"READ (n)" uppercase label</td><td>starred sorted first, no label</td><td>"More connectors" 17px heading</td><td>segmented filter + 13px section heading</td></tr>
+    <tr><td>Status</td><td>pill with dot</td><td>colored dot + clock</td><td>star icon</td><td>pill with dot</td><td>text badge, no dots</td></tr>
+    <tr><td>Delete</td><td>window.confirm</td><td>window.confirm</td><td>no confirm</td><td>instant disconnect</td><td>one shared confirm dialog</td></tr>
+  </table>
+
+  <h2 class="sec">Shared anatomy</h2>
+  <p class="sec-sub">These become four small components (PageShell, ListGroup/ListRow, CardGrid/Card, EmptyState) that every page uses. No page styles its own header or empty state again.</p>
+  <div class="win">
+    <div class="side"><div class="nv">New chat</div><div class="gap"></div><div class="nv on">Any list page</div></div>
+    <div class="main"><div class="page">
+      <div class="hdr mark"><span class="n">1</span>
+        <div><div class="h1">Page title</div><div class="sub">One line of live counts, no marketing copy</div></div>
+        <div class="acts"><div class="ib">↻</div><div class="btn pri">+ New thing</div></div>
+      </div>
+      <div class="bar mark"><span class="n">2</span>
+        <div class="seg"><span class="on">All</span><span>Filter</span><span>Filter</span></div>
+        <div class="search">Search</div>
+      </div>
+      <div class="sh mark"><span class="n">3</span>Section heading <span class="lnk">Optional link</span></div>
+      <div class="list mark"><span class="n">4</span>
+        <div class="row"><div class="tile">Ic</div><div><div class="t">Row title</div><div class="m">One meta line, truncated</div></div><div class="trail"><span class="badge ok">Status</span>2h ago</div></div>
+        <div class="row hover"><div class="tile">Ic</div><div><div class="t">Hovered row</div><div class="m">Actions appear on hover, never stacked under every row</div></div><div class="trail"><div class="ib">▶</div><div class="ib">⋯</div></div></div>
+      </div>
+      <div class="sh">Or, for things you open</div>
+      <div class="grid mark"><span class="n">5</span>
+        <div class="card"><div class="top"><div class="tile">Ic</div><span class="badge">Status</span></div><div class="t">Card title</div><div class="d">Two lines of description at most, then it truncates.</div><div class="ft"><span>Meta</span><span>⋯</span></div></div>
+        <div class="card"><div class="top"><div class="tile">Ic</div></div><div class="t">Card title</div><div class="d">Same height, same padding, same radius on every page.</div><div class="ft"><span>Meta</span></div></div>
+        <div class="card"><div class="top"><div class="tile">Ic</div></div><div class="t">Card title</div><div class="d">Description.</div><div class="ft"><span>Meta</span></div></div>
+      </div>
+      <div class="sh">When there is nothing yet</div>
+      <div class="empty mark"><span class="n">6</span><div class="tile">Ic</div><b>No things yet</b><p>One sentence on what shows up here and where it comes from.</p><span class="btn pri">+ New thing</span></div>
+    </div></div>
+  </div>
+  <ul class="notes">
+    <li><span class="n">1</span><span><b>Header.</b> Title 22px left. Subtitle is counts only. Right side: at most one primary button and one icon button. Same on all four pages.</span></li>
+    <li><span class="n">2</span><span><b>Toolbar.</b> Optional. Segmented filter on the left, search on the right. Only shown when there is enough to filter (5+ items).</span></li>
+    <li><span class="n">3</span><span><b>Section heading.</b> 13px semibold with a muted count. Replaces the uppercase "READ (n)" label and the 17px "More connectors" heading.</span></li>
+    <li><span class="n">4</span><span><b>List.</b> One rounded container, rows split by hairlines. 32px icon tile, title, one meta line, trailing status or time. Click the row to open or expand.</span></li>
+    <li><span class="n">5</span><span><b>Card grid.</b> 3 / 2 / 1 columns. Icon tile top-left, status top-right, title, 2-line description, footer meta. Overflow menu on hover.</span></li>
+    <li><span class="n">6</span><span><b>Empty state.</b> Dashed box, icon tile, one sentence, and the same button label as the header action (no "Create your first X" duplicate wording).</span></li>
+  </ul>
+
+  <!-- INBOX -->
+  <h2 class="sec">Inbox</h2>
+  <p class="sec-sub">List pattern. Items are one line until you click them. The "Reveal summary" step goes away: clicking the row shows the full text and its actions.</p>
+  <div class="win">
+    <div class="side"><div class="nv">New chat</div><div class="gap"></div><div class="nv">Scheduled</div><div class="nv on">Inbox</div><div class="nv">Projects</div><div class="nv">Connectors</div></div>
+    <div class="main"><div class="page">
+      <div class="hdr"><div><div class="h1">Inbox</div><div class="sub">3 unread</div></div><div class="acts"><div class="btn">Mark all read</div></div></div>
+      <div class="bar"><div class="seg"><span class="on">Unread</span><span>All</span></div></div>
+      <div class="list">
+        <div class="row open"><div class="tile">!</div>
+          <div><div class="t">Invoice email needs a reply</div><div class="m">Needs attention · from "Morning email check"</div></div>
+          <div class="trail">12m ago</div>
+          <div class="expand"><p>Two invoices from Harlow Supply are overdue. I drafted a reply asking for a revised due date but did not send it.</p>
+            <div class="acts"><div class="btn pri">Open run</div><div class="btn">Mark read</div><div class="btn">Dismiss</div></div></div>
+        </div>
+        <div class="row"><div class="tile">?</div><div><div class="t">Which calendar should I use?</div><div class="m">Question · from "Weekly planning"</div></div><div class="trail">1h ago</div></div>
+        <div class="row"><div class="tile">Ok</div><div><div class="t">Daily news digest</div><div class="m">Summary · 6 stories, 2 about your competitors</div></div><div class="trail">7h ago</div></div>
+      </div>
+      <div class="sh">Earlier <em>12 read</em></div>
+      <div class="list">
+        <div class="row"><div class="tile">Ok</div><div><div class="t read">Repo activity summary</div><div class="m">Summary · 4 merged PRs</div></div><div class="trail">Yesterday</div></div>
+      </div>
+    </div></div>
+  </div>
+  <ul class="notes">
+    <li><span class="n">A</span><span><b>Kind lives in the icon tile and meta text</b>, not in a colored dot. Error and flag tiles get the warning/error tint; the rest stay neutral.</span></li>
+    <li><span class="n">B</span><span><b>Unread is bold, read is muted.</b> The "All" filter shows both, with read items under an "Earlier" heading.</span></li>
+    <li><span class="n">C</span><span><b>Dismiss needs no confirm.</b> Show an Undo in place of the row for a few seconds instead of window.confirm.</span></li>
+    <li><span class="n">D</span><span><b>Empty:</b> "Nothing waiting. Results from scheduled tasks show up here." Button: "New scheduled task".</span></li>
+  </ul>
+
+  <!-- SCHEDULED -->
+  <h2 class="sec">Scheduled</h2>
+  <p class="sec-sub">List pattern, same container as Inbox. Enable/pause becomes a switch (it is a setting, not an action), Run now moves to hover, Edit and Delete go in the overflow menu.</p>
+  <div class="win">
+    <div class="side"><div class="nv">New chat</div><div class="gap"></div><div class="nv on">Scheduled</div><div class="nv">Inbox</div><div class="nv">Projects</div><div class="nv">Connectors</div></div>
+    <div class="main"><div class="page">
+      <div class="hdr"><div><div class="h1">Scheduled</div><div class="sub">2 active, results go to your Inbox</div></div><div class="acts"><div class="btn pri">+ New task</div></div></div>
+      <div class="bar"><div class="seg"><span class="on">All</span><span>Active</span><span>Paused</span></div></div>
+      <div class="list">
+        <div class="row"><div class="tile">↻</div><div><div class="t">Morning email check</div><div class="m">Weekdays at 8:00 · Next in 14h · Last run 2h ago</div></div><div class="trail"><div class="sw"></div></div></div>
+        <div class="row hover"><div class="tile">↻</div><div><div class="t">Daily news digest</div><div class="m">Every day at 7:30 · Next in 13h · Last run failed</div></div><div class="trail"><span class="badge err">Failed</span><div class="ib">▶</div><div class="ib">⋯</div><div class="sw"></div></div></div>
+        <div class="row"><div class="tile">⏱</div><div><div class="t read">Repo activity summary</div><div class="m">Every 60 min · Paused</div></div><div class="trail"><div class="sw off"></div></div></div>
+      </div>
+    </div></div>
+  </div>
+  <ul class="notes">
+    <li><span class="n">A</span><span><b>One meta line</b> replaces the four icon+label chips: schedule, next run, last run. "View last run" becomes clicking the row.</span></li>
+    <li><span class="n">B</span><span><b>Badges only for problems.</b> Active/Paused is already shown by the switch, so the green "Active" pill goes. A "Failed" badge appears only when the last run failed.</span></li>
+    <li><span class="n">C</span><span><b>The prompt text</b> moves into the edit dialog. In the list, the title is enough.</span></li>
+    <li><span class="n">D</span><span><b>Empty:</b> "No scheduled tasks. The agent can check email, watch sources and post results to your Inbox." Button: "New task".</span></li>
+  </ul>
+
+  <!-- PROJECTS -->
+  <h2 class="sec">Projects</h2>
+  <p class="sec-sub">Card grid. Starred projects get their own section instead of being silently sorted first.</p>
+  <div class="win">
+    <div class="side"><div class="nv">New chat</div><div class="gap"></div><div class="nv">Scheduled</div><div class="nv">Inbox</div><div class="nv on">Projects</div><div class="nv">Connectors</div></div>
+    <div class="main"><div class="page">
+      <div class="hdr"><div><div class="h1">Projects</div><div class="sub">7 projects</div></div><div class="acts"><div class="btn pri">+ New project</div></div></div>
+      <div class="bar"><div></div><div class="search">Search projects</div></div>
+      <div class="sh">Starred <em>2</em></div>
+      <div class="grid">
+        <div class="card"><div class="top"><div class="tile">▣</div><span>★</span></div><div class="t">Website redesign</div><div class="d">New marketing site, copy review and launch checklist.</div><div class="ft"><span>12 chats · 4 files</span><span>2h ago</span></div></div>
+        <div class="card"><div class="top"><div class="tile">▣</div><span>★</span></div><div class="t">Q4 hiring</div><div class="d">Job posts, candidate notes and interview loops.</div><div class="ft"><span>5 chats · 9 files</span><span>Yesterday</span></div></div>
+      </div>
+      <div class="sh">All projects <em>5</em></div>
+      <div class="grid">
+        <div class="card"><div class="top"><div class="tile">▣</div><span>⋯</span></div><div class="t">Tax prep 2026</div><div class="d">Receipts and the questions for the accountant.</div><div class="ft"><span>3 chats</span><span>3d ago</span></div></div>
+        <div class="card"><div class="top"><div class="tile">▣</div></div><div class="t">Podcast research</div><div class="d">Guest shortlist and episode outlines.</div><div class="ft"><span>8 chats · 2 files</span><span>1w ago</span></div></div>
+        <div class="card"><div class="top"><div class="tile">▣</div></div><div class="t">Home move</div><div class="d">Movers, utilities, address changes.</div><div class="ft"><span>2 chats</span><span>2w ago</span></div></div>
+      </div>
+    </div></div>
+  </div>
+  <ul class="notes">
+    <li><span class="n">A</span><span><b>Footer shows what is inside</b> (chats, files) plus last activity, so cards are worth scanning. Needs chat/file counts from the API.</span></li>
+    <li><span class="n">B</span><span><b>Star is always visible</b> when set (top-right), hover-only when not. Delete moves behind the shared confirm dialog.</span></li>
+    <li><span class="n">C</span><span><b>Starred section</b> only renders when something is starred. Search shows at 5+ projects.</span></li>
+    <li><span class="n">D</span><span><b>Detail page</b> (inside a project) is a separate wireframe; it should reuse the same header and section headings.</span></li>
+  </ul>
+
+  <!-- CONNECTORS -->
+  <h2 class="sec">Connectors</h2>
+  <p class="sec-sub">Same shell as the rest: left title, no serif, no centered hero. Apps use the card grid, custom (MCP) servers use the list pattern.</p>
+  <div class="win">
+    <div class="side"><div class="nv">New chat</div><div class="gap"></div><div class="nv">Scheduled</div><div class="nv">Inbox</div><div class="nv">Projects</div><div class="nv on">Connectors</div></div>
+    <div class="main"><div class="page">
+      <div class="hdr"><div><div class="h1">Connectors</div><div class="sub">2 of 6 apps connected</div></div><div class="acts"><div class="ib">↻</div><div class="btn">+ Add server</div></div></div>
+      <div class="sh">Apps</div>
+      <div class="grid">
+        <div class="card"><div class="top"><div class="tile">G</div><span class="badge ok">Connected</span></div><div class="t">Gmail</div><div class="d">Send, read and search your email.</div><div class="ft"><span>Manage</span></div></div>
+        <div class="card"><div class="top"><div class="tile">C</div><span class="badge ok">Connected</span></div><div class="t">Google Calendar</div><div class="d">Create events and check your schedule.</div><div class="ft"><span>Manage</span></div></div>
+        <div class="card"><div class="top"><div class="tile">D</div></div><div class="t">Google Drive</div><div class="d">Browse, upload and share files.</div><div class="ft"><span>Connect</span></div></div>
+        <div class="card"><div class="top"><div class="tile">N</div></div><div class="t">Notion</div><div class="d">Create pages and search your workspace.</div><div class="ft"><span>Connect</span></div></div>
+        <div class="card"><div class="top"><div class="tile">GH</div></div><div class="t">GitHub</div><div class="d">Issues, pull requests and repos.</div><div class="ft"><span>Connect</span></div></div>
+        <div class="card"><div class="top"><div class="tile">L</div><span class="badge err">Error</span></div><div class="t">Linear</div><div class="d">Create issues and track progress.</div><div class="ft"><span>Reconnect</span></div></div>
+      </div>
+      <div class="sh">Custom servers <em>2</em></div>
+      <div class="list">
+        <div class="row"><div class="tile">S</div><div><div class="t">filesystem</div><div class="m">npx @modelcontextprotocol/server-filesystem · 11 tools</div></div><div class="trail"><div class="sw"></div></div></div>
+        <div class="row"><div class="tile">S</div><div><div class="t">postgres-local</div><div class="m">Could not start: command not found</div></div><div class="trail"><span class="badge err">Error</span><div class="btn">Retry</div></div></div>
+      </div>
+    </div></div>
+  </div>
+  <ul class="notes">
+    <li><span class="n">A</span><span><b>Header action is "Add server"</b> (the MCP add button moves up); apps connect from their own card, so they need no header button.</span></li>
+    <li><span class="n">B</span><span><b>Brand logos stay</b> in the icon tile. That is the one place color is allowed, because it helps recognition.</span></li>
+    <li><span class="n">C</span><span><b>Card click opens the existing detail dialog.</b> Disconnect goes through the shared confirm dialog.</span></li>
+    <li><span class="n">D</span><span><b>Import from Claude/Cursor</b> banner becomes a quiet row at the top of Custom servers, only when something importable is found.</span></li>
+  </ul>
+
+  <h2 class="sec">Build order</h2>
+  <div class="spec">
+    <div><h3>1. Shared components</h3>PageShell (width, padding, header, toolbar slot), SectionHeading, ListGroup + ListRow, CardGrid + Card, EmptyState, Badge, ConfirmDialog.
+      <code>app/src/components/page/*</code></div>
+    <div><h3>2. Move pages onto them</h3>Connectors first (biggest drift), then Inbox, Scheduled, Projects. Behavior and store calls stay exactly as they are.</div>
+    <div><h3>3. Update design.md</h3>Record 960px width, 22px title (design.md says 28px, no page uses it), list vs grid rule, badge rule, no window.confirm.</div>
+    <div><h3>4. Later</h3>Project detail page and Settings on the same shell. Analytics and Plan stay as they are for now.</div>
+  </div>
+</div>
+</body>
+</html>

@@ -8,19 +8,25 @@ import {
   Trash2,
   X,
   FolderOpen,
-  Clock,
   Loader2,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
 import { ChatInput } from "./ChatInput";
 import { IconButton } from "./IconButton";
-import { api } from "../lib/api";
-
-const EMOJI_OPTIONS = [
-  "📁", "📊", "💡", "🚀", "🎯", "🔧", "💼", "📝", "🎨", "🏗️",
-  "⚡", "🌟", "🔬", "📈", "🎮", "🤝", "🏆", "📱", "🌐", "✅",
-];
+import { api, type Project } from "../lib/api";
+import {
+  Button,
+  Card,
+  CardGrid,
+  EmptyState,
+  IconTile,
+  OverflowMenu,
+  PageShell,
+  SearchField,
+  SectionHeading,
+  useConfirm,
+} from "./page/Page";
 
 /**
  * Detail view for a single project. Layout:
@@ -43,72 +49,69 @@ export function ProjectView() {
 function ProjectListPage() {
   const projects = useApp((s) => s.projects);
   const [modalOpen, setModalOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [confirmDialog, confirm] = useConfirm();
 
-  // Sort: starred first, then by updated_at descending
-  const sorted = useMemo(() => {
-    return [...projects].sort((a, b) => {
-      if (!!a.starred !== !!b.starred) return a.starred ? -1 : 1;
-      return b.updated_at - a.updated_at;
-    });
-  }, [projects]);
+  const q = query.trim().toLowerCase();
+  const { starred, rest } = useMemo(() => {
+    const byRecent = [...projects]
+      .filter((p) => !q || p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q))
+      .sort((a, b) => b.updated_at - a.updated_at);
+    return { starred: byRecent.filter((p) => p.starred), rest: byRecent.filter((p) => !p.starred) };
+  }, [projects, q]);
+
+  const grid = (list: Project[]) => (
+    <CardGrid>
+      {list.map((p) => (
+        <ProjectCard key={p.id} project={p} confirm={confirm} />
+      ))}
+    </CardGrid>
+  );
 
   return (
-    <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-paper">
-      {/* Header — consistent with Scheduled and Inbox */}
-      <div className="shrink-0 border-b border-line bg-paper-soft px-6 py-4">
-        <div className="mx-auto flex max-w-[1200px] items-center justify-between">
-          <div>
-            <h1 className="text-[28px] font-semibold tracking-tight text-ink">
-              Projects
-            </h1>
-            <p className="mt-0.5 text-[13px] text-ink-muted">
-              {projects.length} project{projects.length === 1 ? "" : "s"}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => setModalOpen(true)}
-            className="press ring-focus inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-paper hover:bg-ink/90 transition-colors"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            New project
-          </button>
-        </div>
-      </div>
-
-      {/* Body */}
-      <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-[1200px] px-6 py-6">
-          {projects.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-line p-16 text-center">
-              <FolderOpen className="mx-auto h-8 w-8 text-ink-faint" />
-              <h3 className="mt-3 text-[13.5px] font-semibold text-ink">
-                No projects yet
-              </h3>
-              <p className="mx-auto mt-1 max-w-[320px] text-[12.5px] text-ink-muted">
-                Create a project to organize chats, instructions, and files around a single goal.
-              </p>
-              <button
-                type="button"
-                onClick={() => setModalOpen(true)}
-                className="press ring-focus mt-4 inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-paper hover:bg-ink/90 transition-colors"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                Create your first project
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {sorted.map((p) => (
-                <ProjectCard key={p.id} project={p} />
-              ))}
-            </div>
+    <PageShell
+      title="Projects"
+      subtitle="Chats, instructions and files grouped around one goal."
+      actions={
+        <Button variant="primary" icon={<Plus />} onClick={() => setModalOpen(true)}>
+          New project
+        </Button>
+      }
+      toolbar={
+        projects.length >= 5 ? <SearchField value={query} onChange={setQuery} placeholder="Search projects" /> : undefined
+      }
+    >
+      {projects.length === 0 ? (
+        <EmptyState
+          icon={<FolderOpen />}
+          title="No projects yet"
+          body="A project keeps related chats together, with instructions and files zWork uses in every one of them."
+          action={
+            <Button variant="primary" icon={<Plus />} onClick={() => setModalOpen(true)}>
+              New project
+            </Button>
+          }
+        />
+      ) : starred.length + rest.length === 0 ? (
+        <p className="py-10 text-center text-[13px] text-ink-muted">No projects match &ldquo;{query}&rdquo;.</p>
+      ) : starred.length > 0 ? (
+        <>
+          <SectionHeading title="Starred" count={starred.length} className="mt-0" />
+          {grid(starred)}
+          {rest.length > 0 && (
+            <>
+              <SectionHeading title="All projects" count={rest.length} />
+              {grid(rest)}
+            </>
           )}
-        </div>
-      </div>
+        </>
+      ) : (
+        grid(rest)
+      )}
 
       {modalOpen && <CreateProjectModal onClose={() => setModalOpen(false)} />}
-    </div>
+      {confirmDialog}
+    </PageShell>
   );
 }
 
@@ -117,8 +120,6 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const setActiveProject = useApp((s) => s.setActiveProject);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [selectedIcon, setSelectedIcon] = useState<string | null>(null);
-  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
 
@@ -139,7 +140,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
     if (!n || busy) return;
     setBusy(true);
     try {
-      await createProject(n, description.trim() || undefined, selectedIcon ?? undefined);
+      await createProject(n, description.trim() || undefined);
       const all = useApp.getState().projects;
       const latest = all[all.length - 1];
       if (latest) setActiveProject(latest.id);
@@ -151,7 +152,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 animate-fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4 animate-fade-in"
       onClick={onClose}
     >
       <div
@@ -170,48 +171,6 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="px-5 py-4 space-y-4">
-          {/* Icon picker row */}
-          <div>
-            <label className="block text-[12.5px] font-medium text-ink-muted mb-1.5">
-              Icon <span className="font-normal text-ink-faint">(optional)</span>
-            </label>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setEmojiPickerOpen((v) => !v)}
-                className="press flex h-9 w-9 items-center justify-center rounded-xl border border-line bg-paper hover:border-line-strong text-[20px]"
-              >
-                {selectedIcon ?? <FolderOpen className="h-4 w-4 text-ink-muted" />}
-              </button>
-              {selectedIcon && (
-                <button
-                  type="button"
-                  onClick={() => { setSelectedIcon(null); setEmojiPickerOpen(false); }}
-                  className="press rounded-md px-2 py-1 text-[11.5px] text-ink-faint hover:bg-paper-sunken hover:text-ink"
-                >
-                  Clear
-                </button>
-              )}
-            </div>
-            {emojiPickerOpen && (
-              <div className="mt-2 flex flex-wrap gap-1 rounded-xl border border-line bg-paper p-2 animate-fade-in">
-                {EMOJI_OPTIONS.map((e) => (
-                  <button
-                    key={e}
-                    type="button"
-                    onClick={() => { setSelectedIcon(e); setEmojiPickerOpen(false); }}
-                    className={cn(
-                      "press flex h-8 w-8 items-center justify-center rounded-lg text-[18px] hover:bg-paper-sunken",
-                      selectedIcon === e && "bg-paper-sunken ring-1 ring-line-strong",
-                    )}
-                  >
-                    {e}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
           <div>
             <label className="block text-[12.5px] font-medium text-ink-muted mb-1.5">
               Name
@@ -263,112 +222,78 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function ProjectCard({ project }: { project: { id: string; name: string; description: string; updated_at: number; starred?: boolean; icon?: string } }) {
+/** Backend writes timestamps as milliseconds (timestamp_millis). */
+function timeAgo(ts: number) {
+  const diff = Date.now() - ts;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function ProjectCard({
+  project,
+  confirm,
+}: {
+  project: Project;
+  confirm: (o: { title: string; body?: string; confirmLabel: string }) => Promise<boolean>;
+}) {
   const setActiveProject = useApp((s) => s.setActiveProject);
   const deleteProject = useApp((s) => s.deleteProject);
   const updateProject = useApp((s) => s.updateProject);
-  const [menuOpen, setMenuOpen] = useState(false);
-
-  // Backend writes created_at/updated_at as milliseconds (timestamp_millis),
-  // so diff directly against Date.now() — no extra *1000.
-  const timeAgo = (ts: number) => {
-    const diff = Date.now() - ts;
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return "just now";
-    if (mins < 60) return `${mins}m ago`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
-  };
-
-  const handleStar = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    await updateProject(project.id, { starred: !project.starred });
-  };
+  const chats = project.chat_ids?.length ?? 0;
 
   return (
-    <div className="group relative rounded-2xl border border-line bg-paper-raised p-4 transition-shadow hover:shadow-chat">
-      <button
-        type="button"
-        onClick={() => setActiveProject(project.id)}
-        className="text-left w-full"
-      >
-        <div className="flex items-start justify-between gap-2">
-          {/* Task 4: show emoji icon if set, otherwise FolderOpen */}
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-paper-sunken text-[20px]">
-            {project.icon ? (
-              <span>{project.icon}</span>
-            ) : (
-              <FolderOpen className="h-4 w-4 text-ink-muted" />
-            )}
-          </div>
-          <div
-            className="flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Task 2: star button */}
-            <button
-              type="button"
-              onClick={(e) => void handleStar(e)}
-              className="press rounded-md p-1 hover:bg-paper-sunken"
-              aria-label={project.starred ? "Unstar" : "Star"}
-            >
-              <Star
-                className={cn(
-                  "h-3.5 w-3.5 transition-colors",
-                  project.starred ? "fill-amber-400 text-amber-400" : "text-ink-faint",
-                )}
-              />
-            </button>
-            <IconButton
-              icon={<MoreHorizontal />}
-              label="More"
-              size="sm"
-              showTooltip={false}
-              onClick={(e) => {
-                e.stopPropagation();
-                setMenuOpen(!menuOpen);
-              }}
-            />
-          </div>
-        </div>
-        <h3 className="mt-3 truncate text-[14px] font-semibold text-ink">{project.name}</h3>
-        {project.description && (
-          <p className="mt-1 line-clamp-2 text-[12.5px] leading-5 text-ink-muted">{project.description}</p>
-        )}
-        <div className="mt-3 flex items-center gap-1 text-[10.5px] text-ink-faint">
-          <Clock className="h-3 w-3" />
-          <span>{timeAgo(project.updated_at)}</span>
-          {project.starred && (
-            <Star className="ml-auto h-3 w-3 fill-amber-400 text-amber-400" />
-          )}
-        </div>
-      </button>
-
-      {/* Context menu */}
-      {menuOpen && (
+    <Card
+      icon={
+        <IconTile size="lg">
+          <FolderOpen />
+        </IconTile>
+      }
+      title={project.name}
+      description={project.description || undefined}
+      onClick={() => setActiveProject(project.id)}
+      footer={
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
-          <div
-            className="absolute right-3 top-10 z-50 w-[160px] animate-fade-in rounded-xl border border-line-strong bg-paper-raised p-1 shadow-pop"
-            role="menu"
-          >
-            <button
-              type="button"
-              onClick={async () => {
-                await deleteProject(project.id);
-                setMenuOpen(false);
-              }}
-              role="menuitem"
-              className="press flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-red-600 hover:bg-red-500/10"
-            >
-              <Trash2 className="h-3.5 w-3.5" /> Delete project
-            </button>
-          </div>
+          <span>
+            {chats} chat{chats === 1 ? "" : "s"}
+          </span>
+          <span>Updated {timeAgo(project.updated_at)}</span>
         </>
-      )}
-    </div>
+      }
+      corner={
+        project.starred ? (
+          <Star aria-label="Starred" className="h-3.5 w-3.5 fill-warning text-warning" />
+        ) : undefined
+      }
+      menu={
+        <OverflowMenu
+          items={[
+            {
+              label: project.starred ? "Unstar" : "Star",
+              icon: <Star />,
+              onSelect: () => void updateProject(project.id, { starred: !project.starred }),
+            },
+            {
+              label: "Delete",
+              icon: <Trash2 />,
+              danger: true,
+              onSelect: async () => {
+                const ok = await confirm({
+                  title: `Delete "${project.name}"?`,
+                  body: "The project, its instructions and files are removed. Its chats stay in your history.",
+                  confirmLabel: "Delete project",
+                });
+                if (ok) void deleteProject(project.id);
+              },
+            },
+          ]}
+        />
+      }
+    />
   );
 }
 
@@ -578,7 +503,6 @@ function ProjectDetail() {
                     onClick={() => setEditingField("name")}
                     className="cursor-text text-[28px] font-semibold tracking-tight text-ink"
                   >
-                    {project.icon && <span className="mr-2 text-[36px]">{project.icon}</span>}
                     {project.name}
                   </h1>
                 )}
@@ -810,7 +734,7 @@ function ProjectDetail() {
       {/* Delete file confirmation modal */}
       {deleteModal.open && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 animate-fade-in px-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4 animate-fade-in"
           onClick={() => setDeleteModal({ open: false, filename: "" })}
         >
           <div
@@ -947,7 +871,7 @@ function EditModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/30 animate-fade-in px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm px-4 animate-fade-in"
       onClick={onClose}
     >
       <div
