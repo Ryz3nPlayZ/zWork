@@ -19,15 +19,17 @@ function rng(seed: number) {
   };
 }
 
+// The real hosted lineup (resolve_upstream_model) with estimate_cost's
+// per-1M-token prices. "mystery-model" stands in for an unpriced model.
 const MODELS = [
-  ["anthropic", "claude-sonnet-5-5"],
-  ["anthropic", "claude-haiku-4-5"],
-  ["openai", "gpt-5.1"],
-  ["deepseek", "deepseek-v4"],
-  ["google", "gemini-3-pro"],
-  ["openrouter", "qwen3-coder"],
-  ["openrouter", "kimi-k2"],
-  ["groq", "llama-4-maverick"],
+  ["OpenRouter", "deepseek/deepseek-v4-flash-0731", 0.04, 0.08],
+  ["OpenRouter", "z-ai/glm-5.3-flash", 0.09, 0.3],
+  ["OpenRouter", "deepseek/deepseek-v4.1-flash", 0.15, 0.6],
+  ["DeepSeek", "deepseek-flash", 0.14, 0.28],
+  ["Groq", "meta-llama/llama-4-scout-17b-16e-instruct", 0.15, 0.3],
+  ["OllamaCloud_1", "gemma4:31b", 0, 0],
+  ["OllamaCloud_2", "gemma4:31b", 0, 0],
+  ["OpenRouter", "mystery-model", null, null],
 ] as const;
 
 const FIRST = ["Ada", "Grace", "Linus", "Margaret", "Ken", "Barbara", "Dennis", "Frances", "Alan", "Radia", "Edsger", "Hedy"];
@@ -43,11 +45,13 @@ function users() {
     const first = FIRST[i % FIRST.length];
     const last = LAST[(i * 5) % LAST.length];
     const tier = r() < 0.72 ? "free" : r() < 0.75 ? "pro" : "max";
+    // A few paid-tier users came in on a coupon and pay nothing.
+    const coupon = tier !== "free" && r() < 0.15;
     const requests = Math.floor(r() ** 2 * 4000);
     const prompt = requests * Math.floor(2000 + r() * 9000);
     const completion = Math.floor(prompt * (0.05 + r() * 0.1));
     const created = Date.now() - Math.floor(r() * 180) * DAY;
-    const paid = tier !== "free";
+    const paid = tier !== "free" && !coupon;
     return {
       user_id: `usr_${(i * 2654435761).toString(36).padStart(10, "0").slice(0, 12)}`,
       email: `${first}.${last}${i}@example.com`.toLowerCase(),
@@ -58,7 +62,7 @@ function users() {
       total_requests: requests,
       total_prompt_tokens: prompt,
       total_completion_tokens: completion,
-      estimated_cost_usd: round((prompt * 1.5 + completion * 7) / 1e6),
+      estimated_cost_usd: round((prompt * 0.09 + completion * 0.3) / 1e6, 4),
       stripe_customer_id: paid ? `cus_${(i * 99991).toString(36)}` : null,
       subscription_status: paid ? (r() < 0.9 ? "active" : "past_due") : null,
     };
@@ -144,9 +148,9 @@ function health(days: number) {
     ttft_p95_ms: 3100,
     daily,
     top_failing_models: [
-      { model_id: "kimi-k2", provider_name: "openrouter", total_requests: 1840, failed_requests: 162, failure_rate: 0.088 },
-      { model_id: "gemini-3-pro", provider_name: "google", total_requests: 4210, failed_requests: 131, failure_rate: 0.031 },
-      { model_id: "deepseek-v4", provider_name: "deepseek", total_requests: 6620, failed_requests: 89, failure_rate: 0.013 },
+      { model_id: "meta-llama/llama-4-scout-17b-16e-instruct", provider_name: "Groq", total_requests: 1840, failed_requests: 162, failure_rate: 0.088 },
+      { model_id: "gemma4:31b", provider_name: "OllamaCloud_2", total_requests: 4210, failed_requests: 131, failure_rate: 0.031 },
+      { model_id: "z-ai/glm-5.3-flash", provider_name: "OpenRouter", total_requests: 6620, failed_requests: 89, failure_rate: 0.013 },
     ],
   };
 }
@@ -262,6 +266,267 @@ function live() {
   };
 }
 
+function finance(days: number) {
+  const r = rng(31 + days);
+  const all = users().map((u) => ({ ...u, tier: tierOverrides.get(u.user_id) ?? u.tier }));
+  const price = (u: { tier: string; stripe_customer_id: string | null }) =>
+    !u.stripe_customer_id ? 0 : u.tier === "pro" ? 12 : u.tier === "max" ? 50 : 0;
+  // Scale each user's lifetime cost to the window; heavy users dominate.
+  const scale = Math.min(days, 90) / 120;
+  // Two Pro subscribers running long agent loops cost more than they pay,
+  // so the "unprofitable" list has something in it.
+  const heavy = new Set(all.filter((u) => u.tier === "pro" && u.stripe_customer_id).slice(0, 2).map((u) => u.user_id));
+  const spenders = all
+    .map((u) => {
+      const boost = heavy.has(u.user_id) ? 14 : u.tier === "max" ? 9 : u.tier === "pro" ? 3 : 1;
+      const cost = round(u.estimated_cost_usd * scale * boost + (heavy.has(u.user_id) ? (12 * days) / 30 : 0), 4);
+      const cost30 = round((cost * 30) / days, 4);
+      return {
+        user_id: u.user_id,
+        email: u.email,
+        name: u.name,
+        tier: u.tier,
+        paying: !!u.stripe_customer_id,
+        requests: Math.floor(u.total_requests * scale),
+        tokens: Math.floor((u.total_prompt_tokens + u.total_completion_tokens) * scale),
+        cost_usd: cost,
+        cost_30d_usd: cost30,
+        monthly_price_usd: price(u),
+        margin_30d_usd: round(price(u) - cost30),
+      };
+    })
+    .filter((s) => s.cost_usd > 0)
+    .sort((a, b) => b.cost_usd - a.cost_usd);
+  const spend = spenders.reduce((a, s) => a + s.cost_usd, 0);
+  const paidSpend = spenders.filter((s) => s.paying).reduce((a, s) => a + s.cost_usd, 0);
+  const mrr = 1240;
+  const revenueUsd = (mrr * days) / 30;
+  const by_tier = (["free", "pro", "max"] as const).map((tier) => {
+    const us = all.filter((u) => u.tier === tier);
+    const sp = spenders.filter((s) => s.tier === tier);
+    const cost = sp.reduce((a, s) => a + s.cost_usd, 0);
+    const revenueT = (us.reduce((a, u) => a + price(u), 0) * days) / 30;
+    return {
+      tier,
+      users: us.length,
+      paying_users: us.filter((u) => u.stripe_customer_id).length,
+      active_users: sp.length,
+      requests: sp.reduce((a, s) => a + s.requests, 0),
+      tokens: sp.reduce((a, s) => a + s.tokens, 0),
+      cost_usd: round(cost, 4),
+      revenue_usd: round(revenueT),
+      margin_usd: round(revenueT - cost),
+      cost_per_active_user: sp.length ? round(cost / sp.length, 4) : 0,
+    };
+  });
+  const tierCost = Object.fromEntries(by_tier.map((t) => [t.tier, t.cost_usd]));
+  const daily = series(days, 37).map(({ date, base }, i, arr) => {
+    const w = base / arr.reduce((a, d) => a + d.base, 0);
+    const free = round(tierCost.free * w, 4);
+    const pro = round(tierCost.pro * w, 4);
+    const max = round(tierCost.max * w, 4);
+    return { date, free, pro, max, total: round(free + pro + max, 4), _i: i };
+  }).map(({ _i, ...d }) => d);
+  const by_model = MODELS.map(([provider, model, pin, pout], i) => {
+    const requests = Math.floor((days * 400) / (i + 1.2) * (0.7 + r() * 0.6));
+    const prompt_tokens = requests * Math.floor(5000 + r() * 6000);
+    const completion_tokens = Math.floor(prompt_tokens * (0.05 + r() * 0.08));
+    const priced = pin !== null && pout !== null;
+    return {
+      provider,
+      model,
+      requests,
+      prompt_tokens,
+      completion_tokens,
+      cost_usd: priced ? round((prompt_tokens * pin + completion_tokens * pout) / 1e6, 4) : 0,
+      unpriced_requests: priced ? 0 : requests,
+    };
+  }).sort((a, b) => b.cost_usd - a.cost_usd);
+  const requests = by_model.reduce((a, m) => a + m.requests, 0);
+  const tokens = by_model.reduce((a, m) => a + m.prompt_tokens + m.completion_tokens, 0);
+  const unpriced = by_model.filter((m) => m.unpriced_requests > 0);
+  const unprofitable = spenders.filter((s) => s.paying && s.margin_30d_usd < 0);
+  const now = new Date();
+  const dim = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
+  const elapsed = now.getUTCDate() - 1 + now.getUTCHours() / 24;
+  const mtd = round((spend / days) * elapsed, 4);
+  const projected = elapsed > 0.25 ? round((mtd / elapsed) * dim) : mtd;
+  return {
+    window_days: days,
+    spend_usd: round(spend, 4),
+    prev_spend_usd: round(spend * 0.82, 4),
+    revenue_usd: round(revenueUsd),
+    margin_usd: round(revenueUsd - spend),
+    margin_pct: ((revenueUsd - spend) / revenueUsd) * 100,
+    mrr,
+    paid_users: 58,
+    mtd_spend_usd: mtd,
+    projected_month_spend_usd: projected,
+    last_month_spend_usd: round((spend / days) * 30 * 0.88, 4),
+    projected_month_margin_usd: round(mrr - projected),
+    free_spend_usd: round(spend - paidSpend, 4),
+    paid_spend_usd: round(paidSpend, 4),
+    cost_per_request_usd: requests ? spend / requests : 0,
+    cost_per_1k_tokens_usd: tokens ? (spend / tokens) * 1000 : 0,
+    requests,
+    unpriced_requests: unpriced.reduce((a, m) => a + m.unpriced_requests, 0),
+    unpriced_tokens: unpriced.reduce((a, m) => a + m.prompt_tokens + m.completion_tokens, 0),
+    priced_coverage_pct: (1 - unpriced.reduce((a, m) => a + m.unpriced_requests, 0) / requests) * 100,
+    unprofitable_users: unprofitable.length,
+    by_tier,
+    daily,
+    by_model,
+    top_spenders: spenders.slice(0, 25),
+    unprofitable: unprofitable.slice(0, 25),
+  };
+}
+
+function downloads() {
+  const r = rng(41);
+  const releases = Array.from({ length: 12 }, (_, i) => {
+    const minor = 5 - Math.floor(i / 4);
+    const patch = 3 - (i % 4);
+    const tag = `v0.${minor}.${Math.max(patch, 0)}${patch < 0 ? "-beta" : ""}`;
+    const age = i * 9 + Math.floor(r() * 4);
+    const mac = Math.floor((30 - i * 2) * (0.6 + r()));
+    const win = Math.floor((22 - i * 1.5) * (0.6 + r()));
+    const lin = Math.floor((6 - i * 0.4) * (0.4 + r()));
+    const assets = [
+      { name: `zWork_${tag.slice(1)}_aarch64.dmg`, platform: "macOS", kind: "installer", downloads: Math.max(mac, 0) },
+      { name: `zWork_${tag.slice(1)}_x64-setup.exe`, platform: "Windows", kind: "installer", downloads: Math.max(win, 0) },
+      { name: `zWork_${tag.slice(1)}_amd64.AppImage`, platform: "Linux", kind: "installer", downloads: Math.max(lin, 0) },
+      { name: "zWork_aarch64.app.tar.gz", platform: "macOS", kind: "update", downloads: Math.floor(r() * 25) },
+      { name: `zWork_${tag.slice(1)}_x64-setup.nsis.zip`, platform: "Windows", kind: "update", downloads: Math.floor(r() * 18) },
+      { name: "latest.json", platform: "any", kind: "update_check", downloads: Math.floor(40 + r() * 400) },
+    ];
+    const sum = (k: string) => assets.filter((a) => a.kind === k).reduce((a, x) => a + x.downloads, 0);
+    return {
+      tag,
+      name: `zWork ${tag}`,
+      published_at: iso(Date.now() - age * DAY),
+      prerelease: false,
+      installers: sum("installer"),
+      updates: sum("update"),
+      update_checks: sum("update_check"),
+      assets,
+    };
+  });
+  const plat: Record<string, number> = {};
+  for (const rel of releases) for (const a of rel.assets) if (a.kind === "installer") plat[a.platform] = (plat[a.platform] ?? 0) + a.downloads;
+  return {
+    repo: "Ryz3nPlayZ/zWork",
+    stars: 11,
+    forks: 2,
+    open_issues: 15,
+    watchers: 3,
+    total_installers: releases.reduce((a, x) => a + x.installers, 0),
+    total_updates: releases.reduce((a, x) => a + x.updates, 0),
+    total_update_checks: releases.reduce((a, x) => a + x.update_checks, 0),
+    by_platform: Object.entries(plat).map(([platform, downloads]) => ({ platform, downloads })).sort((a, b) => b.downloads - a.downloads),
+    releases,
+    fetched_at: iso(Date.now() - 4 * 60_000),
+    source_error: null,
+    daily: series(30, 43).map(({ date, r: rr, base }) => ({
+      date,
+      installers: Math.floor(base / 60 + rr() * 4),
+      updates: Math.floor(base / 90 + rr() * 3),
+      update_checks: Math.floor(base / 6),
+    })),
+    versions_in_use: [
+      { version: "0.5.2", users: 71, requests: 9120 },
+      { version: "0.5.1", users: 28, requests: 3011 },
+      { version: "0.5.0", users: 11, requests: 870 },
+      { version: "0.4.9", users: 6, requests: 402 },
+      { version: "unknown", users: 2, requests: 55 },
+    ],
+    os_split: [
+      { os: "macos", users: 74 },
+      { os: "windows", users: 37 },
+      { os: "linux", users: 7 },
+    ],
+  };
+}
+
+function funnel(days: number) {
+  const r = rng(53);
+  const signups = Math.floor(days * 2.4);
+  const activated = Math.floor(signups * 0.68);
+  const engaged = Math.floor(activated * 0.41);
+  const paid = Math.floor(signups * 0.07);
+  const cohorts = Array.from({ length: 8 }, (_, i) => {
+    const weeksAgo = 7 - i;
+    const monday = new Date();
+    monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7) - weeksAgo * 7);
+    let v = 62 + r() * 12;
+    const retention = Array.from({ length: weeksAgo + 1 }, (_, k) => {
+      if (k > 0) v *= 0.55 + r() * 0.2;
+      return round(v, 1);
+    });
+    return { week_start: day(monday.getTime()), users: Math.floor(10 + r() * 20), retention };
+  });
+  return {
+    window_days: days,
+    steps: [
+      { step: "Signed up", users: signups },
+      { step: "Sent a request", users: activated },
+      { step: "Active on 3+ days", users: engaged },
+      { step: "Subscribed", users: paid },
+    ],
+    median_hours_to_first_request: 0.4,
+    cohorts,
+  };
+}
+
+function status() {
+  const r = rng(Math.floor(Date.now() / 30_000));
+  const probe = (name: string, url: string, host: string, role: string, expect: string, code: number, detail: string | null = null) => ({
+    name, url, host, role, expect, status: code,
+    ok: expect === "2xx" ? code >= 200 && code < 300 : expect === "3xx" ? code >= 300 && code < 400 : Number(expect) === code,
+    latency_ms: Math.floor(40 + r() * 300),
+    detail,
+  });
+  const started = Date.now() - 6 * DAY - 3 * 3600_000;
+  return {
+    api_version: "0.1.0",
+    started_at: iso(started),
+    uptime_secs: Math.floor((Date.now() - started) / 1000),
+    surfaces: [
+      probe("Landing", "https://tryzwork.app", "Vercel", "Marketing site (landing/)", "2xx", 200),
+      probe("Web app", "https://app.tryzwork.app", "Caddy", "Browser demo of the app", "2xx", 200),
+      probe("Admin", "https://admin.tryzwork.app", "Caddy", "This dashboard (admin-web/)", "2xx", 200),
+      probe("API", "https://api.tryzwork.app/api/health", "Caddy → api", "Gateway, auth, billing, admin API", "2xx", 200),
+      probe("Analytics", "https://analytics.tryzwork.app", "Caddy", "Redirect to PostHog", "3xx", 302, "→ https://us.posthog.com/project/397748"),
+      probe("DB host", "https://db.tryzwork.app", "Caddy", "Must stay blocked", "403", 403),
+    ],
+    database: {
+      ok: true,
+      latency_ms: 2,
+      size_bytes: 412_000_000,
+      tables: [
+        { name: "gateway_requests", rows: 182_331, bytes: 301_000_000 },
+        { name: "gateway_attempts", rows: 190_870, bytes: 61_000_000 },
+        { name: "provider_snapshots", rows: 88_120, bytes: 24_000_000 },
+        { name: "web_chat_messages", rows: 9_412, bytes: 9_800_000 },
+        { name: "app_users", rows: 470, bytes: 320_000 },
+        { name: "admin_audit_log", rows: 211, bytes: 96_000 },
+      ],
+    },
+    integrations: [
+      { name: "Stripe", configured: true, detail: "billing + webhook" },
+      { name: "PostHog", configured: true, detail: "https://us.i.posthog.com" },
+      { name: "Google sign-in", configured: true, detail: "desktop OAuth" },
+      { name: "Composio", configured: true, detail: "connector proxy" },
+      { name: "GitHub token", configured: false, detail: "optional; raises the releases API rate limit" },
+      { name: "Web demo", configured: true, detail: "30 messages / IP / day" },
+      { name: "Provider: OpenRouter", configured: true, detail: "deepseek/deepseek-v4-flash-0731" },
+      { name: "Provider: DeepSeek", configured: true, detail: "deepseek-flash" },
+      { name: "Provider: Groq", configured: true, detail: "meta-llama/llama-4-scout-17b-16e-instruct" },
+      { name: "Provider: OllamaCloud_1", configured: true, detail: "gemma4:31b" },
+      { name: "Provider: OllamaCloud_2", configured: false, detail: "gemma4:31b" },
+    ],
+  };
+}
+
 function overview() {
   const all = users();
   return {
@@ -325,6 +590,10 @@ export function mockAdminApi(): Plugin {
         if (path === "/api/admin/metrics/revenue") return send(res, 200, revenue(Math.min(days, 365)));
         if (path === "/api/admin/metrics/engagement") return send(res, 200, engagement(Math.min(days, 90)));
         if (path === "/api/admin/metrics/live") return send(res, 200, live());
+        if (path === "/api/admin/metrics/finance") return send(res, 200, finance(Math.min(days, 365)));
+        if (path === "/api/admin/metrics/downloads") return send(res, 200, downloads());
+        if (path === "/api/admin/metrics/funnel") return send(res, 200, funnel(Math.min(Math.max(days, 7), 365)));
+        if (path === "/api/admin/metrics/status") return send(res, 200, status());
         if (path === "/api/admin/usage/by-time") return send(res, 200, usageByTime(Math.min(days, 365)));
         if (path === "/api/admin/usage/by-model") return send(res, 200, usageByModel(Math.min(days, 365)));
         if (path === "/api/admin/audit") return send(res, 200, audit);
