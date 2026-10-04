@@ -1,0 +1,12 @@
+const assert = require('assert');
+const { parseDuration, formatDuration } = require('./durations');
+const cases = { '1h30m': 5400, '2d 4h': 187200, '45s': 45, '1w': 604800, '1w2d3h4m5s': 788645, ' 10m ': 600, '1h 1h': 7200 };
+for (const [s, v] of Object.entries(cases)) assert.strictEqual(parseDuration(s), v, s);
+for (const bad of ['', 'abc', '5x', '1h30', 'h', '1h30x', '1.5h', '-1h', '1h-30m', 'x1h']) assert.strictEqual(parseDuration(bad), null, JSON.stringify(bad));
+assert.strictEqual(formatDuration(0), '0s');
+assert.strictEqual(formatDuration(5400), '1h30m');
+assert.strictEqual(formatDuration(788645), '1w2d3h4m5s');
+assert.strictEqual(formatDuration(86400), '1d');
+assert.throws(() => formatDuration(-1), RangeError);
+for (let i = 0; i < 2000000; i += 997) assert.strictEqual(parseDuration(formatDuration(i)), i);
+console.log('hidden ok');

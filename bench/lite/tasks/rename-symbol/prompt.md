@@ -1,0 +1,1 @@
+In the `shop` package, rename the function `calc` to `calculate_total` everywhere (definition and every call site, including the tests). Also rename its keyword argument `disc` to `discount`. Don't keep a backwards-compat alias. Everything should still pass `python3 -m unittest`.

@@ -1,0 +1,1 @@
+`node test.js` fails. The `durations.js` module parses human durations like "1h30m" or "2d 4h" into seconds and formats seconds back. Find and fix the bug(s) so the tests pass — and make sure the module actually behaves correctly per its comments, not just for the test cases.

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "name": "api",
+  "host": "api.internal",
+  "port": 443,
+  "use_tls": true,
+  "timeout": "30s",
+  "retries": 5,
+  "tags": "Core, web,core ,"
+}

@@ -1,0 +1,1 @@
+Our pagination helper in `pager.py` is returning the wrong items — users say page 2 repeats the last item of page 1 and the final page is sometimes missing entirely. The tests in `test_pager.py` show it. Please fix the bug.

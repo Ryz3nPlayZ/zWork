@@ -1,0 +1,401 @@
+order_id,region,product,quantity,unit_price,status
+O1000,SOUTH,Gadget,7,52.42,paid
+O1000,West,Widget,6,47.04,shipped
+O1001, North,Widget,2,35.26,paid
+O1001,north,Gizmo,7,5.67,paid
+O1002, North,Gizmo,1,46.59,paid
+O1002, North,Widget,9,68.82,paid
+O1003, North,Gizmo,2,46.10,paid
+O1003,south,Gadget,2,46.95,paid
+O1004,SOUTH,Widget,9,57.26,paid
+O1004,West,Gadget,8,54.75,refunded
+O1005,SOUTH,Sprocket,8,29.57,paid
+O1005, North,Gadget,2,46.38,paid
+O1006,SOUTH,Sprocket,5,49.11,paid
+O1006,West,Sprocket,3,60.81,paid
+O1007,east ,Sprocket,1,77.00,paid
+O1007,West,Gizmo,6,27.87,paid
+O1008,east ,Gizmo,8,6.43,paid
+O1008,SOUTH,Sprocket,2,5.79,paid
+O1009,south,Gizmo,8,23.48,paid
+O1009,south,Doohickey,1,75.31,paid
+O1010,West,Widget,8,5.66,shipped
+O1010, North,Gadget,7,31.89,shipped
+O1011,north,Gadget,8,32.73,paid
+O1011, North,Sprocket,9,23.00,paid
+O1012,SOUTH,Sprocket,4,12.92,paid
+O1012, North,Gadget,1,39.31,paid
+O1013,SOUTH,Doohickey,1,12.51,paid
+O1013,West,Gizmo,6,76.29,paid
+O1014,West,Gizmo,1,37.07,shipped
+O1014,south,Gizmo,7,32.45,paid
+O1015,east ,Sprocket,1,16.06,shipped
+O1015,east ,Gadget,2,27.86,paid
+O1016,north,Gizmo,3,43.39,shipped
+O1016,West,Widget,2,70.07,paid
+O1017, North,Doohickey,6,48.58,refunded
+O1017,north,Sprocket,8,38.95,paid
+O1018, North,Widget,6,59.49,refunded
+O1018,south,Gadget,9,2.82,shipped
+O1019,West,Doohickey,3,55.52,shipped
+O1019,West,Doohickey,2,56.00,paid
+O1020,SOUTH,Gadget,6,61.98,paid
+O1020,West,Doohickey,4,49.45,shipped
+O1021, North,Gadget,7,59.45,paid
+O1021,West,Sprocket,6,58.75,shipped
+O1022,SOUTH,Sprocket,5,16.30,paid
+O1022,SOUTH,Sprocket,6,76.45,paid
+O1023, North,Widget,4,38.14,paid
+O1023,east ,Gizmo,1,38.88,paid
+O1024,south,Widget,2,72.87,shipped
+O1024, North,Sprocket,3,35.28,paid
+O1025,north,Sprocket,8,32.71,shipped
+O1025,south,Gadget,3,79.46,paid
+O1026,West,Sprocket,3,49.31,paid
+O1026,east ,Doohickey,3,44.34,paid
+O1027,north,Widget,9,60.21,paid
+O1027, North,Gadget,1,20.89,paid
+O1028, North,Gizmo,6,21.49,refunded
+O1028, North,Widget,6,71.92,paid
+O1029,West,Sprocket,9,11.33,paid
+O1029,West,Widget,8,62.34,paid
+O1030, North,Gadget,3,38.41,paid
+O1030,West,Widget,6,54.90,paid
+O1031,east ,Widget,9,5.49,paid
+O1031,north,Widget,9,36.72,paid
+O1032,north,Sprocket,6,49.39,paid
+O1032,West,Gadget,5,36.74,paid
+O1033,east ,Gizmo,4,56.24,shipped
+O1033,SOUTH,Gizmo,4,67.36,paid
+O1034,north,Sprocket,8,25.96,paid
+O1034,east ,Widget,4,53.89,shipped
+O1035, North,Doohickey,3,21.00,paid
+O1035,east ,Gadget,2,32.46,refunded
+O1036,south,Gadget,3,56.80,shipped
+O1036,east ,Doohickey,7,16.46,paid
+O1037,south,Doohickey,1,27.70,refunded
+O1037,south,Widget,7,27.19,paid
+O1038,West,Widget,2,78.82,shipped
+O1038,north,Widget,5,22.48,shipped
+O1039, North,Doohickey,3,65.76,shipped
+O1039,south,Doohickey,7,12.80,shipped
+O1040,West,Sprocket,6,8.07,paid
+O1040,south,Gadget,7,71.73,paid
+O1041,north,Widget,5,7.62,shipped
+O1041,north,Doohickey,2,36.85,paid
+O1042,West,Sprocket,5,50.11,paid
+O1042,south,Gadget,2,77.57,paid
+O1043, North,Gadget,5,50.67,paid
+O1043, North,Doohickey,8,40.51,paid
+O1044,SOUTH,Widget,5,3.92,paid
+O1044,West,Gizmo,4,41.62,paid
+O1045,east ,Widget,7,52.86,paid
+O1045,east ,Gizmo,5,55.33,shipped
+O1046,SOUTH,Gadget,3,32.97,paid
+O1046,north,Gadget,1,6.59,paid
+O1047,SOUTH,Sprocket,3,5.38,paid
+O1047,east ,Gizmo,5,48.30,paid
+O1048,north,Sprocket,3,13.45,refunded
+O1048,SOUTH,Doohickey,6,77.84,paid
+O1049, North,Widget,5,18.21,paid
+O1049,SOUTH,Sprocket,2,38.50,paid
+O1050, North,Gadget,9,62.32,paid
+O1050,north,Gadget,7,47.36,paid
+O1051,SOUTH,Doohickey,4,7.67,shipped
+O1051, North,Gizmo,7,61.38,paid
+O1052,east ,Gadget,5,58.21,paid
+O1052,north,Gizmo,7,58.97,shipped
+O1053, North,Gizmo,9,45.91,shipped
+O1053,north,Gizmo,4,7.72,paid
+O1054,south,Doohickey,2,30.75,refunded
+O1054,north,Widget,9,54.77,refunded
+O1055,north,Sprocket,2,60.11,paid
+O1055,West,Widget,9,6.22,paid
+O1056,SOUTH,Widget,5,19.55,shipped
+O1056, North,Sprocket,8,67.80,paid
+O1057,south,Doohickey,1,49.74,paid
+O1057,north,Gizmo,3,27.21,paid
+O1058,south,Doohickey,3,1.99,paid
+O1058,SOUTH,Widget,4,54.38,paid
+O1059,West,Doohickey,8,37.81,shipped
+O1059,West,Gadget,5,78.27,shipped
+O1060,north,Doohickey,8,7.04,paid
+O1060,east ,Doohickey,7,17.58,shipped
+O1061, North,Widget,2,12.20,paid
+O1061,SOUTH,Gadget,9,23.09,paid
+O1062,SOUTH,Gadget,8,71.92,refunded
+O1062,north,Gadget,1,76.05,paid
+O1063,east ,Doohickey,3,33.88,paid
+O1063,north,Doohickey,1,26.64,paid
+O1064,east ,Widget,4,57.33,shipped
+O1064,SOUTH,Doohickey,6,6.13,paid
+O1065,West,Widget,6,74.11,shipped
+O1065,north,Doohickey,2,5.08,paid
+O1066,south,Gadget,4,77.71,refunded
+O1066,SOUTH,Gadget,6,63.03,refunded
+O1067,north,Sprocket,9,44.39,paid
+O1067,north,Sprocket,8,49.58,paid
+O1068,SOUTH,Sprocket,1,73.04,paid
+O1068, North,Sprocket,7,28.15,paid
+O1069,south,Doohickey,7,52.82,paid
+O1069,West,Sprocket,2,14.22,paid
+O1070, North,Gizmo,8,44.48,refunded
+O1070,SOUTH,Sprocket,7,12.03,paid
+O1071,north,Gadget,6,44.91,paid
+O1071,SOUTH,Doohickey,4,71.09,paid
+O1072,east ,Sprocket,7,59.92,paid
+O1072,SOUTH,Doohickey,1,40.35,paid
+O1073,SOUTH,Gadget,9,42.81,shipped
+O1073, North,Widget,5,71.85,paid
+O1074,south,Sprocket,7,76.36,shipped
+O1074,north,Gadget,1,34.59,shipped
+O1075,east ,Gizmo,8,1.01,paid
+O1075,West,Sprocket,8,20.63,paid
+O1076, North,Gadget,9,77.78,paid
+O1076,south,Sprocket,2,44.57,paid
+O1077, North,Gadget,1,51.99,paid
+O1077, North,Doohickey,9,51.27,paid
+O1078,north,Widget,2,24.73,shipped
+O1078, North,Sprocket,5,18.66,paid
+O1079,north,Gizmo,5,79.71,paid
+O1079,SOUTH,Gadget,8,42.58,paid
+O1080,north,Sprocket,5,5.37,paid
+O1080,south,Sprocket,2,21.32,paid
+O1081,SOUTH,Gadget,8,3.69,paid
+O1081,east ,Doohickey,7,16.65,shipped
+O1082,south,Gizmo,2,17.21,shipped
+O1082,SOUTH,Gadget,4,37.74,paid
+O1083,SOUTH,Widget,8,49.20,shipped
+O1083,east ,Sprocket,1,75.95,paid
+O1084,east ,Widget,4,2.87,paid
+O1084,east ,Widget,1,15.54,refunded
+O1085,south,Doohickey,2,79.80,shipped
+O1085,SOUTH,Gadget,3,52.54,paid
+O1086,east ,Widget,5,53.49,paid
+O1086,SOUTH,Doohickey,8,14.37,paid
+O1087,SOUTH,Widget,6,34.19,shipped
+O1087,West,Gadget,7,29.17,shipped
+O1088,east ,Widget,1,56.72,paid
+O1088,West,Sprocket,4,26.54,paid
+O1089,east ,Widget,7,20.59,paid
+O1089,east ,Widget,7,3.75,paid
+O1090,north,Doohickey,4,60.04,shipped
+O1090,SOUTH,Doohickey,5,27.46,shipped
+O1091,north,Doohickey,6,74.01,paid
+O1091,south,Gizmo,2,2.92,paid
+O1092,east ,Sprocket,7,63.39,shipped
+O1092,east ,Gadget,8,15.45,shipped
+O1093,south,Doohickey,3,48.97,paid
+O1093,SOUTH,Sprocket,6,62.92,paid
+O1094,West,Gadget,7,60.48,paid
+O1094,north,Widget,8,44.65,paid
+O1095,east ,Widget,2,21.93,paid
+O1095,north,Sprocket,8,79.09,shipped
+O1096, North,Gadget,3,33.93,paid
+O1096,south,Gadget,9,67.91,paid
+O1097,north,Doohickey,5,23.07,paid
+O1097,SOUTH,Doohickey,4,35.71,paid
+O1098, North,Gadget,5,70.85,paid
+O1098,SOUTH,Widget,7,20.88,paid
+O1099,West,Gadget,2,52.61,shipped
+O1099,north,Widget,8,70.74,paid
+O1100,east ,Doohickey,1,70.27,paid
+O1100,north,Gadget,4,74.48,paid
+O1101, North,Sprocket,5,62.22,paid
+O1101,north,Widget,6,18.19,paid
+O1102, North,Widget,4,79.99,paid
+O1102,south,Gadget,1,65.69,paid
+O1103,SOUTH,Gadget,5,7.16,paid
+O1103,east ,Gizmo,8,6.00,paid
+O1104,east ,Gizmo,3,51.50,paid
+O1104, North,Sprocket,5,33.37,paid
+O1105,SOUTH,Sprocket,1,25.68,paid
+O1105,SOUTH,Sprocket,7,2.44,shipped
+O1106,SOUTH,Gadget,7,58.51,paid
+O1106,north,Sprocket,3,34.48,shipped
+O1107,east ,Gizmo,6,37.41,paid
+O1107,north,Widget,9,12.26,shipped
+O1108,east ,Widget,6,59.24,paid
+O1108,SOUTH,Doohickey,3,42.17,shipped
+O1109,north,Sprocket,8,60.53,shipped
+O1109, North,Doohickey,3,67.15,paid
+O1110,east ,Doohickey,1,49.00,paid
+O1110,north,Gizmo,3,51.59,shipped
+O1111,West,Sprocket,4,66.51,paid
+O1111, North,Widget,7,75.15,paid
+O1112,SOUTH,Widget,3,20.52,paid
+O1112, North,Widget,9,67.56,paid
+O1113,south,Doohickey,2,31.80,refunded
+O1113,south,Doohickey,7,25.35,paid
+O1114,east ,Doohickey,8,40.78,paid
+O1114,north,Gizmo,8,37.76,refunded
+O1115,West,Sprocket,3,65.03,paid
+O1115,north,Gadget,6,35.02,paid
+O1116,east ,Gizmo,9,52.91,paid
+O1116, North,Widget,6,62.43,paid
+O1117,north,Gizmo,7,52.57,shipped
+O1117,north,Widget,2,16.30,shipped
+O1118,east ,Doohickey,3,55.20,paid
+O1118, North,Widget,6,49.23,paid
+O1119,SOUTH,Gizmo,5,72.50,refunded
+O1119,SOUTH,Gizmo,8,17.46,paid
+O1120,West,Gadget,6,30.41,paid
+O1120,east ,Gadget,5,54.69,shipped
+O1121, North,Doohickey,2,61.69,paid
+O1121,SOUTH,Sprocket,9,42.19,paid
+O1122,north,Doohickey,9,50.75,paid
+O1122,SOUTH,Doohickey,7,79.25,paid
+O1123,SOUTH,Doohickey,2,35.94,paid
+O1123,south,Widget,5,65.77,paid
+O1124,south,Gizmo,6,58.91,paid
+O1124, North,Gadget,5,49.67,refunded
+O1125,West,Doohickey,1,11.43,paid
+O1125,south,Widget,1,5.30,paid
+O1126,SOUTH,Widget,9,29.21,paid
+O1126,West,Doohickey,3,17.13,paid
+O1127,east ,Gadget,3,2.11,shipped
+O1127,south,Gadget,8,8.57,paid
+O1128,south,Doohickey,7,65.11,shipped
+O1128,north,Gizmo,6,47.98,paid
+O1129,West,Gizmo,8,20.63,shipped
+O1129,north,Widget,9,2.99,paid
+O1130, North,Widget,2,1.98,paid
+O1130, North,Gadget,7,16.76,paid
+O1131,West,Sprocket,3,41.18,paid
+O1131,south,Widget,8,57.52,paid
+O1132,east ,Sprocket,2,59.60,refunded
+O1132, North,Widget,5,19.35,paid
+O1133,SOUTH,Doohickey,1,22.01,paid
+O1133,east ,Gizmo,5,24.35,shipped
+O1134, North,Widget,9,2.20,paid
+O1134, North,Gadget,3,59.95,paid
+O1135,east ,Doohickey,4,30.98,shipped
+O1135,south,Gizmo,8,38.30,paid
+O1136,north,Widget,7,76.50,paid
+O1136,SOUTH,Gadget,7,50.19,paid
+O1137, North,Gadget,1,3.13,paid
+O1137, North,Doohickey,3,56.36,paid
+O1138, North,Widget,2,59.21,paid
+O1138,West,Doohickey,4,65.59,shipped
+O1139,south,Widget,7,9.46,paid
+O1139,north,Widget,1,75.99,shipped
+O1140,south,Widget,5,38.69,paid
+O1140,south,Gadget,5,26.21,refunded
+O1141,north,Doohickey,5,74.48,paid
+O1141,SOUTH,Doohickey,9,38.61,paid
+O1142,south,Widget,7,3.47,paid
+O1142,north,Doohickey,8,56.67,paid
+O1143, North,Widget,5,14.46,paid
+O1143, North,Doohickey,1,1.34,refunded
+O1144,east ,Gadget,8,47.81,shipped
+O1144,West,Doohickey,3,23.41,paid
+O1145,south,Gadget,8,14.10,shipped
+O1145,north,Sprocket,9,63.17,paid
+O1146,SOUTH,Widget,7,74.35,shipped
+O1146,south,Widget,7,71.19,paid
+O1147, North,Doohickey,5,34.82,paid
+O1147, North,Sprocket,4,75.57,paid
+O1148,West,Gizmo,1,28.53,paid
+O1148, North,Sprocket,9,59.62,paid
+O1149,east ,Doohickey,4,10.96,refunded
+O1149,south,Gadget,9,16.13,paid
+O1150,south,Gizmo,3,58.14,shipped
+O1150,south,Doohickey,9,28.54,paid
+O1151, North,Doohickey,2,14.00,paid
+O1151, North,Sprocket,3,78.72,shipped
+O1152,south,Doohickey,7,22.63,paid
+O1152,north,Doohickey,4,70.93,refunded
+O1153,north,Sprocket,7,55.78,paid
+O1153,south,Doohickey,8,2.75,paid
+O1154,south,Sprocket,1,59.53,shipped
+O1154,east ,Gizmo,7,67.83,paid
+O1155,south,Gizmo,4,54.69,paid
+O1155,east ,Sprocket,6,21.52,paid
+O1156,east ,Gadget,7,57.34,paid
+O1156,SOUTH,Sprocket,8,36.96,paid
+O1157,east ,Gizmo,3,71.67,paid
+O1157,north,Sprocket,8,72.75,paid
+O1158,SOUTH,Gizmo,4,13.71,shipped
+O1158, North,Gizmo,6,8.99,paid
+O1159,West,Gadget,8,41.46,paid
+O1159,SOUTH,Gizmo,6,33.42,shipped
+O1160, North,Gadget,7,41.59,shipped
+O1160,south,Gizmo,6,51.37,paid
+O1161,east ,Sprocket,1,2.05,refunded
+O1161,east ,Doohickey,5,9.63,paid
+O1162,east ,Gizmo,4,79.54,shipped
+O1162,east ,Gadget,3,11.21,shipped
+O1163,south,Gadget,8,51.73,paid
+O1163, North,Doohickey,7,37.98,paid
+O1164,West,Gadget,8,29.02,shipped
+O1164,SOUTH,Sprocket,5,78.65,paid
+O1165,east ,Widget,5,29.28,paid
+O1165,SOUTH,Sprocket,8,34.85,paid
+O1166,south,Doohickey,3,74.37,shipped
+O1166,north,Widget,6,62.94,paid
+O1167,SOUTH,Gizmo,1,52.93,paid
+O1167,north,Doohickey,5,49.05,paid
+O1168, North,Gadget,8,28.37,paid
+O1168,east ,Gizmo,3,49.15,paid
+O1169,north,Gizmo,5,16.59,paid
+O1169,West,Widget,8,54.03,paid
+O1170,north,Doohickey,7,19.50,paid
+O1170,east ,Gizmo,1,39.27,shipped
+O1171,south,Sprocket,4,40.36,paid
+O1171,south,Widget,3,67.42,refunded
+O1172,West,Sprocket,5,67.40,paid
+O1172,east ,Widget,3,51.33,paid
+O1173,north,Widget,1,54.92,shipped
+O1173,SOUTH,Widget,9,39.25,shipped
+O1174, North,Widget,4,57.74,paid
+O1174,SOUTH,Widget,6,27.96,shipped
+O1175,West,Gadget,5,35.38,refunded
+O1175,West,Widget,5,24.14,shipped
+O1176,east ,Doohickey,9,78.76,shipped
+O1176,SOUTH,Gadget,8,63.56,paid
+O1177,SOUTH,Doohickey,3,47.33,paid
+O1177,north,Sprocket,9,70.96,paid
+O1178,north,Sprocket,5,9.57,paid
+O1178,east ,Gizmo,1,63.33,shipped
+O1179,West,Sprocket,3,50.52,paid
+O1179,West,Widget,4,4.12,paid
+O1180,south,Gadget,2,53.43,shipped
+O1180,east ,Widget,1,30.14,shipped
+O1181,SOUTH,Gizmo,5,69.13,paid
+O1181,north,Doohickey,1,35.02,paid
+O1182,north,Sprocket,9,4.11,paid
+O1182,east ,Gizmo,7,36.27,paid
+O1183,east ,Gizmo,3,38.56,paid
+O1183,north,Widget,8,17.77,paid
+O1184,north,Sprocket,1,1.74,paid
+O1184,north,Gadget,2,11.19,paid
+O1185,south,Gizmo,4,36.61,paid
+O1185,north,Doohickey,3,58.65,paid
+O1186,south,Gizmo,8,37.39,shipped
+O1186,SOUTH,Widget,1,1.90,paid
+O1187,south,Gizmo,2,31.73,paid
+O1187,West,Gadget,8,49.11,paid
+O1188,West,Sprocket,8,54.47,paid
+O1188,north,Doohickey,3,50.75,refunded
+O1189,east ,Sprocket,5,62.99,paid
+O1189,SOUTH,Doohickey,1,50.13,paid
+O1190,West,Doohickey,1,66.67,paid
+O1190,SOUTH,Gizmo,7,78.13,paid
+O1191,east ,Sprocket,4,64.79,paid
+O1191,north,Doohickey,5,22.17,paid
+O1192,north,Doohickey,3,65.13,shipped
+O1192,West,Gadget,5,78.05,shipped
+O1193,West,Sprocket,6,43.23,paid
+O1193,east ,Sprocket,4,63.23,paid
+O1194, North,Doohickey,1,54.54,refunded
+O1194, North,Doohickey,1,63.54,refunded
+O1195,north,Gizmo,6,62.00,paid
+O1195,West,Gizmo,5,70.92,paid
+O1196,east ,Gizmo,4,15.94,paid
+O1196, North,Doohickey,6,46.65,paid
+O1197,West,Gadget,4,4.52,shipped
+O1197,SOUTH,Widget,6,50.99,shipped
+O1198, North,Doohickey,1,28.25,paid
+O1198,north,Widget,1,17.17,shipped
+O1199,West,Sprocket,4,21.67,shipped
+O1199,east ,Widget,8,61.61,shipped

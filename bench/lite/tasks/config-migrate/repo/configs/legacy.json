@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "name": "legacy",
+  "host": "old.example.com",
+  "port": 80,
+  "use_tls": false,
+  "timeout": "250ms",
+  "retries": 0,
+  "owner": "team-x",
+  "pager": true
+}

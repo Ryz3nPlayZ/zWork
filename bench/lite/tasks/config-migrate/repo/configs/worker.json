@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "name": "worker",
+  "host": "10.0.0.5",
+  "port": 8080,
+  "timeout": 2.5,
+  "tags": "batch"
+}
