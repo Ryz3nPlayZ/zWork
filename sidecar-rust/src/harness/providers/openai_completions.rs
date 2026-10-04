@@ -1280,7 +1280,12 @@ async fn run_stream(model: Model, context: TranscriptContext, options: StreamOpt
             let text = String::from_utf8_lossy(&chunk);
             for frame in decoder.push(&text) {
                 match serde_json::from_str::<Value>(&frame) {
-                    Ok(v) => process_chunk(&mut st, &tx, &v, &model).await,
+                    Ok(v) => {
+                        if let Some(msg) = stream_error_message(&v) {
+                            return Err(ProviderError::new(None, stream_error(&msg)));
+                        }
+                        process_chunk(&mut st, &tx, &v, &model).await
+                    }
                     Err(e) => {
                         return Err(ProviderError::new(None, format!("malformed SSE frame: {e}: {}", truncate_str(&frame, 300))));
                     }
@@ -1316,6 +1321,16 @@ async fn run_stream(model: Model, context: TranscriptContext, options: StreamOpt
             ));
         }
         if (compat.supports_finish_reason && !st.has_finish_reason) || st.output.stop_reason == StopReason::Pending {
+            // Some gateways (Ollama cloud) abort with a bare `{"error":...}`
+            // line outside SSE framing; surface its message instead of the
+            // generic truncation error.
+            if let Some(msg) = decoder
+                .take_stray_json()
+                .and_then(|line| serde_json::from_str::<Value>(&line).ok())
+                .and_then(|v| stream_error_message(&v))
+            {
+                return Err(ProviderError::new(None, stream_error(&msg)));
+            }
             return Err(ProviderError::new(None, "Stream ended without finish_reason"));
         }
         Ok(())
@@ -1358,6 +1373,31 @@ fn truncate_str(s: &str, max: usize) -> String {
     }
 }
 
+/// Keeps the retryable "ended without" wording (a mid-stream abort is
+/// transient) unless the provider's own message says otherwise, e.g. a quota
+/// error, which the retry classifier then refuses to retry.
+fn stream_error(msg: &str) -> String {
+    format!("Stream ended without finish_reason (provider error: {msg})")
+}
+
+/// Message of an in-stream error object (`{"error":{"message":..}}` or
+/// `{"error":"..."}`) on a frame that carries no completion choices.
+fn stream_error_message(v: &Value) -> Option<String> {
+    if v.get("choices").and_then(|c| c.as_array()).map_or(false, |c| !c.is_empty()) {
+        return None;
+    }
+    let err = v.get("error").filter(|e| !e.is_null())?;
+    let msg = match err {
+        Value::String(s) => s.clone(),
+        _ => err
+            .get("message")
+            .and_then(|m| m.as_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| truncate_str(&err.to_string(), 300).to_string()),
+    };
+    Some(msg)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1381,6 +1421,16 @@ mod tests {
             headers: None,
             compat: None,
         }
+    }
+
+    #[test]
+    fn stream_error_message_reads_gateway_error_objects() {
+        let v = serde_json::json!({"error":{"message":"Internal Server Error (ref: x)","type":"api_error"}});
+        assert_eq!(stream_error_message(&v).as_deref(), Some("Internal Server Error (ref: x)"));
+        assert_eq!(stream_error_message(&serde_json::json!({"error":"overloaded"})).as_deref(), Some("overloaded"));
+        assert!(stream_error_message(&serde_json::json!({"error":null,"choices":[]})).is_none());
+        assert!(stream_error_message(&serde_json::json!({"choices":[{"delta":{}}],"error":"x"})).is_none());
+        assert_eq!(stream_error("boom"), "Stream ended without finish_reason (provider error: boom)");
     }
 
     #[test]

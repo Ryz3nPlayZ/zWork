@@ -20,7 +20,7 @@ Requirements:
 - `opencode` on PATH;
 - `node` for `js-date-bug`;
 - for `--provider deepseek` (the default), a DeepSeek key in `$DEEPSEEK_API_KEY` or as `env.ANTHROPIC_AUTH_TOKEN` in `~/.claude/settings.json`;
-- for `--provider ollama`, a running Ollama daemon.
+- for `--provider ollama`, a running Ollama daemon (`BENCH_OLLAMA_URL` overrides `http://127.0.0.1:11434/v1`, e.g. to route through a logging proxy).
 
 ## Tasks
 

@@ -182,10 +182,11 @@ async fn prepare_generation(
         })
         .collect();
 
-    let messages = match read_bounded_context(lane, drive).await? {
+    let mut messages = match read_bounded_context(lane, drive).await? {
         ContinueOutcome::CancelRequested => return Ok(None),
         ContinueOutcome::Result(messages) => messages,
     };
+    append_retry_nudge(&mut messages, attempt);
 
     let system_prompt = config.system_prompt.clone().unwrap_or_default();
 
@@ -209,6 +210,21 @@ async fn prepare_generation(
     };
 
     Ok(Some(PreparedGeneration::Ready { model, tools, messages, system_prompt, stream_options }))
+}
+
+/// Request-only note sent on retry attempts; never written to the transcript.
+pub(crate) const RETRY_NUDGE: &str =
+    "(The previous response attempt failed with a provider error. Continue the task, calling only the provided tools.)";
+
+/// Some provider failures are deterministic for a given request: Ollama cloud
+/// returns the same mid-stream 500 for every byte-identical retry of a context,
+/// so a plain retry loop just burns its attempts. A retry therefore ends the
+/// request with a short user note, which changes the context enough for the
+/// provider to answer.
+fn append_retry_nudge(messages: &mut Vec<AgentMessage>, attempt: u32) {
+    if attempt > 1 {
+        messages.push(Message::user_text(RETRY_NUDGE).into());
+    }
 }
 
 async fn publish_generation_intent(
@@ -437,4 +453,22 @@ async fn perform_generation(
     }
 
     Ok(response)
+}
+
+#[cfg(test)]
+mod retry_nudge_tests {
+    use super::*;
+
+    #[test]
+    fn first_attempt_sends_context_unchanged_and_retries_end_with_the_nudge() {
+        let mut messages: Vec<AgentMessage> = vec![Message::user_text("do the task").into()];
+        append_retry_nudge(&mut messages, 1);
+        assert_eq!(messages.len(), 1);
+        append_retry_nudge(&mut messages, 2);
+        assert_eq!(messages.len(), 2);
+        match messages.last() {
+            Some(AgentMessage::Llm(Message::User(m))) => assert_eq!(m.content.text(), RETRY_NUDGE),
+            other => panic!("expected trailing user nudge, got {other:?}"),
+        }
+    }
 }

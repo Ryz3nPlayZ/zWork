@@ -18,6 +18,11 @@ pub struct SseDecoder {
     /// multiple `data:` lines per event (joined with `\n`); our providers send
     /// one, but we honour the spec.
     current_data: Option<String>,
+    /// Last line that is not an SSE field but looks like a JSON object. Some
+    /// OpenAI-compatible gateways (Ollama cloud) abort a stream by writing a
+    /// bare `{"error":{...}}` line with no `data:` prefix; per spec that line
+    /// is ignored, so keep it aside for the protocol parser to inspect.
+    stray_json: Option<String>,
 }
 
 impl SseDecoder {
@@ -25,6 +30,7 @@ impl SseDecoder {
         Self {
             buf: String::new(),
             current_data: None,
+            stray_json: None,
         }
     }
 
@@ -68,12 +74,22 @@ impl SseDecoder {
                 continue;
             }
 
+            if line.trim_start().starts_with('{') {
+                self.stray_json = Some(line);
+                continue;
+            }
+
             // `event:`, `id:`, `retry:`, and `:` comments are ignored — the
             // event type lives inside our providers' JSON `type` field, and we
             // don't implement client-driven retry.
         }
 
         out
+    }
+
+    /// The last non-SSE line that looked like a JSON object, if any.
+    pub fn take_stray_json(&mut self) -> Option<String> {
+        self.stray_json.take()
     }
 
     /// Flush any payload still buffered at EOF.
@@ -84,7 +100,9 @@ impl SseDecoder {
         // without a blank line — be lenient and flush it.
         let trailing = self.buf.trim_end_matches(['\r', '\n']);
         if !trailing.is_empty() {
-            if let Some(rest) = trailing.strip_prefix("data:") {
+            if trailing.trim_start().starts_with('{') {
+                self.stray_json = Some(trailing.to_string());
+            } else if let Some(rest) = trailing.strip_prefix("data:") {
                 let payload = rest.strip_prefix(' ').unwrap_or(rest);
                 match &mut self.current_data {
                     Some(existing) => {
@@ -118,6 +136,24 @@ fn normalize_payload(data: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bare_json_line_is_kept_aside_not_yielded() {
+        let mut d = SseDecoder::new();
+        let out = d.push("data: {\"a\":1}\n\n{\"error\":{\"message\":\"boom\"}}\n");
+        assert_eq!(out, vec!["{\"a\":1}".to_string()]);
+        assert!(d.finish().is_empty());
+        assert_eq!(d.take_stray_json().as_deref(), Some("{\"error\":{\"message\":\"boom\"}}"));
+        assert!(d.take_stray_json().is_none());
+    }
+
+    #[test]
+    fn bare_json_without_newline_at_eof_is_kept_aside() {
+        let mut d = SseDecoder::new();
+        assert!(d.push("{\"error\":\"x\"}").is_empty());
+        assert!(d.finish().is_empty());
+        assert_eq!(d.take_stray_json().as_deref(), Some("{\"error\":\"x\"}"));
+    }
 
     #[test]
     fn single_event_two_newlines() {

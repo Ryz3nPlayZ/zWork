@@ -62,7 +62,7 @@ def provider_info(name: str) -> dict:
         return {"url": "https://api.deepseek.com/v1", "key": deepseek_key(), "default_model": "deepseek-v4-flash",
                 "zwork_credential": "deepseek", "zwork_base": "", "zwork_env": {"DEEPSEEK_API_KEY": deepseek_key()}}
     if name == "ollama":
-        url = "http://127.0.0.1:11434/v1"
+        url = os.environ.get("BENCH_OLLAMA_URL", "http://127.0.0.1:11434/v1")
         return {"url": url, "key": "ollama", "default_model": "gpt-oss:120b-cloud",
                 "zwork_credential": "ollama", "zwork_base": url, "zwork_env": {}}
     sys.exit(f"unknown provider {name}")
