@@ -108,7 +108,15 @@ pub fn format_for_system_prompt() -> String {
         return "(none installed)".to_string();
     }
     const LIMIT: usize = 60;
-    let mut lines: Vec<String> = skills.iter().take(LIMIT).map(|s| format!("- `{}` — {}", s.slug, s.description)).collect();
+    // The listing rides on every request, so each entry is just enough to pick
+    // a skill by; `read_skill` loads the full playbook. At 280 chars apiece the
+    // listing alone was ~15k chars (~4k tokens) per model call.
+    const PROMPT_DESCRIPTION_CHARS: usize = 150;
+    let mut lines: Vec<String> = skills
+        .iter()
+        .take(LIMIT)
+        .map(|s| format!("- `{}` — {}", s.slug, clip(&s.description, PROMPT_DESCRIPTION_CHARS)))
+        .collect();
     if skills.len() > LIMIT {
         lines.push(format!("- …and {} more", skills.len() - LIMIT));
     }
