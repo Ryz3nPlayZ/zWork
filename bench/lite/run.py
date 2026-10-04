@@ -4,16 +4,17 @@
 Each task in tasks/<id>/ is a seed repo + a prompt + a hidden grader. For every
 (harness x task x rep) we copy the seed into a fresh git workdir, let the agent
 work in it headlessly, then run the grader against a snapshot of the result.
-Both harnesses hit the SAME upstream model (DeepSeek, OpenAI-compatible API)
-with the same key, the same prompt and the same wall-clock budget.
+Both harnesses hit the SAME upstream model through the same OpenAI-compatible
+endpoint, with the same prompt and the same wall-clock budget.
 
     python3 bench/lite/run.py                      # all tasks, both harnesses, 1 rep
     python3 bench/lite/run.py --reps 3 --parallel 6
     python3 bench/lite/run.py --harness zwork --tasks fix-pagination,csv-report
     python3 bench/lite/run.py --report bench/lite/runs/<ts>   # re-render a report
 
-The DeepSeek key comes from $DEEPSEEK_API_KEY, else from ~/.claude/settings.json
-(env.ANTHROPIC_AUTH_TOKEN when ANTHROPIC_BASE_URL points at DeepSeek).
+Providers: `deepseek` (key from $DEEPSEEK_API_KEY, else ~/.claude/settings.json
+env.ANTHROPIC_AUTH_TOKEN when ANTHROPIC_BASE_URL points at DeepSeek) or
+`ollama` (local daemon at 127.0.0.1:11434, incl. its *-cloud models; no key).
 """
 
 from __future__ import annotations
@@ -38,7 +39,6 @@ HERE = Path(__file__).resolve().parent
 TASKS = HERE / "tasks"
 REPO = HERE.parent.parent
 DEFAULT_ZWORK_BIN = REPO / "sidecar-rust/target/release/rwork-backend"
-DEEPSEEK_OPENAI_URL = "https://api.deepseek.com/v1"
 
 
 # ---------------------------------------------------------------- setup ----
@@ -54,6 +54,18 @@ def deepseek_key() -> str:
     except (OSError, ValueError, KeyError):
         pass
     sys.exit("No DeepSeek key: set DEEPSEEK_API_KEY")
+
+
+def provider_info(name: str) -> dict:
+    """Endpoint + key for one provider, plus how zWork's settings name it."""
+    if name == "deepseek":
+        return {"url": "https://api.deepseek.com/v1", "key": deepseek_key(), "default_model": "deepseek-v4-flash",
+                "zwork_credential": "deepseek", "zwork_base": "", "zwork_env": {"DEEPSEEK_API_KEY": deepseek_key()}}
+    if name == "ollama":
+        url = "http://127.0.0.1:11434/v1"
+        return {"url": url, "key": "ollama", "default_model": "gpt-oss:120b-cloud",
+                "zwork_credential": "ollama", "zwork_base": url, "zwork_env": {}}
+    sys.exit(f"unknown provider {name}")
 
 
 def list_tasks(sel: str) -> list[str]:
@@ -112,14 +124,15 @@ def run_zwork(prompt: str, work: Path, run_dir: Path, args) -> dict:
         "default_model": "bench-ds",
         "custom_models": [{
             "id": "bench-ds", "name": f"DeepSeek {args.model}", "shape": "openai",
-            "credential": "deepseek", "model_id": args.model, "base_url_override": "",
+            "credential": args.prov["zwork_credential"], "model_id": args.model,
+            "base_url_override": args.prov["zwork_base"],
         }],
         "use_claude_code_config": False,
         "telemetry_enabled": False,
     }))
     port, token = free_port(), "bench-token"
     env = {**os.environ, "PWD": str(work), "ZWORK_HOME": str(home), "ZWORK_PORT": str(port), "ZWORK_HOST": "127.0.0.1",
-           "ZWORK_SIDECAR_TOKEN": token, "DEEPSEEK_API_KEY": args.key, "RUST_LOG": "warn"}
+           "ZWORK_SIDECAR_TOKEN": token, "RUST_LOG": "warn", **args.prov["zwork_env"]}
     if args.zwork_coding_only:
         env["ZWORK_CODING_ONLY"] = "1"
     log = open(run_dir / "zwork-sidecar.log", "w")
@@ -197,7 +210,7 @@ def run_zwork(prompt: str, work: Path, run_dir: Path, args) -> dict:
 # ------------------------------------------------------------ OpenCode ----
 
 
-def opencode_config_dir(model: str) -> Path:
+def opencode_config_dir(prov: dict, model: str) -> Path:
     # Persistent (not per-run): opencode's first start against a fresh config
     # dir can stall for minutes, which would land in the first job's timing.
     cfg = Path(tempfile.gettempdir()).resolve() / "zwork-lite-bench" / "opencode-config"
@@ -207,9 +220,9 @@ def opencode_config_dir(model: str) -> Path:
         "permission": {"*": "allow"},
         "autoupdate": False,
         "share": "disabled",
-        "provider": {"deepseek": {
-            "npm": "@ai-sdk/openai-compatible", "name": "DeepSeek",
-            "options": {"baseURL": DEEPSEEK_OPENAI_URL, "apiKey": "{env:DEEPSEEK_API_KEY}"},
+        "provider": {"bench": {
+            "npm": "@ai-sdk/openai-compatible", "name": "Bench",
+            "options": {"baseURL": prov["url"], "apiKey": "{env:BENCH_API_KEY}"},
             "models": {model: {"name": model, "tool_call": True,
                                "limit": {"context": 128000, "output": 32768}}},
         }},
@@ -221,11 +234,11 @@ def warm_opencode(args) -> None:
     """One throwaway prompt so provider/model-catalog setup isn't billed to a task."""
     work = args.work_root / "_warmup"
     work.mkdir(parents=True, exist_ok=True)
-    env = {**os.environ, "PWD": str(work), "XDG_CONFIG_HOME": str(args.oc_config), "DEEPSEEK_API_KEY": args.key,
+    env = {**os.environ, "PWD": str(work), "XDG_CONFIG_HOME": str(args.oc_config), "BENCH_API_KEY": args.prov["key"],
            "OPENCODE_DISABLE_AUTOUPDATE": "1"}
     t0 = time.time()
     proc = subprocess.Popen(["opencode", "run", "--standalone", "--format", "json",
-                             "-m", f"deepseek/{args.model}", "Reply with the word ok."],
+                             "-m", f"bench/{args.model}", "Reply with the word ok."],
                             cwd=work, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                             start_new_session=True)
     try:
@@ -238,10 +251,10 @@ def warm_opencode(args) -> None:
 
 
 def run_opencode(prompt: str, work: Path, run_dir: Path, args) -> dict:
-    env = {**os.environ, "PWD": str(work), "XDG_CONFIG_HOME": str(args.oc_config), "DEEPSEEK_API_KEY": args.key,
+    env = {**os.environ, "PWD": str(work), "XDG_CONFIG_HOME": str(args.oc_config), "BENCH_API_KEY": args.prov["key"],
            "OPENCODE_DISABLE_AUTOUPDATE": "1"}
     cmd = ["opencode", "run", "--standalone", "--auto", "--format", "json",
-           "-m", f"deepseek/{args.model}", "--title", f"bench {run_dir.name}", prompt]
+           "-m", f"bench/{args.model}", "--title", f"bench {run_dir.name}", prompt]
     res = empty_result()
     out = open(run_dir / "events.jsonl", "w")
     err = open(run_dir / "opencode-stderr.log", "w")
@@ -316,7 +329,7 @@ def run_job(harness: str, task: str, rep: int, root: Path, args) -> dict:
     # Contamination tripwire: the agent touched the benchmark checkout (where
     # the hidden tests live). Such a run is reported but not counted as a pass.
     events = run_dir / "events.jsonl"
-    res["escaped"] = events.exists() and str(HERE) in events.read_text(errors="replace")
+    res["escaped"] = events.exists() and str(TASKS) in events.read_text(errors="replace")
     if res["escaped"]:
         res["pass"] = False
         res["detail"] = "ESCAPED workdir into the benchmark checkout; " + res["detail"]
@@ -377,7 +390,8 @@ def main() -> None:
     ap.add_argument("--tasks", default="all")
     ap.add_argument("--reps", type=int, default=1)
     ap.add_argument("--parallel", type=int, default=4)
-    ap.add_argument("--model", default="deepseek-v4-flash")
+    ap.add_argument("--provider", default="deepseek", choices=["deepseek", "ollama"])
+    ap.add_argument("--model", help="model id at the provider (default depends on --provider)")
     ap.add_argument("--timeout", type=int, default=600, help="wall-clock seconds per run")
     ap.add_argument("--zwork-bin", type=Path, default=DEFAULT_ZWORK_BIN)
     ap.add_argument("--zwork-coding-only", action="store_true",
@@ -399,15 +413,16 @@ def main() -> None:
     if "zwork" in harnesses and not args.zwork_bin.exists():
         sys.exit(f"zWork binary not found: {args.zwork_bin} (cargo build --release in sidecar-rust)")
     tasks = list_tasks(args.tasks)
-    args.key = deepseek_key()
+    args.prov = provider_info(args.provider)
+    args.model = args.model or args.prov["default_model"]
     root = args.out / dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     root.mkdir(parents=True)
-    args.oc_config = opencode_config_dir(args.model)
+    args.oc_config = opencode_config_dir(args.prov, args.model)
     args.work_root = Path(tempfile.gettempdir()).resolve() / "zwork-lite-bench" / root.name
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=REPO, capture_output=True, text=True).stdout.strip()
     ocv = subprocess.run(["opencode", "--version"], capture_output=True, text=True).stdout.strip() if "opencode" in harnesses else ""
     (root / "meta.json").write_text(json.dumps({
-        "model": args.model, "reps": args.reps, "timeout": args.timeout, "harnesses": harnesses, "tasks": tasks,
+        "provider": args.provider, "model": args.model, "reps": args.reps, "timeout": args.timeout, "harnesses": harnesses, "tasks": tasks,
         "zwork_coding_only": args.zwork_coding_only, "commit": commit, "opencode_version": ocv,
         "zwork_bin": str(args.zwork_bin),
     }, indent=2))

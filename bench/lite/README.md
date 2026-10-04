@@ -11,6 +11,7 @@ OpenAI-compatible endpoint.
 python3 bench/lite/run.py                                  # every task, both harnesses, 1 rep
 python3 bench/lite/run.py --reps 2 --parallel 6
 python3 bench/lite/run.py --harness zwork --tasks fix-pagination,csv-report
+python3 bench/lite/run.py --provider ollama                 # local Ollama (gpt-oss:120b-cloud), no key
 python3 bench/lite/run.py --report bench/lite/runs/<ts>     # re-render a report
 ```
 
@@ -18,7 +19,8 @@ Requirements:
 - the zWork sidecar built with `cargo build --release` in `sidecar-rust`;
 - `opencode` on PATH;
 - `node` for `js-date-bug`;
-- a DeepSeek key in `$DEEPSEEK_API_KEY`, or as `env.ANTHROPIC_AUTH_TOKEN` in `~/.claude/settings.json`.
+- for `--provider deepseek` (the default), a DeepSeek key in `$DEEPSEEK_API_KEY` or as `env.ANTHROPIC_AUTH_TOKEN` in `~/.claude/settings.json`;
+- for `--provider ollama`, a running Ollama daemon.
 
 ## Tasks
 
