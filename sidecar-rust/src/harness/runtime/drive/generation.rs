@@ -186,7 +186,7 @@ async fn prepare_generation(
         ContinueOutcome::CancelRequested => return Ok(None),
         ContinueOutcome::Result(messages) => messages,
     };
-    append_retry_nudge(&mut messages, attempt);
+    append_retry_nudge(&mut messages, attempt, &tools);
 
     let system_prompt = config.system_prompt.clone().unwrap_or_default();
 
@@ -213,17 +213,27 @@ async fn prepare_generation(
 }
 
 /// Request-only note sent on retry attempts; never written to the transcript.
-pub(crate) const RETRY_NUDGE: &str =
-    "(The previous response attempt failed with a provider error. Continue the task, calling only the provided tools.)";
+/// Observed with gpt-oss on Ollama cloud: the stream dies while the model
+/// emits a tool call carrying a long multi-line argument (a bash heredoc of
+/// Python), and it does so for every byte-identical retry. Steering toward
+/// short arguments rescues most of those contexts; the attempt number keeps
+/// successive retries from being byte-identical to each other too.
+fn retry_nudge(attempt: u32, tools: &[Tool]) -> String {
+    let has = |name: &str| tools.iter().any(|tool| tool.name == name);
+    let steer = if has("write") && has("bash") {
+        "keep each tool call's arguments short and simple: put multi-line code in a file with `write`, then run it with `bash`"
+    } else {
+        "keep each tool call's arguments short and simple, and call only the provided tools"
+    };
+    format!(
+        "(Response attempt {} failed with a provider error, possibly while emitting a tool call. Continue the task, but {steer}.)",
+        attempt - 1
+    )
+}
 
-/// Some provider failures are deterministic for a given request: Ollama cloud
-/// returns the same mid-stream 500 for every byte-identical retry of a context,
-/// so a plain retry loop just burns its attempts. A retry therefore ends the
-/// request with a short user note, which changes the context enough for the
-/// provider to answer.
-fn append_retry_nudge(messages: &mut Vec<AgentMessage>, attempt: u32) {
+fn append_retry_nudge(messages: &mut Vec<AgentMessage>, attempt: u32, tools: &[Tool]) {
     if attempt > 1 {
-        messages.push(Message::user_text(RETRY_NUDGE).into());
+        messages.push(Message::user_text(retry_nudge(attempt, tools)).into());
     }
 }
 
@@ -459,16 +469,31 @@ async fn perform_generation(
 mod retry_nudge_tests {
     use super::*;
 
+    fn tool(name: &str) -> Tool {
+        Tool { name: name.into(), description: String::new(), parameters: serde_json::json!({"type": "object"}) }
+    }
+
     #[test]
     fn first_attempt_sends_context_unchanged_and_retries_end_with_the_nudge() {
+        let tools = vec![tool("bash"), tool("write")];
         let mut messages: Vec<AgentMessage> = vec![Message::user_text("do the task").into()];
-        append_retry_nudge(&mut messages, 1);
+        append_retry_nudge(&mut messages, 1, &tools);
         assert_eq!(messages.len(), 1);
-        append_retry_nudge(&mut messages, 2);
+        append_retry_nudge(&mut messages, 2, &tools);
         assert_eq!(messages.len(), 2);
         match messages.last() {
-            Some(AgentMessage::Llm(Message::User(m))) => assert_eq!(m.content.text(), RETRY_NUDGE),
+            Some(AgentMessage::Llm(Message::User(m))) => {
+                let text = m.content.text();
+                assert!(text.starts_with("(Response attempt 1 failed"), "{text}");
+                assert!(text.contains("`write`"), "{text}");
+            }
             other => panic!("expected trailing user nudge, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn nudge_differs_per_attempt_and_names_only_available_tools() {
+        assert_ne!(retry_nudge(2, &[]), retry_nudge(3, &[]));
+        assert!(!retry_nudge(2, &[tool("read")]).contains("`write`"));
     }
 }
