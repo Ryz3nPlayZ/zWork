@@ -74,3 +74,35 @@ Everything goes in `runs/<timestamp>/`, which git ignores:
 - `report.md`: pass rates plus median time, tool calls and tokens.
 - `<harness>/<task>/r<n>/`: `result.json` and `events.jsonl` (the raw event
   stream), plus the sidecar or opencode logs.
+
+## Results so far
+
+All on `gpt-oss:120b-cloud` through Ollama, 2 reps per task, product mode.
+
+| run | zWork commit | zWork pass | opencode pass | zWork median in tok | opencode median in tok |
+|---|---|---|---|---|---|
+| `20261003-233752` (baseline) | `2f98fd8` | 20/24 | 20/24 | 137k | 116k |
+| `20261004-000305` | `ab8c1fb` | 20/24 | 19/24 | 126k | 97k |
+
+What came out of it:
+
+- **Ollama cloud stream failure.** On some contexts the stream dies with a
+  bare `{"error":{"message":"Internal Server Error (ref: …)"}}` line, which
+  has no `data:` prefix. Proxy traces show it happens while gpt-oss emits a
+  tool call with a long multi-line argument, usually a bash heredoc of Python.
+  Every byte-identical retry fails the same way, so the plain retry loop
+  burned its attempts. zWork now reports the provider's message, and each
+  retry ends the request with a short note that is never persisted. The note
+  steers toward writing code to a file with `write` and running it with
+  `bash`. With that note, csv-report went from 0/2 to 3/3 (focused run
+  `20261004-001429`), and retries rescued 3 of the 4 turns that hit the
+  failure. opencode hits the same failure: it went 0/2 on csv-report in
+  `20261004-000305`.
+- **Prompt overhead.** zWork sent about 54k characters of system prompt on
+  every call; the skills listing alone was 15k. Clipping each skill
+  description to 150 characters removes about 10k characters (about 2.6k
+  tokens) per call. zWork still sends more input per call than opencode,
+  mainly from the prose tool list and 50 tool schemas in product mode.
+- **organize-files** is mostly lost to model mistakes in both harnesses:
+  collision order, manifest sort order, and wrong `original` paths. The
+  grader accepts either case-insensitive collision outcome.
