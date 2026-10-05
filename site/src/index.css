@@ -243,3 +243,8 @@ body {
   padding: 0 0.08em 0.16em;
   margin: 0 -0.08em -0.16em;
 }
+
+/* Hidden until the serif loads and SplitText has measured real lines. */
+@media (prefers-reduced-motion: no-preference) {
+  .hero-title { visibility: hidden; }
+}

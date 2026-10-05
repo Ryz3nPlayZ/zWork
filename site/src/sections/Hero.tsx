@@ -126,14 +126,21 @@ export function Hero() {
         { motion: "(prefers-reduced-motion: no-preference)", reduce: "(prefers-reduced-motion: reduce)" },
         (ctx) => {
           if (ctx.conditions?.reduce) return;
-          // autoSplit re-splits once the serif loads and on resize, so lines
-          // are measured in the real font; the returned tween keeps its progress.
-          const split = SplitText.create(".hero-title", {
-            type: "words,lines",
-            mask: "lines",
-            autoSplit: true,
-            onSplit: (self) =>
-              gsap.from(self.words, { yPercent: 110, duration: 1.0, stagger: 0.06, delay: 0.3, ease: "power3.out" }),
+          // Split only once the serif is in, so the first measurement uses real
+          // line breaks (the title is CSS-hidden until then); autoSplit handles
+          // resizes, and the returned tween keeps its progress across re-splits.
+          let split: SplitText | undefined;
+          let dead = false;
+          document.fonts.ready.then(() => {
+            if (dead) return;
+            split = SplitText.create(".hero-title", {
+              type: "words,lines",
+              mask: "lines",
+              autoSplit: true,
+              onSplit: (self) =>
+                gsap.from(self.words, { yPercent: 110, duration: 1.0, stagger: 0.06, delay: 0.3, ease: "power3.out" }),
+            });
+            gsap.set(".hero-title", { visibility: "visible" });
           });
           const tl = gsap.timeline({ defaults: { ease: "power3.out" } });
           tl.from(".hero-pill", { autoAlpha: 0, y: 12, duration: 0.6 })
@@ -157,7 +164,10 @@ export function Hero() {
             ease: "none",
             scrollTrigger: { trigger: root.current, start: "top top", end: "bottom top", scrub: true },
           });
-          return () => split.revert();
+          return () => {
+            dead = true;
+            split?.revert();
+          };
         },
       );
     },
