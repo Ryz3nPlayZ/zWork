@@ -191,11 +191,11 @@ export function Hero() {
           <ArrowRight className="h-3.5 w-3.5" />
         </a>
         <h1 className="hero-title display mx-auto mt-7 max-w-[13ch] text-[56px] text-ink sm:text-[92px] lg:text-[112px]">
-          The AI that does the work. <em className="text-ink-soft">Not just the talking.</em>
+          Your weekly paperwork, <em className="text-ink-soft">done.</em>
         </h1>
         <p className="hero-sub mx-auto mt-7 max-w-[60ch] text-[17px] leading-relaxed text-ink-muted sm:text-[19px]">
-          zWork is a desktop agent. Hand it a task and it opens your files, runs the commands, works in your apps and browser,
-          and hands back the finished spreadsheet, report or email. Put it on a schedule and it keeps doing it.
+          zWork is an AI assistant on your computer for the reports, spreadsheets and emails you redo every week. Show it the
+          job once and it does it on schedule, in real Excel and Word files, and asks before anything is sent.
         </p>
         <div className="hero-cta mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
           <a
@@ -214,7 +214,7 @@ export function Hero() {
           </a>
         </div>
         <p className="hero-cta mt-4 text-[13px] text-ink-faint">
-          <span>Free · MIT licensed · Our models or your own key</span>
+          <span>Free to start · Pro is $12, less than ChatGPT Plus · Open source</span>
         </p>
       </div>
 

@@ -12,7 +12,6 @@ import {
   Layers,
   Plug,
   Sparkles,
-  Terminal,
 } from "lucide-react";
 import { LiveDemo } from "../clone/LiveDemo";
 import { AssistantMessage } from "../clone/Message";
@@ -50,8 +49,8 @@ export function Statement() {
       <div ref={root}>
         <p className="eyebrow mb-8">Why it's different</p>
         <p className="statement display max-w-[22ch] text-[40px] leading-[1.08] text-ink sm:text-[64px] lg:text-[76px]">
-          Chat apps hand you an answer and leave the work to you. zWork opens the files, runs the commands, clicks through the
-          sites, writes the document and sends it, once you say OK.
+          Use ChatGPT for questions. Use zWork for the jobs you redo every week: it works on the files already on your computer,
+          hands back real Excel and Word files, and asks before anything is sent.
         </p>
       </div>
     </Section>
@@ -60,7 +59,7 @@ export function Statement() {
 
 const ACTIONS = [
   "Read expenses_q3_export.csv",
-  "Ran a command: pandoc notes.md -o brief.docx",
+  "Matched 41 payments to open invoices",
   "Searched Gmail: invoices newer_than:1d",
   "Clicked “Download statement”",
   "Wrote q3_board_deck.pptx",
@@ -70,7 +69,7 @@ const ACTIONS = [
   "Created a schedule: Fridays at 16:00",
   "Read 14 PDFs in ~/Contracts",
   "Filled in the vendor form on portal.acme.com",
-  "Ran Python script dedupe_contacts.py",
+  "Drafted 6 overdue-invoice reminders",
   "Drafted a reply to Priya",
   "Added 3 events to Calendar",
 ];
@@ -125,9 +124,9 @@ const CAPS = [
     body: "Reads spreadsheets, PDFs and scanned pages. Writes Excel, Word, PowerPoint and PDF files you can open anywhere.",
   },
   {
-    icon: Terminal,
-    title: "Runs the commands",
-    body: "Edits files in your folders, writes and runs its own scripts, and fixes them when they fail.",
+    icon: FolderOpen,
+    title: "Works through whole folders",
+    body: "Every PDF, every export, every row. No upload limits, because nothing gets uploaded.",
   },
   {
     icon: Plug,
@@ -190,7 +189,7 @@ export function Capabilities() {
             Everything you'd use to <em className="text-ink-soft">do it yourself.</em>
           </H2>
           <p className="max-w-[42ch] text-[16px] leading-relaxed text-ink-muted">
-            zWork has the same tools you do: your files, a terminal, a real browser, your desktop apps and your accounts. So the
+            zWork has the same tools you do: your files, a real browser, your desktop apps and your accounts. So the
             job ends with the work done, not with instructions for you.
           </p>
         </div>

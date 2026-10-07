@@ -36,7 +36,9 @@ Everyone else is stuck in **chatbot ping-pong**. You ask ChatGPT or Claude for h
 
 ## The Core Insight
 
-**ChatGPT tells you how. zWork does it.**
+> Superseded 2026-10-06 by `docs/POSITIONING.md`. Every major assistant now takes actions, so "ChatGPT tells you how, zWork does it" is no longer true. The current line is: **zWork does your weekly paperwork on your own computer, in real Excel and Word files, and asks before anything leaves. $12 a month.**
+
+Original (obsolete): **ChatGPT tells you how. zWork does it.**
 
 | What you ask | ChatGPT gives you | zWork gives you |
 |--------------|-------------------|-----------------|
