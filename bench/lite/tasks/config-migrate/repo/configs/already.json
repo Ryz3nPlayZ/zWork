@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "name": "already",
+  "server": {
+    "url": "http://x:81"
+  },
+  "timeout_ms": 10,
+  "retry": {
+    "max": 1
+  },
+  "tags": [
+    "a"
+  ]
+}

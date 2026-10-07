@@ -1,15 +1,15 @@
 # zWork Product Documentation
 
 ## Product Overview
-zWork is a personal AI assistant application that helps users with deep work, getting unstuck, shipping faster, and clear thinking. It provides an AI-powered interface for brainstorming, side projects, and productivity enhancement.
+zWork is a desktop AI assistant that does recurring office paperwork on the user's own computer: reports, spreadsheets, invoices and emails, produced as real Excel and Word files, on a schedule, with approval before anything is sent, edited or deleted. Strategy and reasoning: `docs/POSITIONING.md`.
 
 ## Users
-- **Primary**: Technical professionals, developers, and creators who need AI assistance for coding, writing, and problem-solving
-- **Secondary**: Knowledge workers and students who use AI for learning, research, and content creation
-- **Context**: Desktop application (Tauri) with web-based authentication and analytics
+- **Primary**: Non-technical people who pay for their own tools and live in Excel, Word, PDFs and email — solo business owners, freelancers, bookkeepers, office and ops managers at 2–50 person companies, assistants and admins
+- **Not the target**: Developers (they have coding agents) and people who want a better chat window (they have ChatGPT)
+- **Context**: Desktop application (Tauri) on Mac, Windows and Linux; $0 / $12 / $50 plans, free with the user's own model key
 
 ## Product Purpose
-zWork serves as an intelligent pair programmer and creative partner that helps users overcome creative blocks, accelerate their workflow, and maintain focus on deep work tasks.
+Take the same paperwork off someone's plate every week. Success is a scheduled job that keeps delivering files the user opens without having to fix them.
 
 ## Brand & Tone
 - **Voice**: Professional yet approachable, intelligent but not intimidating
@@ -32,8 +32,8 @@ zWork serves as an intelligent pair programmer and creative partner that helps u
 product
 
 ## Key Features
-- AI-powered chat interface
-- Project management and organization
-- Analytics and usage tracking
-- Google OAuth authentication
-- Local and cloud sync capabilities
+- Scheduled jobs that post results to an inbox, running from the menu bar or tray
+- Real Excel, Word, PowerPoint and PDF output from local files and folders
+- Approval before sending, editing or deleting, with every step shown
+- Connectors for mail, calendar and documents (Gmail, Outlook, Google Drive, OneDrive, Sheets, Slack)
+- Any model: zWork's hosted models, the user's own key, or local models

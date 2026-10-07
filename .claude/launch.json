@@ -1,0 +1,94 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "sidecar",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "mkdir -p /private/tmp/claude-501/-Users-zemuliu-Programming-zWork/46c36cbb-d466-4282-aaee-672dbece3619/scratchpad/zhome/workspace && cd /private/tmp/claude-501/-Users-zemuliu-Programming-zWork/46c36cbb-d466-4282-aaee-672dbece3619/scratchpad/zhome/workspace && ZWORK_HOME=/private/tmp/claude-501/-Users-zemuliu-Programming-zWork/46c36cbb-d466-4282-aaee-672dbece3619/scratchpad/zhome ZWORK_SIDECAR_TOKEN=devtoken ZWORK_DISABLE_MODELS_FETCH=1 cargo run -q --manifest-path /Users/zemuliu/Programming/zWork/sidecar-rust/Cargo.toml"
+      ],
+      "port": 8787
+    },
+    {
+      "name": "app",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "ZWORK_SIDECAR_TOKEN=devtoken",
+        "npm",
+        "--prefix",
+        "app",
+        "run",
+        "dev"
+      ],
+      "port": 1420
+    },
+    {
+      "name": "landing",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "landing",
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "4312",
+        "--strictPort"
+      ],
+      "port": 4312
+    },
+    {
+      "name": "sidecar-alt",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "cd /private/tmp/claude-501/-Users-zemuliu-Programming-zWork/46c36cbb-d466-4282-aaee-672dbece3619/scratchpad/zhome/workspace && ZWORK_PORT=8788 ZWORK_HOME=/private/tmp/claude-501/-Users-zemuliu-Programming-zWork/46c36cbb-d466-4282-aaee-672dbece3619/scratchpad/zhome ZWORK_SIDECAR_TOKEN=devtoken ZWORK_DISABLE_MODELS_FETCH=1 cargo run -q --manifest-path /Users/zemuliu/Programming/zWork/sidecar-rust/Cargo.toml"
+      ],
+      "port": 8788
+    },
+    {
+      "name": "app-alt",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "ZWORK_SIDECAR_TOKEN=devtoken",
+        "ZWORK_PORT=8788",
+        "ZWORK_VITE_PORT=1421",
+        "npm",
+        "--prefix",
+        "app",
+        "run",
+        "dev"
+      ],
+      "port": 1421
+    },
+    {
+      "name": "admin-mock",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "admin-web",
+        "run",
+        "dev:mock",
+        "--",
+        "--strictPort"
+      ],
+      "port": 4311
+    },
+    {
+      "name": "site",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "site",
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "4313",
+        "--strictPort"
+      ],
+      "port": 4313
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "name": "edge",
+  "host": "edge.example.com",
+  "port": 8443,
+  "use_tls": true,
+  "timeout": "2m"
+}

@@ -9,7 +9,8 @@
         "height": 760,
         "minWidth": 860,
         "minHeight": 560,
-        "decorations": true,
+        "decorations": false,
+        "backgroundColor": "#141416",
         "transparent": false,
         "resizable": true,
         "fullscreen": false

@@ -1,0 +1,1 @@
+`dedupe.py`'s `dedupe_records` is way too slow on real data (we feed it ~200k records and it takes minutes). Make it fast — it should handle 200k records in well under a second — without changing its behaviour. Read the docstring carefully; existing behaviour must be preserved exactly.

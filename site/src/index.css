@@ -1,0 +1,250 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+
+@custom-variant dark-sys (@media (prefers-color-scheme: dark));
+
+@font-face {
+  font-family: "Instrument Serif";
+  src: url("/fonts/instrument-serif-regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Instrument Serif";
+  src: url("/fonts/instrument-serif-italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* The app's own tokens (app/src/index.css), as RGB triplets so alpha
+   modifiers work. Light first; dark follows the OS unless the visitor picks. */
+:root {
+  --paper: 242 240 232;
+  --paper-soft: 238 236 228;
+  --paper-raised: 234 232 224;
+  --paper-sunken: 246 244 236;
+  --paper-sidebar: 236 234 226;
+  --ink: 48 46 40;
+  --ink-soft: 80 76 68;
+  --ink-muted: 110 106 96;
+  --ink-faint: 155 150 138;
+  --line: 218 214 202;
+  --line-soft: 228 224 212;
+  --line-strong: 200 196 184;
+  --accent: 48 46 40;
+  --shadow: 30 28 24;
+  --success: 16 185 129;
+  --warning: 245 158 11;
+  --error: 239 68 68;
+  --info: 59 130 246;
+  --border-overlay: 0 0 0;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: 22 22 24;
+    --paper-soft: 26 26 29;
+    --paper-raised: 31 31 34;
+    --paper-sunken: 18 18 20;
+    --paper-sidebar: 20 20 22;
+    --ink: 236 236 234;
+    --ink-soft: 213 213 211;
+    --ink-muted: 160 160 157;
+    --ink-faint: 108 108 106;
+    --line: 45 45 49;
+    --line-soft: 40 40 44;
+    --line-strong: 62 62 66;
+    --accent: 236 236 234;
+    --shadow: 0 0 0;
+    --success: 52 211 153;
+    --warning: 251 191 36;
+    --error: 248 113 113;
+    --info: 96 165 250;
+    --border-overlay: 255 255 255;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: 22 22 24;
+  --paper-soft: 26 26 29;
+  --paper-raised: 31 31 34;
+  --paper-sunken: 18 18 20;
+  --paper-sidebar: 20 20 22;
+  --ink: 236 236 234;
+  --ink-soft: 213 213 211;
+  --ink-muted: 160 160 157;
+  --ink-faint: 108 108 106;
+  --line: 45 45 49;
+  --line-soft: 40 40 44;
+  --line-strong: 62 62 66;
+  --accent: 236 236 234;
+  --shadow: 0 0 0;
+  --success: 52 211 153;
+  --warning: 251 191 36;
+  --error: 248 113 113;
+  --info: 96 165 250;
+  --border-overlay: 255 255 255;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-paper: rgb(var(--paper));
+  --color-paper-soft: rgb(var(--paper-soft));
+  --color-paper-raised: rgb(var(--paper-raised));
+  --color-paper-sunken: rgb(var(--paper-sunken));
+  --color-paper-sidebar: rgb(var(--paper-sidebar));
+  --color-ink: rgb(var(--ink));
+  --color-ink-soft: rgb(var(--ink-soft));
+  --color-ink-muted: rgb(var(--ink-muted));
+  --color-ink-faint: rgb(var(--ink-faint));
+  --color-line: rgb(var(--line));
+  --color-line-soft: rgb(var(--line-soft));
+  --color-line-strong: rgb(var(--line-strong));
+  --color-accent: rgb(var(--accent));
+  --color-success: rgb(var(--success));
+  --color-warning: rgb(var(--warning));
+  --color-error: rgb(var(--error));
+  --color-info: rgb(var(--info));
+  --color-edge: rgb(var(--border-overlay) / 0.1);
+  --color-edge-strong: rgb(var(--border-overlay) / 0.2);
+  --color-edge-muted: rgb(var(--border-overlay) / 0.06);
+
+  --font-sans: "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
+  --font-mono: "SF Mono", ui-monospace, Menlo, Monaco, "Cascadia Mono", Consolas, monospace;
+
+  --shadow-pop: 0 1px 2px rgb(var(--shadow) / 0.05), 0 12px 32px rgb(var(--shadow) / 0.1);
+  --shadow-lift: 0 0.125rem 0.25rem -0.125rem rgb(var(--shadow) / 0.07), 0 0.5rem 0.75rem -0.375rem rgb(var(--shadow) / 0.06),
+    0 1.25rem 1.75rem -0.875rem rgb(var(--shadow) / 0.06), 0 2.25rem 3rem -1.75rem rgb(var(--shadow) / 0.04);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: auto;
+}
+body {
+  margin: 0;
+  background: rgb(var(--paper));
+  color: rgb(var(--ink));
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+::selection {
+  background: rgb(var(--ink) / 0.14);
+}
+
+/* ---- App utilities, copied from app/src/index.css ---- */
+.hairline-ring {
+  box-shadow: 0 0 0 0.5px rgb(var(--border-overlay) / 0.1), 0 1px 2px rgb(0 0 0 / 0.04);
+}
+.focus-ring {
+  box-shadow: 0 0 0 1.5px rgb(var(--accent) / 0.45);
+}
+.shadow-float {
+  box-shadow: 0 0 0 1px rgb(var(--shadow) / 0.05), 0 2px 6px -2px rgb(var(--shadow) / 0.12),
+    0 10px 22px -8px rgb(var(--shadow) / 0.22), 0 24px 48px -16px rgb(var(--shadow) / 0.26);
+}
+.press {
+  transition: transform 120ms ease, background-color 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+.press:active,
+.press[data-pressed="true"] {
+  transform: scale(0.97);
+}
+.shimmer-text {
+  background: linear-gradient(90deg, rgb(var(--ink-faint)) 0%, rgb(var(--ink)) 50%, rgb(var(--ink-faint)) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer-slide 2.4s linear infinite;
+}
+@keyframes shimmer-slide {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+.animate-typing-cursor {
+  animation: typing-cursor 1s step-end infinite;
+}
+@keyframes typing-cursor {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* The clone is a picture of the app: no text selection or tab stops inside it. */
+.clone {
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+.clone * {
+  pointer-events: none;
+}
+
+/* Fine scrollbars inside the clone, like the app's. */
+.clone-scroll {
+  scrollbar-width: none;
+}
+.clone-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Page-level type */
+.display {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 0.98;
+}
+.eyebrow {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgb(var(--ink-faint));
+}
+.grain {
+  background-image: radial-gradient(rgb(var(--ink) / 0.05) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-text,
+  .animate-typing-cursor {
+    animation: none;
+  }
+}
+
+/* SplitText line masks clip at the line box; give descenders and italic
+   overhang room without changing the layout. */
+.hero-title > div {
+  padding: 0 0.08em 0.16em;
+  margin: 0 -0.08em -0.16em;
+}
+
+/* Hidden until the serif loads and SplitText has measured real lines. */
+@media (prefers-reduced-motion: no-preference) {
+  .hero-title { visibility: hidden; }
+}

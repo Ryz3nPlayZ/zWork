@@ -1,6 +1,6 @@
 [package]
 name = "rwork-backend"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 
 [dependencies]
@@ -9,22 +9,31 @@ axum = { version = "0.7.5", features = ["macros", "multipart", "ws"] }
 reqwest = { version = "0.12.5", features = ["json", "stream"] }
 serde = { version = "1.0.203", features = ["derive"] }
 serde_json = "1.0.120"
+thiserror = "1.0"
 futures-util = "0.3.30"
+bytes = "1"
 tokio-stream = { version = "0.1.15", features = ["fs"] }
 tower-http = { version = "0.5.2", features = ["cors", "trace"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
-uuid = { version = "1.9.1", features = ["v4"] }
+uuid = { version = "1.9.1", features = ["v4", "v7"] }
 chrono = "0.4"
 dirs = "5.0.1"
 base64 = "0.22"
 rusqlite = { version = "0.31.0", features = ["bundled"] }
 regex = "1.10"
+similar = "2.6"
+rand = "0.8"
 # Add nix for process signal control on Unix
 nix = { version = "0.29.0", features = ["signal"] }
+htmd = "0.5.5"
+pdf-extract = "0.12.1"
+calamine = "0.36.1"
+zip = "8.6.0"
+quick-xml = "0.41"
+sha2 = "0.11.0"
 
-# macOS Keychain for secret storage (file-fallback on other platforms).
-# Already in the transitive tree via native-tls; pinning as a direct dep so
-# secretstore can use the OS keychain instead of plaintext JSON.
-[target.'cfg(target_os = "macos")'.dependencies]
-security-framework = "3"
+# NOTE: no security-framework here, deliberately. The binary must not be able
+# to touch the macOS Keychain at all — see src/secretstore.rs for why, and do
+# not re-add it without a stable Developer ID signature and a re-test for
+# password-prompt storms.

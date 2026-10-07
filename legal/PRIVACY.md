@@ -8,7 +8,7 @@ This Privacy Policy describes how zWork ("we", "us", or "the App") collects, use
 
 ### 1.1 Information you provide
 - **Account information:** When you sign in to zWork Cloud, we store your email address, display name, and subscription tier. This is transmitted over HTTPS and authenticated via a session token.
-- **Bring-your-own-key (BYOK) credentials:** When you add your own API keys (OpenAI, Anthropic, DeepSeek, etc.), zWork stores them to make API requests on your behalf. On macOS, these are stored in the system Keychain (encrypted at rest). On other platforms, they are stored in a local file (`~/.zwork/secrets.json`) restricted to your user account (mode 0600). They are never transmitted to zWork's servers — they are used only for direct, local-to-provider API calls.
+- **Bring-your-own-key (BYOK) credentials:** When you add your own API keys (OpenAI, Anthropic, DeepSeek, etc.), zWork stores them to make API requests on your behalf. They are stored in a local file (`secrets.json` in the app's data directory) restricted to your user account (mode 0600). They are never transmitted to zWork's servers — they are used only for direct, local-to-provider API calls.
 - **Integration tokens:** When you connect third-party services (Gmail, Google Calendar, Notion, Linear, GitHub, etc.) via Composio, the OAuth tokens are managed by Composio and referenced by zWork to execute your instructions.
 
 ### 1.2 Information collected automatically
@@ -37,7 +37,7 @@ This Privacy Policy describes how zWork ("we", "us", or "the App") collects, use
 - **Telemetry:** PostHog retains event data for up to 12 months, after which it is automatically deleted.
 - **Account data:** Retained for the life of your account. You can request deletion at any time by contacting us.
 - **Local data:** You control all local data (conversations, logs, caches) and can delete it at any time via the "Clear Offline Chat Cache" option in Settings or by deleting the `~/.zwork` directory.
-- **API keys:** Remove them at any time in Settings → Models. On macOS they are deleted from the Keychain; elsewhere from the secrets file.
+- **API keys:** Remove them at any time in Settings → Models; they are deleted from the local secrets file.
 
 ## 5. Data security
 - BYOK credentials are stored in the macOS Keychain (encrypted at rest, OS-gated) where available; otherwise in a 0600-permission local file.

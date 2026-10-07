@@ -19,12 +19,11 @@ const IS_TAURI =
     !!(window as any).__TAURI__ ||
     (window.location && window.location.protocol === "tauri:"));
 
-/** True when running as a web app (not Tauri, not vite dev server). */
+/** True when running as a web app (not Tauri, not a local vite dev server on any port). */
 export const IS_WEB =
   typeof window !== "undefined" &&
   !IS_TAURI &&
-  window.location.origin !== "http://localhost:1420" &&
-  window.location.origin !== "http://127.0.0.1:1420";
+  !["localhost", "127.0.0.1"].includes(window.location.hostname);
 
 const APP_VERSION = packageJson.version ?? "unknown";
 
@@ -94,6 +93,8 @@ export interface ApiChat {
   updated_at: number;
   model: string;
   messages: ApiMessage[];
+  /** True while a run is still writing this chat's reply. */
+  running?: boolean;
 }
 
 export interface ApiChatSummary {
@@ -151,14 +152,15 @@ export interface CredentialStatus {
   configured: boolean;
   source: "byok" | "claude_code" | "env" | null;
   base_url: string | null;
-  shape: "anthropic" | "openai";
+  shape: string;
+  api?: string;
 }
 
 export interface ModelEntry {
   id: string;
   name: string;
   subtitle: string;
-  shape: "anthropic" | "openai";
+  shape: string;
   credential: string;
   model_id: string;
   base_url_override?: string;
@@ -170,6 +172,73 @@ export interface ProvidersResponse {
   credentials: Record<string, CredentialStatus>;
   models: ModelEntry[];
   default_model: string;
+}
+
+export type McpServerState = "connected" | "connecting" | "error" | "idle" | "disabled";
+
+/** State of the managed runtime (`/api/runtime`). */
+export type RuntimeStatus =
+  | { state: "missing" }
+  | { state: "installing"; step: string }
+  | { state: "ready"; python: string; node: string }
+  | { state: "failed"; error: string }
+  | { state: "unsupported" };
+
+/** An MCP connector as served by `/api/mcp/servers`. */
+export interface McpServer {
+  name: string;
+  transport: "stdio" | "http" | "sse";
+  /** Command line or URL. */
+  target: string;
+  enabled: boolean;
+  state: McpServerState;
+  error: string | null;
+  server_name: string | null;
+  server_version: string | null;
+  tools: { name: string; description: string; read_only: boolean }[];
+  config: Record<string, unknown>;
+}
+
+/** Servers configured in another app (Claude, Cursor, VS Code, …). */
+export interface McpDiscoverySource {
+  id: string;
+  label: string;
+  servers: { name: string; transport: string; target: string; already_added: boolean }[];
+}
+
+export interface McpAddResult {
+  success?: boolean;
+  error?: string;
+  results?: { name: string; ok: boolean; error: string | null }[];
+}
+
+/** A models.dev provider as served by `/api/providers/catalog`. */
+export interface CatalogProvider {
+  id: string;
+  name: string;
+  supported: boolean;
+  api: string | null;
+  base_url: string;
+  /** Env vars that hold the secret key, e.g. ["OPENAI_API_KEY"]. */
+  env: string[];
+  /** Non-secret URL placeholders, e.g. ["AZURE_RESOURCE_NAME"]. */
+  vars: string[];
+  doc: string;
+  keyless: boolean;
+  model_count: number;
+  configured: boolean;
+}
+
+export interface CatalogModel {
+  id: string;
+  name: string;
+  reasoning: boolean;
+  images: boolean;
+  context: number;
+  output: number;
+  cost: { input: number; output: number; cache_read: number; cache_write: number };
+  api: string;
+  base_url: string;
 }
 
 export interface CustomModel {
@@ -203,21 +272,31 @@ function sleep(ms: number) {
 }
 
 /**
- * Map an upstream model id (e.g. "deepseek-v4-flash", "gemma4:31b") back to
- * its friendly zWork display name. Returns undefined if the id isn't a known
- * upstream we whitelabel, so the caller can fall back to the user-facing model
- * id from the request. Used to scrub upstream provider names from the UI.
+ * Map an upstream model id (e.g. "deepseek/deepseek-v4-flash-0731",
+ * "gemma4:31b") back to its friendly zWork display name. Returns undefined if
+ * the id isn't a known upstream we whitelabel, so the caller can fall back to
+ * the user-facing model id from the request. Used to scrub upstream provider
+ * names from the UI.
+ *
+ * Order matters: the ultra id (deepseek/deepseek-v4.1-flash) must be matched
+ * before the legacy bare deepseek ids, which named the old pro tier.
  */
 export function whitelabelModelName(upstreamId: string | null | undefined): string | undefined {
   if (!upstreamId) return undefined;
   const id = upstreamId.toLowerCase();
-  // DeepSeek family (zwork-flash / zwork-pro)
-  if (id.includes("deepseek-v4-pro") || id === "deepseek-pro") return "zwork-pro";
+  // Ultra (Max tier): deepseek v4.1 flash via OpenRouter — the prefixed id is
+  // the current upstream; the bare spelling was the OLD pro tier id.
+  if (id === "deepseek/deepseek-v4.1-flash") return "zwork-ultimate";
+  // Pro tier: GLM 5.3 flash via OpenRouter, plus legacy pro spellings.
+  if (id.includes("glm-5.3") || id.startsWith("z-ai/glm-5.3")) return "zwork-pro";
+  if (id.includes("deepseek-v4.1-flash") || id.includes("deepseek-v4-pro") || id === "deepseek-pro") return "zwork-pro";
+  // Flash tier: deepseek v4 flash via OpenRouter, DeepSeek's direct flash id,
+  // and legacy spellings.
   if (id.includes("deepseek-v4-flash") || id.includes("deepseek-flash") || id.includes("deepseek-chat")) return "zwork-flash";
   // Vision family (Gemma 4 31B cloud)
   if (id.includes("gemma4") || id.includes("gemma-4") || id.includes("gemma")) return "zwork-vision";
-  // Ultimate family (z-ai/glm-5.2 via OpenRouter — zWork Ultimate, Max tier)
-  if (id.includes("glm-5.2") || id === "z-ai/glm-5.2") return "zwork-ultimate";
+  // Legacy Ultimate (z-ai/glm-5.2 via OpenRouter).
+  if (id.includes("glm-5.2") || id.startsWith("z-ai/glm-5")) return "zwork-ultimate";
   // Already-friendly ids pass through.
   if (id === "zwork-flash" || id === "zwork-pro" || id === "zwork-vision" || id === "zwork-ultimate") return upstreamId;
   return undefined;
@@ -416,7 +495,55 @@ export const api = {
   stopChat: (chatId: string) =>
     localFetch(`/api/chats/${chatId}/stop`, {
       method: "POST",
-    }).then((r) => j<{ ok: boolean; message?: string }>(r)),
+    }).then((r) =>
+      j<{ ok?: boolean; success?: boolean; message?: string; steer?: string[]; follow_up?: string[] }>(r),
+    ),
+
+  // --- Queue while busy (steer / follow-up / next-run) ---
+
+  /** Steer the live run: the message joins the in-flight context at its
+   *  next checkpoint drain. */
+  steerChat: (chatId: string, message: string) =>
+    localFetch(`/api/chats/${chatId}/steer`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message }),
+    }).then((r) => j<QueueOutcome<string>>(r)),
+
+  /** Queue a follow-up: it drives a next run when the current one finishes. */
+  queueFollowUp: (chatId: string, message: string) =>
+    localFetch(`/api/chats/${chatId}/follow-up`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message }),
+    }).then((r) => j<QueueOutcome<string>>(r)),
+
+  /** Queue a whole next run after the current one settles. */
+  queueNextRun: (chatId: string, message: string) =>
+    localFetch(`/api/chats/${chatId}/next-run`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message }),
+    }).then((r) => j<QueueOutcome<string>>(r)),
+
+  /** Snapshot the live run's queued items (kind + text per entry). */
+  listChatQueue: (chatId: string) =>
+    localFetch(`/api/chats/${chatId}/queue`).then((r) => j<QueueOutcome<QueuedItem[]>>(r)),
+
+  /** Cancel one queued item. "cancelled"/"not_found" mean the text can be
+   *  restored to the composer; "consumed" means it already joined the run. */
+  cancelChatQueue: (chatId: string, entryId: string) =>
+    localFetch(`/api/chats/${chatId}/queue/${entryId}/cancel`, {
+      method: "POST",
+    }).then((r) => j<QueueOutcome<"cancelled" | "consumed" | "not_found">>(r)),
+
+  /** Set steering / follow-up queue modes ("all" | "one-at-a-time"). */
+  setChatQueueMode: (chatId: string, modes: { steering?: "all" | "one-at-a-time"; followUp?: "all" | "one-at-a-time" }) =>
+    localFetch(`/api/chats/${chatId}/queue/mode`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ steering: modes.steering, follow_up: modes.followUp }),
+    }).then((r) => j<QueueOutcome<null>>(r)),
 
   truncateMessage: (chatId: string, messageId: string, content: string) => {
     return localFetch(`/api/chats/${chatId}/messages/${messageId}/truncate`, {
@@ -425,6 +552,47 @@ export const api = {
       body: JSON.stringify({ content }),
     }).then((r) => j<{ ok: boolean; chat: any }>(r));
   },
+
+  forkChat: (chatId: string, atMessageId?: string, before?: boolean) =>
+    localFetch(`/api/chats/${chatId}/fork`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ at_message_id: atMessageId, before }),
+    }).then((r) => j<{ success: boolean; chat: any; error?: string }>(r)),
+
+  /** Opens a file the agent made in the user's own app, or shows it in the folder. */
+  openFile: async (path: string, reveal = false) => {
+    const r = await localFetch("/api/files/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, reveal }),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.error || "Couldn't open the file.");
+    return body as { ok: boolean; path: string; revealed: boolean };
+  },
+
+  statFiles: (paths: string[]) =>
+    localFetch("/api/files/stat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paths }),
+    }).then((r) => j<{ existing: string[] }>(r)),
+
+  listBranches: (chatId: string) =>
+    localFetch(`/api/chats/${chatId}/branches`).then((r) =>
+      j<{ branches: { id: string; created_at: number; from_message_id: string; message_count: number; preview: string }[] }>(r),
+    ),
+
+  restoreBranch: (chatId: string, branchId: string) =>
+    localFetch(`/api/chats/${chatId}/branches/${branchId}`, { method: "POST" }).then((r) =>
+      j<{ success: boolean; chat: any }>(r),
+    ),
+
+  deleteBranch: (chatId: string, branchId: string) =>
+    localFetch(`/api/chats/${chatId}/branches/${branchId}`, { method: "DELETE" }).then((r) =>
+      j<{ success: boolean; chat: any }>(r),
+    ),
 
   runPythonCode: (code: string) => {
     return localFetch("/api/run-python", {
@@ -646,6 +814,63 @@ export const api = {
       body: JSON.stringify(body),
       keepalive: true,
     }).then((r) => j<{ ok: boolean }>(r)),
+
+  providerCatalog: () =>
+    localFetch("/api/providers/catalog").then((r) => j<{ providers: CatalogProvider[] }>(r)),
+
+  providerCatalogModels: (id: string) =>
+    localFetch(`/api/providers/catalog/${encodeURIComponent(id)}`).then((r) =>
+      j<{ id: string; name: string; models: CatalogModel[] }>(r),
+    ),
+
+  /** Slash commands: prompt files from zWork/Claude Code/opencode/pi folders, and skills. */
+  commands: () =>
+    localFetch("/api/commands").then((r) =>
+      j<{ commands: { name: string; description: string; kind: "command" | "skill"; source: string }[] }>(r),
+    ),
+
+  /** zWork's managed Python + Node (installed on first launch). */
+  runtimeStatus: () => localFetch("/api/runtime").then((r) => j<{ status: RuntimeStatus; dir: string }>(r)),
+
+  runtimeInstall: () =>
+    localFetch("/api/runtime", { method: "POST" }).then((r) => j<{ status: RuntimeStatus }>(r)),
+
+  mcpServers: () =>
+    localFetch("/api/mcp/servers").then((r) => j<{ servers: McpServer[]; config_path: string }>(r)),
+
+  /** Add one server (`name` + `config`) or a pasted JSON snippet; connects before replying. */
+  mcpAdd: (body: { name?: string; config?: Record<string, unknown>; paste?: string }) =>
+    localFetch("/api/mcp/servers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => r.json() as Promise<McpAddResult>),
+
+  mcpRemove: (name: string) =>
+    localFetch(`/api/mcp/servers/${encodeURIComponent(name)}`, { method: "DELETE" }).then((r) =>
+      j<{ success: boolean }>(r),
+    ),
+
+  mcpSetEnabled: (name: string, enabled: boolean) =>
+    localFetch(`/api/mcp/servers/${encodeURIComponent(name)}/enabled`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    }).then((r) => j<{ success: boolean; error?: string | null }>(r)),
+
+  mcpConnect: (name: string) =>
+    localFetch(`/api/mcp/servers/${encodeURIComponent(name)}/connect`, { method: "POST" }).then((r) =>
+      j<{ success: boolean; error?: string }>(r),
+    ),
+
+  mcpDiscover: () => localFetch("/api/mcp/discover").then((r) => j<{ sources: McpDiscoverySource[] }>(r)),
+
+  mcpImport: (source: string, names: string[]) =>
+    localFetch("/api/mcp/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source, names }),
+    }).then((r) => j<{ success: boolean; imported?: string[]; error?: string }>(r)),
 
   upsertCustomModel: (body: Omit<CustomModel, "id"> & { id?: string }) =>
     localFetch("/api/custom-models", {
@@ -1006,6 +1231,22 @@ export const api = {
 
 // ------ SSE streaming for chat ------
 
+/** Envelope for the queue-while-busy endpoints: `queued` tells whether a
+ *  live run accepted the item (`not-busy` = no run to queue against). */
+export interface QueueOutcome<T> {
+  queued: boolean;
+  result?: T;
+  reason?: string;
+  error?: string;
+}
+
+/** One queued message on the live run, as the backend reports it. */
+export interface QueuedItem {
+  entry_id: string;
+  kind: "steer" | "follow_up" | "next_run" | "write";
+  text: string;
+}
+
 export type StreamEvent =
   | { type: "chat"; id: string; title: string }
   | { type: "status"; text: string }
@@ -1034,7 +1275,10 @@ export type StreamEvent =
   | { type: "subagent_done"; task_id: string; result?: string; error?: string }
   | { type: "ask_question"; chat_id: string; question_id?: string; question: string; options: string[] }
   | { type: "permission_recovery"; tool_use_id?: string; kind?: string; message: string }
-  | { type: "todo_update"; todos: Array<{ id: string; content: string; status: "pending" | "in_progress" | "completed" }> };
+  | { type: "todo_update"; todos: Array<{ id: string; content: string; status: "pending" | "in_progress" | "completed" }> }
+  | { type: "queue"; items: QueuedItem[] }
+  | { type: "user_message"; text: string; assistant_id?: string }
+  | { type: "run_state"; live: boolean; run_id?: string; cursor?: number; started_at?: number };
 
 /** Web-mode streaming: sends Anthropic-format request to the Axum API and
  *  translates Anthropic SSE chunks into the custom event format the UI expects. */
@@ -1068,19 +1312,21 @@ async function streamChatWeb(
   const isPro = body.model === "zwork-pro";
   const isVision = body.model === "zwork-vision";
   const isUltimate = body.model === "zwork-ultimate";
-  // Upstream model id sent to the router (never shown to the user).
+  // Upstream model id sent to the router (never shown to the user). The whole
+  // hosted lineup is served via OpenRouter on the router's OpenAI-shaped
+  // /api/v1/chat/completions path; only vision keeps its alias (the router
+  // resolves it to the Gemma vision model).
   const upstreamModel = isPro
-    ? "deepseek-v4-pro"
+    ? "z-ai/glm-5.3-flash"
     : isVision
       ? "zwork-vision"
       : isUltimate
-        ? "zwork-ultimate"
-        : "deepseek-v4-flash";
+        ? "deepseek/deepseek-v4.1-flash"
+        : "deepseek/deepseek-v4-flash-0731";
   // Friendly display name (whitelabel — never expose the upstream id).
   const friendlyModel = body.model;
-  // Ultimate is OpenAI-shape (served via OpenRouter on the router's
-  // /api/v1/chat/completions path), as is Vision.
-  const useOpenAi = isVision || isUltimate;
+  // Every hosted tier is OpenAI-shape (OpenRouter / vision included).
+  const useOpenAi = true;
 
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -1182,6 +1428,37 @@ async function streamChatWeb(
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buf = "";
+    // The router's /api/v1/chat/completions returns OpenAI-shaped SSE
+    // ({"choices":[{"delta":{...}}]} + "data: [DONE]"); the Anthropic-shaped
+    // /api/v1/messages path returns content_block_delta/message_stop events.
+    // Handle BOTH so either endpoint feeds the UI.
+    let sawMessageStop = false;
+    const handleParsedChunk = (chunk: any) => {
+      // Anthropic shape
+      if (chunk.type === "content_block_delta" && chunk.delta?.type === "text_delta" && chunk.delta?.text) {
+        assistantText += chunk.delta.text;
+        onEvent({ type: "delta", text: chunk.delta.text });
+      }
+      if (chunk.type === "content_block_delta" && chunk.delta?.type === "thinking_delta" && chunk.delta?.thinking) {
+        onEvent({ type: "thinking_delta", text: chunk.delta.thinking });
+      }
+      // OpenAI shape
+      if (Array.isArray(chunk.choices) && chunk.choices.length > 0) {
+        const delta = chunk.choices[0]?.delta;
+        if (delta?.content) {
+          assistantText += delta.content;
+          onEvent({ type: "delta", text: delta.content });
+        }
+        // OpenRouter / DeepSeek reasoning fields.
+        const reasoning = delta?.reasoning_content ?? delta?.reasoning;
+        if (typeof reasoning === "string" && reasoning) {
+          onEvent({ type: "thinking_delta", text: reasoning });
+        }
+      }
+      if (chunk.type === "message_stop") {
+        sawMessageStop = true;
+      }
+    };
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -1193,24 +1470,14 @@ async function streamChatWeb(
         if (!line.startsWith("data:")) continue;
         const data = line.slice(5).trim();
         if (!data) continue;
+        if (data === "[DONE]") {
+          sawMessageStop = true;
+          continue;
+        }
         try {
-          const chunk = JSON.parse(data);
-          // Only forward text_delta events — skip thinking_delta to avoid raw thought output
-          if (chunk.type === "content_block_delta" && chunk.delta?.type === "text_delta" && chunk.delta?.text) {
-            assistantText += chunk.delta.text;
-            onEvent({ type: "delta", text: chunk.delta.text });
-          }
-          // Forward reasoning / chain-of-thought deltas as a distinct segment
-          // kind so the UI can render them in the process panel, not as status
-          // text or blended into the answer.
-          if (chunk.type === "content_block_delta" && chunk.delta?.type === "thinking_delta" && chunk.delta?.thinking) {
-            onEvent({ type: "thinking_delta", text: chunk.delta.thinking });
-          }
-          // message_stop signals end of streaming
-          if (chunk.type === "message_stop") {
-            break;
-          }
+          handleParsedChunk(JSON.parse(data));
         } catch { /* ignore malformed */ }
+        if (sawMessageStop) break;
       }
     }
   } else {
@@ -1218,7 +1485,7 @@ async function streamChatWeb(
     for (const line of text.split("\n")) {
       if (!line.startsWith("data:")) continue;
       const data = line.slice(5).trim();
-      if (!data) continue;
+      if (!data || data === "[DONE]") continue;
       try {
         const chunk = JSON.parse(data);
         if (chunk.type === "content_block_delta" && chunk.delta?.type === "text_delta" && chunk.delta?.text) {
@@ -1227,6 +1494,17 @@ async function streamChatWeb(
         }
         if (chunk.type === "content_block_delta" && chunk.delta?.type === "thinking_delta" && chunk.delta?.thinking) {
           onEvent({ type: "thinking_delta", text: chunk.delta.thinking });
+        }
+        if (Array.isArray(chunk.choices) && chunk.choices.length > 0) {
+          const delta = chunk.choices[0]?.delta;
+          if (delta?.content) {
+            assistantText += delta.content;
+            onEvent({ type: "delta", text: delta.content });
+          }
+          const reasoning = delta?.reasoning_content ?? delta?.reasoning;
+          if (typeof reasoning === "string" && reasoning) {
+            onEvent({ type: "thinking_delta", text: reasoning });
+          }
         }
       } catch { /* ignore */ }
     }
@@ -1337,6 +1615,9 @@ async function streamChatDemo(
   const decoder = new TextDecoder();
   let buf = "";
   let sawText = false;
+  // The demo caps output tokens server-side; without this flag a long answer
+  // that hits the cap just stops mid-sentence with no indication why.
+  let truncatedByLimit = false;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -1368,6 +1649,12 @@ async function streamChatDemo(
         ) {
           onEvent({ type: "thinking_delta", text: chunk.delta.thinking });
         }
+        if (
+          chunk.type === "message_delta" &&
+          chunk.delta?.stop_reason === "max_tokens"
+        ) {
+          truncatedByLimit = true;
+        }
         if (chunk.type === "message_stop") {
           break;
         }
@@ -1377,7 +1664,12 @@ async function streamChatDemo(
     }
   }
 
-  if (!sawText) {
+  if (truncatedByLimit) {
+    onEvent({
+      type: "error",
+      text: "Demo response truncated at the length limit. Sign in or use the desktop app for full-length responses.",
+    });
+  } else if (!sawText) {
     onEvent({ type: "error", text: "The model returned an empty response. Try rephrasing." });
   }
   onEvent({ type: "done" });
@@ -1422,6 +1714,29 @@ export async function streamChat(
   let sawServerError = false;
   let attemptedRecovery = false;
   let retryCount = 0;
+  // Re-attach bookkeeping: the real chat id (server-assigned ids arrive on
+  // the `chat` event; tmp_ placeholders never have a live run) and the last
+  // bus seq seen — together they let a dropped stream resume the SAME run
+  // via GET /api/chats/:id/run/live?after=<seq> instead of re-POSTing the
+  // message (which would start a duplicate run and re-bill it).
+  let liveChatId =
+    body.chat_id && !body.chat_id.startsWith("tmp_") ? body.chat_id : undefined;
+  let lastSeq: number | undefined;
+  const noteEvent = (evt: any) => {
+    sawEvent = true;
+    if (evt.type === "chat" && typeof evt.id === "string" && !evt.id.startsWith("tmp_")) {
+      liveChatId = evt.id;
+    }
+    if (evt.type === "done" || evt.type === "end") {
+      sawTerminal = true;
+    }
+    if (evt.type === "error") {
+      sawServerError = true;
+    }
+    if (typeof evt.seq === "number") {
+      lastSeq = evt.seq;
+    }
+  };
   const parseFrame = (frame: string) => {
     for (const line of frame.split("\n")) {
       if (!line.startsWith("data:")) continue;
@@ -1429,13 +1744,7 @@ export async function streamChat(
       if (!data) continue;
       try {
         const evt = JSON.parse(data) as StreamEvent;
-        sawEvent = true;
-        if (evt.type === "done" || evt.type === "end") {
-          sawTerminal = true;
-        }
-        if (evt.type === "error") {
-          sawServerError = true;
-        }
+        noteEvent(evt);
         onEvent(evt);
       } catch {
         /* ignore malformed partial event */
@@ -1486,6 +1795,77 @@ export async function streamChat(
     }
   };
 
+  // Re-attach to the live run's event bus after a connection drop: the
+  // durable run keeps going server-side, so instead of re-POSTing the
+  // message (a duplicate run, billed twice) we resume the SAME run's event
+  // stream from the last bus seq we saw. Returns true when a live run was
+  // attached (even if that attachment also dropped — caller re-loops);
+  // false when there is no live run to attach to.
+  const attachLive = async (): Promise<boolean> => {
+    if (!liveChatId) return false;
+    const sidecarToken = await getSidecarToken();
+    // Attach from the last seq we saw; with none yet (dropped before the
+    // first bus event), from 0 so nothing is missed. Seq 0 is the prompt's
+    // own entry, which the projection skips — nothing user-visible is lost.
+    const url = u(`/api/chats/${liveChatId}/run/live`) + `?after=${lastSeq ?? 0}`;
+    let resp: Response;
+    try {
+      resp = await fetch(url, {
+        headers: {
+          ...clientHeaders(),
+          ...(sidecarToken ? { "x-zwork-token": sidecarToken } : {}),
+        },
+      });
+    } catch {
+      return false;
+    }
+    if (!resp.ok || !resp.body) return false;
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let headerSeen = false;
+    const consume = (frame: string) => {
+      for (const line of frame.split("\n")) {
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (!data) continue;
+        let evt: any;
+        try {
+          evt = JSON.parse(data);
+        } catch {
+          continue;
+        }
+        if (evt?.type === "run_state") {
+          headerSeen = true;
+          if (!evt.live) {
+            // No live run (finished while we were disconnected) — cancel
+            // the read; the caller falls back to its normal retry path.
+            void reader.cancel().catch(() => {});
+            return;
+          }
+          return;
+        }
+        noteEvent(evt);
+        onEvent(evt as StreamEvent);
+      }
+    };
+    while (true) {
+      const { done, value } = await reader.read().catch(() => ({ done: true, value: undefined }));
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx: number;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const frame = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        consume(frame);
+      }
+    }
+    if (buf.trim()) {
+      consume(buf);
+    }
+    return headerSeen;
+  };
+
   while (true) {
     try {
       if (IS_TAURI) {
@@ -1507,7 +1887,20 @@ export async function streamChat(
         await api.waitForBackend(30).catch(() => {});
         continue;
       }
-      
+
+      // Prefer re-attaching to the still-running durable run over
+      // re-sending the message.
+      if (await attachLive()) {
+        if (sawTerminal || sawServerError) {
+          return;
+        }
+        // The attachment itself dropped without a terminal event — try
+        // again after a beat (never hot-loop a server accepting then
+        // dropping connections).
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        continue;
+      }
+
       if (retryCount >= 5) {
         const detail =
           error instanceof Error && error.message

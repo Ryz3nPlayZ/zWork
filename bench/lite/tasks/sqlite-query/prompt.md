@@ -1,0 +1,1 @@
+`shop.db` is a SQLite database of our store. Who was our top customer by net spend in calendar year 2025? Net spend = sum of their order totals in 2025, excluding cancelled orders, minus any refunds issued against those orders. Write `answer.json` as {"email": "...", "net_spend": <dollars, 2 decimals>}.

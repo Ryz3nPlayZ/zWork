@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { X, Keyboard, Command } from "lucide-react";
+import { X, Command } from "lucide-react";
 import { useApp } from "../lib/store";
 import { cn } from "../lib/cn";
 import { isMacOS } from "../lib/platform";
@@ -93,23 +93,18 @@ export function KeybindingsModal() {
         )}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-line pb-3.5">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-paper text-accent">
-              <Keyboard className="h-4.5 w-4.5" />
-            </div>
-            <div>
-              <h2 className="font-serif text-[17px] font-semibold text-ink">
-                Keyboard Shortcuts
-              </h2>
-              <p className="text-[11.5px] text-ink-muted">
-                Navigate and control zWork with speed
-              </p>
-            </div>
+        <div className="relative border-b border-line pb-3.5 text-center">
+          <div>
+            <h2 className="font-serif text-[17px] font-semibold text-ink">
+              Keyboard Shortcuts
+            </h2>
+            <p className="mt-0.5 text-[11.5px] text-ink-muted">
+              Navigate and control zWork with speed
+            </p>
           </div>
           <button
             onClick={() => setOpen(false)}
-            className="press rounded-lg p-1.5 text-ink-faint hover:bg-line/50 hover:text-ink transition-colors"
+            className="press absolute -top-1 right-0 rounded-lg p-1.5 text-ink-faint hover:bg-line/50 hover:text-ink transition-colors"
             aria-label="Close shortcuts modal"
           >
             <X className="h-4 w-4" />

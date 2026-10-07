@@ -15,13 +15,24 @@ This is the quickest way to understand the shipped desktop app without reading t
 
 | File | Role |
 |------|------|
-| `components/CloudGate.tsx` | mandatory sign-in gate before app usage |
-| `components/Landing.tsx` | empty-state / first-action landing surface |
-| `components/ChatView.tsx` | main conversation pane |
-| `components/Settings.tsx` | account, model, general settings |
-| `components/AnalyticsPage.tsx` | hosted usage, coupon redemption, managed mode activation |
-| `components/Onboarding.tsx` | first-run onboarding flow |
-| `components/Sidebar.tsx` | navigation, chat history, analytics entry point |
+| `components/LoginScreen.tsx` | Sign-in gate before app usage |
+| `components/Onboarding.tsx` | First-run onboarding flow |
+| `components/Landing.tsx` | Empty-state / first-action landing surface |
+| `components/ChatView.tsx` | Main conversation pane |
+| `components/ArtifactPanel.tsx` | Side panel for files the agent made |
+| `components/Sidebar.tsx` | Navigation and chat history |
+| `components/Settings.tsx` | Account, model and general settings |
+| `components/ProjectView.tsx` | A project's chats and files |
+| `components/tasks/TasksPage.tsx`, `components/scheduled/ScheduledTasksPage.tsx` | Tasks and scheduled tasks |
+| `components/InboxPage.tsx` | Messages the agent sent unprompted |
+| `components/ConnectorsPage.tsx` | MCP and Composio connectors |
+| `components/AnalyticsPage.tsx`, `components/PlanPage.tsx` | Hosted usage and plan |
+| `components/AdminPage.tsx` | Admin dashboard (also built standalone as `admin-web/`) |
+| `components/page/Page.tsx` | Shared layout and controls for the collection pages |
+
+Which screen shows is `view` in the store (see `View` in `lib/store.ts`);
+`App.tsx` switches on it. New screens: see
+[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md#adding-a-screen).
 
 ## Core state and clients
 
@@ -81,7 +92,7 @@ When desktop auth or packaged backend startup breaks, inspect this file first.
 
 Look at:
 
-- `components/CloudGate.tsx`
+- `components/LoginScreen.tsx`
 - `lib/cloud.ts`
 - `src-tauri/src/main.rs`
 

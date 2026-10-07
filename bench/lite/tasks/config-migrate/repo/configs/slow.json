@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "name": "slow",
+  "host": "slow.example.com",
+  "port": 443,
+  "use_tls": false,
+  "timeout": "1.5s",
+  "tags": " ",
+  "retries": 2
+}

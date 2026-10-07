@@ -73,6 +73,8 @@ bench/*.egg-info/
 bench/__pycache__/
 bench/.pytest_cache/
 bench/.ruff_cache/
+bench/lite/runs/
+bench/lite/**/__pycache__/
 intro-page/
 
 # Local agent scratch / workspace dirs (not part of the app)

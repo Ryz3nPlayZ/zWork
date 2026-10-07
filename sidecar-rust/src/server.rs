@@ -12,6 +12,8 @@ use std::convert::Infallible;
 use tokio_stream::StreamExt;
 
 use crate::chatstore;
+use crate::harness::providers::catalog;
+use crate::harness::types::Api;
 use crate::settings;
 use crate::agent::run_agent_turn;
 
@@ -127,7 +129,7 @@ pub async fn desktop_status() -> impl IntoResponse {
             source: String::new(),
             error: "Desktop control is only available on macOS (it requires the \
                     CuaDriver accessibility daemon). On this platform, use the \
-                    browser_* tools or run_command instead."
+                    browser_* tools or bash instead."
                 .to_string(),
             wrong_identity_hint: None,
             zwork_self_trusted: None,
@@ -288,278 +290,187 @@ fn read_claude_code_env() -> std::collections::HashMap<String, String> {
     out
 }
 
+/// The model Claude Code would use, by its rules: `ANTHROPIC_MODEL` (process
+/// env, then settings env) over the `model` setting, and aliases (`opus`,
+/// `sonnet[1m]`, ...) through `ANTHROPIC_DEFAULT_<ALIAS>_MODEL`.
 pub fn read_claude_code_model() -> Option<String> {
-    let home = dirs::home_dir()?;
-    let path = home.join(".claude").join("settings.json");
-    if !path.exists() {
-        return None;
-    }
-    let content = std::fs::read_to_string(&path).ok()?;
-    let val: serde_json::Value = serde_json::from_str(&content).ok()?;
-    val.get("model").and_then(|m| m.as_str()).map(|s| s.to_string())
+    let env = read_claude_code_env();
+    let var = |k: &str| std::env::var(k).ok().or_else(|| env.get(k).cloned()).filter(|v| !v.trim().is_empty());
+    let setting = || -> Option<String> {
+        let path = dirs::home_dir()?.join(".claude").join("settings.json");
+        let val: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+        val.get("model").and_then(|m| m.as_str()).map(str::to_string)
+    };
+    let chosen = var("ANTHROPIC_MODEL").or_else(setting)?;
+    Some(resolve_claude_alias(&chosen, var))
 }
 
+fn resolve_claude_alias(model: &str, var: impl Fn(&str) -> Option<String>) -> String {
+    let base = model.trim().trim_end_matches("[1m]");
+    let (key, fallback) = match base {
+        "opus" | "opusplan" => ("ANTHROPIC_DEFAULT_OPUS_MODEL", "claude-opus-5-5"),
+        "sonnet" | "default" => ("ANTHROPIC_DEFAULT_SONNET_MODEL", "claude-sonnet-5-5"),
+        "haiku" => ("ANTHROPIC_DEFAULT_HAIKU_MODEL", "claude-haiku-4-5-20251001"),
+        _ => return base.to_string(),
+    };
+    var(key).unwrap_or_else(|| fallback.to_string())
+}
+
+/// Resolve a credential id to a key + endpoint + protocol.
+///
+/// `claude_code` (reuse ~/.claude config) and `zwork_router` (the managed
+/// gateway) are zWork's own; every other id is a models.dev provider id, so
+/// anything opencode can talk to resolves here — key from Settings, else the
+/// provider's env vars; endpoint from the per-model override, Settings, a
+/// `<ID>_BASE_URL` env var, else the catalog.
 pub fn resolve(credential: &str, settings: &settings::Settings, override_base_url: &str) -> Option<Credentials> {
-    let shape = if credential == "anthropic" || credential == "claude_code" {
-        "anthropic".to_string()
+    match credential {
+        "claude_code" => resolve_claude_code(settings, override_base_url),
+        "zwork_router" => resolve_router(settings, override_base_url),
+        _ => resolve_catalog(credential, settings, override_base_url),
+    }
+}
+
+fn resolve_claude_code(settings: &settings::Settings, override_base_url: &str) -> Option<Credentials> {
+    if !settings.use_claude_code_config {
+        return None;
+    }
+    let env = read_claude_code_env();
+    let tok = env.get("ANTHROPIC_AUTH_TOKEN").or_else(|| env.get("ANTHROPIC_API_KEY")).filter(|t| !t.trim().is_empty())?;
+    let (base, custom) = match (override_base_url.is_empty(), env.get("ANTHROPIC_BASE_URL")) {
+        (false, _) => (override_base_url.to_string(), true),
+        (true, Some(b)) if !b.is_empty() => (b.clone(), true),
+        _ => ("https://api.anthropic.com".to_string(), false),
+    };
+    Some(Credentials {
+        api_key: tok.clone(),
+        base_url: base.trim_end_matches('/').to_string(),
+        source: "claude_code".to_string(),
+        provider: "anthropic".to_string(),
+        api: Api::AnthropicMessages,
+        custom_endpoint: custom,
+    })
+}
+
+fn resolve_router(settings: &settings::Settings, override_base_url: &str) -> Option<Credentials> {
+    const ROUTER: &str = "https://api.tryzwork.app/api";
+    let saved = settings.api_keys.get("zwork_router").or_else(|| settings.api_keys.get("openai")).filter(|k| !k.trim().is_empty());
+    let (key, source) = match saved {
+        Some(k) => (k.clone(), "byok"),
+        None => (std::env::var("ZWORK_GATEWAY_TOKEN").ok().filter(|t| !t.trim().is_empty())?, "env"),
+    };
+    let configured = || {
+        settings.provider_config.get("zwork_router").and_then(|m| m.get("base_url")).filter(|b| !b.is_empty()).cloned()
+    };
+    let base = if !override_base_url.is_empty() {
+        override_base_url.to_string()
+    } else if source == "byok" {
+        configured().unwrap_or_else(|| ROUTER.to_string())
     } else {
-        "openai".to_string()
+        ROUTER.to_string()
+    };
+    Some(Credentials {
+        api_key: key,
+        base_url: base.trim_end_matches('/').to_string(),
+        source: source.to_string(),
+        provider: "zwork_router".to_string(),
+        api: Api::AnthropicMessages,
+        custom_endpoint: true,
+    })
+}
+
+fn resolve_catalog(credential: &str, settings: &settings::Settings, override_base_url: &str) -> Option<Credentials> {
+    let catalog = catalog::global();
+    let provider = catalog.provider(credential);
+    let config = settings.provider_config.get(credential);
+    let env_prefix = credential.to_uppercase().replace('-', "_");
+    let nonempty = |v: Option<String>| v.filter(|s| !s.trim().is_empty());
+
+    let saved_key = nonempty(settings.api_keys.get(credential).cloned());
+    let env_key = provider
+        .map(|p| p.env.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .chain([format!("{env_prefix}_API_KEY")])
+        .find_map(|name| nonempty(std::env::var(name).ok()));
+    let keyless = provider.map_or(false, |p| p.keyless);
+    let (api_key, source) = match (saved_key, env_key) {
+        (Some(k), _) => (k, "byok"),
+        (None, Some(k)) => (k, "env"),
+        // Local servers ignore auth, but the adapters refuse an empty key.
+        (None, None) if keyless => ("local".to_string(), "local"),
+        _ => return None,
     };
 
-    if credential == "claude_code" {
-        if !settings.use_claude_code_config {
-            return None;
-        }
-        let env = read_claude_code_env();
-        let tok = env.get("ANTHROPIC_AUTH_TOKEN")
-            .or_else(|| env.get("ANTHROPIC_API_KEY"))
-            .cloned();
-        if let Some(tok_str) = tok {
-            if !tok_str.trim().is_empty() {
-                let base = if !override_base_url.is_empty() {
-                    override_base_url.to_string()
-                } else {
-                    env.get("ANTHROPIC_BASE_URL")
-                        .cloned()
-                        .unwrap_or_else(|| "https://api.anthropic.com".to_string())
-                };
-                return Some(Credentials {
-                    shape,
-                    api_key: tok_str,
-                    base_url: base.trim_end_matches('/').to_string(),
-                    source: "claude_code".to_string(),
-                });
-            }
-        }
+    let explicit_base = [
+        Some(override_base_url.to_string()),
+        config.and_then(|c| c.get("base_url").cloned()),
+        std::env::var(format!("{env_prefix}_BASE_URL")).ok(),
+    ]
+    .into_iter()
+    .find_map(nonempty);
+    let custom_endpoint = explicit_base.is_some();
+    let template = explicit_base.or_else(|| provider.map(|p| p.base_url.clone()))?;
+    // `${AZURE_RESOURCE_NAME}`-style placeholders come from Settings or env.
+    let base_url = catalog::interpolate(&template, |var| {
+        config
+            .and_then(|c| c.get(var).or_else(|| c.get(&var.to_lowercase())).cloned())
+            .or_else(|| std::env::var(var).ok())
+    });
+    if base_url.is_empty() || base_url.contains("${") {
         return None;
     }
-
-    if credential == "anthropic" {
-        let key = settings.api_keys.get("anthropic").cloned().unwrap_or_default();
-        if !key.trim().is_empty() {
-            let base = if !override_base_url.is_empty() {
-                override_base_url.to_string()
-            } else {
-                settings.provider_config.get("anthropic")
-                    .and_then(|m| m.get("base_url"))
-                    .cloned()
-                    .unwrap_or_else(|| "https://api.anthropic.com".to_string())
-            };
-            return Some(Credentials {
-                shape,
-                api_key: key,
-                base_url: base,
-                source: "byok".to_string(),
-            });
-        }
-        if let Ok(tok) = std::env::var("ANTHROPIC_API_KEY").or_else(|_| std::env::var("ANTHROPIC_AUTH_TOKEN")) {
-            if !tok.trim().is_empty() {
-                let base = if !override_base_url.is_empty() {
-                    override_base_url.to_string()
-                } else {
-                    std::env::var("ANTHROPIC_BASE_URL").unwrap_or_else(|_| "https://api.anthropic.com".to_string())
-                };
-                return Some(Credentials {
-                    shape,
-                    api_key: tok,
-                    base_url: base,
-                    source: "env".to_string(),
-                });
-            }
-        }
-        return None;
-    }
-
-    if credential == "openai" {
-        let key = settings.api_keys.get("openai").cloned().unwrap_or_default();
-        if !key.trim().is_empty() {
-            let base = if !override_base_url.is_empty() {
-                override_base_url.to_string()
-            } else {
-                settings.provider_config.get("openai")
-                    .and_then(|m| m.get("base_url"))
-                    .cloned()
-                    .unwrap_or_else(|| "https://api.openai.com/v1".to_string())
-            };
-            return Some(Credentials {
-                shape,
-                api_key: key,
-                base_url: base,
-                source: "byok".to_string(),
-            });
-        }
-        if let Ok(tok) = std::env::var("OPENAI_API_KEY") {
-            if !tok.trim().is_empty() {
-                let base = if !override_base_url.is_empty() {
-                    override_base_url.to_string()
-                } else {
-                    std::env::var("OPENAI_BASE_URL").unwrap_or_else(|_| "https://api.openai.com/v1".to_string())
-                };
-                return Some(Credentials {
-                    shape,
-                    api_key: tok,
-                    base_url: base,
-                    source: "env".to_string(),
-                });
-            }
-        }
-        return None;
-    }
-
-    if credential == "zwork_router" {
-        let key = settings.api_keys.get("zwork_router")
-            .or_else(|| settings.api_keys.get("openai"))
-            .cloned()
-            .unwrap_or_default();
-        if !key.trim().is_empty() {
-            let base = if !override_base_url.is_empty() {
-                override_base_url.to_string()
-            } else {
-                settings.provider_config.get("zwork_router")
-                    .and_then(|m| m.get("base_url"))
-                    .or_else(|| settings.provider_config.get("openai").and_then(|m| m.get("base_url")))
-                    .cloned()
-                    .unwrap_or_else(|| "https://api.tryzwork.app/api".to_string())
-            };
-            return Some(Credentials {
-                shape,
-                api_key: key,
-                base_url: base,
-                source: "byok".to_string(),
-            });
-        }
-        if let Ok(tok) = std::env::var("ZWORK_GATEWAY_TOKEN") {
-            if !tok.trim().is_empty() {
-                let base = if !override_base_url.is_empty() {
-                    override_base_url.to_string()
-                } else {
-                    "https://api.tryzwork.app/api".to_string()
-                };
-                return Some(Credentials {
-                    shape,
-                    api_key: tok,
-                    base_url: base,
-                    source: "env".to_string(),
-                });
-            }
-        }
-        return None;
-    }
-
-    if credential == "ollama" {
-        let base = if !override_base_url.is_empty() {
-            override_base_url.to_string()
-        } else {
-            settings.provider_config.get("ollama")
-                .and_then(|m| m.get("base_url"))
-                .cloned()
-                .unwrap_or_else(|| "http://localhost:11434/v1".to_string())
-        };
-        // Local Ollama doesn't require an API key
-        let key = settings.api_keys.get("ollama").cloned().unwrap_or_default();
-        return Some(Credentials {
-            shape: "openai".to_string(),
-            api_key: key,
-            base_url: base.trim_end_matches('/').to_string(),
-            source: "ollama".to_string(),
-        });
-    }
-
-    // Default for other compatibility providers
-    let key = settings.api_keys.get(credential).cloned().unwrap_or_default();
-    if !key.trim().is_empty() {
-        let base = if !override_base_url.is_empty() {
-            override_base_url.to_string()
-        } else {
-            settings.provider_config.get(credential)
-                .and_then(|m| m.get("base_url"))
-                .cloned()
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| default_base_url(credential))
-        };
-        return Some(Credentials {
-            shape,
-            api_key: key,
-            base_url: base,
-            source: "byok".to_string(),
-        });
-    }
-
-    // Check uppercase env var
-    let env_var_name = format!("{}_API_KEY", credential.to_uppercase());
-    if let Ok(tok) = std::env::var(&env_var_name) {
-        if !tok.trim().is_empty() {
-            let base = if !override_base_url.is_empty() {
-                override_base_url.to_string()
-            } else {
-                std::env::var(format!("{}_BASE_URL", credential.to_uppercase()))
-                    .ok()
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or_else(|| default_base_url(credential))
-            };
-            return Some(Credentials {
-                shape,
-                api_key: tok,
-                base_url: base,
-                source: "env".to_string(),
-            });
-        }
-    }
-
-    None
-}
-
-/// Hard-coded default base URLs for OpenAI-compatible providers that aren't
-/// given a dedicated `resolve` branch. Without these, a user who enters only a
-/// Groq/DeepSeek/etc. API key resolves to an empty base_url and every request
-/// fails. Mirrors Python's `OPENAI_COMPAT_PROVIDERS` table.
-fn default_base_url(credential: &str) -> String {
-    match credential {
-        "groq" => "https://api.groq.com/openai/v1".to_string(),
-        "cerebras" => "https://api.cerebras.ai/v1".to_string(),
-        "deepseek" => "https://api.deepseek.com/v1".to_string(),
-        "zai" => "https://api.z.ai/api/paas/v4".to_string(),
-        "together" => "https://api.together.xyz/v1".to_string(),
-        "mistral" => "https://api.mistral.ai/v1".to_string(),
-        "perplexity" => "https://api.perplexity.ai".to_string(),
-        "fireworks" => "https://api.fireworks.ai/inference/v1".to_string(),
-        "openrouter" => "https://openrouter.ai/api/v1".to_string(),
-        _ => String::new(),
-    }
+    let api = match provider.and_then(|p| p.api) {
+        Some(api) => api,
+        // Unknown id or unsupported auth: only usable through an explicit
+        // OpenAI-compatible endpoint.
+        None if custom_endpoint => Api::OpenAICompletions,
+        None => return None,
+    };
+    Some(Credentials {
+        api_key,
+        base_url: base_url.trim_end_matches('/').to_string(),
+        source: source.to_string(),
+        provider: provider.map_or_else(|| credential.to_string(), |p| p.id.clone()),
+        api,
+        custom_endpoint,
+    })
 }
 
 #[derive(Debug, Clone)]
 pub struct Credentials {
-    pub shape: String,
     pub api_key: String,
     pub base_url: String,
     pub source: String,
+    /// models.dev provider id (or zWork's own `zwork_router`).
+    pub provider: String,
+    /// The provider's default protocol; individual models may differ.
+    pub api: Api,
+    /// The endpoint was set by the user rather than taken from the catalog,
+    /// so the model's declared protocol (shape) wins over the catalog's.
+    pub custom_endpoint: bool,
 }
 
 pub async fn get_providers() -> impl IntoResponse {
     let s = settings::load();
     
-    // 1. Build credentials status
+    // 1. Credential status: the built-ins plus every provider a model uses.
     let mut credentials_status = serde_json::Map::new();
-    let sources = vec![
-        "anthropic",
-        "openai",
-        "claude_code",
-        "zwork_router",
-        "groq",
-        "cerebras",
-        "deepseek",
-        "zai",
-    ];
-    for src in sources {
+    let mut sources: Vec<String> = ["anthropic", "openai", "claude_code", "zwork_router"].map(String::from).to_vec();
+    sources.extend(s.custom_models.iter().map(|m| m.credential.clone()));
+    sources.extend(s.api_keys.iter().filter(|(_, v)| !v.is_empty()).map(|(k, _)| k.clone()));
+    sources.sort();
+    sources.dedup();
+    for src in &sources {
         let cred = resolve(src, &s, "");
         credentials_status.insert(
-            src.to_string(),
+            src.clone(),
             serde_json::json!({
                 "configured": cred.is_some(),
                 "source": cred.as_ref().map(|c| c.source.clone()),
                 "base_url": cred.as_ref().map(|c| c.base_url.clone()),
-                "shape": if src == "anthropic" || src == "claude_code" { "anthropic" } else { "openai" },
+                "api": cred.as_ref().map(|c| c.api.as_str()),
+                "shape": if cred.as_ref().map_or(false, |c| c.api == Api::AnthropicMessages) { "anthropic" } else { "openai" },
             }),
         );
     }
@@ -575,10 +486,16 @@ pub async fn get_providers() -> impl IntoResponse {
         let existing = s.custom_models.iter().any(|m| m.credential == "claude_code");
         if !existing {
             let cc_model = read_claude_code_model().unwrap_or_default();
+            // Name it after the model it runs when the catalog knows it;
+            // "Local credentials" says where it comes from, not what it is.
+            let name = catalog::global()
+                .find_model(&cc_model)
+                .map(|m| m.name.clone())
+                .unwrap_or_else(|| "Local credentials".to_string());
             synthesized_cc = Some(serde_json::json!({
                 "id": "__claude_code__",
-                "name": "Local credentials",
-                "subtitle": format!("via {}", cc.as_ref().unwrap().base_url),
+                "name": name,
+                "subtitle": "Your Claude Code sign-in",
                 "shape": "anthropic",
                 "credential": "claude_code",
                 "model_id": if cc_model.is_empty() { "(default)".to_string() } else { cc_model },
@@ -592,13 +509,14 @@ pub async fn get_providers() -> impl IntoResponse {
         let cred = resolve(&m.credential, &s, &m.base_url_override);
         
         let subtitle = if m.credential == "zwork_router" {
-            if m.model_id.to_lowercase().contains("vision") {
-                "Vision and images".to_string()
-            } else if m.model_id.to_lowercase().contains("pro") {
-                "Most capable model".to_string()
-            } else {
-                "Fast and efficient".to_string()
-            }
+            // Keyed on the lineup slot, not the upstream model it's pinned to.
+            let blurb = match m.id.as_str() {
+                "zwork-pro" => "Most capable model",
+                "zwork-ultimate" => "Frontier model · Max plan",
+                "zwork-vision" => "Vision and images",
+                _ => "Fast and efficient",
+            };
+            if cred.is_some() { blurb.to_string() } else { format!("{blurb} · sign in to zWork to use") }
         } else {
             let base = if !m.base_url_override.is_empty() {
                 m.base_url_override.clone()
@@ -606,28 +524,16 @@ pub async fn get_providers() -> impl IntoResponse {
                 cred.as_ref().map(|c| c.base_url.clone()).unwrap_or_default()
             };
             
+            let catalog = catalog::global();
             let label = match m.credential.as_str() {
-                "anthropic" => "Anthropic",
-                "openai" => "OpenAI-compatible",
-                "claude_code" => "Local credentials",
-                "zwork_router" => "Managed",
-                "ollama" => "Ollama",
-                "groq" => "Groq",
-                "cerebras" => "Cerebras",
-                "deepseek" => "DeepSeek",
-                "zai" => "z.ai",
-                "together" => "Together AI",
-                "mistral" => "Mistral",
-                "perplexity" => "Perplexity",
-                "fireworks" => "Fireworks AI",
-                "openrouter" => "OpenRouter",
-                other => other,
+                "claude_code" => "Local credentials".to_string(),
+                other => catalog.provider(other).map_or_else(|| other.to_string(), |p| p.name.clone()),
             };
-            
+
             if !base.is_empty() {
                 format!("{} · {}", label, base)
             } else {
-                label.to_string()
+                label
             }
         };
 
@@ -672,6 +578,42 @@ pub async fn get_providers() -> impl IntoResponse {
     }))
 }
 
+
+/// Every provider zWork can talk to (models.dev + local), without models.
+/// `GET /api/providers/catalog`
+pub async fn get_provider_catalog() -> impl IntoResponse {
+    let s = settings::load();
+    let catalog = catalog::global();
+    let providers: Vec<Value> = catalog
+        .providers()
+        .map(|p| {
+            json!({
+                "id": p.id,
+                "name": p.name,
+                "supported": p.supported(),
+                "api": p.api.map(|a| a.as_str()),
+                "base_url": p.base_url,
+                "env": p.env,
+                "vars": p.vars,
+                "doc": p.doc,
+                "keyless": p.keyless,
+                "model_count": p.models.len(),
+                "configured": p.supported() && resolve(&p.id, &s, "").is_some(),
+            })
+        })
+        .collect();
+    Json(json!({ "providers": providers }))
+}
+
+/// One provider's models with limits, pricing and capabilities.
+/// `GET /api/providers/catalog/:id`
+pub async fn get_provider_catalog_models(Path(id): Path<String>) -> impl IntoResponse {
+    let catalog = catalog::global();
+    match catalog.provider(&id) {
+        Some(p) => Json(json!({ "id": p.id, "name": p.name, "models": p.models })).into_response(),
+        None => (axum::http::StatusCode::NOT_FOUND, Json(json!({ "error": "unknown provider" }))).into_response(),
+    }
+}
 
 pub async fn get_settings() -> impl IntoResponse {
     let s = settings::load();
@@ -767,7 +709,32 @@ pub async fn create_chat(Json(req): Json<CreateChatRequest>) -> impl IntoRespons
 
 pub async fn get_chat(Path(chat_id): Path<String>) -> impl IntoResponse {
     match chatstore::get(&chat_id) {
-        Some(chat) => Json(json!(chat)),
+        Some(chat) => {
+            let mut body = json!(chat);
+            // Lets the app tell a reply still being written apart from one
+            // that ended without any text (a failed run).
+            body["running"] = json!(crate::agent::run_state::live_run(&chat_id).is_some());
+            Json(body)
+        }
+        None => Json(json!({ "error": "Chat not found" })),
+    }
+}
+
+/// Token/cost usage for one chat: cumulative totals plus a per-message
+/// breakdown (assistant rows only). Covers BYOK / claude_code / Ollama turns
+/// that cloud analytics never see.
+pub async fn chat_usage(Path(chat_id): Path<String>) -> impl IntoResponse {
+    match chatstore::get(&chat_id) {
+        Some(chat) => Json(json!({
+            "chat_id": chat.id,
+            "totals": chat.usage_totals,
+            "messages": chat
+                .messages
+                .iter()
+                .filter(|m| m.role == "assistant")
+                .filter_map(|m| m.usage.as_ref().map(|u| json!({ "message_id": m.id, "usage": u })))
+                .collect::<Vec<_>>(),
+        })),
         None => Json(json!({ "error": "Chat not found" })),
     }
 }
@@ -806,8 +773,16 @@ pub async fn patch_message(
 }
 
 pub async fn stop_chat(Path(chat_id): Path<String>) -> impl IntoResponse {
+    // Durable abort first so the open operation reconciles as cancelled
+    // (never auto-resumes) even when the task is killed before it settles.
+    // Unconsumed steer/follow-up messages come back for the composer.
+    let stop = crate::agent::run_state::request_stop(&chat_id).await;
     let stopped = crate::watchdog::cancel_run(&chat_id);
-    Json(json!({ "success": stopped }))
+    Json(json!({
+        "success": stopped || stop.requested,
+        "steer": stop.steer,
+        "follow_up": stop.follow_up,
+    }))
 }
 
 pub async fn approve_gate(Path((_chat_id, gate_id)): Path<(String, String)>) -> impl IntoResponse {
@@ -818,6 +793,89 @@ pub async fn approve_gate(Path((_chat_id, gate_id)): Path<(String, String)>) -> 
 pub async fn reject_gate(Path((_chat_id, gate_id)): Path<(String, String)>) -> impl IntoResponse {
     let ok = crate::agent::reject_gate(&gate_id);
     Json(json!({ "success": ok }))
+}
+
+/// Unanswered permission gates for a chat, for polling after a stream
+/// drop (the gate card lives on the SSE stream; without this a
+/// disconnected UI silently eats the 10-minute auto-deny).
+pub async fn list_chat_gates(Path(chat_id): Path<String>) -> impl IntoResponse {
+    Json(json!({ "gates": crate::agent::run_state::chat_gates(&chat_id) }))
+}
+
+#[derive(Deserialize, Debug)]
+pub struct QueueMessageRequest {
+    pub message: String,
+}
+
+fn queue_outcome_json<T: serde::Serialize>(outcome: crate::agent::run_state::QueueOutcome<T>) -> Json<Value> {
+    use crate::agent::run_state::QueueOutcome;
+    match outcome {
+        QueueOutcome::Done(value) => Json(json!({ "queued": true, "result": value })),
+        QueueOutcome::NotBusy => Json(json!({ "queued": false, "reason": "not-busy" })),
+        QueueOutcome::Failed(error) => Json(json!({ "queued": false, "reason": "error", "error": error })),
+    }
+}
+
+/// Steer the live run (message joins the current operation at its next
+/// checkpoint).
+pub async fn steer_chat(Path(chat_id): Path<String>, Json(req): Json<QueueMessageRequest>) -> impl IntoResponse {
+    queue_outcome_json(crate::agent::run_state::steer(&chat_id, &req.message).await)
+}
+
+/// Queue a follow-up message for when the live run finishes.
+pub async fn follow_up_chat(Path(chat_id): Path<String>, Json(req): Json<QueueMessageRequest>) -> impl IntoResponse {
+    queue_outcome_json(crate::agent::run_state::queue_follow_up(&chat_id, &req.message).await)
+}
+
+/// Queue a whole next run.
+pub async fn next_run_chat(Path(chat_id): Path<String>, Json(req): Json<QueueMessageRequest>) -> impl IntoResponse {
+    queue_outcome_json(crate::agent::run_state::queue_next_run(&chat_id, &req.message).await)
+}
+
+/// Snapshot the live run's queued items.
+pub async fn list_chat_queue(Path(chat_id): Path<String>) -> impl IntoResponse {
+    match crate::agent::run_state::queued(&chat_id).await {
+        crate::agent::run_state::QueueOutcome::Done(items) => Json(json!({ "live": true, "items": items })),
+        _ => Json(json!({ "live": false, "items": [] })),
+    }
+}
+
+/// Cancel one queued item; "cancelled"/"not_found" mean the composer
+/// should restore the message, "consumed" means the run already took it.
+pub async fn cancel_chat_queue(Path((chat_id, entry_id)): Path<(String, String)>) -> impl IntoResponse {
+    queue_outcome_json(crate::agent::run_state::cancel_queued(&chat_id, &entry_id).await)
+}
+
+#[derive(Deserialize, Debug)]
+pub struct QueueModeRequest {
+    pub steering: Option<String>,
+    #[serde(rename = "followUp")]
+    pub follow_up: Option<String>,
+}
+
+/// Set steering / follow-up queue modes ("all" | "one-at-a-time").
+pub async fn put_chat_queue_mode(Path(chat_id): Path<String>, Json(req): Json<QueueModeRequest>) -> impl IntoResponse {
+    queue_outcome_json(crate::agent::run_state::set_queue_modes(
+        &chat_id,
+        req.steering.as_deref(),
+        req.follow_up.as_deref(),
+    ))
+}
+
+/// Re-attach to a live run's event stream: replays from `?after=<cursor>`
+/// (the last seq the client saw) then streams live until the run ends.
+/// Without a live run, emits one `run_state { live: false }` event.
+pub async fn chat_run_live(
+    Path(chat_id): Path<String>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let cursor = params.get("after").and_then(|v| v.parse::<u64>().ok());
+    let stream = crate::agent::run_state::attach_or_idle(&chat_id, cursor);
+    let mapped = stream.map(|val| {
+        let s = serde_json::to_string(&val).unwrap_or_default();
+        Ok::<Event, Infallible>(Event::default().data(s))
+    });
+    Sse::new(mapped).keep_alive(axum::response::sse::KeepAlive::default())
 }
 
 // SSE Chat Stream Endpoint
@@ -834,7 +892,7 @@ pub async fn chat_stream_route(
         chat.id
     });
 
-    let model_id = req.model.unwrap_or_else(|| "deepseek-v4-flash".to_string());
+    let model_id = req.model.unwrap_or_else(|| "deepseek-flash".to_string());
     let project_id = req.project_id.unwrap_or_default();
 
     // Plan mode can be toggled by the explicit flag OR by keywords in the
@@ -1067,10 +1125,16 @@ pub async fn list_skills() -> impl IntoResponse {
             "slug": s.slug,
             "name": s.name,
             "description": s.description,
-            "path": s.path.to_string_lossy().to_string()
+            "path": s.path.to_string_lossy().to_string(),
+            "source": s.source
         })
     }).collect();
     Json(serde_json::json!({ "skills": serialized }))
+}
+
+/// What `/` offers in the composer: prompt-file commands and skills.
+pub async fn list_commands() -> impl IntoResponse {
+    Json(json!({ "commands": crate::commands::list() }))
 }
 
 pub async fn list_projects() -> impl IntoResponse {
@@ -1339,15 +1403,18 @@ pub async fn upsert_custom_model(
     // Validate shape + credential so garbage values can't be persisted. The
     // Python backend rejected these with a 400; without this, a bad shape
     // silently produces malformed provider requests later.
-    let valid_shapes = ["anthropic", "openai"];
-    if !valid_shapes.contains(&req.shape.as_str()) {
+    let shape_ok = matches!(req.shape.as_str(), "" | "auto") || catalog::api_for_shape(&req.shape).is_some();
+    if !shape_ok {
         return (axum::http::StatusCode::BAD_REQUEST, Json(json!({
-            "error": format!("invalid shape '{}': must be one of {:?}", req.shape, valid_shapes)
+            "error": format!("invalid shape '{}': use auto, anthropic, openai, openai-responses or google", req.shape)
         }))).into_response();
     }
-    if !settings::KNOWN_CREDENTIALS.contains(&req.credential.as_str()) {
+    let credential_ok = settings::KNOWN_CREDENTIALS.contains(&req.credential.as_str())
+        || catalog::global().provider(&req.credential).is_some()
+        || (!req.base_url_override.trim().is_empty() && crate::paths::is_safe_id(&req.credential));
+    if !credential_ok {
         return (axum::http::StatusCode::BAD_REQUEST, Json(json!({
-            "error": format!("invalid credential '{}': must be one of {:?}", req.credential, settings::KNOWN_CREDENTIALS)
+            "error": format!("unknown provider '{}'", req.credential)
         }))).into_response();
     }
 
@@ -1532,6 +1599,51 @@ pub async fn truncate_message(
     Json(body): Json<PatchMessageRequest>,
 ) -> impl IntoResponse {
     let result = chatstore::truncate_at_message(&chat_id, &message_id, body.content);
+    Json(json!({ "success": result.is_some(), "chat": result }))
+}
+
+#[derive(Deserialize)]
+pub struct ForkChatRequest {
+    pub at_message_id: Option<String>,
+    #[serde(default)]
+    pub before: bool,
+}
+
+/// Fork a chat at (or before) a message: ancestry copies into a new chat,
+/// source untouched. Usage totals start at zero (pi fork policy).
+pub async fn fork_chat(Path(chat_id): Path<String>, Json(body): Json<ForkChatRequest>) -> impl IntoResponse {
+    let result = chatstore::fork_chat(&chat_id, body.at_message_id.as_deref(), body.before);
+    match result {
+        Some(chat) => Json(json!({ "success": true, "chat": chat })),
+        None => Json(json!({ "success": false, "error": "Chat or message not found" })),
+    }
+}
+
+/// Parked branch tails (rewind history) for the branch picker.
+pub async fn list_branches(Path(chat_id): Path<String>) -> impl IntoResponse {
+    match chatstore::get(&chat_id) {
+        Some(chat) => Json(json!({
+            "branches": chat.branches.iter().map(|b| json!({
+                "id": b.id,
+                "created_at": b.created_at,
+                "from_message_id": b.from_message_id,
+                "message_count": b.messages.len(),
+                "preview": b.messages.first()
+                    .map(|m| chatstore::content_to_text(&m.content).chars().take(80).collect::<String>())
+                    .unwrap_or_default(),
+            })).collect::<Vec<_>>(),
+        })),
+        None => Json(json!({ "error": "Chat not found" })),
+    }
+}
+
+pub async fn restore_branch(Path((chat_id, branch_id)): Path<(String, String)>) -> impl IntoResponse {
+    let result = chatstore::restore_branch(&chat_id, &branch_id);
+    Json(json!({ "success": result.is_some(), "chat": result }))
+}
+
+pub async fn delete_branch(Path((chat_id, branch_id)): Path<(String, String)>) -> impl IntoResponse {
+    let result = chatstore::delete_branch(&chat_id, &branch_id);
     Json(json!({ "success": result.is_some(), "chat": result }))
 }
 
@@ -1800,7 +1912,7 @@ pub async fn scrape_url(Json(body): Json<ScrapeRequest>) -> impl IntoResponse {
         Ok(resp) => {
             let html = resp.text().await.unwrap_or_default();
             let title = extract_html_title(&html);
-            let markdown = html_to_markdown(&html);
+            let markdown = crate::harness::tools::web_fetch::html_to_markdown(&html);
             Json(json!({ "markdown": markdown, "title": title }))
         }
         Err(e) => Json(json!({ "error": format!("Failed to fetch: {}", e), "markdown": "", "title": "" })),
@@ -1819,78 +1931,20 @@ pub struct RefactorRequest {
 fn default_clean() -> String { "clean".to_string() }
 
 pub async fn refactor_code(Json(body): Json<RefactorRequest>) -> impl IntoResponse {
-    // Simple refactor: use LLM with non-streaming call
-    let s = settings::load();
-    let model_id = if !s.default_model.is_empty() { &s.default_model } else { "deepseek-v4-flash" };
-
-    let (api_key, base_url, shape, real_model) = if let Some(m) = s.custom_models.iter().find(|m| m.id == model_id) {
-        let real = if m.model_id.is_empty() { "deepseek-v4-flash".to_string() } else { m.model_id.clone() };
-        if let Some(cred) = resolve(&m.credential, &s, &m.base_url_override) {
-            (cred.api_key, cred.base_url, m.shape.clone(), real)
-        } else {
-            return Json(json!({ "error": "No credentials configured for refactoring model" }));
-        }
-    } else {
-        match resolve("zwork_router", &s, "") {
-            Some(cred) => (cred.api_key, cred.base_url, "anthropic".to_string(), "deepseek-v4-flash".to_string()),
-            None => return Json(json!({ "error": "No model credentials available" })),
-        }
-    };
-
-    let endpoint = if shape == "anthropic" {
-        format!("{}/v1/messages", base_url)
-    } else {
-        format!("{}/chat/completions", base_url)
-    };
-
     let system = format!(
         "You are a code refactoring assistant. Given code and an instruction, return ONLY a JSON object with keys: refactored_code, explanation, steps (array of strings). No markdown fences.\n\nMODE: {}\nINSTRUCTION: {}",
         body.mode, body.instruction
     );
-
     let user_msg = format!("MODE: {}\nINSTRUCTION: {}\n\nCode:\n{}", body.mode, body.instruction, body.code);
-    let convo = json!([
-        {"role": "user", "content": user_msg}
-    ]);
-
-    let req_body = if shape == "anthropic" {
-        json!({ "model": real_model, "system": system, "messages": convo, "max_tokens": 4096 })
-    } else {
-        let mut msgs = vec![json!({"role": "system", "content": system})];
-        if let Some(arr) = convo.as_array() { msgs.extend(arr.clone()); }
-        json!({ "model": real_model, "messages": msgs, "max_tokens": 4096 })
-    };
-
-    let client = reqwest::Client::new();
-    let mut req = client.post(&endpoint).json(&req_body);
-    if shape == "anthropic" {
-        req = req.header("x-api-key", &api_key).header("anthropic-version", "2023-06-01");
-    } else {
-        req = req.header("authorization", format!("Bearer {}", api_key));
-    }
-
-    match req.send().await {
-        Ok(resp) => {
-            let text = resp.text().await.unwrap_or_default();
-            // Try to extract the content from the response
-            if let Ok(val) = serde_json::from_str::<Value>(&text) {
-                let content = if shape == "anthropic" {
-                    val.get("content").and_then(|c| c.get(0)).and_then(|c| c.get("text")).and_then(|t| t.as_str()).unwrap_or(&text).to_string()
-                } else {
-                    val.get("choices").and_then(|c| c.get(0)).and_then(|c| c.get("message")).and_then(|m| m.get("content")).and_then(|t| t.as_str()).unwrap_or(&text).to_string()
-                };
-                // Try parsing as JSON, strip markdown fences if present
-                let cleaned = content.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
-                if let Ok(parsed) = serde_json::from_str::<Value>(cleaned) {
-                    Json(parsed)
-                } else {
-                    Json(json!({ "refactored_code": content, "explanation": "", "steps": [] }))
-                }
-            } else {
-                Json(json!({ "error": "Failed to parse LLM response", "raw": text }))
+    match crate::agent::harness_turn::complete_text(&system, &user_msg, 4096).await {
+        Ok(content) => {
+            let cleaned = content.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
+            match serde_json::from_str::<Value>(cleaned) {
+                Ok(parsed) => Json(parsed),
+                Err(_) => Json(json!({ "refactored_code": content, "explanation": "", "steps": [] })),
             }
         }
-        Err(e) => Json(json!({ "error": format!("LLM request failed: {}", e) })),
+        Err(e) => Json(json!({ "error": e })),
     }
 }
 
@@ -2204,51 +2258,6 @@ fn extract_html_title(html: &str) -> String {
     String::new()
 }
 
-fn html_to_markdown(html: &str) -> String {
-    let mut text = html.to_string();
-    // Strip script and style blocks
-    let re_script = regex::Regex::new(r"(?is)<script[^>]*>.*?</script>").ok();
-    let re_style = regex::Regex::new(r"(?is)<style[^>]*>.*?</style>").ok();
-    if let Some(re) = re_script { text = re.replace_all(&text, "").to_string(); }
-    if let Some(re) = re_style { text = re.replace_all(&text, "").to_string(); }
-    // Headers
-    for level in 1..=6 {
-        let tag = format!("h{}", level);
-        let prefix = "#".repeat(level);
-        let re_open = regex::Regex::new(&format!(r"(?i)<{}\s*[^>]*>", tag)).ok();
-        let re_close = regex::Regex::new(&format!(r"(?i)</{}>", tag)).ok();
-        if let Some(re) = re_open { text = re.replace_all(&text, &format!("\n{} ", prefix)).to_string(); }
-        if let Some(re) = re_close { text = re.replace_all(&text, "\n").to_string(); }
-    }
-    // Paragraphs and line breaks
-    let re_p = regex::Regex::new(r"(?i)<p\s*[^>]*>").ok();
-    let re_p_close = regex::Regex::new(r"(?i)</p>").ok();
-    let re_br = regex::Regex::new(r"(?i)<br\s*/?\s*>").ok();
-    if let Some(re) = re_p { text = re.replace_all(&text, "\n").to_string(); }
-    if let Some(re) = re_p_close { text = re.replace_all(&text, "\n").to_string(); }
-    if let Some(re) = re_br { text = re.replace_all(&text, "\n").to_string(); }
-    // Links
-    let re_link = regex::Regex::new(r#"(?i)<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>"#).ok();
-    if let Some(re) = re_link { text = re.replace_all(&text, "[$2]($1)").to_string(); }
-    // Bold and italic
-    let re_b = regex::Regex::new(r"(?i)</?(b|strong)>").ok();
-    let re_i = regex::Regex::new(r"(?i)</?(i|em)>").ok();
-    if let Some(re) = re_b { text = re.replace_all(&text, "**").to_string(); }
-    if let Some(re) = re_i { text = re.replace_all(&text, "*").to_string(); }
-    // List items
-    let re_li = regex::Regex::new(r"(?i)<li[^>]*>").ok();
-    if let Some(re) = re_li { text = re.replace_all(&text, "- ").to_string(); }
-    // Strip remaining tags
-    let re_tag = regex::Regex::new(r"<[^>]+>").ok();
-    if let Some(re) = re_tag { text = re.replace_all(&text, "").to_string(); }
-    // Decode HTML entities
-    text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'");
-    // Collapse whitespace
-    let re_ws = regex::Regex::new(r"\n{3,}").ok();
-    if let Some(re) = re_ws { text = re.replace_all(&text, "\n\n").to_string(); }
-    text.trim().to_string()
-}
-
 // ─── Tasks ────────────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -2525,18 +2534,152 @@ pub async fn delete_inbox_item(Path(item_id): Path<String>) -> impl IntoResponse
 }
 
 // ─── MCP ─────────────────────────────────────────────────────────────────────
-// Reads configured stdio servers from ~/.zwork/mcp.json, probes each for
-// readiness + tool count, and lists their tools. See `mcp.rs`.
+// Connector management over `connectors::mcp`: list/add/remove/toggle servers
+// in ~/.zwork/mcp.json, retry a connection, and import from other apps.
+
+/// Managed runtime (Python + Node) status for Settings.
+pub async fn runtime_status() -> impl IntoResponse {
+    Json(json!({ "status": crate::runtime::status(), "dir": crate::runtime::dir() }))
+}
+
+/// Start (or retry) the managed runtime install.
+pub async fn runtime_install() -> impl IntoResponse {
+    crate::runtime::ensure_in_background();
+    Json(json!({ "status": crate::runtime::status() }))
+}
 
 pub async fn mcp_servers() -> impl IntoResponse {
-    let config_path = crate::paths::home_dir().join("mcp.json");
-    let servers = crate::mcp::server_status();
+    let config_path = crate::connectors::mcp::config::config_path();
+    let servers = crate::connectors::mcp::status().await;
     Json(json!({ "servers": servers, "config_path": config_path.to_string_lossy() }))
 }
 
 pub async fn mcp_tools() -> impl IntoResponse {
-    let tools = crate::mcp::all_tool_schemas();
+    let tools: Vec<Value> = crate::connectors::mcp::status()
+        .await
+        .into_iter()
+        .flat_map(|s| {
+            let server = s.name;
+            s.tools.into_iter().map(move |t| {
+                json!({
+                    "name": crate::connectors::mcp::tool::tool_name(&server, &t.name),
+                    "server": server,
+                    "description": t.description,
+                    "read_only": t.read_only,
+                })
+            })
+        })
+        .collect();
     Json(json!({ "tools": tools }))
+}
+
+#[derive(Deserialize)]
+pub struct McpAddRequest {
+    /// One server: `name` + a config entry in any dialect.
+    name: Option<String>,
+    config: Option<Value>,
+    /// Or a pasted JSON snippet (`{"mcpServers": {...}}`, `{"name": {...}}`, …).
+    paste: Option<String>,
+}
+
+/// Save one or more servers, then connect them so the reply says whether
+/// they work.
+pub async fn mcp_add(Json(req): Json<McpAddRequest>) -> impl IntoResponse {
+    use crate::connectors::mcp;
+    let specs = match (&req.name, &req.config, &req.paste) {
+        (Some(name), Some(entry), _) => mcp::config::parse_entry(name.trim(), entry).into_iter().collect(),
+        (_, _, Some(text)) => {
+            let text = mcp::config::strip_jsonc(text);
+            match serde_json::from_str::<Value>(&text) {
+                Ok(doc) => mcp::parse_pasted(&doc),
+                Err(e) => return (axum::http::StatusCode::BAD_REQUEST, Json(json!({ "error": format!("That isn't valid JSON: {e}") }))),
+            }
+        }
+        _ => Vec::new(),
+    };
+    if specs.is_empty() {
+        return (
+            axum::http::StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "No server found — give it a command (e.g. `npx -y …`) or a URL." })),
+        );
+    }
+    let mut results = Vec::new();
+    for spec in specs {
+        let name = spec.name.clone();
+        if let Err(e) = mcp::upsert(spec) {
+            return (axum::http::StatusCode::BAD_REQUEST, Json(json!({ "error": e })));
+        }
+        let error = mcp::connect(&name).await.err();
+        results.push(json!({ "name": name, "ok": error.is_none(), "error": error }));
+    }
+    (axum::http::StatusCode::OK, Json(json!({ "success": true, "results": results })))
+}
+
+pub async fn mcp_remove(Path(name): Path<String>) -> impl IntoResponse {
+    match crate::connectors::mcp::remove(&name) {
+        Ok(found) => Json(json!({ "success": found })),
+        Err(e) => Json(json!({ "success": false, "error": e })),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct McpEnabledRequest {
+    enabled: bool,
+}
+
+pub async fn mcp_set_enabled(Path(name): Path<String>, Json(req): Json<McpEnabledRequest>) -> impl IntoResponse {
+    use crate::connectors::mcp;
+    match mcp::set_enabled(&name, req.enabled) {
+        Ok(true) if req.enabled => {
+            let error = mcp::connect(&name).await.err();
+            Json(json!({ "success": true, "error": error }))
+        }
+        Ok(found) => Json(json!({ "success": found })),
+        Err(e) => Json(json!({ "success": false, "error": e })),
+    }
+}
+
+pub async fn mcp_connect(Path(name): Path<String>) -> impl IntoResponse {
+    match crate::connectors::mcp::connect(&name).await {
+        Ok(()) => Json(json!({ "success": true })),
+        Err(e) => Json(json!({ "success": false, "error": e })),
+    }
+}
+
+pub async fn mcp_discover() -> impl IntoResponse {
+    Json(crate::connectors::mcp::discover())
+}
+
+#[derive(Deserialize)]
+pub struct McpImportRequest {
+    /// Source id from `/api/mcp/discover` (e.g. `cursor`).
+    source: String,
+    /// Server names to import; empty imports all not already added.
+    #[serde(default)]
+    names: Vec<String>,
+}
+
+pub async fn mcp_import(Json(req): Json<McpImportRequest>) -> impl IntoResponse {
+    use crate::connectors::mcp;
+    let existing: Vec<String> = mcp::config::load().into_iter().map(|s| s.name).collect();
+    let Some((_, specs)) = mcp::config::discover().into_iter().find(|(src, _)| src.id == req.source) else {
+        return Json(json!({ "success": false, "error": "nothing to import from that app" }));
+    };
+    let mut imported = Vec::new();
+    for spec in specs {
+        let wanted = if req.names.is_empty() { !existing.contains(&spec.name) } else { req.names.contains(&spec.name) };
+        if !wanted {
+            continue;
+        }
+        let name = spec.name.clone();
+        if let Err(e) = mcp::upsert(spec) {
+            return Json(json!({ "success": false, "error": e, "imported": imported }));
+        }
+        imported.push(name);
+    }
+    // Connect in the background; the settings list shows progress.
+    crate::connectors::mcp::warm_up();
+    Json(json!({ "success": true, "imported": imported }))
 }
 
 // ─── Composio ────────────────────────────────────────────────────────────────
@@ -2545,7 +2688,7 @@ pub async fn mcp_tools() -> impl IntoResponse {
 // `cloud-src/api/src/main.rs` (composio_* handlers).
 
 pub async fn composio_status() -> impl IntoResponse {
-    Json(crate::composio::status().await)
+    Json(crate::connectors::composio::status().await)
 }
 
 /// Composio is configured entirely server-side; there's no client API key to
@@ -2554,13 +2697,13 @@ pub async fn composio_status() -> impl IntoResponse {
 pub async fn composio_set_config() -> impl IntoResponse {
     Json(json!({
         "ok": true,
-        "configured": crate::composio::is_configured(),
+        "configured": crate::connectors::composio::is_configured(),
         "note": "Composio is configured via the zWork Cloud account token (zwork_router).",
     }))
 }
 
 pub async fn composio_accounts() -> impl IntoResponse {
-    Json(crate::composio::accounts().await)
+    Json(crate::connectors::composio::accounts().await)
 }
 
 #[derive(Deserialize)]
@@ -2569,7 +2712,7 @@ pub struct ComposioAppRequest {
 }
 
 pub async fn composio_connect(Json(body): Json<ComposioAppRequest>) -> impl IntoResponse {
-    match crate::composio::connect(body.app.trim()).await {
+    match crate::connectors::composio::connect(body.app.trim()).await {
         Ok(v) => Json(v).into_response(),
         Err(msg) => (
             axum::http::StatusCode::BAD_REQUEST,
@@ -2580,7 +2723,7 @@ pub async fn composio_connect(Json(body): Json<ComposioAppRequest>) -> impl Into
 }
 
 pub async fn composio_disconnect(Json(body): Json<ComposioAppRequest>) -> impl IntoResponse {
-    match crate::composio::disconnect(body.app.trim()).await {
+    match crate::connectors::composio::disconnect(body.app.trim()).await {
         Ok(v) => Json(v).into_response(),
         Err(msg) => (
             axum::http::StatusCode::BAD_REQUEST,
@@ -2592,7 +2735,7 @@ pub async fn composio_disconnect(Json(body): Json<ComposioAppRequest>) -> impl I
 
 /// Returns a curated list of supported apps so the Connectors page grid renders.
 pub async fn composio_apps() -> impl IntoResponse {
-    Json(crate::composio::apps())
+    Json(crate::connectors::composio::apps())
 }
 
 // ---- Ollama ----
@@ -2853,4 +2996,18 @@ pub async fn ollama_pull(
     });
 
     Sse::new(sse_stream).into_response()
+}
+
+#[cfg(test)]
+mod claude_model_tests {
+    use super::resolve_claude_alias;
+
+    #[test]
+    fn aliases_follow_claude_code() {
+        let none = |_: &str| None;
+        assert_eq!(resolve_claude_alias("opus[1m]", none), "claude-opus-5-5");
+        assert_eq!(resolve_claude_alias("deepseek-v4-pro", none), "deepseek-v4-pro");
+        let pinned = |k: &str| (k == "ANTHROPIC_DEFAULT_SONNET_MODEL").then(|| "glm-5".to_string());
+        assert_eq!(resolve_claude_alias("sonnet", pinned), "glm-5");
+    }
 }

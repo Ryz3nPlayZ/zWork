@@ -32,6 +32,7 @@ cd zWork
 - **Node.js** 20+ for frontend builds
 - **Rust** stable for the Tauri shell and the local + cloud backends
 - **Docker** for local cloud infrastructure testing
+- **Python 3** for a few scripts (`scripts/check-version-sync.py`, `telemetry-collector/`)
 
 ### Running Locally
 
@@ -40,33 +41,39 @@ cd zWork
 ```
 
 This script:
-1. Installs frontend dependencies
-2. Starts the Tauri development window (which spawns the Rust backend)
+1. Builds and stages the Rust backend if it is missing or older than `sidecar-rust/`
+2. Installs frontend dependencies on first run
+3. Starts the Tauri development window (which spawns the backend)
 
-### Development Workflow
+Frontend edits hot-reload; backend edits take effect the next time you start
+`./run.sh`. The [Developer Guide](docs/DEVELOPER_GUIDE.md) covers the rest:
+where things live, adding tools and screens, logs, env vars and debugging.
 
-```bash
-# Frontend dev server (separate terminal)
-cd app && npm run dev
-
-# Full desktop build (frontend + Rust backend + native shell)
-cd app && npm run tauri build
-```
+Release builds go through `scripts/` (see [scripts/README.md](scripts/README.md)),
+not `npm run tauri build` directly, because they stage the backend and bundled
+resources first.
 
 ## Project Structure
 
 ```
 zWork/
-├── app/                    # Tauri frontend application
-│   ├── src/               # React components and logic
-│   ├── src-tauri/         # Rust desktop shell (spawns the backend, manages cua-driver)
-│   └── package.json       # Frontend dependencies
-├── sidecar-rust/          # Rust local backend (axum HTTP+WS server, agent, tools)
-├── cloud-src/            # Cloud infrastructure source
-│   ├── auth/             # Better Auth integration
-│   ├── api/              # Rust Axum HTTP handlers
-│   └── deploy/           # Docker and deployment configs
-└── docs/                 # Project documentation
+├── app/                   # Desktop app
+│   ├── src/               # React frontend (components/, lib/)
+│   └── src-tauri/         # Tauri shell: spawns the backend, manages cua-driver
+├── sidecar-rust/          # Local backend: axum HTTP/SSE server, agent harness, tools
+├── cloud-src/             # Cloud stack
+│   ├── api/               # Rust axum API: auth, gateway, billing, admin
+│   ├── auth/              # Better Auth service
+│   ├── db/                # Postgres schema
+│   ├── Caddyfile          # Public routing
+│   └── docker-compose.yml # Service topology
+├── admin-web/             # Admin dashboard (admin.tryzwork.app)
+├── landing/               # Marketing site (tryzwork.app)
+├── telemetry-collector/   # Optional self-hosted telemetry sink + analyzer
+├── bench/                 # SWE-bench harness
+├── zWork-Skills/          # Skills bundled into the app
+├── scripts/               # Build, release, deploy, install
+└── docs/                  # Documentation
 ```
 
 ## Contribution Guidelines
@@ -84,13 +91,14 @@ When reporting bugs, please include:
 1. Fork the repository
 2. Create a branch for your feature (`git checkout -b feature/amazing-feature`)
 3. Write tests for new functionality
-4. Ensure `cargo test` passes in `sidecar-rust/` and `npm run build` passes in `app/`
+4. Ensure `cargo test` passes in `sidecar-rust/` and `npm run build` passes in `app/` (and in `admin-web/` if you touched `app/src/components/admin` or `page/`)
 5. Submit a pull request with a clear description
 
 ### Code Style
 
 - **TypeScript**: Follow the existing patterns, use strict mode
-- **Rust**: `cargo fmt` and `cargo clippy` should pass
+- **Rust**: match the surrounding code. The tree is not `rustfmt`-clean yet, so don't reformat whole files you aren't otherwise changing.
+- **UI**: follow [design.md](design.md)
 
 ### Testing
 
@@ -108,7 +116,9 @@ For information on building release artifacts (`.dmg`, `.exe`, `.AppImage`), see
 
 ## Documentation
 
+- [Developer Guide](docs/DEVELOPER_GUIDE.md) — Commands, layout, debugging
 - [Architecture Overview](docs/ARCHITECTURE.md) — System design and data flow
+- [Backend Code Map](docs/CODEMAP_BACKENDS.md) and [Desktop Code Map](docs/CODEMAP_DESKTOP.md)
 - [Authentication](docs/AUTH.md) — Auth flow and session management
 - [Cloud Deployment](docs/CLOUD.md) — Infrastructure and deployment guide
 - [Use Cases](docs/USE_CASES.md) — Product framing and target workflows

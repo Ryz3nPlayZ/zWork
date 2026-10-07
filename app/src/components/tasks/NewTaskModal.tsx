@@ -151,7 +151,7 @@ export function NewTaskModal({
 
   return (
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-ink/30 animate-fade-in"
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 backdrop-blur-sm px-4 animate-fade-in"
       onClick={onClose}
     >
       <div

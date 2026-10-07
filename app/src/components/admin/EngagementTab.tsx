@@ -1,13 +1,24 @@
-import { useEffect, useState } from "react";
-import { Activity, Users, Repeat, Sparkles } from "lucide-react";
+import { useState } from "react";
+import { Activity, Users, Sparkles, UserPlus } from "lucide-react";
 import {
   AreaChartCard,
   BarChartCard,
+  DataTable,
   LineChartCard,
+  StatCard,
+  StatGrid,
+  TabStatus,
+  TabToolbar,
+  TierBadge,
+  TONE_COLOR,
+  UserCell,
+  WindowPicker,
+  type ApiFetch,
   type SeriesPoint,
+  useAdminData,
 } from "./shared";
-import { cn } from "../../lib/cn";
-import { formatDate, formatNumber } from "./format";
+import { SectionHeading } from "../page/Page";
+import { formatNumber, formatRelative, formatUsd, shortDate } from "./format";
 
 interface EngagementDayPoint {
   date: string;
@@ -39,203 +50,123 @@ interface EngagementOverview {
   top_active_users: AdminUserLite[];
 }
 
-function StatCard({
-  label,
-  value,
-  sub,
-  icon: Icon,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  icon: React.ElementType;
-}) {
-  return (
-    <div className="rounded-xl border border-line bg-paper-raised p-4">
-      <div className="flex items-center gap-2 text-ink-muted">
-        <Icon className="h-4 w-4" />
-        <span className="text-xs font-medium uppercase tracking-wide">{label}</span>
-      </div>
-      <div className="mt-2 text-2xl font-semibold text-ink">{value}</div>
-      {sub && <div className="mt-0.5 text-xs text-ink-muted">{sub}</div>}
-    </div>
-  );
-}
-
-export function EngagementTab({ apiFetch }: { apiFetch: <T>(path: string) => Promise<T> }) {
-  const [data, setData] = useState<EngagementOverview | null>(null);
+export function EngagementTab({ apiFetch, refreshKey }: { apiFetch: ApiFetch; refreshKey: number }) {
   const [days, setDays] = useState(30);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
+  const { data, loading, error, reload } = useAdminData<EngagementOverview>(
+    apiFetch,
+    `/api/admin/metrics/engagement?days=${days}`,
+    refreshKey,
+  );
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setErr("");
-    apiFetch<EngagementOverview>(`/api/admin/metrics/engagement?days=${days}`)
-      .then((d) => !cancelled && setData(d))
-      .catch((e) => !cancelled && setErr(e instanceof Error ? e.message : String(e)))
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
-  }, [days, apiFetch]);
-
-  if (loading && !data) {
-    return <div className="flex items-center justify-center py-20 text-sm text-ink-muted">Loading…</div>;
-  }
-  if (err || !data) {
-    return <div className="flex items-center justify-center py-20 text-sm text-red-500">{err || "No data"}</div>;
+  const toolbar = (
+    <TabToolbar>
+      <WindowPicker value={days} options={[7, 30, 90]} onChange={setDays} />
+    </TabToolbar>
+  );
+  if (!data) {
+    return (
+      <div className="space-y-5">
+        {toolbar}
+        <TabStatus loading={loading} error={error} onRetry={reload} />
+      </div>
+    );
   }
 
-  const dailyNewReturn: SeriesPoint[] = data.daily.map((d) => ({
-    date: d.date.slice(5),
+  const daily: SeriesPoint[] = data.daily.map((d) => ({
+    date: shortDate(d.date),
+    dau: d.dau,
     new_users: d.new_users,
     returning: d.returning,
-  }));
-  const dailyRequests: SeriesPoint[] = data.daily.map((d) => ({
-    date: d.date.slice(5),
     requests: d.requests,
     tokens: d.tokens,
   }));
-  // Build DAU/WAU/MAU comparison lines (DAU series is our daily; WAU/MAU are
-  // point-in-time so we plot them as flat reference lines).
-  const dailyEngagement: SeriesPoint[] = data.daily.map((d) => ({
-    date: d.date.slice(5),
-    dau: d.dau,
-  }));
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-ink-muted">Window:</span>
-        {[7, 30, 90].map((d) => (
-          <button
-            key={d}
-            onClick={() => setDays(d)}
-            className={cn(
-              "rounded-md px-2 py-1 text-xs font-medium transition-colors",
-              days === d ? "bg-ink text-paper" : "bg-paper-sunken text-ink-muted hover:text-ink",
-            )}
-          >
-            {d}d
-          </button>
-        ))}
-      </div>
+    <div className="space-y-5">
+      {toolbar}
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard icon={Activity} label="DAU (today)" value={data.dau_today.toLocaleString()} />
-        <StatCard icon={Users} label="WAU" value={data.wau.toLocaleString()} sub="7-day active" />
-        <StatCard icon={Users} label="MAU" value={data.mau.toLocaleString()} sub="30-day active" />
+      <StatGrid>
+        <StatCard icon={Activity} label="Active today" value={formatNumber(data.dau_today)} sub={`${formatNumber(data.wau)} this week`} />
+        <StatCard icon={Users} label="Active this month" value={formatNumber(data.mau)} sub="last 30 days" />
         <StatCard
           icon={Sparkles}
           label="Stickiness"
           value={`${data.stickiness_pct.toFixed(1)}%`}
-          sub="DAU / MAU"
+          sub="daily ÷ monthly active"
+          hint="DAU / MAU. 20%+ is healthy for a work tool."
         />
-      </div>
+        <StatCard icon={UserPlus} label="New users" value={formatNumber(data.new_users_in_window)} sub={`last ${data.window_days} days`} />
+      </StatGrid>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <AreaChartCard
             title="Daily active users"
             sub="distinct users per day"
-            data={dailyEngagement}
+            data={daily}
             xKey="date"
-            series={[{ key: "dau", label: "DAU", color: "#6366f1" }]}
+            series={[{ key: "dau", label: "Active" }]}
           />
         </div>
         <BarChartCard
           title="New vs returning"
           sub="per day"
-          data={dailyNewReturn}
+          data={daily}
           xKey="date"
           series={[
-            { key: "new_users", label: "New", color: "#10b981" },
-            { key: "returning", label: "Returning", color: "#3b82f6" },
+            { key: "new_users", label: "New", color: TONE_COLOR.success },
+            { key: "returning", label: "Returning", color: TONE_COLOR.info },
           ]}
           stacked
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <LineChartCard
           title="Requests per day"
-          data={dailyRequests}
+          data={daily}
           xKey="date"
-          series={[{ key: "requests", label: "Requests", color: "#f59e0b" }]}
+          series={[{ key: "requests", label: "Requests" }]}
           valueFormatter={(v) => formatNumber(v)}
         />
         <LineChartCard
           title="Tokens per day"
-          data={dailyRequests}
+          data={daily}
           xKey="date"
-          series={[{ key: "tokens", label: "Tokens", color: "#14b8a6" }]}
+          series={[{ key: "tokens", label: "Tokens", color: TONE_COLOR.info }]}
           valueFormatter={(v) => formatNumber(v)}
         />
       </div>
 
-      {/* Top active users */}
       <div>
-        <div className="mb-3 flex items-center gap-2">
-          <Repeat className="h-4 w-4 text-ink-muted" />
-          <h3 className="text-sm font-semibold text-ink">Top active users</h3>
-          <span className="text-xs text-ink-muted">last {data.window_days} days</span>
-        </div>
-        <div className="overflow-auto rounded-xl border border-line">
-          <table className="w-full text-left text-xs">
-            <thead className="border-b border-line bg-paper-sunken">
-              <tr>
-                <th className="px-3 py-2 font-medium text-ink-muted">User</th>
-                <th className="px-3 py-2 font-medium text-ink-muted">Tier</th>
-                <th className="px-3 py-2 font-medium text-ink-muted">Requests</th>
-                <th className="px-3 py-2 font-medium text-ink-muted">Tokens</th>
-                <th className="px-3 py-2 font-medium text-ink-muted">Est. Cost</th>
-                <th className="px-3 py-2 font-medium text-ink-muted">Last Active</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.top_active_users.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-3 py-6 text-center text-ink-muted">
-                    No activity in this window.
-                  </td>
-                </tr>
-              ) : (
-                data.top_active_users.map((u) => (
-                  <tr key={u.user_id} className="border-b border-line/50 hover:bg-paper-sunken/50">
-                    <td className="px-3 py-2">
-                      <div className="font-medium text-ink">{u.name}</div>
-                      <div className="text-ink-muted">{u.email}</div>
-                    </td>
-                    <td className="px-3 py-2">
-                      <span
-                        className={cn(
-                          "inline-block rounded-full px-2 py-0.5 text-[10px] font-bold uppercase",
-                          u.tier === "max"
-                            ? "bg-purple-100 text-purple-700"
-                            : u.tier === "pro"
-                              ? "bg-blue-100 text-blue-700"
-                              : "bg-gray-100 text-gray-600",
-                        )}
-                      >
-                        {u.tier}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-ink">{formatNumber(u.total_requests)}</td>
-                    <td className="px-3 py-2 text-ink">
-                      {formatNumber(u.total_prompt_tokens + u.total_completion_tokens)}
-                    </td>
-                    <td className="px-3 py-2 text-ink font-medium">${u.estimated_cost_usd.toFixed(2)}</td>
-                    <td className="px-3 py-2 text-ink-muted whitespace-nowrap">
-                      {formatDate(u.last_activity)}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+        <SectionHeading title="Most active users" count={data.top_active_users.length} className="mt-2" />
+        <DataTable
+          rows={data.top_active_users}
+          rowKey={(u) => u.user_id}
+          defaultSort={{ key: "total_requests", dir: "desc" }}
+          empty="No activity in this window."
+          exportName={`top-users-${days}d`}
+          columns={[
+            { key: "email", label: "User", render: (u) => <UserCell name={u.name} email={u.email} /> },
+            { key: "tier", label: "Tier", render: (u) => <TierBadge tier={u.tier} /> },
+            { key: "total_requests", label: "Requests", numeric: true, render: (u) => formatNumber(u.total_requests) },
+            {
+              key: "tokens",
+              label: "Tokens",
+              numeric: true,
+              value: (u) => u.total_prompt_tokens + u.total_completion_tokens,
+              render: (u) => formatNumber(u.total_prompt_tokens + u.total_completion_tokens),
+            },
+            { key: "estimated_cost_usd", label: "Est. cost", numeric: true, render: (u) => formatUsd(u.estimated_cost_usd) },
+            {
+              key: "last_activity",
+              label: "Last active",
+              numeric: true,
+              value: (u) => (u.last_activity ? Date.parse(u.last_activity) : null),
+              render: (u) => <span className="text-ink-muted">{formatRelative(u.last_activity)}</span>,
+            },
+          ]}
+        />
       </div>
     </div>
   );

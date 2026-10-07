@@ -41,7 +41,7 @@ flowchart LR
 
 - `app/` renders the product UI.
 - `app/src-tauri/` launches the desktop shell and local sidecar process.
-- `sidecar/` owns local orchestration, settings, chat streaming, and tool execution.
+- `sidecar-rust/` (binary `rwork-backend`) owns local orchestration, settings, chat streaming, and tool execution. See [CODEMAP_BACKENDS.md](CODEMAP_BACKENDS.md).
 
 In local BYOK mode:
 

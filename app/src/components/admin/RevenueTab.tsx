@@ -1,13 +1,21 @@
-import { useEffect, useState } from "react";
-import { DollarSign, TrendingUp, TrendingDown, Users, Percent } from "lucide-react";
+import { useState } from "react";
+import { DollarSign, TrendingUp, TrendingDown, Users, Percent, Receipt } from "lucide-react";
 import {
   AreaChartCard,
   BarChartCard,
   DonutCard,
-  SERIES_PALETTE,
+  StatCard,
+  StatGrid,
+  TabStatus,
+  TabToolbar,
+  TONE_COLOR,
+  WindowPicker,
+  type ApiFetch,
   type SeriesPoint,
+  type StatTone,
+  useAdminData,
 } from "./shared";
-import { cn } from "../../lib/cn";
+import { formatNumber, formatUsd, shortDate } from "./format";
 
 interface RevenueDayPoint {
   date: string;
@@ -36,146 +44,88 @@ interface RevenueOverview {
 }
 
 const TIER_COLORS: Record<string, string> = {
-  free: "#9ca3af",
-  pro: "#3b82f6",
-  max: "#a855f7",
+  free: TONE_COLOR.muted,
+  pro: TONE_COLOR.info,
+  max: TONE_COLOR.warning,
 };
 
-function StatCard({
-  label,
-  value,
-  sub,
-  icon: Icon,
-  tone = "default",
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  icon: React.ElementType;
-  tone?: "default" | "warn" | "error" | "ok";
-}) {
-  const toneColor =
-    tone === "warn"
-      ? "text-amber-500"
-      : tone === "error"
-        ? "text-red-500"
-        : tone === "ok"
-          ? "text-emerald-500"
-          : "text-ink";
-  return (
-    <div className="rounded-xl border border-line bg-paper-raised p-4">
-      <div className="flex items-center gap-2 text-ink-muted">
-        <Icon className="h-4 w-4" />
-        <span className="text-xs font-medium uppercase tracking-wide">{label}</span>
-      </div>
-      <div className={cn("mt-2 text-2xl font-semibold", toneColor)}>{value}</div>
-      {sub && <div className="mt-0.5 text-xs text-ink-muted">{sub}</div>}
-    </div>
-  );
-}
-
-export function RevenueTab({ apiFetch }: { apiFetch: <T>(path: string) => Promise<T> }) {
-  const [data, setData] = useState<RevenueOverview | null>(null);
+export function RevenueTab({ apiFetch, refreshKey }: { apiFetch: ApiFetch; refreshKey: number }) {
   const [days, setDays] = useState(30);
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
+  const { data, loading, error, reload } = useAdminData<RevenueOverview>(
+    apiFetch,
+    `/api/admin/metrics/revenue?days=${days}`,
+    refreshKey,
+  );
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setErr("");
-    apiFetch<RevenueOverview>(`/api/admin/metrics/revenue?days=${days}`)
-      .then((d) => !cancelled && setData(d))
-      .catch((e) => !cancelled && setErr(e instanceof Error ? e.message : String(e)))
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
-  }, [days, apiFetch]);
-
-  if (loading && !data) {
-    return <div className="flex items-center justify-center py-20 text-sm text-ink-muted">Loading…</div>;
-  }
-  if (err || !data) {
-    return <div className="flex items-center justify-center py-20 text-sm text-red-500">{err || "No data"}</div>;
+  const toolbar = (
+    <TabToolbar>
+      <WindowPicker value={days} options={[7, 30, 90, 365]} onChange={setDays} />
+    </TabToolbar>
+  );
+  if (!data) {
+    return (
+      <div className="space-y-5">
+        {toolbar}
+        <TabStatus loading={loading} error={error} onRetry={reload} />
+      </div>
+    );
   }
 
-  const marginTone = data.gross_margin_pct >= 50 ? "ok" : data.gross_margin_pct >= 0 ? "warn" : "error";
+  const marginTone: StatTone = data.gross_margin_pct >= 50 ? "ok" : data.gross_margin_pct >= 0 ? "warn" : "error";
+  const net = data.new_subs_in_window - data.churned_in_window;
 
   const dailyNet: SeriesPoint[] = data.daily.map((d) => ({
-    date: d.date.slice(5),
+    date: shortDate(d.date),
     new_subs: d.new_subs,
     cancellations: -d.cancellations,
   }));
   const dailyCost: SeriesPoint[] = data.daily.map((d) => ({
-    date: d.date.slice(5),
+    date: shortDate(d.date),
     cost: d.est_cost_usd,
-    margin: data.current_mrr - d.est_cost_usd,
+    // Computed here rather than read from d.margin: older API builds subtracted
+    // a day's cost from the whole month's MRR.
+    margin: Number((data.current_mrr / 30 - d.est_cost_usd).toFixed(2)),
   }));
   const tierDonut = data.tier_split.map((t) => ({
     name: t.tier,
     value: t.users,
-    color: TIER_COLORS[t.tier] ?? SERIES_PALETTE[5],
+    color: TIER_COLORS[t.tier] ?? TONE_COLOR.muted,
   }));
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-ink-muted">Window:</span>
-        {[7, 30, 90, 365].map((d) => (
-          <button
-            key={d}
-            onClick={() => setDays(d)}
-            className={cn(
-              "rounded-md px-2 py-1 text-xs font-medium transition-colors",
-              days === d ? "bg-ink text-paper" : "bg-paper-sunken text-ink-muted hover:text-ink",
-            )}
-          >
-            {d}d
-          </button>
-        ))}
-      </div>
+    <div className="space-y-5">
+      {toolbar}
 
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard icon={DollarSign} label="Current MRR" value={`$${data.current_mrr.toFixed(2)}`} sub={`$${data.arpu.toFixed(2)} ARPU`} />
-        <StatCard icon={Users} label="Paid Users" value={data.paid_users.toLocaleString()} />
+      <StatGrid>
+        <StatCard icon={DollarSign} label="MRR" value={formatUsd(data.current_mrr)} sub={`${formatUsd(data.arpu)} per user (ARPU)`} />
+        <StatCard icon={Users} label="Paying users" value={formatNumber(data.paid_users)} />
         <StatCard
-          icon={TrendingUp}
-          label="New Subs"
-          value={`+${data.new_subs_in_window}`}
-          tone={data.new_subs_in_window > 0 ? "ok" : "default"}
-          sub={`${data.window_days}d`}
+          icon={net >= 0 ? TrendingUp : TrendingDown}
+          label="Net subscriptions"
+          value={`${net >= 0 ? "+" : ""}${net}`}
+          tone={net > 0 ? "ok" : net < 0 ? "error" : "default"}
+          sub={`+${data.new_subs_in_window} new · −${data.churned_in_window} churned`}
         />
-        <StatCard
-          icon={TrendingDown}
-          label="Churned"
-          value={`-${data.churned_in_window}`}
-          tone={data.churned_in_window > 0 ? "error" : "default"}
-          sub={`${data.window_days}d`}
-        />
-      </div>
-
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard icon={DollarSign} label="Est. Cost" value={`$${data.est_cost_usd.toFixed(2)}`} sub={`${data.window_days}d`} />
         <StatCard
           icon={Percent}
-          label="Gross Margin"
+          label="Gross margin"
           value={`${data.gross_margin_pct.toFixed(1)}%`}
-          tone={marginTone as "ok" | "warn" | "error"}
-          sub="MRR − cost"
+          tone={marginTone}
+          sub={`${formatUsd(data.est_cost_usd)} est. cost`}
+          hint="Revenue for the window (MRR × days ÷ 30) minus estimated provider cost, as a share of that revenue"
         />
-      </div>
+      </StatGrid>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <BarChartCard
-            title="Net subscription changes"
+            title="Subscriptions"
             sub="new vs cancelled per day"
             data={dailyNet}
             xKey="date"
             series={[
-              { key: "new_subs", label: "New subs", color: "#10b981" },
-              { key: "cancellations", label: "Cancellations", color: "#ef4444" },
+              { key: "new_subs", label: "New", color: TONE_COLOR.success },
+              { key: "cancellations", label: "Cancelled", color: TONE_COLOR.error },
             ]}
             stacked
           />
@@ -183,24 +133,29 @@ export function RevenueTab({ apiFetch }: { apiFetch: <T>(path: string) => Promis
         <DonutCard title="Users by tier" data={tierDonut} valueFormatter={(v) => v.toLocaleString()} />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <AreaChartCard
           title="Estimated provider cost"
-          sub="daily, USD"
+          sub="per day"
           data={dailyCost}
           xKey="date"
-          series={[{ key: "cost", label: "Cost", color: "#f59e0b" }]}
-          valueFormatter={(v) => `$${v.toFixed(2)}`}
+          series={[{ key: "cost", label: "Cost", color: TONE_COLOR.warning }]}
+          valueFormatter={(v) => formatUsd(v)}
         />
         <AreaChartCard
-          title="Margin (MRR − cost)"
-          sub={`current MRR $${data.current_mrr.toFixed(2)}`}
+          title="Daily margin"
+          sub="MRR ÷ 30, minus that day's cost"
           data={dailyCost}
           xKey="date"
-          series={[{ key: "margin", label: "Margin", color: "#10b981" }]}
-          valueFormatter={(v) => `$${v.toFixed(2)}`}
+          series={[{ key: "margin", label: "Margin", color: TONE_COLOR.success }]}
+          valueFormatter={(v) => formatUsd(v)}
         />
       </div>
+
+      <p className="flex items-center gap-1.5 text-[11.5px] text-ink-faint">
+        <Receipt className="h-3.5 w-3.5" />
+        Costs are estimates from token counts and list prices, not provider invoices.
+      </p>
     </div>
   );
 }

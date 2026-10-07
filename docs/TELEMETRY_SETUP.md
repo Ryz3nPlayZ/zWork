@@ -1,80 +1,61 @@
-# Setting up zWork Telemetry with PostHog
+# Telemetry setup
 
-## Step 1: Create PostHog Account
+How the desktop app's usage events reach PostHog, and the other places they
+can go. For the event list and the self-hosted collector, see
+[telemetry-collector/README.md](../telemetry-collector/README.md).
 
-1. Go to https://app.posthog.com/signup
-2. Create a new project
-3. Get your API Key from Project Settings → API Keys
+## Paths
 
-## Step 2: Set up the proxy endpoint on zwork.ai
+| Path | Configured by | Status |
+|------|---------------|--------|
+| **posthog-js in the app** → PostHog | `VITE_PUBLIC_POSTHOG_PROJECT_TOKEN` (and optional `VITE_PUBLIC_POSTHOG_HOST`) in `app/.env` **at build time** | The real one. No token at build, no PostHog. |
+| Sidecar local log | always on while telemetry is enabled | `<data dir>/zWork/state/telemetry.jsonl` per install |
+| Sidecar → `ZW_TELEMETRY_ENDPOINT` | env var in the sidecar's environment **at runtime** | Optional, for `telemetry-collector/`. Not set in shipped builds. |
+| Cloud API `POST /api/telemetry/event` → PostHog | `POSTHOG_API_KEY` / `POSTHOG_HOST` in `cloud-src/.env` | Requires a gateway token, which the sidecar doesn't send, so nothing calls it today. |
+| `netlify/functions/api/telemetry.ts` | | Legacy proxy from the zwork.ai site. It reads `install_id` and `os` fields the app no longer sends. Superseded by posthog-js. |
 
-The zWork desktop app sends telemetry to an endpoint. We'll use your landing page
-as a proxy that forwards to PostHog.
+The user's Settings toggle gates all of them: `telemetry.ts` drops events and
+opts posthog-js out, and the sidecar checks the setting again before it writes
+or forwards anything.
 
-### If using Netlify (zwork.ai):
+## Turning PostHog on for a build
+
+1. Get the project token from PostHog (Project settings → Project API key).
+2. Put it in `app/.env`, which is gitignored. `app/.env.example` has the shape:
+
+   ```
+   VITE_PUBLIC_POSTHOG_PROJECT_TOKEN=phc_…
+   VITE_PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
+   ```
+
+3. Build as usual (`scripts/build-*-release.*`). Vite inlines the values, so
+   they have to be present on the machine or CI runner that builds. Setting
+   them on a user's machine later does nothing.
+
+To check that a build has it: launch it with telemetry on, open devtools, and
+look for requests to `*.posthog.com`.
+
+## What PostHog sees
+
+- Anonymous events from `telemetry.ts`, keyed by posthog-js's own anonymous
+  id, with `app_version`, `os` and `current_screen` registered as super
+  properties.
+- After a user signs in to zWork cloud, `identifyPostHogUser` links that id
+  to their cloud user id, email, name, tier and access code. This is the only
+  personal data in the pipeline. Signing out calls `posthog.reset()`.
+- `person_profiles: "identified_only"`, so anonymous users don't create
+  person profiles.
+
+## Local testing without PostHog
 
 ```bash
-# Create the function
-mkdir -p netlify/functions/api/telemetry
+cd telemetry-collector && pip install fastapi uvicorn && python server.py
+ZW_TELEMETRY_ENDPOINT=http://localhost:8765/ingest ./run.sh
+python telemetry-collector/analyze.py telemetry-collector/telemetry-data
 ```
 
-Create `netlify/functions/api/telemetry.ts` with the PostHog proxy code.
-
-### Add environment variable to Netlify:
-
-In Netlify dashboard → Site Settings → Environment Variables:
-```
-POSTHOG_KEY = phc_YOUR_ACTUAL_KEY_HERE
-```
-
-Deploy Netlify site.
-
-## Step 3: Update zWork to send telemetry to zwork.ai
-
-In `app/src-tauri/tauri.conf.json`:
-
-```json
-{
-  "bundle": {
-    "environment": {
-      "ZW_TELEMETRY_ENDPOINT": "https://zwork.ai/api/telemetry"
-    }
-  }
-}
-```
-
-## Step 4: Build and release a new version
+Or skip the server and read your own install's log:
 
 ```bash
-# Bump version
-npm run build
-tauri build
-
-# Tag and push
-git tag v0.3.14
-git push --tags
+python telemetry-collector/analyze.py ~/Library/Application\ Support/zWork/state/telemetry.jsonl
 ```
-
-## What you'll see in PostHog
-
-- **Live users**: See active users right now
-- **Events dashboard**: All telemetry events charted over time
-- **Funnels**: e.g., onboarding → first chat → second chat
-- **Retention**: Do users come back?
-- **Properties**: OS breakdown, version distribution
-- **Models**: Which LLMs are most popular
-
-## Privacy Note
-
-Your telemetry collects:
-- Anonymous install_id (random UUID per install)
-- App version
-- OS platform
-- Event types (chat_turn_started, update_finished, etc.)
-- Session duration
-
-It does NOT collect:
-- User names or emails
-- Chat message content
-- API keys
-- File contents

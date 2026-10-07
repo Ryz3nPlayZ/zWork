@@ -3,7 +3,7 @@ use axum::{
     http::{header, HeaderName, HeaderValue, Method, StatusCode},
     middleware::{self, Next},
     response::Response,
-    routing::{get, post, patch, delete},
+    routing::{get, post, put, patch, delete},
     Router,
 };
 use std::sync::Arc;
@@ -59,8 +59,11 @@ fn cors_layer() -> CorsLayer {
     // the extension (chrome-extension:// origin) reach us: modern Chrome
     // blocks cross-context requests to private/loopback addresses (Private
     // Network Access) unless the preflight echoes this header back.
+    // ZWORK_DEV_ORIGIN is set only by a debug (`tauri dev`) host, whose
+    // webview is served by Vite.
+    let dev_origin = std::env::var("ZWORK_DEV_ORIGIN").ok().filter(|o| !o.is_empty());
     CorsLayer::new()
-        .allow_origin(AllowOrigin::predicate(|origin: &HeaderValue, _| {
+        .allow_origin(AllowOrigin::predicate(move |origin: &HeaderValue, _| {
             let Ok(origin) = origin.to_str() else {
                 return false;
             };
@@ -68,6 +71,7 @@ fn cors_layer() -> CorsLayer {
                 origin,
                 "tauri://localhost" | "http://tauri.localhost" | "https://tauri.localhost"
             ) || origin.starts_with("chrome-extension://")
+                || dev_origin.as_deref() == Some(origin)
         }))
         .allow_methods([
             Method::GET,
@@ -96,10 +100,12 @@ mod secretstore;
 mod settings;
 mod chatstore;
 mod skills;
+mod commands;
 mod academic;
 mod watchdog;
 mod tools;
 mod agent;
+mod harness;
 mod taskstore;
 mod schedulestore;
 mod inboxstore;
@@ -110,19 +116,38 @@ mod zbctl;
 mod browser_bridge;
 mod memory;
 mod telegram;
-mod composio;
+mod connectors;
 mod deploy;
-mod mcp;
 mod office;
+mod runtime;
+mod fileopen;
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    // Before the runtime starts threads: `set_var` is only sound while the
+    // process is single-threaded.
+    paths::hydrate_path();
+    paths::settle_cwd();
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("failed to start the async runtime")
+        .block_on(run());
+}
+
+async fn run() {
     // Install the crash-capturing panic hook BEFORE anything else so a panic
     // during setup is captured to ~/.zwork/logs/crashes.jsonl.
     crash::install();
 
-    // Initialize logging
-    tracing_subscriber::fmt::init();
+    // Initialize logging. RUST_LOG wins; otherwise log this crate at info so
+    // backend.log (the Tauri host captures our stdout) shows startup and
+    // warnings instead of only errors. No ANSI colour when stdout is a pipe.
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn,rwork_backend=info,harness=info"));
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stdout()))
+        .init();
 
     let host = std::env::var("ZWORK_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
     let port = std::env::var("ZWORK_PORT")
@@ -137,8 +162,9 @@ async fn main() {
             // mint a throwaway token so the token middleware still runs.
             let generated = uuid::Uuid::new_v4().to_string();
             tracing::warn!(
-                "ZWORK_SIDECAR_TOKEN not set; generated a per-run token (dev mode). \
-                 Requests must send it as the x-zwork-token header."
+                "ZWORK_SIDECAR_TOKEN not set; generated a per-run token (dev mode), \
+                 so every request will get 401. To call the API by hand, set \
+                 ZWORK_SIDECAR_TOKEN yourself and send it as the x-zwork-token header."
             );
             Arc::new(generated)
         }
@@ -154,6 +180,8 @@ async fn main() {
         .route("/api/browser-bridge/status", get(server::browser_bridge_status))
         .route("/api/me", get(server::me))
         .route("/api/providers", get(server::get_providers))
+        .route("/api/providers/catalog", get(server::get_provider_catalog))
+        .route("/api/providers/catalog/:id", get(server::get_provider_catalog_models))
         .route("/api/settings", get(server::get_settings).put(server::put_settings))
         .route("/api/chats", get(server::list_chats).post(server::create_chat))
         .route(
@@ -164,7 +192,22 @@ async fn main() {
         )
         .route("/api/chats/:chat_id/messages/:message_id", patch(server::patch_message))
         .route("/api/chats/:chat_id/messages/:message_id/truncate", post(server::truncate_message))
+        .route("/api/chats/:chat_id/fork", post(server::fork_chat))
+        .route("/api/chats/:chat_id/branches", get(server::list_branches))
+        .route(
+            "/api/chats/:chat_id/branches/:branch_id",
+            axum::routing::delete(server::delete_branch).post(server::restore_branch),
+        )
         .route("/api/chats/:chat_id/stop", post(server::stop_chat))
+        .route("/api/chats/:chat_id/run/live", get(server::chat_run_live))
+        .route("/api/chats/:chat_id/gates", get(server::list_chat_gates))
+        .route("/api/chats/:chat_id/steer", post(server::steer_chat))
+        .route("/api/chats/:chat_id/follow-up", post(server::follow_up_chat))
+        .route("/api/chats/:chat_id/next-run", post(server::next_run_chat))
+        .route("/api/chats/:chat_id/queue", get(server::list_chat_queue))
+        .route("/api/chats/:chat_id/queue/mode", put(server::put_chat_queue_mode))
+        .route("/api/chats/:chat_id/queue/:entry_id/cancel", post(server::cancel_chat_queue))
+        .route("/api/chats/:chat_id/usage", get(server::chat_usage))
         .route("/api/chats/:chat_id/answer-question", post(server::answer_question))
         .route("/api/chat/stream", post(server::chat_stream_route))
         .route("/api/chats/:chat_id/gate/:gate_id/approve", post(server::approve_gate))
@@ -175,6 +218,7 @@ async fn main() {
         .route("/api/custom-models", get(server::list_custom_models).post(server::upsert_custom_model))
         .route("/api/custom-models/:model_id", delete(server::delete_custom_model))
         .route("/api/skills", get(server::list_skills))
+        .route("/api/commands", get(server::list_commands))
         .route("/api/projects", get(server::list_projects).post(server::create_project))
         .route("/api/projects/:project_id", patch(server::update_project).delete(server::delete_project))
         .route("/api/projects/:project_id/context", get(server::get_project_context).put(server::put_project_context))
@@ -195,8 +239,14 @@ async fn main() {
         .route("/api/user-md", get(server::get_user_md).put(server::put_user_md))
         .route("/api/telemetry/event", post(server::telemetry_event))
         .route("/api/activity-logs", get(server::activity_logs))
-        .route("/api/mcp/servers", get(server::mcp_servers))
+        .route("/api/runtime", get(server::runtime_status).post(server::runtime_install))
+        .route("/api/mcp/servers", get(server::mcp_servers).post(server::mcp_add))
+        .route("/api/mcp/servers/:name", delete(server::mcp_remove))
+        .route("/api/mcp/servers/:name/enabled", post(server::mcp_set_enabled))
+        .route("/api/mcp/servers/:name/connect", post(server::mcp_connect))
         .route("/api/mcp/tools", get(server::mcp_tools))
+        .route("/api/mcp/discover", get(server::mcp_discover))
+        .route("/api/mcp/import", post(server::mcp_import))
         .route("/api/tasks", get(server::list_tasks).post(server::create_task_handler))
         .route("/api/tasks/:task_id", patch(server::update_task_handler).delete(server::delete_task_handler))
         .route("/api/tasks/:task_id/column", patch(server::update_task_column_handler))
@@ -216,6 +266,8 @@ async fn main() {
         )
         .route("/api/uploads", get(server::list_uploads).post(server::upload_files))
         .route("/api/uploads/:filename", get(server::get_upload))
+        .route("/api/files/open", post(fileopen::open_file))
+        .route("/api/files/stat", post(fileopen::stat_files))
         .route("/api/screenshot", post(server::screenshot))
         .route("/api/run-python", post(server::run_python))
         .route("/api/telegram/send", post(server::telegram_send))
@@ -255,6 +307,23 @@ async fn main() {
     // schedules (every N min, or daily at HH:MM) and posts findings to the
     // inbox. See scheduler::scheduler_loop.
     tokio::spawn(scheduler::scheduler_loop());
+
+    // Provider/model catalog: cached models.dev copy, refreshed daily in the
+    // background (the embedded snapshot covers offline and first launch).
+    harness::providers::catalog::set_cache_path(paths::home_dir().join("cache").join("models.json"));
+    tokio::spawn(harness::providers::catalog::refresh_if_stale());
+
+    // Python + Node for office files, skills and `npx`/`uvx` connectors;
+    // a no-op once installed.
+    runtime::ensure_in_background();
+
+    // MCP connectors: start configured servers now so the first turn does
+    // not wait on `npx` cold starts.
+    connectors::mcp::warm_up();
+
+    // Resume-on-restart: scan durable sessions for interrupted runs and
+    // drive them to settlement (recovery output persists to chatstore).
+    tokio::spawn(agent::harness_turn::resume_interrupted_runs());
 
     let listener = match tokio::net::TcpListener::bind(&addr).await {
         Ok(listener) => listener,

@@ -10,6 +10,7 @@ export default {
     "./src/**/*.{ts,tsx}",
     "../app/src/components/admin/**/*.{ts,tsx}",
     "../app/src/components/AdminPage.tsx",
+    "../app/src/components/page/**/*.{ts,tsx}",
   ],
   theme: {
     extend: {
@@ -34,6 +35,22 @@ export default {
         accent: {
           DEFAULT: "rgb(var(--accent) / <alpha-value>)",
         },
+        success: { DEFAULT: "rgb(var(--success) / <alpha-value>)" },
+        warning: { DEFAULT: "rgb(var(--warning) / <alpha-value>)" },
+        error: { DEFAULT: "rgb(var(--error) / <alpha-value>)" },
+        info: { DEFAULT: "rgb(var(--info) / <alpha-value>)" },
+      },
+      boxShadow: {
+        pop: "0 1px 2px rgb(var(--shadow) / 0.05), 0 12px 32px rgb(var(--shadow) / 0.10)",
+      },
+      keyframes: {
+        "fade-in": {
+          "0%": { opacity: "0", transform: "translateY(2px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+      },
+      animation: {
+        "fade-in": "fade-in 180ms ease-out both",
       },
       fontFamily: {
         sans: [

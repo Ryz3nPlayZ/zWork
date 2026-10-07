@@ -5,12 +5,11 @@ use futures_util::stream::Stream;
 use futures_util::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 
-pub mod fs;
-pub mod shell;
 pub mod search;
 pub mod doc_extract;
 pub mod stock;
 pub mod todos;
+pub mod file_guard;
 
 // Risk evaluation for permission checking
 pub enum Risk {
@@ -20,7 +19,7 @@ pub enum Risk {
 
 pub fn evaluate_tool_risk(name: &str, params: &Value) -> Risk {
     match name {
-        "run_command" => {
+        "bash" => {
             let cmd = params.get("command").and_then(|v| v.as_str()).unwrap_or("");
             if targets_zwork_backend(cmd) {
                 Risk::Destructive {
@@ -39,17 +38,25 @@ pub fn evaluate_tool_risk(name: &str, params: &Value) -> Risk {
                     Risk::Destructive {
                         reason: format!("Executing potentially destructive command: '{}'", cmd),
                     }
+                } else if let Some(path) = file_guard::user_file_changed_by(cmd, &risk_cwd(cwd)) {
+                    Risk::Destructive {
+                        reason: format!("Changing a file outside the zWork workspace: {}", path.display()),
+                    }
                 } else {
                     Risk::Safe
                 }
             }
         }
-        "write_file" => {
+        "write" | "edit" => {
             let path = params.get("path").and_then(|v| v.as_str()).unwrap_or("");
             // Writing to settings or credentials directly can be risky
             if path.contains("settings.json") || path.contains("secrets.json") {
                 Risk::Destructive {
                     reason: format!("Writing to sensitive backend configuration file: '{}'", path),
+                }
+            } else if let Some(path) = file_guard::user_file_written(path, &risk_cwd(None)) {
+                Risk::Destructive {
+                    reason: format!("Changing a file outside the zWork workspace: {}", path.display()),
                 }
             } else {
                 Risk::Safe
@@ -57,6 +64,12 @@ pub fn evaluate_tool_risk(name: &str, params: &Value) -> Risk {
         }
         _ => Risk::Safe,
     }
+}
+
+fn risk_cwd(cwd: Option<&str>) -> std::path::PathBuf {
+    cwd.map(std::path::PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(crate::paths::workspace_root)
 }
 
 fn targets_zwork_backend(command: &str) -> bool {
@@ -151,41 +164,6 @@ fn redirect_overwrites_outside(cmd: &str, cwd: Option<&str>) -> bool {
 pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
     let mut schemas = vec![
         json!({
-            "name": "read_file",
-            "description": "Read and return the UTF-8 contents of a file. Use this to inspect files before editing.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "Relative or absolute file path" }
-                },
-                "required": ["path"]
-            }
-        }),
-        json!({
-            "name": "list_dir",
-            "description": "List immediate children of a directory.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "Directory path (default: '.')" }
-                }
-            }
-        }),
-        json!({
-            "name": "grep_search",
-            "description": "Search recursively inside a directory for matching queries. Returns paths, line numbers, and matching line content.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": { "type": "string", "description": "The query string or regex pattern to search for" },
-                    "path": { "type": "string", "description": "Search directory path (default: '.')" },
-                    "is_regex": { "type": "boolean", "description": "Treat query as regex (default: false)" },
-                    "case_insensitive": { "type": "boolean", "description": "Perform case-insensitive search (default: false)" }
-                },
-                "required": ["query"]
-            }
-        }),
-        json!({
             "name": "web_search",
             "description": "Search the web/news for current information without opening a browser.",
             "parameters": {
@@ -235,13 +213,12 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
         }),
         json!({
             "name": "extract_document",
-            "description": "Extract text and metadata from PDF, DOCX, XLSX, PPTX, or TXT files.",
+            "description": "Read the text of a document: PDF (scanned PDFs are OCR'd), Word (.docx/.doc/.rtf), Excel and CSV-like spreadsheets (.xlsx/.xls/.ods, returned as markdown tables), PowerPoint (.pptx, with speaker notes), OpenDocument (.odt/.odp), or HTML. Long output is saved to a file you can page through with `read`.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": "Path to document" },
-                    "format": { "type": "string", "description": "Output format ('markdown' or 'text')" },
-                    "pages": { "type": "string", "description": "1-based page range for PDFs, e.g., '1-5'" }
+                    "path": { "type": "string", "description": "Path to the document" },
+                    "pages": { "type": "string", "description": "1-based page or slide range, e.g. '3' or '1-5'" }
                 },
                 "required": ["path"]
             }
@@ -344,47 +321,6 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
     if !plan_mode {
         // Add modifying / executing tools
         schemas.push(json!({
-            "name": "write_file",
-            "description": "Write entire contents to a file. Overwrites existing files.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "File path" },
-                    "content": { "type": "string", "description": "Full content" }
-                },
-                "required": ["path", "content"]
-            }
-        }));
-        schemas.push(json!({
-            "name": "replace_file_content",
-            "description": "Replace a target substring in a file with a replacement substring. Use start_line and end_line if the target content matches multiple lines in the file.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "Relative or absolute file path" },
-                    "target_content": { "type": "string", "description": "The exact string block to replace" },
-                    "replacement_content": { "type": "string", "description": "The new string block to replace the target block with" },
-                    "start_line": { "type": "integer", "description": "Optional 1-based starting line range" },
-                    "end_line": { "type": "integer", "description": "Optional 1-based ending line range" }
-                },
-                "required": ["path", "target_content", "replacement_content"]
-            }
-        }));
-        schemas.push(json!({
-            "name": "run_command",
-            "description": "Run a shell command. Set background=true to detach servers. Set timeout (seconds, default 180, 0=unbounded) for long-running commands.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "command": { "type": "string", "description": "Shell command to run" },
-                    "cwd": { "type": "string", "description": "Directory context" },
-                    "background": { "type": "boolean", "description": "Run in background" },
-                    "timeout": { "type": "integer", "description": "Max seconds before the command is killed. Default 180. Use 0 for no timeout (servers, watchers)." }
-                },
-                "required": ["command"]
-            }
-        }));
-        schemas.push(json!({
             "name": "save_memory",
             "description": "Save a fact to the agent's persistent memory. Use target='user' for facts about the user (preferences, style, goals, habits, job, family, constraints) and target='memory' for everything else (project facts, conventions, deadlines, things learned). Use target='task' ONLY inside a scheduled-task run to save findings for future runs of that task.",
             "parameters": {
@@ -424,7 +360,7 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
         // accessibility tree; it has no Windows/Linux build. Advertising these
         // tools on other platforms made the model attempt them, fail to find
         // the driver, and burn turn after turn retrying. Gate the whole toolset
-        // to macOS so the model routes to run_command / browser_* elsewhere.
+        // to macOS so the model routes to bash / browser_* elsewhere.
         // (`desktop_office`, below, is platform-independent document editing.)
         if cfg!(target_os = "macos") {
             schemas.push(json!({
@@ -746,12 +682,6 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
     // use; the env var is never set outside the benchmark driver.
     if std::env::var("ZWORK_CODING_ONLY").is_ok() {
         const CODING_ALLOWLIST: &[&str] = &[
-            "read_file",
-            "list_dir",
-            "grep_search",
-            "write_file",
-            "replace_file_content",
-            "run_command",
             "web_search",
             "update_todos",
             "save_memory",
@@ -789,12 +719,6 @@ pub fn execute_tool(
         })).await;
         
         let result = match name.as_str() {
-            "read_file" => fs::execute_read_file(&params).await,
-            "write_file" => fs::execute_write_file(&params).await,
-            "replace_file_content" => fs::execute_replace_file_content(&params).await,
-            "grep_search" => fs::execute_grep_search(&params).await,
-            "list_dir" => fs::execute_list_dir(&params).await,
-            "run_command" => shell::execute_run_command(&params, &chat_id, &tx).await,
             "web_search" => search::execute_web_search(&params).await,
             "search_papers" => {
                 let query = params.get("query").and_then(|v| v.as_str()).unwrap_or("");
@@ -1015,7 +939,7 @@ pub fn execute_tool(
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| {
                         let s = crate::settings::load();
-                        if !s.default_model.is_empty() { s.default_model } else { "deepseek-v4-flash".to_string() }
+                        if !s.default_model.is_empty() { s.default_model } else { "deepseek-flash".to_string() }
                     });
                 match crate::agent::spawn_subagent(&chat_id, &chat_id, &desc, &model_id, &tx).await {
                     Ok(result) => Ok(format!("Sub-agent completed the task. Result:\n\n{}", result)),
@@ -1211,23 +1135,9 @@ pub fn execute_tool(
                     Ok(format!("Posted to inbox: {} (id={})", item.title, item.id))
                 }
             }
-            t if t.starts_with("mcp__") => {
-                // Forward to the configured MCP server's tools/call.
-                let res = crate::mcp::call_tool(&name, params.clone()).await;
-                let is_error = res.get("isError").and_then(|v| v.as_bool()).unwrap_or(false);
-                let text = res.get("content")
-                    .and_then(|c| c.as_array())
-                    .map(|blocks| blocks.iter()
-                        .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
-                        .collect::<Vec<_>>()
-                        .join("\n"))
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or_else(|| res.to_string());
-                if is_error { Err(text) } else { Ok(text) }
-            }
             t if t.starts_with("composio__") => {
                 // Forward to the zWork cloud Composio proxy (see composio.rs).
-                let res = crate::composio::call_tool(&name, params.clone()).await;
+                let res = crate::connectors::composio::call_tool(&name, params.clone()).await;
                 let is_error = res.get("isError")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
@@ -1653,16 +1563,18 @@ fn describe_schedule(
 mod tests {
     use super::*;
 
+    /// Commands run from the zWork workspace, like a normal session.
     fn gated(cmd: &str) -> bool {
+        let cwd = crate::paths::workspace_root();
         matches!(
-            evaluate_tool_risk("run_command", &json!({ "command": cmd })),
+            evaluate_tool_risk("bash", &json!({ "command": cmd, "cwd": cwd })),
             Risk::Destructive { .. }
         )
     }
 
     fn gated_with_cwd(cmd: &str, cwd: &str) -> bool {
         matches!(
-            evaluate_tool_risk("run_command", &json!({ "command": cmd, "cwd": cwd })),
+            evaluate_tool_risk("bash", &json!({ "command": cmd, "cwd": cwd })),
             Risk::Destructive { .. }
         )
     }
@@ -1711,11 +1623,13 @@ mod tests {
     fn catches_redirect_outside_workdir() {
         assert!(gated("echo evil > /etc/hosts"));
         assert!(gated("cat payload > '/Library/LaunchDaemons/x.plist'"));
-        // Truncating redirect under an absolute cwd is inside the workdir.
-        assert!(!gated_with_cwd("echo hi > /work/proj/out.txt", "/work/proj"));
-        assert!(!gated_with_cwd("echo hi > /work/proj/sub/out.txt", "/work/proj/"));
-        // Different absolute root than the cwd → gated.
-        assert!(gated_with_cwd("echo hi > /etc/other.txt", "/work/proj"));
+        let ws = crate::paths::workspace_root();
+        let ws = ws.to_str().unwrap();
+        assert!(!gated_with_cwd(&format!("echo hi > {ws}/out.txt"), ws));
+        assert!(!gated_with_cwd(&format!("echo hi > {ws}/sub/out.txt"), &format!("{ws}/")));
+        assert!(gated_with_cwd("echo hi > /etc/other.txt", ws));
+        // A folder of the user's own is theirs, even as the cwd.
+        assert!(gated_with_cwd("echo hi > /work/proj/out.txt", "/work/proj"));
     }
 
     #[test]

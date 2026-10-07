@@ -1,6 +1,6 @@
 /* Hallmark · genre: modern-minimal · macrostructure: Workbench · design-system: design.md · designed-as-app */
 
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { THINKING_WORDS, shuffled } from "../lib/thinkingWords";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -30,19 +30,36 @@ import {
   XCircle,
   Loader2,
   ShieldAlert,
+  GitFork,
 } from "lucide-react";
 import { cn } from "../lib/cn";
+import { protectCurrency } from "../lib/markdown";
+import { ThinkingOrb, type OrbState } from "thinking-orbs";
 import { getIcon } from "./ActivityBlocks";
-import type { Activity, Artifact, MessagePart } from "../lib/store";
+import type { Activity, Artifact, MessagePart, MessageUsage } from "../lib/store";
 import { useApp } from "../lib/store";
 import { Logo } from "./Logo";
 import { IconButton } from "./IconButton";
 import type { Message as Msg } from "../lib/store";
 import { api } from "../lib/api";
+import { FileChip, looksLikeFile, useFileCheck } from "./FileChip";
 
 function formatTime(ts: number): string {
   if (!ts) return "";
   return new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function formatTokens(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+}
+
+function UsageCaption({ usage }: { usage: MessageUsage }) {
+  const cost = usage.costUsd != null ? ` · $${usage.costUsd.toFixed(4)}` : "";
+  return (
+    <span className="whitespace-nowrap font-mono" title={`${usage.input.toLocaleString()} in / ${usage.output.toLocaleString()} out${cost}`}>
+      ↑{formatTokens(usage.input)} ↓{formatTokens(usage.output)}{cost}
+    </span>
+  );
 }
 
 // ---- Code block with copy, preview tabs, and running capabilities ----
@@ -174,7 +191,7 @@ function CodeBlock({
           customStyle={{
             margin: 0,
             borderRadius: 0,
-            fontSize: "12.5px",
+            fontSize: "13px",
             background: "transparent",
             padding: "12px 16px",
           }}
@@ -248,6 +265,12 @@ function AssistantMarkdown({
   content: string;
   onOpenPanel?: (code: string, lang: string) => void;
 }) {
+  // Inline `path/to/file.xlsx` spans that exist on disk render as file chips.
+  const candidates = useMemo(
+    () => Array.from(new Set(Array.from(content.matchAll(/`([^`\n]+)`/g), (m) => m[1].trim()).filter(looksLikeFile))),
+    [content],
+  );
+  const isFile = useFileCheck(candidates);
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkMath]}
@@ -267,9 +290,12 @@ function AssistantMarkdown({
               />
             );
           }
+          if (looksLikeFile(codeStr) && isFile(codeStr)) {
+            return <FileChip path={codeStr} />;
+          }
           // Inline code
           return (
-            <code className="rounded bg-paper-sunken px-1.5 py-0.5 text-[12px] font-mono text-ink" {...props}>
+            <code className="rounded bg-paper-sunken px-1.5 py-0.5 text-[13px] font-mono text-ink" {...props}>
               {children}
             </code>
           );
@@ -278,16 +304,16 @@ function AssistantMarkdown({
           return <>{children}</>;
         },
         p({ children }) {
-          return <p className="mb-3 last:mb-0 leading-6">{children}</p>;
+          return <p className="mb-3 last:mb-0 leading-[1.65]">{children}</p>;
         },
         h1({ children }) {
-          return <h1 className="mb-2 mt-4 text-[18px] font-bold text-ink">{children}</h1>;
+          return <h1 className="mb-2 mt-5 text-[19px] font-bold text-ink">{children}</h1>;
         },
         h2({ children }) {
-          return <h2 className="mb-2 mt-3 text-[15px] font-semibold text-ink">{children}</h2>;
+          return <h2 className="mb-2 mt-4 text-[16px] font-semibold text-ink">{children}</h2>;
         },
         h3({ children }) {
-          return <h3 className="mb-1 mt-2 text-[13.5px] font-semibold text-ink">{children}</h3>;
+          return <h3 className="mb-1.5 mt-3 text-[14.5px] font-semibold text-ink">{children}</h3>;
         },
         ul({ children }) {
           return <ul className="mb-3 list-disc space-y-1 pl-5">{children}</ul>;
@@ -296,7 +322,7 @@ function AssistantMarkdown({
           return <ol className="mb-3 list-decimal space-y-1 pl-5">{children}</ol>;
         },
         li({ children }) {
-          return <li className="leading-6">{children}</li>;
+          return <li className="leading-[1.6]">{children}</li>;
         },
         blockquote({ children }) {
           return (
@@ -308,7 +334,7 @@ function AssistantMarkdown({
         table({ children }) {
           return (
             <div className="my-2 overflow-x-auto">
-              <table className="w-full border-collapse text-[12.5px]">{children}</table>
+              <table className="w-full border-collapse text-[13px]">{children}</table>
             </div>
           );
         },
@@ -342,7 +368,7 @@ function AssistantMarkdown({
         },
       }}
     >
-      {content}
+      {protectCurrency(content)}
     </ReactMarkdown>
   );
 }
@@ -413,7 +439,7 @@ function UserBubble({
                 if (e.key === "Escape") cancel();
               }}
               rows={Math.min(10, draft.split("\n").length + 1)}
-              className="w-full resize-none rounded-2xl rounded-br-md border border-accent/50 bg-paper-raised px-3.5 py-2.5 text-[14px] leading-6 text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
+              className="w-full resize-none rounded-2xl rounded-br-md border border-accent/50 bg-paper-raised px-3.5 py-2.5 text-[15px] leading-[25px] text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
             />
             <div className="flex items-center justify-end gap-1.5">
               <button
@@ -434,7 +460,7 @@ function UserBubble({
           </div>
         ) : (
           <div className="relative">
-            <div className="rounded-2xl rounded-br-md bg-paper-raised border border-line px-3.5 py-2.5 text-[14px] leading-6 text-ink break-words whitespace-pre-wrap">
+            <div className="rounded-2xl rounded-br-md bg-paper-raised border border-line px-3.5 py-2.5 text-[15px] leading-[25px] text-ink break-words whitespace-pre-wrap">
               {message.content}
             </div>
             {!streaming && (
@@ -450,7 +476,7 @@ function UserBubble({
           </div>
         )}
 
-        <p className="mt-1 text-right text-[10.5px] text-ink-faint">{formatTime(message.createdAt)}</p>
+        <p className="mt-1 text-right text-[11px] text-ink-faint">{formatTime(message.createdAt)}</p>
       </div>
     </div>
   );
@@ -458,13 +484,15 @@ function UserBubble({
 
 type ProcessEntry =
   | { kind: "thinking"; part: Extract<MessagePart, { kind: "thinking" }>; i: number }
+  | { kind: "narration"; part: Extract<MessagePart, { kind: "narration" }>; i: number }
   | { kind: "tool"; part: Extract<MessagePart, { kind: "tool" }>; i: number };
 
 /**
  * A compact, expandable panel that groups the model's internal process
- * (thinking blocks and tool calls) and sits above the actual assistant
- * message. This separates "what the model did" from "the message for the
- * user" instead of interleaving them inline.
+ * (thinking blocks, mid-run narration, and tool calls) and sits above the
+ * actual assistant message. This separates "what the model did" from "the
+ * message for the user" instead of interleaving them inline. Text the model
+ * streams between tool calls is narration — it lives here, not in the answer.
  */
 function ProcessPanel({
   parts,
@@ -480,68 +508,116 @@ function ProcessPanel({
   messageId: string;
 }) {
   const [expanded, setExpanded] = useState(false);
+  // Auto-open tracking: the panel opens itself while the model is visibly
+  // working, and folds back down when the run finishes so the final answer
+  // stands alone. Once the user clicks the toggle, auto behavior stops —
+  // their choice wins for the rest of the stream.
+  const [autoExpanded, setAutoExpanded] = useState(false);
+  const [manual, setManual] = useState(false);
   const processEntries = useMemo<ProcessEntry[]>(() => {
     const entries: ProcessEntry[] = [];
     parts.forEach((part, i) => {
       if (part.kind === "thinking") entries.push({ kind: "thinking", part, i });
+      else if (part.kind === "narration") entries.push({ kind: "narration", part, i });
       else if (part.kind === "tool") entries.push({ kind: "tool", part, i });
     });
     return entries;
   }, [parts]);
 
   useEffect(() => {
-    if (!streaming || processEntries.length === 0) return;
+    if (!streaming || manual || processEntries.length === 0) return;
     const latest = parts[lastPartIdx];
-    if (latest && (latest.kind === "thinking" || (latest.kind === "tool" && !latest.done))) {
+    if (latest && (latest.kind === "thinking" || latest.kind === "narration" || (latest.kind === "tool" && !latest.done))) {
       setExpanded(true);
+      setAutoExpanded(true);
     }
-  }, [streaming, processEntries.length, lastPartIdx, parts]);
+  }, [streaming, manual, processEntries.length, lastPartIdx, parts]);
+
+  // When the stream ends, fold an auto-opened panel back down so the final
+  // answer stands alone. A panel the user opened themselves stays open.
+  useEffect(() => {
+    if (!streaming && autoExpanded) {
+      setExpanded(false);
+      setAutoExpanded(false);
+    }
+  }, [streaming, autoExpanded]);
 
   if (processEntries.length === 0) return null;
 
   const latest = processEntries[processEntries.length - 1];
+  // The process is "live" only while its newest entry is still growing. Once
+  // the trailing part is answer text (or the stream ended), the panel settles
+  // into its summary state.
+  const trailingIsAnswer = parts[lastPartIdx]?.kind === "text";
   const isActive =
     streaming &&
-    (latest.kind === "thinking" || (latest.kind === "tool" && !latest.part.done));
+    !trailingIsAnswer &&
+    (latest.kind === "thinking" ||
+      latest.kind === "narration" ||
+      (latest.kind === "tool" && !latest.part.done));
 
   const thoughtCount = processEntries.filter((e) => e.kind === "thinking").length;
+  const narrationCount = processEntries.filter((e) => e.kind === "narration").length;
   const toolCount = processEntries.filter((e) => e.kind === "tool").length;
 
   let summary: string;
-  if (isActive) {
-    summary = latest.kind === "thinking" ? "Thinking…" : `${latest.part.label}…`;
-  } else if (thoughtCount > 0 && toolCount > 0) {
-    summary = `Thought · ${toolCount} tools`;
-  } else if (thoughtCount > 0) {
-    summary = "Thought";
+  if (isActive && latest.kind === "thinking") {
+    summary = "Thinking…";
+  } else if (isActive && latest.kind === "narration") {
+    const words = latest.part.text.trim().split(/\s+/).slice(0, 8).join(" ");
+    summary = words || "Working…";
+  } else if (isActive && latest.kind === "tool") {
+    summary = `${latest.part.label}…`;
   } else {
-    summary = `${toolCount} tools`;
+    const bits: string[] = [];
+    if (thoughtCount + narrationCount > 0) bits.push("Thought");
+    if (toolCount > 0) bits.push(`${toolCount} step${toolCount === 1 ? "" : "s"}`);
+    summary = bits.join(" · ") || "Process";
   }
 
   return (
-    <div className="mb-2">
+    <div className="mb-2.5">
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="press flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11.5px] font-medium text-ink-faint hover:text-ink-muted hover:bg-paper-sunken"
+        onClick={() => {
+          setManual(true);
+          setAutoExpanded(false);
+          setExpanded((v) => !v);
+        }}
+        className="press flex max-w-full items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[12px] font-medium text-ink-faint hover:text-ink-muted hover:bg-paper-sunken"
       >
         {isActive ? (
-          <Loader2 className="h-3 w-3 animate-spin" />
+          <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
         ) : (
           <ChevronDown
             className={cn(
-              "h-3 w-3 transition-transform duration-200",
+              "h-3 w-3 shrink-0 transition-transform duration-200",
               expanded && "rotate-180",
             )}
           />
         )}
-        <span>{summary}</span>
+        <span className="truncate">{summary}</span>
       </button>
       {expanded && (
-        <div className="mt-1 space-y-1">
+        <div className="mt-1.5 space-y-1.5">
           {processEntries.map((entry) => {
             if (entry.kind === "thinking") {
-              return <ThinkingBlock key={`thinking-${entry.i}`} text={entry.part.text} />;
+              return (
+                <ThinkingBlock
+                  key={`thinking-${entry.i}`}
+                  text={entry.part.text}
+                  active={streaming && entry.i === lastPartIdx}
+                />
+              );
+            }
+            if (entry.kind === "narration") {
+              return (
+                <NarrationBlock
+                  key={`narration-${entry.i}`}
+                  text={entry.part.text}
+                  active={streaming && entry.i === lastPartIdx}
+                />
+              );
             }
             return (
               <ToolCallAccordion
@@ -558,24 +634,100 @@ function ProcessPanel({
   );
 }
 
-function ThinkingBlock({ text }: { text: string }) {
+function ThinkingBlock({ text, active }: { text: string; active?: boolean }) {
   const trimmed = text.trim();
   if (!trimmed) return null;
   return (
-    <div className="rounded-lg border border-line bg-paper-sunken/60 px-3 py-2 text-[12.5px] italic leading-5 text-ink-muted whitespace-pre-wrap">
-      {trimmed}
+    <div className="border-l-2 border-line pl-3 text-[13px] italic leading-[1.6] text-ink-faint">
+      <TypewriterText text={trimmed} active={!!active} />
+    </div>
+  );
+}
+
+/** Mid-run spoken text ("Let me check that…") — readable process commentary,
+ *  visually distinct from both private reasoning and the final answer. */
+function NarrationBlock({ text, active }: { text: string; active?: boolean }) {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  return (
+    <div className="border-l-2 border-line pl-3 text-[13.5px] leading-[1.6] text-ink-muted">
+      <TypewriterText text={trimmed} active={!!active} />
     </div>
   );
 }
 
 /**
- * Plain-text renderer for the streaming tail. ReactMarkdown + KaTeX re-parse
- * the whole block on every token, which makes fast streams feel chunky.
- * Rendering the active text part as plain text while it is still growing keeps
- * the stream smooth and letter-by-letter.
+ * Plain-text renderer with a smoothed reveal, used while a text/thinking/
+ * narration segment is still growing. Two jobs:
+ *
+ * 1. ReactMarkdown + KaTeX re-parse the whole block on every token, which
+ *    makes fast streams feel chunky — active segments render as plain text
+ *    and flip to markdown once the stream ends.
+ * 2. SSE deltas arrive in bursts (several frames coalesce into one network
+ *    read and one batched React render), so raw appends make text jump
+ *    whole sentences at a time. This component buffers arrivals and reveals
+ *    characters at a steady pace, accelerating with the backlog so it never
+ *    lags far behind the stream, and snapping to the full text once idle.
  */
-function StreamingText({ text }: { text: string }) {
-  return <span className="whitespace-pre-wrap">{text}</span>;
+function TypewriterText({ text, active }: { text: string; active: boolean }) {
+  const [shown, setShown] = useState(active ? 0 : text.length);
+  const textRef = useRef(text);
+  const shownRef = useRef(shown);
+  const carryRef = useRef(0);
+  textRef.current = text;
+
+  useEffect(() => {
+    if (!active) {
+      shownRef.current = textRef.current.length;
+      setShown(textRef.current.length);
+      return;
+    }
+    let raf = 0;
+    let rafAliveAt = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      const elapsed = Math.max(now - last, 0);
+      last = now;
+      const len = textRef.current.length;
+      const backlog = len - shownRef.current;
+      if (backlog > 0) {
+        // ~60 chars/s at small backlogs, accelerating linearly with the
+        // backlog (capped at 1200 c/s) so a burst clears in well under a
+        // second instead of trailing the stream.
+        const rate = Math.min(60 + backlog, 1200); // chars per second
+        carryRef.current += (rate * elapsed) / 1000;
+        const add = Math.floor(carryRef.current);
+        if (add > 0) {
+          carryRef.current -= add;
+          let next = Math.min(len, shownRef.current + add);
+          // Never split a UTF-16 surrogate pair at the reveal boundary.
+          if (next < len && (text.charCodeAt(next) & 0xfc00) === 0xdc00) next += 1;
+          shownRef.current = next;
+          setShown(next);
+        }
+      }
+    };
+    const rafTick = (now: number) => {
+      rafAliveAt = now;
+      tick(now);
+      raf = requestAnimationFrame(rafTick);
+    };
+    raf = requestAnimationFrame(rafTick);
+    // rAF is frozen to zero in throttled/occluded webviews (an unfocused
+    // overlay window, suspended in-app browsers) — timers still fire there.
+    // Drive the reveal from an interval whenever frames stop coming so text
+    // never freezes mid-stream.
+    const interval = setInterval(() => {
+      if (performance.now() - rafAliveAt < 200) return; // rAF is healthy
+      tick(performance.now());
+    }, 30);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearInterval(interval);
+    };
+  }, [active]);
+
+  return <span className="whitespace-pre-wrap">{text.slice(0, shown)}</span>;
 }
 
 // ---- Main Message component ----
@@ -584,6 +736,7 @@ export function Message({
   onOpenArtifact,
   onRetry,
   onBadResponse,
+  onFork,
   artifacts,
   streaming,
   activities,
@@ -593,6 +746,8 @@ export function Message({
   onOpenArtifact?: (artifact: Artifact) => void;
   onRetry?: (messageId: string) => void;
   onBadResponse?: (messageId: string) => void;
+  /** Fork the chat with this message as the branch point. */
+  onFork?: (messageId: string) => void;
   artifacts?: Artifact[];
   streaming?: boolean;
   activities?: Activity[];
@@ -633,12 +788,19 @@ export function Message({
     return <UserBubble message={message} attachments={attachments} streaming={!!streaming} />;
   }
 
-  // Assistant message: separate the model's internal process (thinking +
-  // tool calls) from the response text shown to the user. The process panel
-  // renders above the message body; the message body contains only text parts.
+  // While the agent works (no parts yet), the orb stands in for the logo
+  // avatar and the row carries only the shimmering working label.
+  if (showWorkingPlaceholder) {
+    return <WorkingLabel status={status} />;
+  }
+
+  // Assistant message: separate the model's internal process (thinking,
+  // mid-run narration, tool calls) from the response text shown to the user.
+  // The process panel renders above the message body; the body contains only
+  // text parts — the final answer.
   const lastPartIdx = parts.length - 1;
   const trailingIsText = parts.length > 0 && parts[lastPartIdx].kind === "text";
-  const hasProcess = textEntries.length < parts.length;
+  const hasProcess = parts.some((p) => p.kind === "thinking" || p.kind === "narration" || p.kind === "tool");
 
   const openArtifactFromCode = onOpenArtifact
     ? (code: string, lang: string) => {
@@ -660,8 +822,8 @@ export function Message({
         <Logo size={14} />
       </div>
       <div className="min-w-0 flex-1 max-w-[92%]">
-        <div className="text-[14px] leading-6 text-ink">
-          {!showWorkingPlaceholder && hasProcess && (
+        <div className="text-[15px] leading-[25px] text-ink">
+          {hasProcess && (
             <ProcessPanel
               parts={parts}
               streaming={streaming}
@@ -670,28 +832,24 @@ export function Message({
               messageId={message.id}
             />
           )}
-          {showWorkingPlaceholder ? (
-            <WorkingLabel status={status} />
-          ) : (
-            textEntries.map(({ part, i }, idx) => {
-              const isStreamingPart = streaming && i === lastPartIdx;
-              const trimmed = part.text.trim();
-              if (!trimmed) return null;
-              if (isStreamingPart && textEntries.length === 1) {
-                return (
-                  <div key={`text-${i}`} className={cn(idx > 0 && "mt-2")}>
-                    <StreamingText text={trimmed} />
-                  </div>
-                );
-              }
+          {textEntries.map(({ part, i }, idx) => {
+            const isStreamingPart = streaming && i === lastPartIdx;
+            const trimmed = part.text.trim();
+            if (!trimmed) return null;
+            if (isStreamingPart && textEntries.length === 1) {
               return (
                 <div key={`text-${i}`} className={cn(idx > 0 && "mt-2")}>
-                  <AssistantMarkdown content={trimmed} onOpenPanel={openArtifactFromCode} />
+                  <TypewriterText text={trimmed} active />
                 </div>
               );
-            })
-          )}
-          {streaming && !showWorkingPlaceholder && trailingIsText && (
+            }
+            return (
+              <div key={`text-${i}`} className={cn(idx > 0 && "mt-2")}>
+                <AssistantMarkdown content={trimmed} onOpenPanel={openArtifactFromCode} />
+              </div>
+            );
+          })}
+          {streaming && trailingIsText && (
             <span className="inline-block h-[1em] w-[2px] align-middle bg-ink animate-typing-cursor ml-0.5" />
           )}
           {recoveryEntries.map((r) => (
@@ -722,10 +880,10 @@ export function Message({
                     {artifact.kind === "diff" && <GitCompare className="h-4 w-4" />}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px] font-medium text-ink">
+                    <div className="truncate text-[13.5px] font-medium text-ink">
                       {artifact.title}
                     </div>
-                    <div className="mt-0.5 text-[11.5px] text-ink-muted">
+                    <div className="mt-0.5 text-[12px] text-ink-muted">
                       Click to open in the sidebar
                     </div>
                   </div>
@@ -750,13 +908,24 @@ export function Message({
           />
           <IconButton icon={<RefreshCcw />} label="Regenerate" size="sm" onClick={() => onRetry?.(message.id)} />
           <IconButton
+            icon={<GitFork className="h-3.5 w-3.5" />}
+            label="Fork from here"
+            size="sm"
+            onClick={() => onFork?.(message.id)}
+          />
+          <IconButton
             icon={<ThumbsDown className={cn(message.feedback === "bad" && "text-error fill-error/20")} />}
             label={message.feedback === "bad" ? "Feedback logged" : "Bad response"}
             size="sm"
             active={message.feedback === "bad"}
             onClick={() => onBadResponse?.(message.id)}
           />
-          <span className="ml-auto text-[10.5px] text-ink-faint">{formatTime(message.createdAt)}</span>
+          <span className="ml-auto text-[11px] text-ink-faint">{formatTime(message.createdAt)}</span>
+          {message.usage && (
+            <span className="text-[11px] text-ink-faint">
+              <UsageCaption usage={message.usage} />
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -810,7 +979,7 @@ function ToolCallAccordion({
           }
         }}
         className={cn(
-          "press flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-[12.5px] transition-colors",
+          "press flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-[13px] transition-colors",
           hasGate
             ? "border-warning/20 bg-warning/5 text-warning hover:bg-warning/10"
             : errored
@@ -854,16 +1023,16 @@ function ToolCallAccordion({
 
           {inputPreview && (
             <div>
-              <div className="mb-0.5 text-[10.5px] font-medium uppercase tracking-wide text-ink-faint">Input</div>
-              <pre className="overflow-x-auto rounded-md border border-line bg-paper-sunken px-2.5 py-1.5 text-[11.5px] leading-5 text-ink-muted">
+              <div className="mb-0.5 text-[11px] font-medium uppercase tracking-wide text-ink-faint">Input</div>
+              <pre className="overflow-x-auto rounded-md border border-line bg-paper-sunken px-2.5 py-1.5 text-[12px] leading-5 text-ink-muted">
                 {inputPreview}
               </pre>
             </div>
           )}
           {part.result && (
             <div>
-              <div className="mb-0.5 text-[10.5px] font-medium uppercase tracking-wide text-ink-faint">Output</div>
-              <pre className="max-h-72 overflow-auto rounded-md border border-line bg-paper-sunken px-2.5 py-1.5 text-[11.5px] leading-5 text-ink-muted whitespace-pre-wrap break-words">
+              <div className="mb-0.5 text-[11px] font-medium uppercase tracking-wide text-ink-faint">Output</div>
+              <pre className="max-h-72 overflow-auto rounded-md border border-line bg-paper-sunken px-2.5 py-1.5 text-[12px] leading-5 text-ink-muted whitespace-pre-wrap break-words">
                 {part.result.slice(0, 4000)}
                 {part.result.length > 4000 ? `\n… (${part.result.length - 4000} more chars)` : ""}
               </pre>
@@ -874,6 +1043,14 @@ function ToolCallAccordion({
     </div>
   );
 }
+
+/** Orb states that read clearly at the 32px display size — "working" (loose
+ *  particle scatter) and "shaping" (thin outline) dissolve into noise, so the
+ *  label matcher never selects them. */
+const ORB_STATES: readonly OrbState[] = [
+  "searching", "solving", "listening",
+  "connecting", "weaving", "composing", "breathing",
+];
 
 function WorkingLabel({ status }: { status?: string }) {
   // Cycle through a shuffled pool of whimsical "-ing" words at a slower pace.
@@ -888,19 +1065,29 @@ function WorkingLabel({ status }: { status?: string }) {
   const generic = !status || status.toLowerCase() === "thinking";
   const label = generic ? pool[idx] : status;
 
+  const words = label.toLowerCase().split(/[^a-z]+/);
+  const orbState: OrbState = ORB_STATES.find((s) => words.includes(s)) ?? "weaving";
+
   return (
-    <span
-      key={label}
-      className="shimmer-text inline-flex items-center gap-2 text-[13.5px] font-medium text-ink-faint"
-    >
-      <span className="inline-flex h-1.5 w-1.5 rounded-full bg-ink-faint/70 animate-pulse" />
-      <span
-        key={label /* re-fade on word change */}
-        className="shimmer-text"
-      >
-        {label}
-      </span>
-    </span>
+    <div className="group flex w-full gap-3 justify-start">
+      {/* While the agent works, the orb takes the logo avatar's slot. The
+          package's 20px preset draws sub-pixel dots that vanish at inline
+          scale; the denser 64px design displayed at 32px stays legible. */}
+      <ThinkingOrb
+        state={orbState}
+        size={64}
+        style={{ width: 32, height: 32 }}
+        className="mt-0.5 shrink-0"
+      />
+      <div className="min-w-0 flex-1 max-w-[92%] self-center">
+        <span
+          key={label /* re-fade on word change */}
+          className="shimmer-text text-[14px] font-medium text-ink-faint"
+        >
+          {label}
+        </span>
+      </div>
+    </div>
   );
 }
 
@@ -925,11 +1112,11 @@ function PermissionRecoveryCard({ message }: { message: string }) {
     <div className="mt-2 flex items-start gap-2.5 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2.5">
       <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
       <div className="min-w-0 flex-1">
-        <div className="text-[12.5px] font-medium text-ink">Permission needed for desktop control</div>
-        <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-muted">{message}</p>
+        <div className="text-[13px] font-medium text-ink">Permission needed for desktop control</div>
+        <p className="mt-0.5 text-[12px] leading-relaxed text-ink-muted">{message}</p>
         <button
           onClick={openSettings}
-          className="mt-2 inline-flex items-center gap-1 rounded-lg border border-amber-500/40 bg-paper-raised px-2.5 py-1 text-[11px] font-medium text-ink hover:bg-paper-sunken transition-colors"
+          className="mt-2 inline-flex items-center gap-1 rounded-lg border border-amber-500/40 bg-paper-raised px-2.5 py-1 text-[11.5px] font-medium text-ink hover:bg-paper-sunken transition-colors"
         >
           Open System Settings
         </button>

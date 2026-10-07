@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::env;
 
 pub fn home_dir() -> PathBuf {
@@ -172,7 +172,11 @@ pub fn skills_dir() -> PathBuf {
         }
     }
 
-    // 5. Dev fallback.
+    // 5. Dev fallback: the checkout this binary was built from, then cwd.
+    let built_from = Path::new(env!("CARGO_MANIFEST_DIR")).join("../zWork-Skills");
+    if built_from.exists() {
+        return built_from;
+    }
     repo_root().join("zWork-Skills")
 }
 
@@ -222,4 +226,100 @@ pub fn is_safe_id(id_str: &str) -> bool {
         return false;
     }
     id_str.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// Give the process the user's real `PATH`, plus zWork's managed runtime
+/// (see [`crate::runtime`]).
+///
+/// An app launched from Finder or the Dock inherits launchd's minimal
+/// `/usr/bin:/bin:/usr/sbin:/sbin`, so `npx`/`uvx` MCP servers and the CLIs
+/// the agent runs through `bash` (node, python3, brew tools, gh, …) would
+/// not be found. Ask the login shell for its `PATH` (bounded by a timeout,
+/// since shell rc files can hang) and add the usual install locations.
+/// Must run before any threads read the environment.
+pub fn hydrate_path() {
+    if cfg!(windows) {
+        return;
+    }
+    let current = env::var("PATH").unwrap_or_default();
+    // Launched from a terminal the PATH is already the user's; only the
+    // launchd default needs the (slow-ish) login-shell round trip.
+    let minimal = current.split(':').all(|d| matches!(d, "" | "/usr/bin" | "/bin" | "/usr/sbin" | "/sbin"));
+    let shell_path = if minimal { login_shell_path() } else { None };
+    let (ahead, behind) = crate::runtime::path_dirs();
+    let as_strings = |v: Vec<PathBuf>| v.into_iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>();
+    let mut dirs: Vec<String> = as_strings(ahead);
+    dirs.extend(shell_path.map(|p| p.split(':').map(str::to_string).collect::<Vec<_>>()).unwrap_or_default());
+    dirs.extend(current.split(':').map(str::to_string));
+    if let Some(home) = dirs::home_dir() {
+        for rel in [".local/bin", ".cargo/bin", ".bun/bin", ".volta/bin", ".deno/bin", "go/bin"] {
+            dirs.push(home.join(rel).to_string_lossy().into_owned());
+        }
+    }
+    dirs.extend(["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"].map(String::from));
+    dirs.extend(as_strings(behind));
+
+    let mut seen = std::collections::HashSet::new();
+    let merged: Vec<String> = dirs.into_iter().filter(|d| !d.is_empty() && seen.insert(d.clone())).collect();
+    let merged = merged.join(":");
+    // SAFETY: called at the top of `main`, before the runtime spawns worker
+    // threads that could read the environment concurrently.
+    if merged != current {
+        unsafe { env::set_var("PATH", merged) };
+    }
+    for (key, value) in crate::runtime::process_env() {
+        if env::var_os(key).is_none() {
+            unsafe { env::set_var(key, value) };
+        }
+    }
+}
+
+fn login_shell_path() -> Option<String> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    const MARKER: &str = "__ZWORK_PATH__";
+    let shell = env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/zsh".into());
+    // fish keeps PATH as a list (quoted, it joins with spaces).
+    let (flags, script) = if shell.ends_with("fish") {
+        ("-lc", format!("printf '{MARKER}%s{MARKER}' (string join : $PATH)"))
+    } else {
+        ("-ilc", format!("printf '{MARKER}%s{MARKER}' \"$PATH\""))
+    };
+    let mut child = Command::new(&shell)
+        .arg(flags)
+        .arg(script)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(20)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+    let mut out = String::new();
+    child.stdout.take()?.read_to_string(&mut out).ok()?;
+    let path = out.split(MARKER).nth(1)?.trim().to_string();
+    (!path.is_empty()).then_some(path)
+}
+
+/// A Finder-launched app inherits `/` as its working directory, which would
+/// make the agent's shell, relative paths and AGENTS.md lookup start at the
+/// filesystem root. Work from the zWork workspace instead; a real directory
+/// (a terminal launch, a benchmark checkout) is left alone.
+pub fn settle_cwd() {
+    let at_root = env::current_dir().map_or(true, |d| d.parent().is_none());
+    if at_root {
+        let _ = env::set_current_dir(workspace_root());
+    }
 }

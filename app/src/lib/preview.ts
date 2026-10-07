@@ -22,11 +22,7 @@ function readPreviewParam(): string {
 const DEMO_ORIGINS: string[] = (() => {
   const env = (import.meta.env.VITE_ZWORK_DEMO_ORIGIN as string | undefined)?.trim();
   if (env) return env.split(",").map((o) => o.trim()).filter(Boolean);
-  return [
-    "https://app.tryzwork.app",
-    "https://tryzwork.app",
-    "https://www.tryzwork.app",
-  ];
+  return ["https://app.tryzwork.app"];
 })();
 
 function isDemoOrigin(): boolean {

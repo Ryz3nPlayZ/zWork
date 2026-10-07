@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState, type ReactNode } from "react";
 import { CheckCircle2, ExternalLink, X, AlertTriangle, PanelLeft, Search } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
 import { Landing } from "./components/Landing";
@@ -7,7 +7,7 @@ import { useApp } from "./lib/store";
 import { consumeInstalledUpdateNotice, detectUpdate, installUpdate, openReleaseUrl, type UpdateCardState, type UpdateProgress } from "./lib/update";
 import { cn } from "./lib/cn";
 import { dragRegionAttrs, onDragMouseDown } from "./lib/drag";
-import { isMacOS } from "./lib/platform";
+import { isMacOS, usesIntegratedTitleBar } from "./lib/platform";
 import { loadZoom, applyZoom, zoomIn, zoomOut, zoomReset } from "./lib/zoom";
 import { useTranslucencyPref, nativeVibrancySupported } from "./lib/translucency";
 import { recordTelemetry, setTelemetryEnabled, startTelemetrySession, stopTelemetrySession } from "./lib/telemetry";
@@ -37,6 +37,7 @@ const ShareWindowApp = lazy(() => import("./components/ShareWindowApp").then((m)
 import { KeybindingsModal } from "./components/KeybindingsModal";
 import { PermissionPrompt } from "./components/PermissionPrompt";
 import { BootProgress } from "./components/BootProgress";
+import { EarlyScreenChrome, TitleBar } from "./components/TitleBar";
 
 
 function OfflineBanner() {
@@ -72,6 +73,21 @@ function OfflineBanner() {
       >
         {reconnecting ? "Connecting..." : "Reconnect"}
       </button>
+    </div>
+  );
+}
+
+/**
+ * Full-screen gate wrapper for the pre-app screens that render as bare
+ * divs (blank boot states). Gives them a drag strip + caption buttons on
+ * Windows, where the window has no native decorations to fall back on.
+ * LoginScreen/Onboarding/BootProgress mount their own EarlyScreenChrome.
+ */
+function GateScreen({ children }: { children: ReactNode }) {
+  return (
+    <div className="relative h-screen w-screen overflow-hidden bg-paper">
+      <EarlyScreenChrome />
+      {children}
     </div>
   );
 }
@@ -155,6 +171,10 @@ export default function App() {
   const translucentOn = translucency === "on";
   const useNativeGlass = translucentOn && nativeVibrancySupported();
   const isMac = isMacOS();
+  // Windows: the integrated TitleBar owns the top chrome — the pane starts
+  // below it and ChatView's in-pane header is replaced by the title bar's
+  // chat cluster (see components/TitleBar.tsx).
+  const isWin = usesIntegratedTitleBar();
   const sidebarOpen = useApp((s) => s.sidebarOpen);
 
   // Skip onboarding in browser preview mode (non-Tauri environment)
@@ -509,11 +529,15 @@ export default function App() {
     }
   }, [showLanding, showLandingOverlay]);
   if (cloudLoading) {
-    return <div className="h-screen w-screen bg-paper" />;
+    return (
+      <GateScreen>
+        <div className="h-screen w-screen bg-paper" />
+      </GateScreen>
+    );
   }
   if (!cloudUser && !isBrowserDevMode) {
     return (
-      <Suspense fallback={<div className="h-screen w-screen bg-paper" />}>
+      <Suspense fallback={<GateScreen><div className="h-screen w-screen bg-paper" /></GateScreen>}>
         <LoginScreen />
       </Suspense>
     );
@@ -529,14 +553,22 @@ export default function App() {
     );
   }
   if (!skipOnboarding && onboardingDone === null) {
-    return <div className="h-screen w-screen bg-paper" />;
+    return (
+      <GateScreen>
+        <div className="h-screen w-screen bg-paper" />
+      </GateScreen>
+    );
   }
 
   // Gate: don't render the main UI until the local backend is healthy.
   // Without this, providers/settings/connectors all load as empty.
   const isTauri = typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
   if (isTauri && !backendReady) {
-    return <BootProgress />;
+    return (
+      <GateScreen>
+        <BootProgress />
+      </GateScreen>
+    );
   }
 
   return (
@@ -561,6 +593,7 @@ export default function App() {
         )}
       >
         <Sidebar />
+        {isWin && <TitleBar />}
       </div>
 
       {/*
@@ -575,7 +608,10 @@ export default function App() {
         className={cn(
           "absolute flex flex-col overflow-hidden rounded-[14px] bg-paper shadow-float",
           "transition-[left] duration-200 ease-out",
-          "top-[5px] right-[5px] bottom-[5px]",
+          // Windows: start below the integrated title bar (40px strip + 5px
+          // seam); everywhere else the pane floats at the window's top edge.
+          isWin ? "top-[45px]" : "top-[5px]",
+          "right-[5px] bottom-[5px]",
           sidebarOpen ? "left-[253px]" : "left-[5px]",
         )}
       >
@@ -588,8 +624,11 @@ export default function App() {
           header sits at the true top with no empty band above it.
           macOS indents it from the left so it doesn't sit under the
           traffic lights when the sidebar is collapsed.
+          Windows skips it entirely: the TitleBar above the pane is the
+          drag region, and ChatView renders a slim gradient spacer instead
+          of its header (the title bar carries the chat title + metadata).
         */}
-        {!(view === "chat" && active) && (
+        {!isWin && !(view === "chat" && active) && (
           <div
             {...dragRegionAttrs()}
             onMouseDown={onDragMouseDown}
@@ -703,8 +742,10 @@ export default function App() {
         top-left of the WINDOW (not the pane), so they never slide when
         the pane expands/contracts on sidebar toggle. On macOS they sit
         just to the right of the traffic lights; off-mac they hug the
-        top-left corner.
+        top-left corner. On Windows they live INSIDE the TitleBar strip
+        instead, so this floating cluster isn't rendered there.
       */}
+      {!isWin && (
       <div
         data-no-drag
         className={cn(
@@ -731,6 +772,7 @@ export default function App() {
           size="sm"
         />
       </div>
+      )}
 
       {/*
         Window-level overlays — outside the main pane so they cover the whole

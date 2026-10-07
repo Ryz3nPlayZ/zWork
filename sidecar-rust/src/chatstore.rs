@@ -20,6 +20,11 @@ pub struct ChatMessage {
     /// chat" without storing raw tool_use/tool_result blocks.
     #[serde(default)]
     pub tool_trace: Vec<Value>,
+    /// Token/cost usage for this assistant run (camelCase harness `Usage`
+    /// JSON). Written once per assistant message with the running total,
+    /// so the last write equals the run's total.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Value>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -43,9 +48,36 @@ pub struct Chat {
     /// the main chat list; they surface inside the scheduled task's run history.
     #[serde(default = "default_chat_kind")]
     pub kind: String,
+    /// Set on a chat created by [`fork_chat`]: the source chat id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_chat_id: Option<String>,
+    /// Message id in the parent the fork was taken at (display metadata).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked_at_message_id: Option<String>,
+    /// Rewound tails kept for restore. Non-destructive truncate appends here
+    /// (pi: branches over the entry tree — the flat view keeps one active
+    /// path and stashes diverged tails as branch records).
+    #[serde(default)]
+    pub branches: Vec<BranchRecord>,
+    /// Cumulative usage across all runs in this chat (camelCase harness
+    /// `Usage` JSON). Unlike cloud analytics this covers BYOK / claude_code /
+    /// Ollama turns too, because the sidecar sees every request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_totals: Option<Value>,
 }
 
 fn default_chat_kind() -> String { "chat".to_string() }
+
+/// A diverged tail parked by a rewind (non-destructive truncate). Restoring
+/// it swaps it back in as the active tail, parking the current tail in turn.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BranchRecord {
+    pub id: String,
+    pub created_at: u64,
+    /// The message the rewind kept — the branch's messages continue after it.
+    pub from_message_id: String,
+    pub messages: Vec<ChatMessage>,
+}
 
 fn chat_file_path(chat_id: &str) -> PathBuf {
     chats_dir().join(format!("{}.json", chat_id))
@@ -81,6 +113,10 @@ pub fn create_kind(title: &str, model: &str, project_id: &str, kind: &str) -> Ch
         compacted_summary: String::new(),
         compaction_cursor: 0,
         kind: kind.to_string(),
+        parent_chat_id: None,
+        forked_at_message_id: None,
+        branches: Vec::new(),
+        usage_totals: None,
     };
     save(&c);
     c
@@ -267,6 +303,23 @@ pub fn content_to_text(v: &Value) -> String {
     }
 }
 
+/// The provisional title for a chat: its first line, cut at a word
+/// boundary. The agent replaces it with a model-written one shortly after.
+pub fn auto_title(text: &str) -> String {
+    const MAX: usize = 60;
+    let first_line = text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    // Count chars, not bytes, so emoji/CJK first lines don't panic.
+    if first_line.chars().count() <= MAX {
+        return first_line.to_string();
+    }
+    let cut: String = first_line.chars().take(MAX).collect();
+    let cut = match cut.rfind(char::is_whitespace) {
+        Some(i) if i > MAX / 2 => &cut[..i],
+        _ => cut.as_str(),
+    };
+    format!("{}…", cut.trim_end_matches(|c: char| c.is_whitespace() || c == ',' || c == '.'))
+}
+
 pub fn append_message(chat_id: &str, role: &str, content: Value) -> Option<ChatMessage> {
     let mut c = get(chat_id)?;
     let msg = ChatMessage {
@@ -276,6 +329,7 @@ pub fn append_message(chat_id: &str, role: &str, content: Value) -> Option<ChatM
         created_at: now_ms(),
         activities: Vec::new(),
         tool_trace: Vec::new(),
+        usage: None,
     };
     
     c.messages.push(msg.clone());
@@ -285,10 +339,7 @@ pub fn append_message(chat_id: &str, role: &str, content: Value) -> Option<ChatM
     if c.title == "New chat" && role == "user" {
         let txt = content_to_text(&content);
         if !txt.is_empty() {
-            let first_line = txt.lines().next().unwrap_or("").trim();
-            // Slice on char boundaries so multi-byte (emoji/CJK) first lines
-            // don't panic the backend mid-turn.
-            let title: String = first_line.chars().take(64).collect();
+            let title = auto_title(&txt);
             if !title.is_empty() {
                 c.title = title;
             }
@@ -324,6 +375,39 @@ pub fn update_message(
         save(&c);
     }
     updated
+}
+
+/// Record usage for one assistant message: the message row stores the run's
+/// running total (last write = run total), while `delta` — this message's
+/// own usage — is merged into the chat's cumulative totals. One load+save.
+pub fn record_usage(
+    chat_id: &str,
+    message_id: &str,
+    running_total: &crate::harness::types::Usage,
+    delta: &crate::harness::types::Usage,
+) -> Option<()> {
+    let mut c = get(chat_id)?;
+    let mut found = false;
+    for msg in &mut c.messages {
+        if msg.id == message_id {
+            msg.usage = Some(serde_json::to_value(running_total).ok()?);
+            found = true;
+            break;
+        }
+    }
+    if !found {
+        return None;
+    }
+    let existing: crate::harness::types::Usage = c
+        .usage_totals
+        .as_ref()
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+    let totals = existing.add(delta);
+    c.usage_totals = serde_json::to_value(totals).ok();
+    c.updated_at = now_ms();
+    save(&c);
+    Some(())
 }
 
 #[allow(dead_code)]
@@ -434,17 +518,209 @@ pub fn render_tool_traces(messages: &[ChatMessage]) -> Option<String> {
 }
 
 /// Remove all messages after the given message_id, optionally updating that
-/// message's content. Returns the updated chat.
+/// message's content. Non-destructive: the dropped tail is parked as a
+/// [`BranchRecord`] for later restore.
 pub fn truncate_at_message(chat_id: &str, message_id: &str, content: Option<Value>) -> Option<Chat> {
     let mut c = get(chat_id)?;
     let pos = c.messages.iter().position(|m| m.id == message_id)?;
-    // Optionally update the truncation target message
     if let Some(ref val) = content {
         c.messages[pos].content = val.clone();
     }
-    // Keep only messages up to and including the target
-    c.messages.truncate(pos + 1);
+    let tail: Vec<ChatMessage> = c.messages.split_off(pos + 1);
+    if !tail.is_empty() {
+        c.branches.push(BranchRecord {
+            id: uid(),
+            created_at: now_ms(),
+            from_message_id: message_id.to_string(),
+            messages: tail,
+        });
+    }
     c.updated_at = now_ms();
     save(&c);
     Some(c)
+}
+
+/// Fork a chat: copy messages up to (and including, unless `before`)
+/// `at_message_id` into a new chat. The source is untouched. Usage totals
+/// are NOT copied (pi: forks start with a zeroed ledger).
+pub fn fork_chat(chat_id: &str, at_message_id: Option<&str>, before: bool) -> Option<Chat> {
+    let source = get(chat_id)?;
+    let pos = match at_message_id {
+        Some(id) => source.messages.iter().position(|m| m.id == id)?,
+        None => source.messages.len().checked_sub(1)?,
+    };
+    let cut = if before { pos } else { pos + 1 };
+    let now = now_ms();
+    let forked = Chat {
+        id: uid(),
+        title: format!("Fork of {}", source.title),
+        created_at: now,
+        updated_at: now,
+        messages: source.messages[..cut].to_vec(),
+        model: source.model.clone(),
+        project_id: source.project_id.clone(),
+        compacted_summary: source.compacted_summary.clone(),
+        compaction_cursor: source.compaction_cursor,
+        kind: "chat".to_string(),
+        parent_chat_id: Some(source.id.clone()),
+        forked_at_message_id: at_message_id.map(String::from),
+        branches: Vec::new(),
+        usage_totals: None,
+    };
+    save(&forked);
+    Some(forked)
+}
+
+/// Restore a parked branch tail: the active tail after the branch point is
+/// parked as a new branch record, and the branch's messages are appended
+/// back as the active tail. Returns the updated chat.
+pub fn restore_branch(chat_id: &str, branch_id: &str) -> Option<Chat> {
+    let mut c = get(chat_id)?;
+    let index = c.branches.iter().position(|b| b.id == branch_id)?;
+    let branch = c.branches.remove(index);
+    let pos = c.messages.iter().position(|m| m.id == branch.from_message_id)?;
+    let tail: Vec<ChatMessage> = c.messages.split_off(pos + 1);
+    if !tail.is_empty() {
+        c.branches.push(BranchRecord {
+            id: uid(),
+            created_at: now_ms(),
+            from_message_id: branch.from_message_id.clone(),
+            messages: tail,
+        });
+    }
+    c.messages.extend(branch.messages);
+    c.updated_at = now_ms();
+    save(&c);
+    Some(c)
+}
+
+/// Delete a parked branch record permanently (its messages are discarded).
+pub fn delete_branch(chat_id: &str, branch_id: &str) -> Option<Chat> {
+    let mut c = get(chat_id)?;
+    c.branches.retain(|b| b.id != branch_id);
+    c.updated_at = now_ms();
+    save(&c);
+    Some(c)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::harness::types::{Usage, UsageCost};
+    use serde_json::json;
+
+    /// Env is process-global and tests run in parallel: serialize the
+    /// env-mutating tests (see the convention note in harness_turn tests).
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn auto_title_cuts_at_a_word() {
+        assert_eq!(auto_title("\n  Clean up my Q3 expenses\nmore"), "Clean up my Q3 expenses");
+        let long = "Please go through the Q3 expenses export and flag every duplicate charge you find";
+        let t = auto_title(long);
+        assert!(t.ends_with('…') && t.chars().count() <= 61, "{t}");
+        assert!(long.starts_with(t.trim_end_matches('…')));
+        assert_eq!(auto_title(&"日本語".repeat(40)).chars().count(), 61);
+    }
+
+    fn usage(input: u64, output: u64) -> Usage {
+        Usage {
+            input,
+            output,
+            cache_read: 0,
+            cache_write: 0,
+            cache_write_1h: None,
+            reasoning: None,
+            total_tokens: input + output,
+            cost: UsageCost {
+                input: input as f64 * 1.0,
+                output: output as f64 * 2.0,
+                cache_read: 0.0,
+                cache_write: 0.0,
+                total: input as f64 * 1.0 + output as f64 * 2.0,
+            },
+        }
+    }
+
+    /// Env-mutating test — must stay single and self-cleaning (see the
+    /// convention note in harness_turn tests).
+    #[test]
+    fn record_usage_merges_deltas_into_totals() {
+        let _env_guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var("ZWORK_HOME").ok();
+        let home = std::env::temp_dir().join(format!("zwork-chatstore-{}", uuid::Uuid::new_v4().simple()));
+        std::env::set_var("ZWORK_HOME", &home);
+
+        let chat = create("t", "m", "");
+        let msg = append_message(&chat.id, "assistant", serde_json::json!("hi")).unwrap();
+
+        // Two MessageEnds in one run: running totals on the row, deltas in chat.
+        record_usage(&chat.id, &msg.id, &usage(100, 10), &usage(100, 10)).unwrap();
+        record_usage(&chat.id, &msg.id, &usage(150, 30), &usage(50, 20)).unwrap();
+
+        let c = get(&chat.id).unwrap();
+        let row_usage: Usage = serde_json::from_value(c.messages[0].usage.clone().unwrap()).unwrap();
+        assert_eq!((row_usage.input, row_usage.output), (150, 30));
+        let totals: Usage = serde_json::from_value(c.usage_totals.clone().unwrap()).unwrap();
+        assert_eq!((totals.input, totals.output), (150, 30));
+        assert_eq!(totals.cost.total, row_usage.cost.total);
+
+        std::env::remove_var("ZWORK_HOME");
+        if let Some(p) = prev {
+            std::env::set_var("ZWORK_HOME", p);
+        }
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Env-mutating test — same convention as above.
+    #[test]
+    fn fork_truncate_and_restore_are_non_destructive() {
+        let _env_guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var("ZWORK_HOME").ok();
+        let home = std::env::temp_dir().join(format!("zwork-chatstore-{}", uuid::Uuid::new_v4().simple()));
+        std::env::set_var("ZWORK_HOME", &home);
+
+        let chat = create("t", "m", "");
+        let m1 = append_message(&chat.id, "user", json!("one")).unwrap();
+        let m2 = append_message(&chat.id, "assistant", json!("two")).unwrap();
+        let m3 = append_message(&chat.id, "user", json!("three")).unwrap();
+
+        // Fork at m2 (inclusive): new chat has 2 messages, source untouched.
+        let fork = fork_chat(&chat.id, Some(&m2.id), false).unwrap();
+        assert_eq!(fork.messages.len(), 2);
+        assert_eq!(fork.parent_chat_id.as_deref(), Some(chat.id.as_str()));
+        assert_eq!(get(&chat.id).unwrap().messages.len(), 3);
+
+        // Rewind (truncate) at m1: tail parked, restorable.
+        let c = truncate_at_message(&chat.id, &m1.id, None).unwrap();
+        assert_eq!(c.messages.len(), 1);
+        assert_eq!(c.branches.len(), 1);
+        assert_eq!(c.branches[0].messages.len(), 2);
+
+        // Restore: the parked tail returns. Nothing was active after m1, so
+        // no new branch is parked.
+        let branch_id = c.branches[0].id.clone();
+        let c = restore_branch(&chat.id, &branch_id).unwrap();
+        assert_eq!(c.messages.len(), 3);
+        assert_eq!(c.messages[2].id, m3.id);
+        assert!(c.branches.is_empty());
+
+        // Truncate again mid-tail, then restore the NEW parked branch: the
+        // replaced tail ("fresh") is parked in its place.
+        let c = truncate_at_message(&chat.id, &m1.id, None).unwrap();
+        let branch2_id = c.branches[0].id.clone();
+        let c = append_message(&chat.id, "assistant", json!("fresh"));
+        assert!(c.is_some());
+        let c = restore_branch(&chat.id, &branch2_id).unwrap();
+        assert_eq!(c.messages.len(), 3);
+        assert_eq!(c.messages[1].id, m2.id);
+        assert_eq!(c.branches.len(), 1);
+        assert_eq!(c.branches[0].messages.len(), 1); // the "fresh" message parked
+
+        std::env::remove_var("ZWORK_HOME");
+        if let Some(p) = prev {
+            std::env::set_var("ZWORK_HOME", p);
+        }
+        let _ = std::fs::remove_dir_all(&home);
+    }
 }

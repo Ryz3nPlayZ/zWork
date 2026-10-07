@@ -10,14 +10,14 @@ export function ModelPicker() {
   const setView = useApp((s) => s.setView);
 
   const [open, setOpen] = useState(false);
-  const [dropUp, setDropUp] = useState(false);
+  const [dropDown, setDropDown] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   const updateDirection = useCallback(() => {
     if (!ref.current) return;
     const rect = ref.current.getBoundingClientRect();
-    // If trigger is in the top 60% of viewport, drop down; otherwise drop up.
-    setDropUp(rect.top < window.innerHeight * 0.6);
+    // Open toward whichever side has more room; the list scrolls past that.
+    setDropDown(window.innerHeight - rect.bottom > rect.top);
   }, []);
 
   useEffect(() => {
@@ -57,8 +57,8 @@ export function ModelPicker() {
         <div
           role="listbox"
           className={cn(
-            "absolute right-0 z-40 w-[320px] animate-fade-in rounded-xl border border-line bg-paper p-1 shadow-pop",
-            dropUp ? "top-[calc(100%+8px)]" : "bottom-[calc(100%+8px)]",
+            "absolute right-0 z-40 w-[320px] max-h-[min(420px,calc(50vh-32px))] overflow-y-auto animate-fade-in rounded-xl border border-line bg-paper p-1 shadow-pop",
+            dropDown ? "top-[calc(100%+8px)]" : "bottom-[calc(100%+8px)]",
           )}
         >
           <div className="px-2.5 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
@@ -104,7 +104,7 @@ export function ModelPicker() {
                   </span>
                   <span className="block text-[11px] text-ink-muted truncate">
                     {m.subtitle}
-                    {!m.configured && " · no key"}
+                    {!m.configured && !m.subtitle?.includes("sign in") && " · needs a key"}
                   </span>
                 </span>
                 {!m.configured ? (

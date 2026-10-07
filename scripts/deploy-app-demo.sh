@@ -61,7 +61,9 @@ SSH_OPTS=(-i "$KEY" -o StrictHostKeyChecking=accept-new)
 echo "==> Deploying to ${USER}@${HOST}:${REMOTE_ROOT}/"
 # --delete so stale assets from a prior build don't linger; the path is a host
 # bind-mount into the Caddy container, so files go live immediately.
-rsync -avz --delete \
+# --exclude '._*' keeps macOS AppleDouble resource-fork sidecars out of the
+# web root (they used to litter it and are servable junk).
+rsync -avz --delete --exclude='._*' \
   -e "ssh ${SSH_OPTS[*]}" \
   "$APP_DIR/dist/" \
   "${USER}@${HOST}:${REMOTE_ROOT}/"

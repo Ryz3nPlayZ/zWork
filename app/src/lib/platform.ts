@@ -14,6 +14,18 @@ export function isWindows(): boolean {
   return /^Win/i.test(platform) || /Windows/i.test(ua);
 }
 
+/**
+ * True on the Tauri desktop app running on Windows — the platform where the
+ * main window ships without native decorations and the integrated TitleBar
+ * component (components/TitleBar.tsx) owns the top chrome: window controls,
+ * drag region, and the chat title/metadata header. macOS overlays its native
+ * traffic lights instead, Linux keeps its native title bar, and the web build
+ * has no window chrome at all — so none of them use it.
+ */
+export function usesIntegratedTitleBar(): boolean {
+  return IS_TAURI && isWindows();
+}
+
 let softwareRenderingCache: boolean | null = null;
 
 /** Detect whether the browser is using a software (CPU) WebGL renderer.
