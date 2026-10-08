@@ -4,6 +4,7 @@ import { useGSAP } from "@gsap/react";
 import { ArrowRight, Check, Download, Plus } from "lucide-react";
 import { Logo } from "../clone/Logo";
 import { cn } from "../lib/cn";
+import { Link } from "../lib/router";
 import {
   ASSET_LABEL,
   CONTRIBUTING_URL,
@@ -460,9 +461,11 @@ export function Footer() {
     [
       "Product",
       [
-        ["How it works", "#how"],
-        ["Schedules", "#schedules"],
-        ["Pricing", "#pricing"],
+        ["How it works", "/#how"],
+        ["Features", "/features"],
+        ["Pricing", "/pricing"],
+        ["Open source", "/open-source"],
+        ["Download", "/download"],
         ["Try in browser", DEMO_URL],
       ],
     ],
@@ -507,9 +510,9 @@ export function Footer() {
               <ul className="mt-4 flex flex-col gap-2.5">
                 {links.map(([label, href]) => (
                   <li key={label}>
-                    <a href={href} className="text-[13.5px] text-ink-muted transition-colors hover:text-ink">
+                    <Link href={href} className="text-[13.5px] text-ink-muted transition-colors hover:text-ink">
                       {label}
-                    </a>
+                    </Link>
                   </li>
                 ))}
               </ul>

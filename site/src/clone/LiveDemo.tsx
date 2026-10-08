@@ -30,6 +30,7 @@ export function LiveDemo({
   onChapter,
   className,
   loopDelay = 3,
+  pinnedContainer,
 }: {
   scenario: Scenario;
   width: number;
@@ -39,6 +40,8 @@ export function LiveDemo({
   onChapter?: (name: string) => void;
   className?: string;
   loopDelay?: number;
+  /** The pinned ancestor, if any, so the play range includes the pin. */
+  pinnedContainer?: string;
 }) {
   const [state, setState] = useState<CloneState>(scenario.initial);
   const [scale, setScale] = useState(0);
@@ -80,6 +83,9 @@ export function LiveDemo({
             start: "top 80%",
             end: "bottom 15%",
             onToggle: (self) => (self.isActive ? tl.play() : tl.pause()),
+            pinnedContainer,
+            // Measure after the pin it sits in (created later, by the parent).
+            refreshPriority: pinnedContainer ? -1 : 0,
           });
         },
       );

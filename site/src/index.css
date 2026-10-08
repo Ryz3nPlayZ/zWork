@@ -248,3 +248,62 @@ body {
 @media (prefers-reduced-motion: no-preference) {
   .hero-title { visibility: hidden; }
 }
+
+/* ---- The desktop the demo plays on ---- */
+.desk {
+  --pad: 10px;
+  height: calc(100dvh - 2 * var(--pad));
+  background-color: #cbbfae;
+  background-image:
+    radial-gradient(70% 60% at 12% 8%, #efe4d1 0%, transparent 60%),
+    radial-gradient(60% 70% at 92% 18%, #b9c4c0 0%, transparent 62%),
+    radial-gradient(80% 70% at 70% 105%, #a8927a 0%, transparent 62%),
+    radial-gradient(55% 55% at 25% 90%, #d9c3a6 0%, transparent 70%);
+  box-shadow: 0 0 0 1px rgb(var(--border-overlay) / 0.08), 0 30px 80px -30px rgb(var(--shadow) / 0.45);
+}
+@media (min-width: 640px) {
+  .desk { --pad: 20px; }
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .desk {
+    background-color: #1d1c1f;
+    background-image:
+      radial-gradient(70% 60% at 12% 8%, #3a342d 0%, transparent 60%),
+      radial-gradient(60% 70% at 92% 18%, #25302f 0%, transparent 62%),
+      radial-gradient(80% 70% at 70% 105%, #3b2f26 0%, transparent 62%),
+      radial-gradient(55% 55% at 25% 90%, #2a2622 0%, transparent 70%);
+  }
+}
+:root[data-theme="dark"] .desk {
+  background-color: #1d1c1f;
+  background-image:
+    radial-gradient(70% 60% at 12% 8%, #3a342d 0%, transparent 60%),
+    radial-gradient(60% 70% at 92% 18%, #25302f 0%, transparent 62%),
+    radial-gradient(80% 70% at 70% 105%, #3b2f26 0%, transparent 62%),
+    radial-gradient(55% 55% at 25% 90%, #2a2622 0%, transparent 70%);
+}
+/* Frosted OS chrome (menu bar, dock, widget). An approximation of macOS
+   vibrancy; solid where transparency is reduced. */
+.desk-glass {
+  background: rgb(255 255 255 / 0.32);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  backdrop-filter: blur(24px) saturate(1.6);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .desk-glass { background: rgb(30 30 32 / 0.42); }
+}
+:root[data-theme="dark"] .desk-glass { background: rgb(30 30 32 / 0.42); }
+@media (prefers-reduced-transparency: reduce) {
+  .desk-glass { background: rgb(var(--paper-raised)); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+/* The zWork window: as wide as the free height allows at the app's 1440×880
+   shape (menu bar 28px + dock 88px + breathing room). */
+.desk-app {
+  width: 94%;
+}
+@media (min-width: 1024px) {
+  .desk-app { width: min(78%, calc((100dvh - 2 * var(--pad) - 116px - 48px) * 1.6364)); }
+}
+.desk-window-shadow {
+  box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.22), 0 22px 70px -12px rgb(0 0 0 / 0.42), 0 8px 20px -8px rgb(0 0 0 / 0.2);
+}
