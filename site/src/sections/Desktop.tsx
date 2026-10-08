@@ -28,6 +28,10 @@ const CHAPTERS = [
   { id: "result", title: "You get the finished thing", body: "A cleaned workbook and a report you can send." },
 ];
 
+// From the desktop coming into view to just after the pin lets go.
+const PIN_LENGTH = 1.5;
+const DEMO_RANGE = { trigger: ".desk-pin", start: "top 45%", end: () => `+=${window.innerHeight * (PIN_LENGTH + 0.8)}` };
+
 /**
  * A Mac desktop, framed in the page: menu bar, dock, a chat app answering the
  * question, and zWork doing the job. It pins for a while so the run plays out
@@ -70,7 +74,7 @@ export function Desktop() {
         });
       });
       // Pinned with or without motion: the run needs room either way.
-      ScrollTrigger.create({ trigger: ".desk-pin", start: "top top", end: "+=150%", pin: true });
+      ScrollTrigger.create({ trigger: ".desk-pin", start: "top top", end: () => `+=${window.innerHeight * PIN_LENGTH}`, pin: true });
       return () => mm.revert();
     },
     { scope: root },
@@ -87,7 +91,7 @@ export function Desktop() {
 
           <div className="absolute inset-x-0 bottom-[76px] top-7 sm:bottom-[88px]">
             {/* The chat app: an answer, and the work left to you. */}
-            <div className="desk-chat-in absolute left-[3%] top-[7%] hidden h-[66%] w-[46%] lg:block">
+            <div className="desk-chat-in absolute left-[3%] top-[7%] hidden h-[66%] w-[46%] lg:block xl:h-[54%]">
               <ChatWindow />
             </div>
 
@@ -100,7 +104,7 @@ export function Desktop() {
                   height={880}
                   panelWidth={600}
                   onChapter={setChapter}
-                  pinnedContainer=".desk-pin"
+                  range={DEMO_RANGE}
                   loopDelay={2}
                 />
               </div>

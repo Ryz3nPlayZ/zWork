@@ -30,7 +30,7 @@ export function LiveDemo({
   onChapter,
   className,
   loopDelay = 3,
-  pinnedContainer,
+  range,
 }: {
   scenario: Scenario;
   width: number;
@@ -40,8 +40,8 @@ export function LiveDemo({
   onChapter?: (name: string) => void;
   className?: string;
   loopDelay?: number;
-  /** The pinned ancestor, if any, so the play range includes the pin. */
-  pinnedContainer?: string;
+  /** Where it plays, when that isn't simply "while on screen" (e.g. inside a pin). */
+  range?: Pick<ScrollTrigger.Vars, "trigger" | "start" | "end">;
 }) {
   const [state, setState] = useState<CloneState>(scenario.initial);
   const [scale, setScale] = useState(0);
@@ -82,10 +82,10 @@ export function LiveDemo({
             trigger: outer.current,
             start: "top 80%",
             end: "bottom 15%",
+            ...range,
+            // Selector strings would resolve inside this component's scope.
+            ...(typeof range?.trigger === "string" && { trigger: document.querySelector(range.trigger) }),
             onToggle: (self) => (self.isActive ? tl.play() : tl.pause()),
-            pinnedContainer,
-            // Measure after the pin it sits in (created later, by the parent).
-            refreshPriority: pinnedContainer ? -1 : 0,
           });
         },
       );
