@@ -10,8 +10,8 @@ export function Section({ id, className, children }: { id?: string; className?: 
   );
 }
 
-export function H2({ className, children }: { className?: string; children: ReactNode }) {
-  return <h2 className={cn("display text-[44px] text-ink sm:text-[64px]", className)}>{children}</h2>;
+export function H2({ className, children, as: Tag = "h2" }: { className?: string; children: ReactNode; as?: "h1" | "h2" }) {
+  return <Tag className={cn("display text-[44px] text-ink sm:text-[64px]", className)}>{children}</Tag>;
 }
 
 export function GithubIcon({ className }: { className?: string }) {

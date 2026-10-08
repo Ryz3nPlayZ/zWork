@@ -193,7 +193,8 @@ function fmt(n: number) {
   return Number.isInteger(r) ? String(r) : r.toFixed(2);
 }
 
-export function Pricing() {
+// `heading="h1"` when the section is the page itself (/pricing, /download).
+export function Pricing({ heading }: { heading?: "h1" } = {}) {
   const root = useReveal();
   const [yearly, setYearly] = useState(false);
   const platform = useMemo(detectPlatform, []);
@@ -204,7 +205,7 @@ export function Pricing() {
           <p data-reveal className="eyebrow mb-5">
             Pricing
           </p>
-          <H2 className="max-w-[15ch]">
+          <H2 as={heading} className="max-w-[15ch]">
             <span data-reveal className="block">
               Free to use.
             </span>
@@ -388,7 +389,7 @@ export function Faq() {
   );
 }
 
-export function FinalCta() {
+export function FinalCta({ heading }: { heading?: "h1" } = {}) {
   const detected = useMemo(detectPlatform, []);
   const [platform, setPlatform] = useState<Platform>(detected ?? "Mac");
   const root = useReveal();
@@ -400,7 +401,7 @@ export function FinalCta() {
           <div data-reveal className="flex justify-center">
             <Logo size={52} className="text-ink" />
           </div>
-          <H2 className="mx-auto mt-8 max-w-[14ch] sm:text-[76px]">
+          <H2 as={heading} className="mx-auto mt-8 max-w-[14ch] sm:text-[76px]">
             <span data-reveal className="block">
               Hand it something
             </span>

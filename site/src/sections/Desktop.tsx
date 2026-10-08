@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useGSAP } from "@gsap/react";
@@ -22,6 +22,16 @@ import { cn } from "../lib/cn";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
 
+// Phones get a narrower, taller window: the 1440-wide one scales to ~0.23 there
+// and is unreadable, and a portrait desk leaves room above and below it.
+const PHONE = "(max-width: 639px)";
+const subscribePhone = (cb: () => void) => {
+  const mq = window.matchMedia(PHONE);
+  mq.addEventListener("change", cb);
+  return () => mq.removeEventListener("change", cb);
+};
+const usePhone = () => useSyncExternalStore(subscribePhone, () => window.matchMedia(PHONE).matches);
+
 const CHAPTERS = [
   { id: "ask", title: "You hand it the job", body: "In plain words, with the file attached." },
   { id: "work", title: "It does the work", body: "Reads the data, writes and runs its own scripts. Every step is shown." },
@@ -40,6 +50,7 @@ const DEMO_RANGE = { trigger: ".desk-pin", start: "top 45%", end: () => `+=${win
 export function Desktop() {
   const root = useRef<HTMLDivElement>(null);
   const [chapter, setChapter] = useState<string | null>(null);
+  const phone = usePhone();
 
   useGSAP(
     () => {
@@ -99,10 +110,11 @@ export function Desktop() {
             <div className="desk-app absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 lg:left-auto lg:right-[3.5%] lg:translate-x-0">
               <div className="desk-app-in desk-window-shadow overflow-hidden rounded-[12px]">
                 <LiveDemo
+                  key={phone ? "phone" : "wide"}
                   scenario={heroScenario}
-                  width={1440}
-                  height={880}
-                  panelWidth={600}
+                  width={phone ? 1040 : 1440}
+                  height={phone ? 1400 : 880}
+                  panelWidth={phone ? 420 : 600}
                   onChapter={setChapter}
                   range={DEMO_RANGE}
                   loopDelay={2}
