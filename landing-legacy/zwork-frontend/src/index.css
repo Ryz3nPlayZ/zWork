@@ -1,0 +1,297 @@
+@import "katex/dist/katex.min.css";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+  font-family: "Instrument Serif";
+  src: url("/fonts/instrument-serif-regular.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Instrument Serif";
+  src: url("/fonts/instrument-serif-italic.woff2") format("woff2");
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+}
+
+/* --------------------------------------------------------
+   Theme tokens (rgb triplets, consumed by tailwind.config)
+   -------------------------------------------------------- */
+:root,
+:root.light {
+  color-scheme: light;
+
+  /* Creamy warm off-white palette — gentle on the eyes. */
+  --paper: 247 246 243;
+  /* #f7f6f3 */
+  --paper-soft: 251 250 247;
+  --paper-raised: 255 255 255;
+  --paper-sunken: 239 237 232;
+  --paper-sidebar: 242 240 236;
+
+  --ink: 23 23 22;
+  /* #171716 */
+  --ink-soft: 37 36 31;
+  --ink-muted: 107 106 101;
+  --ink-faint: 160 158 152;
+
+  --line: 230 227 220;
+  --line-soft: 237 233 225;
+  --line-strong: 213 209 199;
+
+  --accent: 23 23 22;
+
+  /* Assistant → user bubble. Calm warm stone, not bright blue. */
+  --bubble: 242 240 236;
+  --bubble-fg: 23 23 22;
+
+  --shadow: 17 17 17;
+}
+
+:root.dark {
+  color-scheme: dark;
+
+  /* A soft, calm dark — not pure black. Warm-cool neutrals. */
+  --paper: 22 22 24;
+  /* ~#161618 */
+  --paper-soft: 26 26 29;
+  --paper-raised: 31 31 34;
+  --paper-sunken: 18 18 20;
+  --paper-sidebar: 20 20 22;
+
+  --ink: 236 236 234;
+  --ink-soft: 213 213 211;
+  --ink-muted: 160 160 157;
+  --ink-faint: 108 108 106;
+
+  --line: 45 45 49;
+  --line-soft: 40 40 44;
+  --line-strong: 62 62 66;
+
+  --accent: 236 236 234;
+
+  /* Assistant → user bubble in dark mode: slightly lighter than paper. */
+  --bubble: 60 60 64;
+  --bubble-fg: 242 242 238;
+
+  --shadow: 0 0 0;
+}
+
+/* --------------------------------------------------------
+   Base
+   -------------------------------------------------------- */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-paper text-ink font-sans antialiased;
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+}
+
+/* --------------------------------------------------------
+   Text selection — theme-aware so it matches the palette
+   -------------------------------------------------------- */
+::selection {
+  /* Light: warm parchment highlight on dark ink. */
+  background-color: rgb(var(--ink) / 0.18);
+  color: rgb(var(--ink));
+}
+
+:root.dark ::selection {
+  /* Dark: soft cool highlight that reads against near-black. */
+  background-color: rgb(var(--ink) / 0.28);
+  color: rgb(var(--paper));
+}
+
+/* Firefox uses ::-moz-selection; mirror the same tokens. */
+::-moz-selection {
+  background-color: rgb(var(--ink) / 0.18);
+  color: rgb(var(--ink));
+}
+:root.dark ::-moz-selection {
+  background-color: rgb(var(--ink) / 0.28);
+  color: rgb(var(--paper));
+}
+
+/* Thin, elegant scrollbars that adapt to theme */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+*:hover::-webkit-scrollbar-thumb {
+  background: rgb(var(--line-strong));
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* macOS-style draggable titlebar area */
+.titlebar-drag {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.titlebar-drag button,
+.titlebar-drag a,
+.titlebar-drag input,
+.titlebar-drag [data-no-drag] {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* Subtle interactive press */
+.press {
+  transition:
+    transform 120ms ease,
+    background-color 140ms ease,
+    color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    opacity 140ms ease;
+}
+
+.press:active {
+  transform: scale(0.97);
+}
+
+/* Focus ring */
+.ring-focus:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(var(--paper)), 0 0 0 4px rgb(var(--accent));
+}
+
+textarea {
+  font-family: inherit;
+}
+
+/* --------------------------------------------------------
+   Logo spin-on-hover — used across Sidebar + Landing.
+   Applied on the parent element; the inner `.logo-spin-target`
+   is what actually rotates.
+   -------------------------------------------------------- */
+.logo-hover-trigger .logo-spin-target {
+  transition:
+    transform 900ms cubic-bezier(0.22, 1, 0.36, 1),
+    filter 300ms ease;
+  transform-origin: 50% 50%;
+  perspective: 600px;
+}
+
+.logo-hover-trigger:hover .logo-spin-target,
+.logo-hover-trigger:focus-visible .logo-spin-target {
+  transform: rotateZ(-360deg) scale(1.12);
+}
+
+/* --------------------------------------------------------
+   Onboarding uses a single, editorial type voice throughout.
+   -------------------------------------------------------- */
+.onboarding-shell,
+.onboarding-shell * {
+  font-family:
+    "Instrument Serif",
+    ui-serif,
+    Georgia,
+    "Iowan Old Style",
+    "Times New Roman",
+    serif;
+  -webkit-font-smoothing: antialiased;
+  font-optical-sizing: auto;
+  font-synthesis: none;
+  text-rendering: geometricPrecision;
+}
+
+/* --------------------------------------------------------
+   Shimmer + thinking-text
+   -------------------------------------------------------- */
+@keyframes shimmer-slide {
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(90deg,
+      rgb(var(--ink) / 0) 0%,
+      rgb(var(--ink) / 0.06) 50%,
+      rgb(var(--ink) / 0) 100%);
+  background-size: 200% 100%;
+  animation: shimmer-slide 2.2s linear infinite;
+}
+
+/* Slow shimmer — used for onboarding finalizing text where we want a
+   more ambient, less hurried pulse. */
+.shimmer-text-slow {
+  background: linear-gradient(90deg,
+      rgb(var(--ink-faint)) 0%,
+      rgb(var(--ink-faint)) 40%,
+      rgb(var(--ink) / 0.95) 50%,
+      rgb(var(--ink-faint)) 60%,
+      rgb(var(--ink-faint)) 100%);
+  background-size: 260% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer-slide 5.5s ease-in-out infinite;
+}
+
+/* Shimmering grey status text — used during assistant loading */
+.shimmer-text {
+  background: linear-gradient(90deg,
+      rgb(var(--ink-faint)) 0%,
+      rgb(var(--ink-faint)) 35%,
+      rgb(var(--ink)) 50%,
+      rgb(var(--ink-faint)) 65%,
+      rgb(var(--ink-faint)) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer-slide 2.4s linear infinite;
+}
+
+/* --------------------------------------------------------
+   Onboarding question-card morph. The container smoothly
+   resizes as the content height changes.
+   -------------------------------------------------------- */
+.morph-height {
+  transition: height 380ms cubic-bezier(0.22, 1, 0.36, 1);
+  /* Clip only vertically so ring/selection outlines on children can breathe
+     horizontally without getting shaved off. */
+  overflow-y: hidden;
+  overflow-x: visible;
+}
+
+/* --------------------------------------------------------
+   Typing cursor — inline blink during streaming
+   -------------------------------------------------------- */
+@keyframes typing-cursor {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+.animate-typing-cursor {
+  animation: typing-cursor 1s step-end infinite;
+}
