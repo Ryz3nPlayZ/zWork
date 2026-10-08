@@ -1,23 +1,11 @@
-import { useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useGSAP } from "@gsap/react";
-import {
-  ArrowUp,
-  BatteryFull,
-  FileSpreadsheet,
-  Mail,
-  MessageCircle,
-  Paperclip,
-  Search,
-  Smile,
-  StickyNote,
-  Trash2,
-  Wifi,
-} from "lucide-react";
+import { ArrowUp, Paperclip } from "lucide-react";
 import { LiveDemo } from "../clone/LiveDemo";
-import { Logo } from "../clone/Logo";
 import { heroScenario } from "../clone/scenarios";
+import { Dock, MenuBar, TrafficLights } from "./MacOS";
 import { cn } from "../lib/cn";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
@@ -100,7 +88,7 @@ export function Desktop() {
         <div className="desk relative w-full max-w-[1680px] overflow-hidden rounded-[24px] will-change-transform">
           <MenuBar />
 
-          <div className="absolute inset-x-0 bottom-[76px] top-7 sm:bottom-[88px]">
+          <div className="absolute inset-x-0 bottom-[60px] top-[26px] sm:bottom-[80px]">
             {/* The chat app: an answer, and the work left to you. */}
             <div className="desk-chat-in absolute left-[3%] top-[7%] hidden h-[66%] w-[46%] lg:block xl:h-[54%]">
               <ChatWindow />
@@ -108,7 +96,7 @@ export function Desktop() {
 
             {/* zWork, in front and doing it. */}
             <div className="desk-app absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 lg:left-auto lg:right-[3.5%] lg:translate-x-0">
-              <div className="desk-app-in desk-window-shadow overflow-hidden rounded-[12px]">
+              <div className="desk-app-in desk-window-shadow overflow-hidden rounded-[16px]">
                 <LiveDemo
                   key={phone ? "phone" : "wide"}
                   scenario={heroScenario}
@@ -123,7 +111,7 @@ export function Desktop() {
             </div>
 
             {/* What's happening, as a desktop widget. */}
-            <div className="desk-glass absolute bottom-[4%] left-[2.2%] hidden w-[min(17%,250px)] rounded-[20px] p-2 shadow-[0_10px_30px_-12px_rgb(0_0_0/.3)] ring-[0.5px] ring-black/10 xl:block">
+            <div className="desk-glass absolute bottom-[4%] left-[2.2%] hidden w-[min(17%,250px)] rounded-[22px] p-2 shadow-[0_10px_30px_-12px_rgb(0_0_0/.3)] ring-[0.5px] ring-black/10 xl:block">
               <ol>
                 {CHAPTERS.map((c, i) => (
                   <li
@@ -162,48 +150,10 @@ export function Desktop() {
   );
 }
 
-function MenuBar() {
-  return (
-    <div className="desk-glass absolute inset-x-0 top-0 z-10 flex h-7 items-center justify-between px-4 text-[12.5px] text-ink">
-      <div className="flex items-center gap-4">
-        <Logo size={13} className="text-ink" />
-        <span className="font-semibold">zWork</span>
-        {["File", "Edit", "View", "Window", "Help"].map((m) => (
-          <span key={m} className="hidden sm:inline">
-            {m}
-          </span>
-        ))}
-      </div>
-      <div className="flex items-center gap-3.5">
-        <BatteryFull className="hidden h-[15px] w-[15px] sm:block" strokeWidth={1.75} />
-        <Wifi className="h-[14px] w-[14px]" strokeWidth={2} />
-        <Search className="hidden h-[13px] w-[13px] sm:block" strokeWidth={2.25} />
-        <span className="tabular-nums">
-          <span className="hidden sm:inline">Tue Oct 7&nbsp;&nbsp;</span>5:21 PM
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function TrafficLights({ dim }: { dim?: boolean }) {
-  return (
-    <div className="flex gap-2">
-      {["#ff5f57", "#febc2e", "#28c840"].map((c) => (
-        <span
-          key={c}
-          className="h-3 w-3 rounded-full ring-[0.5px] ring-black/10"
-          style={{ background: dim ? "rgb(var(--line-strong))" : c }}
-        />
-      ))}
-    </div>
-  );
-}
-
 /** A generic chat app, giving the usual answer: instructions. */
 function ChatWindow() {
   return (
-    <div className="desk-window-shadow flex h-full flex-col overflow-hidden rounded-[12px] bg-paper-sunken text-[12.5px] text-ink">
+    <div className="desk-window-shadow flex h-full flex-col overflow-hidden rounded-[16px] bg-paper-sunken text-[12.5px] text-ink">
       <div className="flex h-10 shrink-0 items-center gap-3 border-b border-line-soft px-3.5">
         <TrafficLights dim />
         <span className="flex-1 text-center text-[12px] font-medium text-ink-muted">ChatGPT</span>
@@ -242,58 +192,6 @@ function ChatWindow() {
             <ArrowUp className="h-3.5 w-3.5" />
           </span>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function DockTile({ className, running, label, children }: { className?: string; running?: boolean; label: string; children: ReactNode }) {
-  return (
-    <div className="relative flex flex-col items-center" title={label}>
-      <div
-        className={cn(
-          "flex h-9 w-9 items-center justify-center rounded-[10px] shadow-[0_1px_2px_rgb(0_0_0/.18),inset_0_0_0_0.5px_rgb(0_0_0/.12)] sm:h-12 sm:w-12 sm:rounded-[12px]",
-          className,
-        )}
-      >
-        {children}
-      </div>
-      <span className={cn("absolute -bottom-[5px] h-1 w-1 rounded-full bg-ink/70", !running && "invisible")} />
-    </div>
-  );
-}
-
-function Dock() {
-  const icon = "h-[18px] w-[18px] sm:h-6 sm:w-6";
-  return (
-    <div className="absolute inset-x-0 bottom-2 flex justify-center sm:bottom-3">
-      <div className="desk-glass flex items-end gap-1.5 rounded-[16px] px-2 pb-2 pt-2 ring-[0.5px] ring-black/10 sm:gap-2 sm:rounded-[20px] sm:px-2.5">
-        <DockTile label="Finder" className="bg-gradient-to-b from-[#6ab6f5] to-[#2c7fdc] text-white">
-          <Smile className={icon} strokeWidth={1.75} />
-        </DockTile>
-        <DockTile label="Mail" className="bg-gradient-to-b from-[#5fb0ff] to-[#1f6fe0] text-white">
-          <Mail className={icon} strokeWidth={1.75} />
-        </DockTile>
-        <DockTile label="Calendar" className="flex-col gap-0 bg-white text-[#222]">
-          <span className="text-[7px] font-semibold uppercase leading-none text-[#e5483e] sm:text-[9px]">Oct</span>
-          <span className="text-[15px] font-light leading-none sm:text-[22px]">7</span>
-        </DockTile>
-        <DockTile label="Numbers" className="hidden bg-gradient-to-b from-[#4fd07d] to-[#1f9d4f] text-white sm:flex">
-          <FileSpreadsheet className={icon} strokeWidth={1.75} />
-        </DockTile>
-        <DockTile label="Notes" className="hidden bg-gradient-to-b from-[#ffe27a] to-[#f5c63c] text-[#5c4a12] sm:flex">
-          <StickyNote className={icon} strokeWidth={1.75} />
-        </DockTile>
-        <DockTile label="ChatGPT" running className="bg-[#111] text-white">
-          <MessageCircle className={icon} strokeWidth={1.75} />
-        </DockTile>
-        <DockTile label="zWork" running className="bg-[#f2f0e8] text-[#302e28]">
-          <Logo size={28} className="h-[22px] w-[22px] sm:h-[30px] sm:w-[30px]" />
-        </DockTile>
-        <span className="mx-0.5 mb-1 h-8 w-px self-center bg-black/15 sm:h-10" />
-        <DockTile label="Trash" className="bg-white/40 text-ink-muted">
-          <Trash2 className={icon} strokeWidth={1.5} />
-        </DockTile>
       </div>
     </div>
   );
