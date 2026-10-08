@@ -1,4 +1,4 @@
-import { useRef, useState, useSyncExternalStore } from "react";
+import { useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useGSAP } from "@gsap/react";
@@ -26,17 +26,34 @@ const CHAPTERS = [
   { id: "result", title: "You get the finished thing", body: "A cleaned workbook and a report you can send." },
 ];
 
-// From the desktop coming into view to just after the pin lets go.
+// In viewport heights of scroll: the dive through the mark, then the hold
+// while the run plays out.
+const DIVE = 1.6;
 const PIN_LENGTH = 1.5;
-const DEMO_RANGE = { trigger: ".desk-pin", start: "top 45%", end: () => `+=${window.innerHeight * (PIN_LENGTH + 0.8)}` };
+// From the mark opening onto the desktop to just after the pin lets go.
+const DEMO_RANGE = {
+  trigger: ".dive",
+  start: () => `top+=${window.innerHeight * DIVE * 0.75} top`,
+  end: () => `+=${window.innerHeight * (DIVE * 0.25 + PIN_LENGTH + 0.8)}`,
+};
+
+// The ring's inner radius as a share of the mark's size (the slats' inner
+// edges sit 7 units from the centre of a 40-unit box), kept a little inside
+// so the hole never shows past a slat.
+const HOLE = 0.165;
 
 /**
  * A Mac desktop, framed in the page: menu bar, dock, a chat app answering the
- * question, and zWork doing the job. It pins for a while so the run plays out
- * before you can scroll past it.
+ * question, and zWork doing the job.
+ *
+ * The hero lies over it. Scrolling spins the zWork mark at the top of the
+ * hero and flies you through the middle of it: the mark grows towards the
+ * centre of the screen while a hole the size of its ring opens in the hero,
+ * and the desktop is what's on the other side. Then it holds while the run
+ * plays out. Without motion the two are simply stacked.
  */
-export function Desktop() {
-  const root = useRef<HTMLDivElement>(null);
+export function Desktop({ children }: { children?: ReactNode }) {
+  const root = useRef<HTMLElement>(null);
   const [chapter, setChapter] = useState<string | null>(null);
   const phone = usePhone();
 
@@ -44,36 +61,82 @@ export function Desktop() {
     () => {
       const mm = gsap.matchMedia();
       mm.add("(prefers-reduced-motion: no-preference)", () => {
-        // Grows into the frame as it arrives, then holds while the demo runs.
-        gsap.fromTo(
-          ".desk",
-          { scale: 0.86, borderRadius: 40 },
-          {
-            scale: 1,
-            borderRadius: 24,
-            ease: "none",
-            scrollTrigger: { trigger: ".desk-pin", start: "top bottom", end: "top top", scrub: true },
-          },
-        );
-        gsap.from(".desk-app-in", {
-          y: 60,
-          scale: 0.94,
-          autoAlpha: 0,
-          ease: "power3.out",
-          duration: 1,
-          scrollTrigger: { trigger: ".desk-pin", start: "top 55%", toggleActions: "play none none reverse" },
-        });
-        gsap.from(".desk-chat-in", {
-          y: 40,
-          autoAlpha: 0,
-          ease: "power3.out",
-          duration: 1,
-          delay: 0.1,
-          scrollTrigger: { trigger: ".desk-pin", start: "top 65%", toggleActions: "play none none reverse" },
+        const stage = root.current!;
+        const hero = stage.querySelector<HTMLElement>(".dive-hero");
+        const slot = stage.querySelector<HTMLElement>(".dive-logo-slot");
+        const mark = stage.querySelector<SVGGElement>(".dive-mark-g");
+        if (!hero || !slot || !mark) return;
+        stage.classList.add("is-diving");
+
+        // Where the mark starts, and how far it has to grow for its hole to
+        // clear the corners of the screen once it's centred.
+        let W = 0, H = 0, x0 = 0, y0 = 0, size = 1, sMax = 1;
+        const measure = () => {
+          const sr = stage.getBoundingClientRect();
+          const r = slot.getBoundingClientRect();
+          W = stage.clientWidth;
+          H = stage.clientHeight;
+          x0 = r.left - sr.left + r.width / 2;
+          y0 = r.top - sr.top + r.height / 2;
+          size = r.width || 1;
+          sMax = 1 + (Math.hypot(W, H) / 2 / (HOLE * size)) * 1.1;
+        };
+        const travel = gsap.parseEase("power2.inOut");
+        const spin = gsap.parseEase("sine.inOut");
+        const dive = { p: 0 };
+        const render = () => {
+          const p = dive.p;
+          const m = travel(Math.min(1, p / 0.6));
+          const cx = x0 + (W / 2 - x0) * m;
+          const cy = y0 + (H / 2 - y0) * m;
+          // Exponential, so it reads as moving forward at speed rather than
+          // a picture being enlarged.
+          const s = Math.pow(sMax, Math.pow(p, 1.35));
+          mark.setAttribute("transform", `translate(${cx} ${cy}) rotate(${spin(p) * 300}) scale(${(size * s) / 40})`);
+          hero.style.setProperty("--cx", `${cx}px`);
+          hero.style.setProperty("--cy", `${cy}px`);
+          hero.style.setProperty("--r", `${Math.max(0, HOLE * size * (s - 1))}px`);
+        };
+        measure();
+        render();
+
+        gsap
+          .timeline({
+            defaults: { ease: "none" },
+            scrollTrigger: {
+              trigger: stage,
+              start: "top top",
+              end: () => `+=${window.innerHeight * (DIVE + PIN_LENGTH)}`,
+              pin: true,
+              scrub: 0.6,
+              invalidateOnRefresh: true,
+              onRefresh: () => {
+                measure();
+                render();
+              },
+            },
+          })
+          .to(dive, { p: 1, duration: DIVE, onUpdate: render }, 0)
+          .to(".hero-body", { autoAlpha: 0, y: -40, scale: 0.97, duration: DIVE * 0.2 }, 0)
+          .to(".hero-glow", { autoAlpha: 0, duration: DIVE * 0.4 }, 0)
+          // Landing: the desktop settles as you come through.
+          .fromTo(".desk", { scale: 1.22 }, { scale: 1, duration: DIVE * 0.55, ease: "power2.out" }, DIVE * 0.45)
+          .from(".desk-app-in", { y: 70, scale: 0.95, autoAlpha: 0, duration: DIVE * 0.3, ease: "power2.out" }, DIVE * 0.66)
+          .from(".desk-chat-in", { y: 50, autoAlpha: 0, duration: DIVE * 0.28, ease: "power2.out" }, DIVE * 0.72)
+          .set(hero, { autoAlpha: 0 }, DIVE)
+          .to({}, { duration: PIN_LENGTH });
+
+        return () => stage.classList.remove("is-diving");
+      });
+      // Without motion only the desktop pins: the run needs room either way.
+      mm.add("(prefers-reduced-motion: reduce)", () => {
+        ScrollTrigger.create({
+          trigger: ".desk-pin",
+          start: "top top",
+          end: () => `+=${window.innerHeight * PIN_LENGTH}`,
+          pin: true,
         });
       });
-      // Pinned with or without motion: the run needs room either way.
-      ScrollTrigger.create({ trigger: ".desk-pin", start: "top top", end: () => `+=${window.innerHeight * PIN_LENGTH}`, pin: true });
       return () => mm.revert();
     },
     { scope: root },
@@ -83,8 +146,13 @@ export function Desktop() {
   const current = CHAPTERS[active] ?? CHAPTERS[0];
 
   return (
-    <section ref={root} id="how" aria-label="zWork doing a job on a Mac desktop">
-      <div className="desk-pin flex items-center justify-center p-[10px] sm:p-5">
+    <section ref={root} id="how" className="dive relative overflow-hidden">
+      {children}
+      <div
+        role="region"
+        aria-label="zWork doing a job on a Mac desktop"
+        className="desk-pin flex items-center justify-center p-[10px] sm:p-5"
+      >
         <div className="desk relative w-full max-w-[1680px] overflow-hidden rounded-[24px] will-change-transform">
           <MenuBar />
 

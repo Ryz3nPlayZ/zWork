@@ -327,3 +327,22 @@ body {
 .desk-window-shadow {
   box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.22), 0 22px 70px -12px rgb(0 0 0 / 0.42), 0 8px 20px -8px rgb(0 0 0 / 0.2);
 }
+
+/* ---- The dive from the hero into the desktop ---- */
+/* Without motion the hero and desktop are stacked and the mark is the plain
+   logo in its slot. With it, the hero lies over the pinned desktop and a hole
+   the size of the mark's ring opens in it. */
+.dive-mark { display: none; }
+.dive.is-diving .dive-hero {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  min-height: 0;
+  --cx: 50%;
+  --cy: 50%;
+  --r: 0px;
+  -webkit-mask-image: radial-gradient(circle at var(--cx) var(--cy), transparent var(--r), #000 calc(var(--r) + 1px));
+  mask-image: radial-gradient(circle at var(--cx) var(--cy), transparent var(--r), #000 calc(var(--r) + 1px));
+}
+.dive.is-diving .dive-mark { display: block; }
+.dive.is-diving .dive-logo-slot > svg { visibility: hidden; }

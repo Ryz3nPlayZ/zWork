@@ -9,8 +9,9 @@ import { Section } from "../sections/ui";
 export function Home() {
   return (
     <>
-      <Hero />
-      <Desktop />
+      <Desktop>
+        <Hero />
+      </Desktop>
       <Statement />
       <Capabilities />
       <Section>

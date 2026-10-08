@@ -4,7 +4,7 @@ import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { SplitText } from "gsap/SplitText";
 import { useGSAP } from "@gsap/react";
 import { ArrowRight, Download, Menu, Moon, Sun, X } from "lucide-react";
-import { Logo } from "../clone/Logo";
+import { Logo, LogoSlats } from "../clone/Logo";
 import { cn } from "../lib/cn";
 import { onReveal } from "../lib/intro";
 import { Link, usePath } from "../lib/router";
@@ -161,11 +161,13 @@ export function Hero() {
           let split: SplitText | undefined;
           let dead = false;
           const tl = gsap.timeline({ paused: true, defaults: { ease: "power3.out" } });
-          tl.from(".hero-sub", { autoAlpha: 0, y: 16, duration: 0.8 }, 0.55).from(
-            ".hero-cta > *",
-            { autoAlpha: 0, y: 14, duration: 0.6, stagger: 0.08 },
-            "-=0.5",
-          );
+          tl.from(
+            ".dive-mark-intro",
+            { rotation: -140, scale: 0.4, autoAlpha: 0, transformOrigin: "50% 50%", duration: 1.4, ease: "expo.out" },
+            0,
+          )
+            .from(".hero-sub", { autoAlpha: 0, y: 16, duration: 0.8 }, 0.55)
+            .from(".hero-cta > *", { autoAlpha: 0, y: 14, duration: 0.6, stagger: 0.08 }, "-=0.5");
           const off = onReveal(() => {
             document.fonts.ready.then(() => {
               if (dead) return;
@@ -179,11 +181,6 @@ export function Hero() {
               tl.play();
             });
           });
-          gsap.to(".hero-glow", {
-            yPercent: 30,
-            ease: "none",
-            scrollTrigger: { trigger: root.current, start: "top top", end: "bottom top", scrub: true },
-          });
           return () => {
             dead = true;
             off();
@@ -196,35 +193,54 @@ export function Hero() {
   );
 
   return (
-    <div ref={root} id="top" className="relative flex min-h-[92dvh] items-center overflow-hidden pb-16 pt-28 sm:pt-32">
+    <div
+      ref={root}
+      id="top"
+      className="dive-hero relative flex min-h-[92dvh] items-center overflow-hidden bg-paper pb-16 pt-24 sm:pt-28"
+    >
       <div className="grain pointer-events-none absolute inset-0 [mask-image:linear-gradient(to_bottom,black,transparent_70%)]" />
       <div
         className="hero-glow pointer-events-none absolute left-1/2 top-[-10%] h-[720px] w-[1100px] -translate-x-1/2 rounded-full opacity-70 blur-3xl"
         style={{ background: "radial-gradient(closest-side, rgb(var(--paper-sunken)), transparent)" }}
       />
+      {/* The mark you dive through on the way to the desktop. It's drawn
+          across the whole stage so it stays sharp at any size; the slot below
+          only marks where it starts. */}
+      <svg className="dive-mark pointer-events-none absolute inset-0 z-20 h-full w-full text-ink" aria-hidden="true">
+        <g className="dive-mark-g" fill="currentColor">
+          <g className="dive-mark-intro">
+            <LogoSlats />
+          </g>
+        </g>
+      </svg>
       <div className="relative mx-auto w-full max-w-[1240px] px-4 text-center sm:px-8">
-        <h1 className="hero-title display mx-auto max-w-[13ch] text-[56px] text-ink sm:text-[92px] lg:text-[118px]">
-          Your weekly paperwork, <em className="text-ink-soft">done.</em>
-        </h1>
-        <p className="hero-sub mx-auto mt-8 max-w-[60ch] text-[17px] leading-relaxed text-ink-muted sm:text-[19px]">
-          zWork is an AI assistant on your computer for the reports, spreadsheets and emails you redo every week. Show it the
-          job once and it does it on schedule, in real Excel and Word files, and asks before anything is sent.
-        </p>
-        <div className="hero-cta mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
-          <a
-            href={downloadUrl(platform)}
-            className="press inline-flex h-12 items-center gap-2.5 rounded-full bg-ink px-6 text-[15px] font-medium text-paper shadow-lift hover:bg-ink/90"
-          >
-            <Download className="h-4 w-4" />
-            {platform ? `Download for ${platform === "Mac" ? "macOS" : platform}` : "Download zWork"}
-          </a>
-          <a
-            href={DEMO_URL}
-            className="press inline-flex h-12 items-center gap-2 rounded-full border border-line bg-paper px-6 text-[15px] font-medium text-ink hover:bg-paper-raised"
-          >
-            Try it in your browser
-            <ArrowRight className="h-4 w-4" />
-          </a>
+        <div className="dive-logo-slot mx-auto mb-7 h-11 w-11 sm:mb-9 sm:h-14 sm:w-14">
+          <Logo className="h-full w-full text-ink" />
+        </div>
+        <div className="hero-body">
+          <h1 className="hero-title display mx-auto max-w-[13ch] text-[56px] text-ink sm:text-[92px] lg:text-[118px]">
+            Your weekly paperwork, <em className="text-ink-soft">done.</em>
+          </h1>
+          <p className="hero-sub mx-auto mt-8 max-w-[60ch] text-[17px] leading-relaxed text-ink-muted sm:text-[19px]">
+            zWork is an AI assistant on your computer for the reports, spreadsheets and emails you redo every week. Show it the
+            job once and it does it on schedule, in real Excel and Word files, and asks before anything is sent.
+          </p>
+          <div className="hero-cta mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <a
+              href={downloadUrl(platform)}
+              className="press inline-flex h-12 items-center gap-2.5 rounded-full bg-ink px-6 text-[15px] font-medium text-paper shadow-lift hover:bg-ink/90"
+            >
+              <Download className="h-4 w-4" />
+              {platform ? `Download for ${platform === "Mac" ? "macOS" : platform}` : "Download zWork"}
+            </a>
+            <a
+              href={DEMO_URL}
+              className="press inline-flex h-12 items-center gap-2 rounded-full border border-line bg-paper px-6 text-[15px] font-medium text-ink hover:bg-paper-raised"
+            >
+              Try it in your browser
+              <ArrowRight className="h-4 w-4" />
+            </a>
+          </div>
         </div>
       </div>
     </div>
