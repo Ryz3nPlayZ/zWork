@@ -346,3 +346,85 @@ body {
 }
 .dive.is-diving .dive-mark { display: block; }
 .dive.is-diving .dive-logo-slot > svg { visibility: hidden; }
+
+/* Capabilities: a dark horizon. The planet's rim is drawn whole and revealed
+   by a conic mask centred on the planet, so --sweep lights it from the left. */
+.horizon {
+  container-type: inline-size;
+  --d: 180cqw; /* planet diameter */
+  --drop: 17.6cqw; /* how far the curve falls by the edges: r - sqrt(r^2 - (w/2)^2) */
+  --lift: 380px; /* room above the rim for its halo */
+  --sweep: 160deg;
+  background: #060607;
+}
+@media (min-width: 640px) {
+  .horizon {
+    --d: 200cqw;
+    --drop: 13.4cqw;
+  }
+}
+.horizon-planet,
+.horizon-light,
+.horizon-glow {
+  position: absolute;
+  left: 50%;
+  translate: -50% 0;
+  pointer-events: none;
+}
+.horizon-planet {
+  top: 0;
+  width: var(--d);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 0, #15161a, #0b0b0e 9%, #08080a 24%);
+}
+.horizon-light {
+  top: calc(-1 * var(--lift));
+  width: var(--d);
+  height: calc(var(--lift) + var(--d));
+  -webkit-mask-image: conic-gradient(
+    from 270deg at 50% calc(var(--lift) + var(--d) / 2),
+    #000 var(--sweep),
+    transparent calc(var(--sweep) + 18deg)
+  );
+  mask-image: conic-gradient(
+    from 270deg at 50% calc(var(--lift) + var(--d) / 2),
+    #000 var(--sweep),
+    transparent calc(var(--sweep) + 18deg)
+  );
+}
+.horizon-light > * {
+  position: absolute;
+  left: 0;
+  top: var(--lift);
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+}
+.horizon-rim {
+  box-shadow:
+    inset 0 1.5px 0 rgb(255 255 255 / 0.92),
+    inset 0 2px 6px -2px rgb(225 233 255 / 0.6),
+    inset 0 40px 90px -50px rgb(200 214 255 / 0.5);
+}
+.horizon-halo {
+  box-shadow:
+    0 -1px 16px rgb(225 233 255 / 0.45),
+    0 -16px 120px 16px rgb(185 202 255 / 0.16);
+}
+.horizon-rays {
+  background: repeating-conic-gradient(rgb(255 255 255 / 0.045) 0 0.1deg, transparent 0.1deg 2.4deg);
+  -webkit-mask-image: radial-gradient(closest-side, transparent 88%, #000 99.7%, transparent 100%);
+  mask-image: radial-gradient(closest-side, transparent 88%, #000 99.7%, transparent 100%);
+}
+.horizon-glow {
+  top: -260px;
+  width: 110cqw;
+  height: 520px;
+  translate: -50% 0;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgb(175 195 255 / 0.24), rgb(175 195 255 / 0.07) 55%, transparent);
+}
+.horizon-caps {
+  padding-top: calc(var(--drop) + 40px);
+}

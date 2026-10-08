@@ -17,7 +17,7 @@ import { LiveDemo } from "../clone/LiveDemo";
 import { AssistantMessage } from "../clone/Message";
 import { browserScenario } from "../clone/scenarios";
 import type { AssistantMsg } from "../clone/types";
-import { H2, Section } from "./ui";
+import { Section } from "./ui";
 
 gsap.registerPlugin(ScrollTrigger, SplitText, useGSAP);
 
@@ -171,11 +171,32 @@ export function Capabilities() {
     () => {
       const mm = gsap.matchMedia();
       mm.add("(prefers-reduced-motion: no-preference)", () => {
+        // The headline comes in word by word as it scrolls into view.
+        const split = SplitText.create(".horizon-title", { type: "words" });
+        gsap
+          .timeline({ scrollTrigger: { trigger: ".horizon-title", start: "top 82%", toggleActions: "play none none reverse" } })
+          .from(split.words, { autoAlpha: 0, y: 18, filter: "blur(10px)", duration: 0.9, stagger: 0.07, ease: "power3.out" })
+          .from(".horizon-sub", { autoAlpha: 0, y: 12, duration: 0.8, ease: "power3.out" }, "-=0.5");
+
+        // Then the rim lights from left to right, and the glow behind it
+        // travels across with it.
+        gsap
+          .timeline({ scrollTrigger: { trigger: ".horizon-arc", start: "top 78%", toggleActions: "play none none reverse" } })
+          .fromTo(".horizon", { "--sweep": "30deg" }, { "--sweep": "160deg", duration: 2.4, ease: "power2.inOut" }, 0)
+          .fromTo(
+            ".horizon-glow",
+            { autoAlpha: 0, xPercent: -35, scaleX: 0.6 },
+            { autoAlpha: 1, xPercent: 0, scaleX: 1, duration: 2.4, ease: "power2.inOut" },
+            0,
+          )
+          .from(".horizon-cap", { autoAlpha: 0, y: 24, duration: 0.8, stagger: 0.07, ease: "power3.out" }, 0.7);
+
         ScrollTrigger.batch(".cap", {
           start: "top 88%",
           once: true,
           onEnter: (els) => gsap.from(els, { autoAlpha: 0, y: 40, duration: 0.9, stagger: 0.08, ease: "power3.out" }),
         });
+        return () => split.revert();
       });
     },
     { scope: root },
@@ -184,18 +205,42 @@ export function Capabilities() {
   return (
     <Section className="pb-32 sm:pb-44">
       <div ref={root}>
-        <div className="mb-14 flex flex-col justify-between gap-6 md:flex-row md:items-end">
-          <H2 className="max-w-[14ch]">
-            Everything you'd use to <em className="text-ink-soft">do it yourself.</em>
-          </H2>
-          <p className="max-w-[42ch] text-[16px] leading-relaxed text-ink-muted">
-            zWork has the same tools you do: your files, a real browser, your desktop apps and your accounts. So the
-            job ends with the work done, not with instructions for you.
-          </p>
+        {/* A dark horizon: the six capabilities sit on a planet whose rim
+            lights up as you arrive. Dark in both themes. */}
+        <div className="horizon relative overflow-hidden rounded-[28px] border border-white/[.06] sm:rounded-[36px]">
+          <header className="relative z-10 mx-auto max-w-[760px] px-6 pt-20 text-center sm:pt-28">
+            <p className="eyebrow mb-6 !text-white/40">What it can do</p>
+            <h2 className="horizon-title display text-[44px] text-white sm:text-[64px]">
+              Everything you'd use to <em className="text-white/50">do it yourself.</em>
+            </h2>
+            <p className="horizon-sub mx-auto mt-6 max-w-[52ch] text-[16px] leading-relaxed text-white/55">
+              zWork has the same tools you do: your files, a real browser, your desktop apps and your accounts. So the job
+              ends with the work done, not with instructions for you.
+            </p>
+          </header>
+
+          <div className="horizon-arc relative mt-16 sm:mt-24">
+            <div className="horizon-glow" />
+            <div className="horizon-planet" />
+            <div className="horizon-light">
+              <div className="horizon-halo" />
+              <div className="horizon-rays" />
+              <div className="horizon-rim" />
+            </div>
+            <div className="horizon-caps relative z-10 grid gap-x-12 px-6 pb-14 sm:grid-cols-2 sm:px-12 sm:pb-20 lg:grid-cols-3 lg:gap-x-14 lg:px-16">
+              {CAPS.map(({ icon: Icon, title, body }) => (
+                <article key={title} className="horizon-cap border-t border-white/10 py-7 sm:py-8">
+                  <Icon className="h-[18px] w-[18px] text-white/70" strokeWidth={1.7} />
+                  <h3 className="mt-4 text-[17px] font-semibold tracking-tight text-white">{title}</h3>
+                  <p className="mt-2 text-[14.5px] leading-relaxed text-white/55">{body}</p>
+                </article>
+              ))}
+            </div>
+          </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-3">
-          <article className="cap relative overflow-hidden rounded-3xl border border-line bg-paper-raised lg:col-span-2 lg:row-span-2">
+        <div className="mt-4 grid gap-4 lg:grid-cols-3">
+          <article className="cap relative overflow-hidden rounded-3xl border border-line bg-paper-raised lg:col-span-2">
             <div className="flex h-full flex-col gap-7 p-7 sm:p-9">
               <div>
                 <div className="flex gap-2 text-ink-muted">
@@ -213,23 +258,14 @@ export function Capabilities() {
               </div>
             </div>
           </article>
-          {CAPS.map(({ icon: Icon, title, body }) => (
-            <article key={title} className="cap rounded-3xl border border-line bg-paper-raised p-7">
+          <article className="cap flex flex-col justify-between gap-6 overflow-hidden rounded-3xl border border-line bg-paper-raised p-7">
+            <div>
               <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-line bg-paper text-ink-muted">
-                <Icon className="h-[18px] w-[18px]" />
-              </span>
-              <h3 className="mt-5 text-[17px] font-semibold tracking-tight text-ink">{title}</h3>
-              <p className="mt-2 text-[14.5px] leading-relaxed text-ink-muted">{body}</p>
-            </article>
-          ))}
-          <article className="cap flex flex-col justify-between gap-6 overflow-hidden rounded-3xl border border-line bg-paper-raised p-7 lg:col-span-2">
-            <div className="flex items-center gap-4">
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-line bg-paper text-ink-muted">
                 <FolderOpen className="h-[18px] w-[18px]" />
               </span>
-              <p className="max-w-[52ch] text-[14.5px] leading-relaxed text-ink-muted">
-                <span className="font-semibold text-ink">The kind of steps it takes.</span> Each one shows up in the chat as it
-                happens, so you can follow along or stop it.
+              <h3 className="mt-5 text-[17px] font-semibold tracking-tight text-ink">The kind of steps it takes</h3>
+              <p className="mt-2 text-[14.5px] leading-relaxed text-ink-muted">
+                Each one shows up in the chat as it happens, so you can follow along or stop it.
               </p>
             </div>
             <div className="-mx-7 min-w-0">
