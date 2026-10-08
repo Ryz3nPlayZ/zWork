@@ -1,5 +1,5 @@
 import { Models, Safety, Schedules } from "../sections/Demos";
-import { FinalCta } from "../sections/Closing";
+import { Outro } from "../sections/Outro";
 import { PageHeader } from "./PageHeader";
 
 export function Features() {
@@ -12,7 +12,7 @@ export function Features() {
       <Schedules />
       <Safety />
       <Models />
-      <FinalCta />
+      <Outro />
     </>
   );
 }

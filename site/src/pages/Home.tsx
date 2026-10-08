@@ -2,7 +2,7 @@ import { ArrowRight } from "lucide-react";
 import { Hero } from "../sections/Hero";
 import { Desktop } from "../sections/Desktop";
 import { Capabilities, Statement } from "../sections/Story";
-import { FinalCta } from "../sections/Closing";
+import { Outro } from "../sections/Outro";
 import { Link } from "../lib/router";
 import { Section } from "../sections/ui";
 
@@ -34,7 +34,7 @@ export function Home() {
           ))}
         </div>
       </Section>
-      <FinalCta />
+      <Outro />
     </>
   );
 }

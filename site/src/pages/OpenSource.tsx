@@ -1,4 +1,5 @@
-import { FinalCta, OpenSource } from "../sections/Closing";
+import { Outro } from "../sections/Outro";
+import { OpenSource } from "../sections/Closing";
 import { PageHeader } from "./PageHeader";
 
 export function OpenSourcePage() {
@@ -9,7 +10,7 @@ export function OpenSourcePage() {
         for anyone to read.
       </PageHeader>
       <OpenSource />
-      <FinalCta />
+      <Outro />
     </>
   );
 }
