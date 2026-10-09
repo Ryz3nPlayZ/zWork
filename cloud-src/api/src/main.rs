@@ -1187,6 +1187,18 @@ async fn bootstrap_schema(db: &PgPool) -> Result<(), sqlx::Error> {
     .execute(db)
     .await?;
 
+    // What started the run: `schedule`, `chat` or `background` (titles and
+    // other helper calls). Sent by the desktop sidecar as x-zwork-trigger;
+    // NULL for clients older than 0.6.1.
+    sqlx::query(
+        r#"
+        ALTER TABLE gateway_requests
+        ADD COLUMN IF NOT EXISTS run_trigger TEXT;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
     sqlx::query(
         r#"
         CREATE INDEX IF NOT EXISTS idx_gateway_requests_chat_id ON gateway_requests(chat_id, created_at);
@@ -1562,6 +1574,38 @@ fn request_kind_from_headers(headers: &HeaderMap) -> RequestKind {
     {
         "continuation" => RequestKind::Continuation,
         _ => RequestKind::Root,
+    }
+}
+
+/// Clients that send a run id but no `x-zwork-request-kind` (the desktop
+/// sidecar since the harness port) would otherwise have every call of a
+/// multi-step run counted as a new root against the quota. A call is a
+/// continuation when this user already has a request logged under the run id.
+async fn infer_request_kind(
+    state: &AppState,
+    headers: &HeaderMap,
+    user: Option<&AppUser>,
+    run_id: &str,
+    from_header: RequestKind,
+) -> RequestKind {
+    let (Some(user), RequestKind::Root) = (user, from_header) else {
+        return from_header;
+    };
+    if headers.contains_key("x-zwork-request-kind") || header_str(headers, "x-zwork-run-id").is_none() {
+        return from_header;
+    }
+    let seen: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM gateway_requests WHERE user_id = $1 AND run_id = $2)",
+    )
+    .bind(&user.user_id)
+    .bind(run_id)
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(false);
+    if seen {
+        RequestKind::Continuation
+    } else {
+        RequestKind::Root
     }
 }
 
@@ -2286,6 +2330,7 @@ struct GatewayRequestMeta {
     stream: Option<bool>,
     max_tokens: Option<i64>,
     tool_count: Option<i32>,
+    run_trigger: Option<String>,
 }
 
 async fn insert_gateway_request(
@@ -2306,10 +2351,10 @@ async fn insert_gateway_request(
             user_id, run_id, request_kind,
             chat_id, project_id, app_version, os,
             request_payload, request_body_size_bytes,
-            stream, max_tokens, tool_count,
+            stream, max_tokens, tool_count, run_trigger,
             started_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, NOW())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
         RETURNING id
         "#,
     )
@@ -2325,6 +2370,7 @@ async fn insert_gateway_request(
     .bind(meta.stream)
     .bind(meta.max_tokens)
     .bind(meta.tool_count)
+    .bind(&meta.run_trigger)
     .fetch_one(&state.db)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -2477,6 +2523,8 @@ async fn ai_proxy(
     let app_user = resolve_app_user(&state, access)
         .await
         .map_err(|status| (status, "gateway_user_resolution_failed".to_string()))?;
+    let request_kind =
+        infer_request_kind(&state, &headers, app_user.as_ref(), &run_id, request_kind).await;
 
     if state.gateway.providers.is_empty() {
         return Err((
@@ -2559,6 +2607,7 @@ async fn ai_proxy(
             .get("tools")
             .and_then(|v| v.as_array())
             .map(|a| a.len() as i32),
+        run_trigger: header_str(&headers, "x-zwork-trigger"),
     };
 
     let request_id = if let Some(user) = &app_user {
@@ -2850,6 +2899,8 @@ async fn ai_proxy_anthropic(
     let app_user = resolve_app_user(&state, access)
         .await
         .map_err(|status| (status, "gateway_user_resolution_failed".to_string()))?;
+    let request_kind =
+        infer_request_kind(&state, &headers, app_user.as_ref(), &run_id, request_kind).await;
 
     if state.gateway.providers.is_empty() {
         return Err((
@@ -2933,6 +2984,7 @@ async fn ai_proxy_anthropic(
             .get("tools")
             .and_then(|v| v.as_array())
             .map(|a| a.len() as i32),
+        run_trigger: header_str(&headers, "x-zwork-trigger"),
     };
 
     let request_id = if let Some(user) = &app_user {
