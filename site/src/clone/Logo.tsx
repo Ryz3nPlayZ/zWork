@@ -1,10 +1,15 @@
+/** One slat, centred on the origin. */
+export function LogoSlat() {
+  return <rect x={-2.1} y={-5.5} width={4.2} height={11} rx={1.6} transform="skewX(-18)" />;
+}
+
 /** The six slats, centred on the origin in a 40-unit box. */
 export function LogoSlats() {
   return (
     <>
       {Array.from({ length: 6 }, (_, i) => (
         <g key={i} transform={`rotate(${i * 60}) translate(0 -12.5)`}>
-          <rect x={-2.1} y={-5.5} width={4.2} height={11} rx={1.6} transform="skewX(-18)" />
+          <LogoSlat />
         </g>
       ))}
     </>

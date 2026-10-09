@@ -37,19 +37,14 @@ const DEMO_RANGE = {
   end: () => `+=${window.innerHeight * (DIVE * 0.25 + PIN_LENGTH + 0.8)}`,
 };
 
-// The ring's inner radius as a share of the mark's size (the slats' inner
-// edges sit 7 units from the centre of a 40-unit box), kept a little inside
-// so the hole never shows past a slat.
-const HOLE = 0.165;
-
 /**
  * A Mac desktop, framed in the page: menu bar, dock, a chat app answering the
  * question, and zWork doing the job.
  *
  * The hero lies over it. Scrolling spins the zWork mark at the top of the
  * hero and flies you through the middle of it: the mark grows towards the
- * centre of the screen while a hole the size of its ring opens in the hero,
- * and the desktop is what's on the other side. Then it holds while the run
+ * centre of the screen, then its slats burst outward past the edges while
+ * the hero fades and the desktop comes into focus behind it. Then it holds while the run
  * plays out. Without motion the two are simply stacked.
  */
 export function Desktop({ children }: { children?: ReactNode }) {
@@ -65,12 +60,13 @@ export function Desktop({ children }: { children?: ReactNode }) {
         const hero = stage.querySelector<HTMLElement>(".dive-hero");
         const slot = stage.querySelector<HTMLElement>(".dive-logo-slot");
         const mark = stage.querySelector<SVGGElement>(".dive-mark-g");
-        if (!hero || !slot || !mark) return;
+        const slats = gsap.utils.toArray<SVGGElement>(".dive-slat", stage);
+        if (!hero || !slot || !mark || slats.length !== 6) return;
         stage.classList.add("is-diving");
 
-        // Where the mark starts, and how far it has to grow for its hole to
-        // clear the corners of the screen once it's centred.
-        let W = 0, H = 0, x0 = 0, y0 = 0, size = 1, sMax = 1;
+        // Where the mark starts, how big it gets, and how far out its slats
+        // have to fly for their inner ends to clear the corners of the screen.
+        let W = 0, H = 0, x0 = 0, y0 = 0, size = 1, sEnd = 1, rEnd = 12.5;
         const measure = () => {
           const sr = stage.getBoundingClientRect();
           const r = slot.getBoundingClientRect();
@@ -79,23 +75,27 @@ export function Desktop({ children }: { children?: ReactNode }) {
           x0 = r.left - sr.left + r.width / 2;
           y0 = r.top - sr.top + r.height / 2;
           size = r.width || 1;
-          sMax = 1 + (Math.hypot(W, H) / 2 / (HOLE * size)) * 1.1;
+          const half = Math.hypot(W, H) / 2;
+          // A slat ends up about a fifth of the screen's diagonal long.
+          sEnd = Math.max(3, (0.2 * half * 2) / ((11 * size) / 40));
+          rEnd = 5.5 + (half * 1.15) / ((size * sEnd) / 40);
         };
         const travel = gsap.parseEase("power2.inOut");
         const spin = gsap.parseEase("sine.inOut");
+        const burst = gsap.parseEase("power3.in");
         const dive = { p: 0 };
         const render = () => {
           const p = dive.p;
-          const m = travel(Math.min(1, p / 0.6));
+          const m = travel(Math.min(1, p / 0.5));
           const cx = x0 + (W / 2 - x0) * m;
           const cy = y0 + (H / 2 - y0) * m;
-          // Exponential, so it reads as moving forward at speed rather than
-          // a picture being enlarged.
-          const s = Math.pow(sMax, Math.pow(p, 1.35));
-          mark.setAttribute("transform", `translate(${cx} ${cy}) rotate(${spin(p) * 300}) scale(${(size * s) / 40})`);
-          hero.style.setProperty("--cx", `${cx}px`);
-          hero.style.setProperty("--cy", `${cy}px`);
-          hero.style.setProperty("--r", `${Math.max(0, HOLE * size * (s - 1))}px`);
+          const s = 1 + (sEnd - 1) * Math.pow(p, 1.6);
+          // The slats leave the ring faster than the mark grows, so the
+          // middle opens and you pass through it.
+          const b = burst(Math.max(0, (p - 0.3) / 0.7));
+          const r = 12.5 + (rEnd - 12.5) * b;
+          mark.setAttribute("transform", `translate(${cx} ${cy}) rotate(${spin(p) * 240}) scale(${(size * s) / 40})`);
+          slats.forEach((el, i) => el.setAttribute("transform", `rotate(${i * 60}) translate(0 ${-r}) rotate(${b * 35})`));
         };
         measure();
         render();
@@ -118,9 +118,15 @@ export function Desktop({ children }: { children?: ReactNode }) {
           })
           .to(dive, { p: 1, duration: DIVE, onUpdate: render }, 0)
           .to(".hero-body", { autoAlpha: 0, y: -40, scale: 0.97, duration: DIVE * 0.2 }, 0)
-          .to(".hero-glow", { autoAlpha: 0, duration: DIVE * 0.4 }, 0)
-          // Landing: the desktop settles as you come through.
-          .fromTo(".desk", { scale: 1.22 }, { scale: 1, duration: DIVE * 0.55, ease: "power2.out" }, DIVE * 0.45)
+          .to(".hero-bg", { autoAlpha: 0, duration: DIVE * 0.4, ease: "power1.inOut" }, DIVE * 0.35)
+          // Landing: the desktop settles into focus as you come through.
+          .fromTo(
+            ".desk",
+            { scale: 1.15, filter: "blur(16px)" },
+            { scale: 1, filter: "blur(0px)", duration: DIVE * 0.6, ease: "power2.out" },
+            DIVE * 0.35,
+          )
+          .to(".dive-mark", { autoAlpha: 0, duration: DIVE * 0.12 }, DIVE * 0.88)
           .from(".desk-app-in", { y: 70, scale: 0.95, autoAlpha: 0, duration: DIVE * 0.3, ease: "power2.out" }, DIVE * 0.66)
           .from(".desk-chat-in", { y: 50, autoAlpha: 0, duration: DIVE * 0.28, ease: "power2.out" }, DIVE * 0.72)
           .set(hero, { autoAlpha: 0 }, DIVE)
@@ -153,7 +159,7 @@ export function Desktop({ children }: { children?: ReactNode }) {
         aria-label="zWork doing a job on a Mac desktop"
         className="desk-pin flex items-center justify-center p-[10px] sm:p-5"
       >
-        <div className="desk relative w-full max-w-[1680px] overflow-hidden rounded-[24px] will-change-transform">
+        <div className="desk relative w-full max-w-[1680px] overflow-hidden rounded-[12px] will-change-transform sm:rounded-[14px]">
           <MenuBar />
 
           <div className="absolute inset-x-0 bottom-[60px] top-[26px] sm:bottom-[80px]">

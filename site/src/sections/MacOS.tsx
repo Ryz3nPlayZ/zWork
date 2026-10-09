@@ -12,9 +12,9 @@ import { cn } from "../lib/cn";
 
 export function MenuBar({ app = "zWork" }: { app?: string }) {
   return (
-    <div className="desk-ink mac-font absolute inset-x-0 top-0 z-10 flex h-[26px] items-center justify-between px-3.5 text-[13px] sm:px-5">
-      <div className="flex items-center gap-[18px]">
-        <svg viewBox="0 0 24 24" className="h-[15px] w-[15px] -translate-y-px fill-current" aria-hidden="true">
+    <div className="desk-ink mac-font absolute inset-x-0 top-0 z-10 flex h-[24px] items-center justify-between px-3 text-[13px] sm:px-4">
+      <div className="flex items-center gap-[19px]">
+        <svg viewBox="0 0 24 24" className="h-[14px] w-[14px] -translate-y-px fill-current" aria-hidden="true">
           <path d={siApple.path} />
         </svg>
         <span className="font-bold">{app}</span>

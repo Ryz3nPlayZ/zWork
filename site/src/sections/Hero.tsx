@@ -4,7 +4,7 @@ import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { SplitText } from "gsap/SplitText";
 import { useGSAP } from "@gsap/react";
 import { ArrowRight, Download, Menu, Moon, Sun, X } from "lucide-react";
-import { Logo, LogoSlats } from "../clone/Logo";
+import { Logo, LogoSlat } from "../clone/Logo";
 import { cn } from "../lib/cn";
 import { onReveal } from "../lib/intro";
 import { Link, usePath } from "../lib/router";
@@ -198,18 +198,21 @@ export function Hero() {
       id="top"
       className="dive-hero relative flex min-h-[92dvh] items-center overflow-hidden bg-paper pb-16 pt-24 sm:pt-28"
     >
-      <div className="grain pointer-events-none absolute inset-0 [mask-image:linear-gradient(to_bottom,black,transparent_70%)]" />
-      <div
-        className="hero-glow pointer-events-none absolute left-1/2 top-[-10%] h-[720px] w-[1100px] -translate-x-1/2 rounded-full opacity-70 blur-3xl"
-        style={{ background: "radial-gradient(closest-side, rgb(var(--paper-sunken)), transparent)" }}
-      />
+      {/* The paper behind the hero; it fades on the way into the desktop. */}
+      <div className="hero-bg pointer-events-none absolute inset-0 bg-paper">
+        <div className="grain absolute inset-0 [mask-image:linear-gradient(to_bottom,black,transparent_70%)]" />
+      </div>
       {/* The mark you dive through on the way to the desktop. It's drawn
           across the whole stage so it stays sharp at any size; the slot below
           only marks where it starts. */}
       <svg className="dive-mark pointer-events-none absolute inset-0 z-20 h-full w-full text-ink" aria-hidden="true">
         <g className="dive-mark-g" fill="currentColor">
           <g className="dive-mark-intro">
-            <LogoSlats />
+            {Array.from({ length: 6 }, (_, i) => (
+              <g key={i} className="dive-slat" transform={`rotate(${i * 60}) translate(0 -12.5)`}>
+                <LogoSlat />
+              </g>
+            ))}
           </g>
         </g>
       </svg>
