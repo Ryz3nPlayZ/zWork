@@ -166,8 +166,8 @@ export function Hero() {
             { rotation: -140, scale: 0.4, autoAlpha: 0, transformOrigin: "50% 50%", duration: 1.4, ease: "expo.out" },
             0,
           )
-            .from(".hero-sub", { autoAlpha: 0, y: 16, duration: 0.8 }, 0.55)
-            .from(".hero-cta > *", { autoAlpha: 0, y: 14, duration: 0.6, stagger: 0.08 }, "-=0.5");
+            .fromTo(".hero-sub", { autoAlpha: 0, y: 16 }, { autoAlpha: 1, y: 0, duration: 0.8 }, 0.55)
+            .fromTo(".hero-cta > *", { autoAlpha: 0, y: 14 }, { autoAlpha: 1, y: 0, duration: 0.6, stagger: 0.08 }, "-=0.5");
           const off = onReveal(() => {
             document.fonts.ready.then(() => {
               if (dead) return;

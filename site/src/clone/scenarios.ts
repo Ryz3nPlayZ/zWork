@@ -252,28 +252,3 @@ export const modelScenario: Scenario = {
     pick("zwork-pro", "zWork Pro");
   },
 };
-
-/* ------------------------------------------------------------------ */
-/* Apps & browser: steps from a run that drives a site with no API.    */
-/* ------------------------------------------------------------------ */
-
-export const browserScenario: Scenario = {
-  initial: baseState({
-    view: "chat",
-    working: true,
-    messages: [],
-  }),
-  build: (s) => {
-    const a = "a-web";
-    s.wait(0.3)
-      .assistant(a)
-      .step(a, "Opened portal.hetzner.com in the browser", "globe", 0.9)
-      .step(a, "Clicked “Invoices”", "pointer", 0.7)
-      .step(a, "Read the invoice table", "search", 0.8)
-      .step(a, "Clicked “Download PDF” on INV-20931", "pointer", 0.8)
-      .step(a, "Opened Numbers and pasted 3 rows", "pointer", 1.0)
-      .step(a, "Saved Hosting costs 2026.numbers", "file", 0.8)
-      .msg(a, { working: false })
-      .wait(3);
-  },
-};

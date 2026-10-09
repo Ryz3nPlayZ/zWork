@@ -108,6 +108,7 @@
   --color-warning: rgb(var(--warning));
   --color-error: rgb(var(--error));
   --color-info: rgb(var(--info));
+  --color-cream: rgb(var(--cream));
   --color-edge: rgb(var(--border-overlay) / 0.1);
   --color-edge-strong: rgb(var(--border-overlay) / 0.2);
   --color-edge-muted: rgb(var(--border-overlay) / 0.06);
@@ -244,9 +245,14 @@ body {
   margin: 0 -0.08em -0.16em;
 }
 
-/* Hidden until the serif loads and SplitText has measured real lines. */
+/* Hidden until the serif loads and SplitText has measured real lines. The
+   rest of the hero and the statement's words start in their animated-from
+   state in CSS, so nothing shows before its entrance plays. */
 @media (prefers-reduced-motion: no-preference) {
-  .hero-title { visibility: hidden; }
+  .hero-title,
+  .hero-sub,
+  .hero-cta > * { visibility: hidden; }
+  .statement-word { opacity: 0.14; }
 }
 
 /* ---- The desktop the demo plays on ---- */
@@ -347,15 +353,17 @@ body {
 .dive.is-diving .dive-mark { display: block; }
 .dive.is-diving .dive-logo-slot > svg { visibility: hidden; }
 
-/* Capabilities: a dark horizon. The planet's rim is drawn whole and revealed
-   by a conic mask centred on the planet, so --sweep lights it from the left. */
+/* Capabilities: a dark horizon in the parchment palette, warm ink below and a
+   paper-coloured light on the rim. The rim is drawn whole and revealed by a
+   conic mask centred on the planet, so --sweep lights it from the left. */
 .horizon {
+  --cream: 244 236 218;
   container-type: inline-size;
   --d: 180cqw; /* planet diameter */
   --drop: 17.6cqw; /* how far the curve falls by the edges: r - sqrt(r^2 - (w/2)^2) */
   --lift: 380px; /* room above the rim for its halo */
   --sweep: 160deg;
-  background: #060607;
+  background: rgb(24 21 17);
 }
 @media (min-width: 640px) {
   .horizon {
@@ -376,7 +384,7 @@ body {
   width: var(--d);
   aspect-ratio: 1;
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 0, #15161a, #0b0b0e 9%, #08080a 24%);
+  background: radial-gradient(circle at 50% 0, rgb(46 40 32), rgb(31 27 22) 9%, rgb(22 19 15) 24%);
 }
 .horizon-light {
   top: calc(-1 * var(--lift));
@@ -403,17 +411,17 @@ body {
 }
 .horizon-rim {
   box-shadow:
-    inset 0 1.5px 0 rgb(255 255 255 / 0.92),
-    inset 0 2px 6px -2px rgb(225 233 255 / 0.6),
-    inset 0 40px 90px -50px rgb(200 214 255 / 0.5);
+    inset 0 1.5px 0 rgb(255 248 232 / 0.92),
+    inset 0 2px 6px -2px rgb(var(--cream) / 0.6),
+    inset 0 40px 90px -50px rgb(232 214 178 / 0.45);
 }
 .horizon-halo {
   box-shadow:
-    0 -1px 16px rgb(225 233 255 / 0.45),
-    0 -16px 120px 16px rgb(185 202 255 / 0.16);
+    0 -1px 16px rgb(var(--cream) / 0.45),
+    0 -16px 120px 16px rgb(226 204 160 / 0.16);
 }
 .horizon-rays {
-  background: repeating-conic-gradient(rgb(255 255 255 / 0.045) 0 0.1deg, transparent 0.1deg 2.4deg);
+  background: repeating-conic-gradient(rgb(var(--cream) / 0.05) 0 0.1deg, transparent 0.1deg 2.4deg);
   -webkit-mask-image: radial-gradient(closest-side, transparent 88%, #000 99.7%, transparent 100%);
   mask-image: radial-gradient(closest-side, transparent 88%, #000 99.7%, transparent 100%);
 }
@@ -423,7 +431,7 @@ body {
   height: 520px;
   translate: -50% 0;
   border-radius: 50%;
-  background: radial-gradient(closest-side, rgb(175 195 255 / 0.24), rgb(175 195 255 / 0.07) 55%, transparent);
+  background: radial-gradient(closest-side, rgb(228 206 164 / 0.22), rgb(228 206 164 / 0.07) 55%, transparent);
 }
 .horizon-caps {
   padding-top: calc(var(--drop) + 40px);

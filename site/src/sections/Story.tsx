@@ -3,20 +3,7 @@ import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { SplitText } from "gsap/SplitText";
 import { useGSAP } from "@gsap/react";
-import {
-  AppWindow,
-  Brain,
-  FileSpreadsheet,
-  FolderOpen,
-  Globe,
-  Layers,
-  Plug,
-  Sparkles,
-} from "lucide-react";
-import { LiveDemo } from "../clone/LiveDemo";
-import { AssistantMessage } from "../clone/Message";
-import { browserScenario } from "../clone/scenarios";
-import type { AssistantMsg } from "../clone/types";
+import { Brain, FileSpreadsheet, FolderOpen, Layers, Plug, Sparkles } from "lucide-react";
 import { Section } from "./ui";
 
 gsap.registerPlugin(ScrollTrigger, SplitText, useGSAP);
@@ -28,7 +15,7 @@ export function Statement() {
     () => {
       const mm = gsap.matchMedia();
       mm.add("(prefers-reduced-motion: no-preference)", () => {
-        const split = SplitText.create(".statement", { type: "words" });
+        const split = SplitText.create(".statement", { type: "words", wordsClass: "statement-word" });
         gsap.fromTo(
           split.words,
           { opacity: 0.14 },
@@ -54,66 +41,6 @@ export function Statement() {
         </p>
       </div>
     </Section>
-  );
-}
-
-const ACTIONS = [
-  "Read expenses_q3_export.csv",
-  "Matched 41 payments to open invoices",
-  "Searched Gmail: invoices newer_than:1d",
-  "Clicked “Download statement”",
-  "Wrote q3_board_deck.pptx",
-  "Updated the Leads sheet: 30 rows",
-  "Posted the summary in #ops",
-  "Opened Numbers and pasted 3 rows",
-  "Created a schedule: Fridays at 16:00",
-  "Read 14 PDFs in ~/Contracts",
-  "Filled in the vendor form on portal.acme.com",
-  "Drafted 6 overdue-invoice reminders",
-  "Drafted a reply to Priya",
-  "Added 3 events to Calendar",
-];
-
-/** A ticker of real-looking tool calls, looped with GSAP. */
-export function Ticker() {
-  const root = useRef<HTMLDivElement>(null);
-  useGSAP(
-    () => {
-      const mm = gsap.matchMedia();
-      mm.add("(prefers-reduced-motion: no-preference)", () => {
-        gsap.utils.toArray<HTMLElement>(".ticker-track").forEach((track, i) => {
-          gsap.fromTo(
-            track,
-            { xPercent: i % 2 ? -50 : 0 },
-            { xPercent: i % 2 ? 0 : -50, duration: 60, ease: "none", repeat: -1 },
-          );
-        });
-      });
-    },
-    { scope: root },
-  );
-  const row = (items: string[]) => (
-    <div className="ticker-track flex w-max gap-3 pr-3">
-      {[...items, ...items].map((a, i) => (
-        <span
-          key={i}
-          className="inline-flex items-center gap-2 whitespace-nowrap rounded-lg border border-line bg-paper-sunken px-3 py-1.5 text-[13px] text-ink-muted"
-        >
-          <span className="h-1.5 w-1.5 rounded-full bg-success" />
-          {a}
-        </span>
-      ))}
-    </div>
-  );
-  return (
-    <div
-      ref={root}
-      aria-hidden="true"
-      className="flex flex-col gap-3 overflow-hidden py-2 [mask-image:linear-gradient(to_right,transparent,black_12%,black_88%,transparent)]"
-    >
-      {row(ACTIONS.slice(0, 7))}
-      {row(ACTIONS.slice(7))}
-    </div>
   );
 }
 
@@ -150,21 +77,6 @@ const CAPS = [
   },
 ];
 
-function BrowserCard() {
-  return (
-    <LiveDemo
-      scenario={browserScenario}
-      width={560}
-      height={330}
-      loopDelay={2.5}
-      render={(s) => {
-        const m = s.messages.find((x) => x.role === "assistant") as AssistantMsg | undefined;
-        return <div className="bg-paper p-5">{m && <AssistantMessage m={m} pressed={null} />}</div>;
-      }}
-    />
-  );
-}
-
 export function Capabilities() {
   const root = useRef<HTMLDivElement>(null);
   useGSAP(
@@ -191,11 +103,6 @@ export function Capabilities() {
           )
           .from(".horizon-cap", { autoAlpha: 0, y: 24, duration: 0.8, stagger: 0.07, ease: "power3.out" }, 0.7);
 
-        ScrollTrigger.batch(".cap", {
-          start: "top 88%",
-          once: true,
-          onEnter: (els) => gsap.from(els, { autoAlpha: 0, y: 40, duration: 0.9, stagger: 0.08, ease: "power3.out" }),
-        });
         return () => split.revert();
       });
     },
@@ -205,15 +112,15 @@ export function Capabilities() {
   return (
     <Section className="pb-32 sm:pb-44">
       <div ref={root}>
-        {/* A dark horizon: the six capabilities sit on a planet whose rim
+        {/* A warm dark horizon: the six capabilities sit on a planet whose rim
             lights up as you arrive. Dark in both themes. */}
-        <div className="horizon relative overflow-hidden rounded-[28px] border border-white/[.06] sm:rounded-[36px]">
+        <div className="horizon relative overflow-hidden rounded-[28px] border border-cream/[.06] sm:rounded-[36px]">
           <header className="relative z-10 mx-auto max-w-[760px] px-6 pt-20 text-center sm:pt-28">
-            <p className="eyebrow mb-6 !text-white/40">What it can do</p>
-            <h2 className="horizon-title display text-[44px] text-white sm:text-[64px]">
-              Everything you'd use to <em className="text-white/50">do it yourself.</em>
+            <p className="eyebrow mb-6 !text-cream/40">What it can do</p>
+            <h2 className="horizon-title display text-[44px] text-cream sm:text-[64px]">
+              Everything you'd use to <em className="text-cream/50">do it yourself.</em>
             </h2>
-            <p className="horizon-sub mx-auto mt-6 max-w-[52ch] text-[16px] leading-relaxed text-white/55">
+            <p className="horizon-sub mx-auto mt-6 max-w-[52ch] text-[16px] leading-relaxed text-cream/55">
               zWork has the same tools you do: your files, a real browser, your desktop apps and your accounts. So the job
               ends with the work done, not with instructions for you.
             </p>
@@ -229,50 +136,16 @@ export function Capabilities() {
             </div>
             <div className="horizon-caps relative z-10 grid gap-x-12 px-6 pb-14 sm:grid-cols-2 sm:px-12 sm:pb-20 lg:grid-cols-3 lg:gap-x-14 lg:px-16">
               {CAPS.map(({ icon: Icon, title, body }) => (
-                <article key={title} className="horizon-cap border-t border-white/10 py-7 sm:py-8">
-                  <Icon className="h-[18px] w-[18px] text-white/70" strokeWidth={1.7} />
-                  <h3 className="mt-4 text-[17px] font-semibold tracking-tight text-white">{title}</h3>
-                  <p className="mt-2 text-[14.5px] leading-relaxed text-white/55">{body}</p>
+                <article key={title} className="horizon-cap border-t border-cream/10 py-7 sm:py-8">
+                  <Icon className="h-[18px] w-[18px] text-cream/70" strokeWidth={1.7} />
+                  <h3 className="mt-4 text-[17px] font-semibold tracking-tight text-cream">{title}</h3>
+                  <p className="mt-2 text-[14.5px] leading-relaxed text-cream/55">{body}</p>
                 </article>
               ))}
             </div>
           </div>
         </div>
 
-        <div className="mt-4 grid gap-4 lg:grid-cols-3">
-          <article className="cap relative overflow-hidden rounded-3xl border border-line bg-paper-raised lg:col-span-2">
-            <div className="flex h-full flex-col gap-7 p-7 sm:p-9">
-              <div>
-                <div className="flex gap-2 text-ink-muted">
-                  <Globe className="h-5 w-5" />
-                  <AppWindow className="h-5 w-5" />
-                </div>
-                <h3 className="mt-5 text-[22px] font-semibold tracking-tight text-ink">Uses the web and your apps</h3>
-                <p className="mt-3 max-w-[56ch] text-[15px] leading-relaxed text-ink-muted">
-                  Searches, reads current pages, clicks through sites and fills in forms in a real browser. Operates desktop apps
-                  that have no API, reading the screen the way you would.
-                </p>
-              </div>
-              <div className="mt-auto overflow-hidden rounded-2xl border border-line bg-paper shadow-lift">
-                <BrowserCard />
-              </div>
-            </div>
-          </article>
-          <article className="cap flex flex-col justify-between gap-6 overflow-hidden rounded-3xl border border-line bg-paper-raised p-7">
-            <div>
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-line bg-paper text-ink-muted">
-                <FolderOpen className="h-[18px] w-[18px]" />
-              </span>
-              <h3 className="mt-5 text-[17px] font-semibold tracking-tight text-ink">The kind of steps it takes</h3>
-              <p className="mt-2 text-[14.5px] leading-relaxed text-ink-muted">
-                Each one shows up in the chat as it happens, so you can follow along or stop it.
-              </p>
-            </div>
-            <div className="-mx-7 min-w-0">
-              <Ticker />
-            </div>
-          </article>
-        </div>
       </div>
     </Section>
   );
