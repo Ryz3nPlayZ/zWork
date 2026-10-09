@@ -5,6 +5,7 @@ import { SplitText } from "gsap/SplitText";
 import { useGSAP } from "@gsap/react";
 import { ArrowRight, Download, Menu, Moon, Sun, X } from "lucide-react";
 import { Logo, LogoSlat } from "../clone/Logo";
+import { LogoParticles } from "./LogoParticles";
 import { cn } from "../lib/cn";
 import { onReveal } from "../lib/intro";
 import { Link, usePath } from "../lib/router";
@@ -201,6 +202,8 @@ export function Hero() {
       {/* The paper behind the hero; it fades on the way into the desktop. */}
       <div className="hero-bg pointer-events-none absolute inset-0 bg-paper">
         <div className="grain absolute inset-0 [mask-image:linear-gradient(to_bottom,black,transparent_70%)]" />
+        {/* The mark's lower slats run behind the paragraph; thin them there. */}
+        <LogoParticles className="absolute inset-0 h-full w-full sm:[mask-image:radial-gradient(ellipse_44%_13%_at_50%_70%,rgb(0_0_0/.3)_35%,black)]" />
       </div>
       {/* The mark you dive through on the way to the desktop. It's drawn
           across the whole stage so it stays sharp at any size; the slot below
