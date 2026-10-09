@@ -9,6 +9,8 @@
 //!   plus weekly retention cohorts.
 //! - `GET /api/admin/metrics/status`: every public surface probed from the
 //!   server, the database, and which integrations are configured.
+//! - `GET /api/admin/metrics/jobs?days=N`: runs by trigger (schedule, chat,
+//!   background), who runs scheduled work, and how much traffic is untagged.
 //!
 //! Costs are `gateway_requests.estimated_cost_usd`, filled by `estimate_cost`
 //! at request time. A model missing from that price table stores NULL, so the
@@ -1098,6 +1100,270 @@ pub async fn admin_metrics_status(
         surfaces,
         database: DbStatus { ok: db_ok, latency_ms, size_bytes, tables },
         integrations,
+    }))
+}
+
+// ── Jobs: scheduled vs chat runs, and telemetry quality ───────────────────
+//
+// The wedge is recurring paperwork, so the number that matters is how much
+// work runs on a schedule. The desktop sidecar tags every router call with
+// `x-zwork-trigger` (`schedule`, `chat` or `background`), stored as
+// `gateway_requests.run_trigger`. Older builds send nothing: their rows land
+// in `untagged`, and their calls each counted as a new root against the quota.
+
+const TRIGGER_SQL: &str = "COALESCE(NULLIF(run_trigger, ''), 'untagged')";
+
+#[derive(Serialize)]
+pub struct TriggerRow {
+    trigger: String,
+    requests: i64,
+    runs: i64,
+    users: i64,
+    cost_usd: f64,
+    /// Requests per run: how many model calls a task takes.
+    calls_per_run: f64,
+}
+
+#[derive(Serialize)]
+pub struct JobsDay {
+    date: String,
+    schedule: i64,
+    chat: i64,
+    background: i64,
+    untagged: i64,
+}
+
+#[derive(Serialize)]
+pub struct WeeklySchedulers {
+    week_start: String,
+    users: i64,
+    runs: i64,
+}
+
+#[derive(Serialize)]
+pub struct Scheduler {
+    user_id: String,
+    email: String,
+    name: String,
+    tier: String,
+    runs: i64,
+    requests: i64,
+    cost_usd: f64,
+    /// Distinct days with a scheduled run in the window.
+    active_days: i64,
+    last_run_at: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct TelemetryQuality {
+    requests_24h: i64,
+    missing_version_pct: f64,
+    missing_os_pct: f64,
+    missing_trigger_pct: f64,
+    /// Share of requests stored as continuations. Near zero while agents
+    /// make several calls per task means every step is billed as a message.
+    continuation_pct: f64,
+    /// Requests whose app_version/os are blank, by user: who's on an old build.
+    untagged_users_24h: i64,
+}
+
+#[derive(Serialize)]
+pub struct JobsOverview {
+    window_days: i64,
+    /// When the first tagged request arrived, if ever. Splits before this
+    /// date are all `untagged`.
+    tagged_since: Option<String>,
+    by_trigger: Vec<TriggerRow>,
+    daily: Vec<JobsDay>,
+    weekly_schedulers: Vec<WeeklySchedulers>,
+    top_schedulers: Vec<Scheduler>,
+    quality: TelemetryQuality,
+}
+
+pub async fn admin_metrics_jobs(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<AdminDaysQuery>,
+) -> Result<Json<JobsOverview>, StatusCode> {
+    let _owner = ensure_owner_or_service(&state, &headers).await?;
+    let days = q.days.clamp(1, 365);
+    let db_err = |e: sqlx::Error| {
+        tracing::warn!("jobs query failed: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    };
+
+    let tagged_since: Option<DateTime<Utc>> = sqlx::query_scalar(
+        "SELECT MIN(created_at) FROM gateway_requests WHERE run_trigger IS NOT NULL",
+    )
+    .fetch_one(&state.db)
+    .await
+    .unwrap_or(None);
+
+    let by_trigger = sqlx::query(&format!(
+        r#"
+        SELECT {TRIGGER_SQL} AS trigger,
+               COUNT(*)::bigint AS requests,
+               COUNT(DISTINCT run_id)::bigint AS runs,
+               COUNT(DISTINCT user_id)::bigint AS users,
+               COALESCE(SUM(estimated_cost_usd), 0)::float8 AS cost
+        FROM gateway_requests
+        WHERE created_at > NOW() - ($1 || ' days')::INTERVAL
+        GROUP BY 1
+        ORDER BY requests DESC
+        "#
+    ))
+    .bind(days)
+    .fetch_all(&state.db)
+    .await
+    .map_err(db_err)?
+    .into_iter()
+    .map(|r| {
+        let requests: i64 = r.get("requests");
+        let runs: i64 = r.get("runs");
+        TriggerRow {
+            trigger: r.get("trigger"),
+            requests,
+            runs,
+            users: r.get("users"),
+            cost_usd: round4(r.get("cost")),
+            calls_per_run: if runs > 0 { round2(requests as f64 / runs as f64) } else { 0.0 },
+        }
+    })
+    .collect();
+
+    // Runs started per day, by trigger. A run counts on the day of its first call.
+    let mut daily_map: BTreeMap<NaiveDate, JobsDay> = BTreeMap::new();
+    let start = Utc::now().date_naive() - chrono::Duration::days(days - 1);
+    for i in 0..days {
+        let d = start + chrono::Duration::days(i);
+        daily_map.insert(d, JobsDay { date: d.to_string(), schedule: 0, chat: 0, background: 0, untagged: 0 });
+    }
+    let daily_rows = sqlx::query(&format!(
+        r#"
+        WITH runs AS (
+          SELECT run_id, MIN({TRIGGER_SQL}) AS trigger, MIN(created_at) AS first_at
+          FROM gateway_requests
+          WHERE created_at > NOW() - ($1 || ' days')::INTERVAL
+          GROUP BY run_id
+        )
+        SELECT DATE(first_at) AS day, trigger, COUNT(*)::bigint AS runs
+        FROM runs GROUP BY 1, 2
+        "#
+    ))
+    .bind(days)
+    .fetch_all(&state.db)
+    .await
+    .map_err(db_err)?;
+    for r in daily_rows {
+        let day: NaiveDate = r.get("day");
+        let trigger: String = r.get("trigger");
+        let n: i64 = r.get("runs");
+        if let Some(d) = daily_map.get_mut(&day) {
+            match trigger.as_str() {
+                "schedule" => d.schedule += n,
+                "chat" => d.chat += n,
+                "background" => d.background += n,
+                _ => d.untagged += n,
+            }
+        }
+    }
+
+    let weekly_schedulers = sqlx::query(
+        r#"
+        SELECT date_trunc('week', created_at)::date AS wk,
+               COUNT(DISTINCT user_id)::bigint AS users,
+               COUNT(DISTINCT run_id)::bigint AS runs
+        FROM gateway_requests
+        WHERE run_trigger = 'schedule'
+          AND created_at >= date_trunc('week', NOW()) - INTERVAL '7 weeks'
+        GROUP BY 1 ORDER BY 1
+        "#,
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(db_err)?
+    .into_iter()
+    .map(|r| WeeklySchedulers {
+        week_start: r.get::<NaiveDate, _>("wk").to_string(),
+        users: r.get("users"),
+        runs: r.get("runs"),
+    })
+    .collect();
+
+    let top_schedulers = sqlx::query(
+        r#"
+        SELECT g.user_id,
+               COALESCE(u.email, '') AS email,
+               COALESCE(u.name, '') AS name,
+               COALESCE(u.tier, 'free') AS tier,
+               COUNT(DISTINCT g.run_id)::bigint AS runs,
+               COUNT(*)::bigint AS requests,
+               COALESCE(SUM(g.estimated_cost_usd), 0)::float8 AS cost,
+               COUNT(DISTINCT DATE(g.created_at))::bigint AS active_days,
+               MAX(g.created_at) AS last_at
+        FROM gateway_requests g
+        LEFT JOIN app_users u ON u.user_id = g.user_id
+        WHERE g.run_trigger = 'schedule'
+          AND g.created_at > NOW() - ($1 || ' days')::INTERVAL
+        GROUP BY g.user_id, u.email, u.name, u.tier
+        ORDER BY runs DESC, requests DESC
+        LIMIT 20
+        "#,
+    )
+    .bind(days)
+    .fetch_all(&state.db)
+    .await
+    .map_err(db_err)?
+    .into_iter()
+    .map(|r| Scheduler {
+        user_id: r.get("user_id"),
+        email: r.get("email"),
+        name: r.get("name"),
+        tier: r.get("tier"),
+        runs: r.get("runs"),
+        requests: r.get("requests"),
+        cost_usd: round4(r.get("cost")),
+        active_days: r.get("active_days"),
+        last_run_at: r.get::<Option<DateTime<Utc>>, _>("last_at").map(|t| t.to_rfc3339()),
+    })
+    .collect();
+
+    let q24 = sqlx::query(
+        r#"
+        SELECT COUNT(*)::bigint AS n,
+               COUNT(*) FILTER (WHERE COALESCE(app_version, '') = '')::bigint AS no_version,
+               COUNT(*) FILTER (WHERE COALESCE(os, '') = '' OR os = 'desktop')::bigint AS no_os,
+               COUNT(*) FILTER (WHERE COALESCE(run_trigger, '') = '')::bigint AS no_trigger,
+               COUNT(*) FILTER (WHERE request_kind = 'continuation')::bigint AS continuations,
+               COUNT(DISTINCT user_id) FILTER (WHERE COALESCE(run_trigger, '') = '')::bigint AS untagged_users
+        FROM gateway_requests
+        WHERE created_at > NOW() - INTERVAL '24 hours'
+        "#,
+    )
+    .fetch_one(&state.db)
+    .await
+    .map_err(db_err)?;
+    let n: i64 = q24.get("n");
+    let pct = |k: &str| -> f64 {
+        if n > 0 { round2(q24.get::<i64, _>(k) as f64 / n as f64 * 100.0) } else { 0.0 }
+    };
+    let quality = TelemetryQuality {
+        requests_24h: n,
+        missing_version_pct: pct("no_version"),
+        missing_os_pct: pct("no_os"),
+        missing_trigger_pct: pct("no_trigger"),
+        continuation_pct: pct("continuations"),
+        untagged_users_24h: q24.get("untagged_users"),
+    };
+
+    Ok(Json(JobsOverview {
+        window_days: days,
+        tagged_since: tagged_since.map(|t| t.to_rfc3339()),
+        by_trigger,
+        daily: daily_map.into_values().collect(),
+        weekly_schedulers,
+        top_schedulers,
+        quality,
     }))
 }
 

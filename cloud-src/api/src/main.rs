@@ -7646,6 +7646,7 @@ async fn main() {
         .route("/api/admin/metrics/downloads", get(admin_insights::admin_metrics_downloads))
         .route("/api/admin/metrics/funnel", get(admin_insights::admin_metrics_funnel))
         .route("/api/admin/metrics/status", get(admin_insights::admin_metrics_status))
+        .route("/api/admin/metrics/jobs", get(admin_insights::admin_metrics_jobs))
         .route("/api/admin/users", get(admin_list_users))
         .route("/api/admin/usage/by-time", get(admin_usage_by_time))
         .route("/api/admin/usage/by-model", get(admin_usage_by_model))
