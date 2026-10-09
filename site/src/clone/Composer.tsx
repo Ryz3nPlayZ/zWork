@@ -15,6 +15,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { cn } from "../lib/cn";
+import { useHit, useLive } from "./live";
 import type { CloneState, Permission, Preset } from "./types";
 
 export const PRESET_META: Record<Preset, { icon: ReactNode; label: string; description: string }> = {
@@ -46,6 +47,7 @@ function IconButton({ children, label }: { children: ReactNode; label: string })
 }
 
 function ModelMenu({ current }: { current: string }) {
+  const hit = useHit();
   return (
     <div className="absolute bottom-[calc(100%+8px)] right-0 z-40 w-[320px] rounded-xl border border-line bg-paper p-1 shadow-pop animate-[fade-in_180ms_ease-out]">
       <div className="px-2.5 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">Model</div>
@@ -55,6 +57,7 @@ function ModelMenu({ current }: { current: string }) {
           <div
             key={m.id}
             data-target={`model-${m.id}`}
+            {...hit((api) => api.setModel(m.name))}
             className={cn("press flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left", selected && "bg-paper-sunken")}
           >
             <span className="min-w-0 flex-1">
@@ -117,16 +120,43 @@ export function PermissionCard({ p, pressed }: { p: Permission; pressed: string 
 
 export function Composer({ s, placeholder }: { s: CloneState; placeholder: string }) {
   if (s.permission && !s.permission.chosen) return <PermissionCard p={s.permission} pressed={s.pressed} />;
+  return <ComposerBox s={s} placeholder={placeholder} />;
+}
+
+function ComposerBox({ s, placeholder }: { s: CloneState; placeholder: string }) {
+  const live = useLive();
+  const hit = useHit();
   const preset = PRESET_META[s.preset];
-  const hasText = s.composer.length > 0;
+  const hasText = s.composer.trim().length > 0;
   return (
     <div className={cn("group relative w-full rounded-2xl bg-paper transition-[box-shadow]", s.composerFocus ? "focus-ring" : "hairline-ring")}>
-      <div className="block min-h-[66px] w-full whitespace-pre-wrap px-5 pb-2 pt-4 text-[15px] leading-[25px] text-ink">
-        {hasText ? s.composer : <span className="text-ink-faint">{placeholder}</span>}
-        {s.composerFocus && (
-          <span className="ml-px inline-block h-[1.05em] w-[1.5px] translate-y-[3px] bg-ink animate-typing-cursor" />
-        )}
-      </div>
+      {live?.active ? (
+        <textarea
+          data-live
+          data-composer
+          rows={1}
+          aria-label="Message zWork"
+          value={s.composer}
+          placeholder={placeholder}
+          onChange={(e) => live.api.type(e.target.value)}
+          onFocus={() => live.api.focus(true)}
+          onBlur={() => live.api.focus(false)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              live.api.send();
+            }
+          }}
+          className="block max-h-[200px] min-h-[66px] w-full resize-none bg-transparent px-5 pb-2 pt-4 text-[15px] leading-[25px] text-ink outline-none [field-sizing:content] placeholder:text-ink-faint"
+        />
+      ) : (
+        <div className="block min-h-[66px] w-full whitespace-pre-wrap px-5 pb-2 pt-4 text-[15px] leading-[25px] text-ink">
+          {s.composer ? s.composer : <span className="text-ink-faint">{placeholder}</span>}
+          {s.composerFocus && (
+            <span className="ml-px inline-block h-[1.05em] w-[1.5px] translate-y-[3px] bg-ink animate-typing-cursor" />
+          )}
+        </div>
+      )}
       <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5 pt-1">
         <div className="flex items-center gap-1">
           <IconButton label="Attach file">
@@ -146,6 +176,7 @@ export function Composer({ s, placeholder }: { s: CloneState; placeholder: strin
             <span
               data-target="model"
               data-pressed={s.pressed === "model"}
+              {...hit((api) => api.toggleModels())}
               className="press inline-flex items-center gap-1.5 rounded-full border border-line bg-paper py-1 pl-2.5 pr-2 text-[12px] font-medium text-ink"
             >
               <span className="max-w-[200px] truncate">{s.model}</span>
@@ -162,6 +193,7 @@ export function Composer({ s, placeholder }: { s: CloneState; placeholder: strin
             <span
               data-target="send"
               data-pressed={s.pressed === "send"}
+              {...hit((api) => api.send())}
               className={cn(
                 "press inline-flex h-8 w-8 items-center justify-center rounded-full border border-line bg-paper-sunken text-ink",
                 !hasText && "opacity-50",

@@ -178,7 +178,9 @@ export function Hero() {
                 autoSplit: true,
                 onSplit: (self) => gsap.from(self.words, { yPercent: 110, duration: 1.0, stagger: 0.06, ease: "power3.out" }),
               });
-              gsap.set(".hero-title", { visibility: "visible" });
+              // "inherit", not "visible", or the title would stay clickable
+              // over the desktop after the dive hides .hero-body.
+              gsap.set(".hero-title", { visibility: "inherit" });
               tl.play();
             });
           });

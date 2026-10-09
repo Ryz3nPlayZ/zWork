@@ -81,12 +81,12 @@ function ChatView({ s }: { s: CloneState }) {
  *  app's real size. Callers scale it to fit (see ScaledWindow). */
 export const AppWindow = forwardRef<
   HTMLDivElement,
-  { s: CloneState; width: number; height: number; panelWidth?: number; className?: string }
->(function AppWindow({ s, width, height, panelWidth = 560 }, ref) {
+  { s: CloneState; width: number; height: number; panelWidth?: number; className?: string; live?: boolean }
+>(function AppWindow({ s, width, height, panelWidth = 560, live }, ref) {
   return (
     <div
       ref={ref}
-      aria-hidden="true"
+      aria-hidden={live ? undefined : true}
       className="clone relative overflow-hidden rounded-[12px] bg-paper-sidebar text-left"
       style={{ width, height }}
     >

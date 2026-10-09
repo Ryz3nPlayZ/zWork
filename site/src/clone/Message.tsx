@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { ThinkingOrb, type OrbState } from "thinking-orbs";
 import { cn } from "../lib/cn";
+import { useHit } from "./live";
 import { Logo } from "./Logo";
 import type { AssistantMsg, ArtifactKind, Step, ToolIcon, UserMsg } from "./types";
 
@@ -173,6 +174,7 @@ export function AssistantMessage({ m, pressed }: { m: AssistantMsg; pressed: str
       : "Thinking…"
     : `${m.steps.length} step${m.steps.length === 1 ? "" : "s"}`;
   const ArtIcon = m.artifact ? ARTIFACT_ICON[m.artifact.kind] : FileText;
+  const hit = useHit();
 
   return (
     <div data-msg className="group flex w-full justify-start gap-3">
@@ -182,7 +184,10 @@ export function AssistantMessage({ m, pressed }: { m: AssistantMsg; pressed: str
       <div className="min-w-0 max-w-[92%] flex-1">
         {m.steps.length > 0 && (
           <div className="mb-2">
-            <div className="flex max-w-full items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[12px] font-medium text-ink-faint">
+            <div
+              {...(m.working ? {} : hit((api) => api.toggleSteps(m.id)))}
+              className="flex w-fit max-w-full items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[12px] font-medium text-ink-faint [&[data-live]:hover]:text-ink-muted"
+            >
               {m.working ? (
                 <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
               ) : (
@@ -208,6 +213,7 @@ export function AssistantMessage({ m, pressed }: { m: AssistantMsg; pressed: str
           <div
             data-target="artifact-card"
             data-pressed={pressed === "artifact-card"}
+            {...hit((api) => api.openPanel(m.artifact!.title, m.artifact!.kind))}
             className="press mt-3 flex w-full items-center gap-3 rounded-2xl border border-line bg-paper-raised px-3.5 py-3"
           >
             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-line bg-paper-sunken text-ink-muted">

@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "../lib/cn";
+import { useHit, type LiveApi } from "./live";
 import type { CloneState, InboxItem, InboxKind } from "./types";
 
 type Tone = "neutral" | "warning" | "info" | "error";
@@ -75,9 +76,11 @@ function RowIcon({ children, target, pressed }: { children: ReactNode; target?: 
   );
 }
 
-function Switch({ on }: { on: boolean }) {
+function Switch({ on, onHit }: { on: boolean; onHit?: (api: LiveApi) => void }) {
+  const hit = useHit();
   return (
     <span
+      {...(onHit && hit(onHit))}
       className={cn(
         "relative inline-flex h-[18px] w-8 shrink-0 items-center rounded-full border transition-colors",
         on ? "border-transparent bg-accent" : "border-line bg-paper-sunken",
@@ -205,7 +208,7 @@ export function ScheduledPage({ s }: { s: CloneState }) {
                 </RowIcon>
               </div>
               <div className="flex shrink-0 items-center gap-2 text-[11.5px] text-ink-faint">
-                <Switch on={t.enabled} />
+                <Switch on={t.enabled} onHit={(api) => api.toggleTask(t.id)} />
                 <RowIcon>
                   <MoreHorizontal />
                 </RowIcon>
@@ -233,9 +236,10 @@ function kindMeta(kind: InboxKind): { icon: ReactNode; tone: Tone; label: string
 
 function InboxRow({ item, s }: { item: InboxItem; s: CloneState }) {
   const meta = kindMeta(item.kind);
+  const hit = useHit();
   return (
     <li data-row={item.id} className={cn("transition-colors first:rounded-t-2xl last:rounded-b-2xl", item.open && "bg-line/20")}>
-      <div data-target={`row-${item.id}`} className="flex items-center gap-3 px-3.5 py-2.5">
+      <div data-target={`row-${item.id}`} {...hit((api) => api.toggleInbox(item.id))} className="flex items-center gap-3 px-3.5 py-2.5">
         <IconTile tone={meta.tone}>{meta.icon}</IconTile>
         <div className="min-w-0 flex-1">
           <div className={cn("truncate text-[13px]", item.read ? "text-ink-muted" : "font-semibold text-ink")}>{item.title}</div>

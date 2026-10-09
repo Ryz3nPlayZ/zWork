@@ -1,24 +1,32 @@
-import { useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { Draggable } from "gsap/Draggable";
 import { useGSAP } from "@gsap/react";
-import { ArrowUp, Paperclip } from "lucide-react";
+import { ArrowUp, Paperclip, RotateCcw } from "lucide-react";
 import { LiveDemo } from "../clone/LiveDemo";
 import { heroScenario } from "../clone/scenarios";
 import { Dock, MenuBar, TrafficLights } from "./MacOS";
 import { cn } from "../lib/cn";
 
-gsap.registerPlugin(ScrollTrigger, useGSAP);
+gsap.registerPlugin(ScrollTrigger, Draggable, useGSAP);
 
 // Phones get a narrower, taller window: the 1440-wide one scales to ~0.23 there
 // and is unreadable, and a portrait desk leaves room above and below it.
 const PHONE = "(max-width: 639px)";
-const subscribePhone = (cb: () => void) => {
-  const mq = window.matchMedia(PHONE);
-  mq.addEventListener("change", cb);
-  return () => mq.removeEventListener("change", cb);
-};
-const usePhone = () => useSyncExternalStore(subscribePhone, () => window.matchMedia(PHONE).matches);
+// A mouse or trackpad: the windows drag and zWork can be tried.
+const FINE = "(pointer: fine)";
+function useMedia(query: string) {
+  const subscribe = useCallback(
+    (cb: () => void) => {
+      const mq = window.matchMedia(query);
+      mq.addEventListener("change", cb);
+      return () => mq.removeEventListener("change", cb);
+    },
+    [query],
+  );
+  return useSyncExternalStore(subscribe, () => window.matchMedia(query).matches);
+}
 
 const CHAPTERS = [
   { id: "ask", title: "You hand it the job", body: "In plain words, with the file attached." },
@@ -50,7 +58,11 @@ const DEMO_RANGE = {
 export function Desktop({ children }: { children?: ReactNode }) {
   const root = useRef<HTMLElement>(null);
   const [chapter, setChapter] = useState<string | null>(null);
-  const phone = usePhone();
+  // Set while the visitor has the zWork window; puts the scripted run back.
+  const [replay, setReplay] = useState<(() => void) | null>(null);
+  const onLive = useCallback((r: (() => void) | null) => setReplay(() => r), []);
+  const phone = useMedia(PHONE);
+  const fine = useMedia(FINE);
 
   useGSAP(
     () => {
@@ -143,6 +155,45 @@ export function Desktop({ children }: { children?: ReactNode }) {
           pin: true,
         });
       });
+      // The windows can be moved by their title bars; whichever was touched
+      // last comes to the front.
+      mm.add(FINE, () => {
+        const area = root.current!.querySelector(".desk-windows")!;
+        let z = 1;
+        const raise = (el: Element | null) => el && gsap.set(el, { zIndex: ++z });
+        const app = root.current!.querySelector(".desk-app")!;
+        const chat = root.current!.querySelector(".desk-chat-in")!;
+        const strip = app.querySelector<HTMLElement>("[data-drag-handle]");
+        const onApp = () => raise(app);
+        const onChat = () => raise(chat);
+        app.addEventListener("pointerdown", onApp);
+        chat.addEventListener("pointerdown", onChat);
+        const drags = [
+          ...Draggable.create(app, {
+            trigger: strip,
+            bounds: area,
+            zIndexBoost: false,
+            edgeResistance: 0.85,
+            cursor: "grab",
+            activeCursor: "grabbing",
+            // The strip lies over the window's top bar; a click that didn't
+            // drag goes on to whatever it covers (the document's close button).
+            onClick(e: PointerEvent) {
+              if (!strip) return;
+              strip.style.pointerEvents = "none";
+              const under = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>("[data-live]");
+              strip.style.pointerEvents = "";
+              under?.click();
+            },
+          }),
+          ...Draggable.create(".desk-chat-drag", { trigger: ".desk-titlebar", bounds: area, zIndexBoost: false, edgeResistance: 0.85, cursor: "grab", activeCursor: "grabbing" }),
+        ];
+        return () => {
+          for (const d of drags) d.kill();
+          app.removeEventListener("pointerdown", onApp);
+          chat.removeEventListener("pointerdown", onChat);
+        };
+      });
       return () => mm.revert();
     },
     { scope: root },
@@ -162,10 +213,12 @@ export function Desktop({ children }: { children?: ReactNode }) {
         <div className="desk relative w-full max-w-[1680px] overflow-hidden rounded-[12px] will-change-transform sm:rounded-[14px]">
           <MenuBar />
 
-          <div className="absolute inset-x-0 bottom-[60px] top-[26px] sm:bottom-[80px]">
+          <div className="desk-windows absolute inset-x-0 bottom-[60px] top-[26px] isolate sm:bottom-[80px]">
             {/* The chat app: an answer, and the work left to you. */}
             <div className="desk-chat-in absolute left-[3%] top-[7%] hidden h-[66%] w-[46%] lg:block xl:h-[54%]">
-              <ChatWindow />
+              <div className="desk-chat-drag h-full">
+                <ChatWindow />
+              </div>
             </div>
 
             {/* zWork, in front and doing it. */}
@@ -180,6 +233,8 @@ export function Desktop({ children }: { children?: ReactNode }) {
                   onChapter={setChapter}
                   range={DEMO_RANGE}
                   loopDelay={2}
+                  interactive={fine}
+                  onLive={onLive}
                 />
               </div>
             </div>
@@ -203,17 +258,34 @@ export function Desktop({ children }: { children?: ReactNode }) {
                   </li>
                 ))}
               </ol>
+              {replay ? (
+                <div className="flex items-center justify-between gap-2 border-t border-black/5 px-3 pb-1 pt-2">
+                  <span className="text-[11.5px] font-medium text-ink">You're driving.</span>
+                  <ReplayButton onClick={replay} />
+                </div>
+              ) : (
+                <p className="border-t border-black/5 px-3 pb-1.5 pt-2.5 text-[11.5px] leading-snug text-ink-muted pointer-coarse:hidden">
+                  Drag the windows around, or click into zWork and try it.
+                </p>
+              )}
             </div>
 
             {/* Smaller screens: one line under the window instead. */}
             <div className="absolute inset-x-0 bottom-[5%] flex justify-center px-4 xl:hidden">
-              <p
-                key={current.id}
-                className="desk-glass animate-[fade-in_400ms_ease] rounded-full px-4 py-2 text-center text-[12.5px] text-ink ring-[0.5px] ring-black/10"
-              >
-                <span className="font-semibold">{current.title}.</span>{" "}
-                <span className="text-ink-muted">{current.body}</span>
-              </p>
+              {replay ? (
+                <p className="desk-glass flex animate-[fade-in_400ms_ease] items-center gap-2 rounded-full py-1 pl-4 pr-1 text-[12.5px] text-ink ring-[0.5px] ring-black/10">
+                  <span className="font-semibold">You're driving.</span>
+                  <ReplayButton onClick={replay} />
+                </p>
+              ) : (
+                <p
+                  key={current.id}
+                  className="desk-glass animate-[fade-in_400ms_ease] rounded-full px-4 py-2 text-center text-[12.5px] text-ink ring-[0.5px] ring-black/10"
+                >
+                  <span className="font-semibold">{current.title}.</span>{" "}
+                  <span className="text-ink-muted">{current.body}</span>
+                </p>
+              )}
             </div>
           </div>
 
@@ -224,11 +296,24 @@ export function Desktop({ children }: { children?: ReactNode }) {
   );
 }
 
+function ReplayButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="press inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-paper/70 px-2.5 py-1 text-[12px] font-medium text-ink ring-[0.5px] ring-black/10 hover:bg-paper"
+    >
+      <RotateCcw className="h-3 w-3" />
+      Replay the demo
+    </button>
+  );
+}
+
 /** A generic chat app, giving the usual answer: instructions. */
 function ChatWindow() {
   return (
     <div className="desk-window-shadow flex h-full flex-col overflow-hidden rounded-[16px] bg-paper-sunken text-[12.5px] text-ink">
-      <div className="flex h-10 shrink-0 items-center gap-3 border-b border-line-soft px-3.5">
+      <div className="desk-titlebar flex h-10 shrink-0 items-center gap-3 border-b border-line-soft px-3.5">
         <TrafficLights dim />
         <span className="flex-1 text-center text-[12px] font-medium text-ink-muted">ChatGPT</span>
         <span className="w-[52px]" />

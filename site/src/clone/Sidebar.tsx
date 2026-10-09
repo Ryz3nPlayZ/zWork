@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { ChevronDown, Clock, FolderOpen, Inbox, MoreHorizontal, PanelLeft, Plug, Search, Settings, SquarePen } from "lucide-react";
 import { cn } from "../lib/cn";
+import { useHit, type LiveApi } from "./live";
 import { Logo } from "./Logo";
 import type { CloneState } from "./types";
 
@@ -12,6 +13,7 @@ function SidebarButton({
   badge,
   target,
   pressed,
+  onHit,
 }: {
   icon: ReactNode;
   label: string;
@@ -20,11 +22,14 @@ function SidebarButton({
   badge?: number;
   target?: string;
   pressed?: boolean;
+  onHit?: (api: LiveApi) => void;
 }) {
+  const hit = useHit();
   return (
     <div
       data-target={target}
       data-pressed={pressed}
+      {...(onHit && hit(onHit))}
       className={cn(
         "press group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] text-ink-muted",
         active && "bg-line font-semibold text-ink",
@@ -49,6 +54,7 @@ function SectionLabel({ children }: { children: ReactNode }) {
 }
 
 export function Sidebar({ s }: { s: CloneState }) {
+  const hit = useHit();
   const unread = s.inbox.filter((i) => !i.read).length;
   const buckets = (["Today", "This week", "Earlier"] as const)
     .map((b) => [b, s.history.filter((h) => h.bucket === b)] as const)
@@ -86,6 +92,7 @@ export function Sidebar({ s }: { s: CloneState }) {
           active={s.view === "welcome"}
           target="nav-new"
           pressed={s.pressed === "nav-new"}
+          onHit={(api) => api.nav("welcome")}
         />
         <SidebarButton
           icon={<Clock />}
@@ -93,6 +100,7 @@ export function Sidebar({ s }: { s: CloneState }) {
           active={s.view === "scheduled"}
           target="nav-scheduled"
           pressed={s.pressed === "nav-scheduled"}
+          onHit={(api) => api.nav("scheduled")}
         />
         <SidebarButton
           icon={<Inbox />}
@@ -101,6 +109,7 @@ export function Sidebar({ s }: { s: CloneState }) {
           active={s.view === "inbox"}
           target="nav-inbox"
           pressed={s.pressed === "nav-inbox"}
+          onHit={(api) => api.nav("inbox")}
         />
         <SidebarButton icon={<FolderOpen />} label="Projects" />
         <SidebarButton icon={<Plug />} label="Connectors" />
@@ -114,6 +123,7 @@ export function Sidebar({ s }: { s: CloneState }) {
               {items.map((h) => (
                 <div
                   key={h.id}
+                  {...hit((api) => api.openChat(h.id))}
                   className={cn(
                     "press flex w-full items-center rounded-md px-2 py-1.5 text-left text-[12.5px] text-ink-muted",
                     s.view === "chat" && s.activeChat === h.id && "bg-line font-semibold text-ink",

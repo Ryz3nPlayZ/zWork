@@ -1,4 +1,5 @@
 import { baseState, type Scenario } from "./engine";
+import type { CannedChat } from "./live";
 import type { HistoryItem, InboxItem, Task } from "./types";
 
 const HISTORY: HistoryItem[] = [
@@ -60,8 +61,67 @@ const EXPENSE_REPLY = `Done. Cleaned 87 raw rows down to 86 (one duplicate remov
 
 **Headline numbers:** $43,687.78 total. Advertising (35%) and contractors (29%) are 64% of spend. July $18.4k → Aug $12.9k → Sep $12.4k.`;
 
+// What's behind the sidebar's past chats once the visitor takes the window over.
+const HISTORY_CHATS: Record<string, CannedChat> = {
+  h1: {
+    prompt: "Draft the launch email to the beta list. Use the notes in launch.md and keep it short.",
+    time: "Tue 10:12 AM",
+    steps: [["Read launch.md", "file"], ["Read the Beta sheet", "table"], ["Wrote a draft in Gmail", "mail"]],
+    reply: `Drafted and left in Gmail for you to review: **"zWork 1.0 is here"**, 212 recipients from the Beta sheet, each with their first name.
+
+It's four short paragraphs: what's new, the two things beta users asked for most, the pricing, and a thank-you. Nothing has been sent.`,
+    footer: "10:14 AM · $0.0091",
+  },
+  h2: {
+    prompt: "Compare the laptop quotes in the Quotes folder and tell me which one to go with.",
+    time: "Mon 3:40 PM",
+    steps: [["Read 4 PDFs in Quotes/", "file"], ["Ran a Python snippet", "wrench"], ["Wrote laptop_quotes.xlsx", "table"]],
+    reply: `Compared all four. **Dell** is cheapest at $1,284 a seat; **Apple** is $1,499 but includes three years of AppleCare, which makes it $46 cheaper per seat over three years.
+
+I'd go with Apple. The side-by-side is in \`laptop_quotes.xlsx\`.`,
+    footer: "3:43 PM · $0.0154",
+  },
+  h3: {
+    prompt: "Turn the interview notes in Research/ into a short deck for Thursday.",
+    time: "Mon 11:05 AM",
+    steps: [["Read 9 files in Research/", "file"], ["Wrote synthesis.md", "file"], ["Wrote interviews_synthesis.pptx", "code"]],
+    reply: `Built a 12-slide deck from the 9 interviews: the four themes that came up most, a quote for each, and a recommendations slide at the end.
+
+Saved as \`interviews_synthesis.pptx\`, next to the notes.`,
+    footer: "11:11 AM · $0.0302",
+  },
+  h4: {
+    prompt: "The shared Drive folder is a mess. Sort it out without deleting anything.",
+    time: "Sep 28",
+    steps: [["Listed 340 files in Shared/", "search"], ["Moved files into 6 folders", "file"], ["Renamed 58 files", "file"]],
+    reply: `Sorted 340 files into six folders (Contracts, Invoices, Decks, Design, Photos, Archive) and renamed 58 of them to \`YYYY-MM-DD name\`.
+
+Twelve look like duplicates. I've listed them in \`duplicates.txt\` rather than deleting them.`,
+    footer: "Sep 28 · $0.0127",
+  },
+  h5: {
+    prompt: "Find 30 design agencies in Austin and add them to the Leads sheet.",
+    time: "Sep 24",
+    steps: [["Searched the web", "globe"], ["Visited 41 agency sites", "globe"], ["Added 30 rows to Leads", "table"]],
+    reply: `Added 30 agencies to the **Leads** sheet with their site, team size and a contact. Eleven list a named head of design; those are at the top.
+
+I skipped six that only do print work.`,
+    footer: "Sep 24 · $0.0418",
+  },
+  h6: {
+    prompt: "Reconcile the Stripe payouts for August against the bank statement.",
+    time: "Sep 3",
+    steps: [["Read stripe_payouts_aug.csv", "file"], ["Read bank_aug.csv", "file"], ["Wrote stripe_aug_reconciliation.xlsx", "table"]],
+    reply: `Matched 41 of 42 August payouts to deposits. The one that's missing is **$312.40 from Aug 19**: Stripe shows it paid, the bank doesn't have it yet.
+
+It's highlighted in \`stripe_aug_reconciliation.xlsx\`.`,
+    footer: "Sep 3 · $0.0089",
+  },
+};
+
 export const heroScenario: Scenario = {
   initial: baseState({ history: HISTORY, tasks: TASKS, inbox: INBOX, model: "Claude Opus 5.5" }),
+  chats: HISTORY_CHATS,
   // Paced for a page, not real time: quick typing, short tool steps, a fast
   // stream, and the report opens the moment the reply finishes.
   build: (s) => {

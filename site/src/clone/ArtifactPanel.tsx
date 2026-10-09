@@ -1,6 +1,7 @@
 import { CircleHelp, Copy, Download, Eye, Globe, Pencil, Send, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "../lib/cn";
+import { useHit } from "./live";
 import type { Panel } from "./types";
 
 export const Q3_ROWS: [string, string, string, number][] = [
@@ -102,12 +103,15 @@ function Email({ progress }: { progress: number }) {
 }
 
 export function ArtifactPanel({ panel, width }: { panel: Panel; width: number }) {
+  const hit = useHit();
   const email = panel.kind === "email";
   return (
     <aside style={{ width }} className="flex h-full shrink-0 flex-col border-l border-edge bg-paper">
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-edge px-4">
         <span className="truncate text-[13px] font-medium text-ink">{panel.title}</span>
-        <X className="h-4 w-4 text-ink-muted" />
+        <span {...hit((api) => api.closePanel())} className="-m-1 rounded-md p-1 [&[data-live]:hover]:bg-line/60">
+          <X className="h-4 w-4 text-ink-muted" />
+        </span>
       </div>
       <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2.5">
         <div className="inline-flex rounded-lg border border-line bg-paper-raised p-0.5 text-[12px] font-medium">

@@ -1,4 +1,5 @@
 import gsap from "gsap";
+import type { CannedChat } from "./live";
 import type { AssistantMsg, CloneState, Msg, Step, ToolIcon } from "./types";
 
 export const THINKING_WORDS = [
@@ -35,6 +36,11 @@ export class Script {
   }
 
   private initialCursor = { x: -60, y: -60 };
+
+  /** Where the run has got to. */
+  get state() {
+    return this.cur;
+  }
 
   private apply(p: Patch) {
     const next = typeof p === "function" ? p(this.cur) : p;
@@ -265,6 +271,8 @@ export class Script {
 export type Scenario = {
   initial: CloneState;
   build: (s: Script) => void;
+  /** What's behind the sidebar's past chats, for the hands-on demo. */
+  chats?: Record<string, CannedChat>;
 };
 
 export function baseState(over: Partial<CloneState> = {}): CloneState {
