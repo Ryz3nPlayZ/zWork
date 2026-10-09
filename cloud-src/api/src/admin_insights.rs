@@ -11,6 +11,8 @@
 //!   server, the database, and which integrations are configured.
 //! - `GET /api/admin/metrics/jobs?days=N`: runs by trigger (schedule, chat,
 //!   background), who runs scheduled work, and how much traffic is untagged.
+//! - `GET /api/admin/users/:user_id/activity?days=N`: one user's runs, models,
+//!   builds and spend.
 //!
 //! Costs are `gateway_requests.estimated_cost_usd`, filled by `estimate_cost`
 //! at request time. A model missing from that price table stores NULL, so the
@@ -18,7 +20,7 @@
 
 use super::{compute_current_mrr, ensure_owner_or_service, tier_monthly_price, AdminDaysQuery, AppState};
 use axum::{
-    extract::{Json, Query, State},
+    extract::{Json, Path, Query, State},
     http::{HeaderMap, StatusCode},
 };
 use chrono::{DateTime, Datelike, NaiveDate, Utc};
@@ -1364,6 +1366,233 @@ pub async fn admin_metrics_jobs(
         weekly_schedulers,
         top_schedulers,
         quality,
+    }))
+}
+
+// ── One user's activity ───────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct UserDay {
+    date: String,
+    requests: i64,
+    runs: i64,
+    cost_usd: f64,
+}
+
+#[derive(Serialize)]
+pub struct UserModelRow {
+    model: String,
+    requests: i64,
+    tokens: i64,
+    cost_usd: f64,
+}
+
+#[derive(Serialize)]
+pub struct UserTriggerRow {
+    trigger: String,
+    runs: i64,
+    requests: i64,
+}
+
+#[derive(Serialize)]
+pub struct UserClientRow {
+    app_version: String,
+    os: String,
+    requests: i64,
+    last_seen: String,
+}
+
+#[derive(Serialize)]
+pub struct UserRun {
+    run_id: String,
+    trigger: String,
+    started_at: String,
+    requests: i64,
+    tokens: i64,
+    cost_usd: f64,
+    failed: i64,
+    model: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct UserActivity {
+    window_days: i64,
+    requests: i64,
+    runs: i64,
+    cost_usd: f64,
+    failed: i64,
+    daily: Vec<UserDay>,
+    models: Vec<UserModelRow>,
+    triggers: Vec<UserTriggerRow>,
+    clients: Vec<UserClientRow>,
+    recent_runs: Vec<UserRun>,
+}
+
+/// `GET /api/admin/users/:user_id/activity?days=N`: what one user ran, on
+/// which models and builds, and what it cost. Opened from the Users tab.
+pub async fn admin_user_activity(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(user_id): Path<String>,
+    Query(q): Query<AdminDaysQuery>,
+) -> Result<Json<UserActivity>, StatusCode> {
+    let _owner = ensure_owner_or_service(&state, &headers).await?;
+    let days = q.days.clamp(1, 365);
+    let db_err = |e: sqlx::Error| {
+        tracing::warn!("user activity query failed: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    };
+    const FAILED: &str = "(upstream_status IS NULL OR upstream_status >= 400)";
+
+    let totals = sqlx::query(&format!(
+        r#"
+        SELECT COUNT(*)::bigint AS requests,
+               COUNT(DISTINCT run_id)::bigint AS runs,
+               COALESCE(SUM(estimated_cost_usd), 0)::float8 AS cost,
+               COUNT(*) FILTER (WHERE {FAILED})::bigint AS failed
+        FROM gateway_requests
+        WHERE user_id = $1 AND created_at > NOW() - ($2 || ' days')::INTERVAL
+        "#
+    ))
+    .bind(&user_id)
+    .bind(days)
+    .fetch_one(&state.db)
+    .await
+    .map_err(db_err)?;
+
+    let mut daily_map: BTreeMap<NaiveDate, UserDay> = BTreeMap::new();
+    let start = Utc::now().date_naive() - chrono::Duration::days(days - 1);
+    for i in 0..days {
+        let d = start + chrono::Duration::days(i);
+        daily_map.insert(d, UserDay { date: d.to_string(), requests: 0, runs: 0, cost_usd: 0.0 });
+    }
+    for r in sqlx::query(
+        r#"
+        SELECT DATE(created_at) AS day, COUNT(*)::bigint AS requests,
+               COUNT(DISTINCT run_id)::bigint AS runs,
+               COALESCE(SUM(estimated_cost_usd), 0)::float8 AS cost
+        FROM gateway_requests
+        WHERE user_id = $1 AND created_at > NOW() - ($2 || ' days')::INTERVAL
+        GROUP BY 1
+        "#,
+    )
+    .bind(&user_id)
+    .bind(days)
+    .fetch_all(&state.db)
+    .await
+    .map_err(db_err)?
+    {
+        if let Some(d) = daily_map.get_mut(&r.get::<NaiveDate, _>("day")) {
+            d.requests = r.get("requests");
+            d.runs = r.get("runs");
+            d.cost_usd = round4(r.get("cost"));
+        }
+    }
+
+    let models = sqlx::query(
+        r#"
+        SELECT COALESCE(model_id, 'unknown') AS model, COUNT(*)::bigint AS requests,
+               COALESCE(SUM(total_tokens), 0)::bigint AS tokens,
+               COALESCE(SUM(estimated_cost_usd), 0)::float8 AS cost
+        FROM gateway_requests
+        WHERE user_id = $1 AND created_at > NOW() - ($2 || ' days')::INTERVAL
+        GROUP BY 1 ORDER BY requests DESC LIMIT 10
+        "#,
+    )
+    .bind(&user_id)
+    .bind(days)
+    .fetch_all(&state.db)
+    .await
+    .map_err(db_err)?
+    .into_iter()
+    .map(|r| UserModelRow { model: r.get("model"), requests: r.get("requests"), tokens: r.get("tokens"), cost_usd: round4(r.get("cost")) })
+    .collect();
+
+    let triggers = sqlx::query(&format!(
+        r#"
+        SELECT {TRIGGER_SQL} AS trigger, COUNT(DISTINCT run_id)::bigint AS runs, COUNT(*)::bigint AS requests
+        FROM gateway_requests
+        WHERE user_id = $1 AND created_at > NOW() - ($2 || ' days')::INTERVAL
+        GROUP BY 1 ORDER BY runs DESC
+        "#
+    ))
+    .bind(&user_id)
+    .bind(days)
+    .fetch_all(&state.db)
+    .await
+    .map_err(db_err)?
+    .into_iter()
+    .map(|r| UserTriggerRow { trigger: r.get("trigger"), runs: r.get("runs"), requests: r.get("requests") })
+    .collect();
+
+    let clients = sqlx::query(
+        r#"
+        SELECT COALESCE(NULLIF(app_version, ''), 'unknown') AS app_version,
+               COALESCE(NULLIF(os, ''), 'unknown') AS os,
+               COUNT(*)::bigint AS requests, MAX(created_at) AS last_seen
+        FROM gateway_requests
+        WHERE user_id = $1 AND created_at > NOW() - ($2 || ' days')::INTERVAL
+        GROUP BY 1, 2 ORDER BY last_seen DESC LIMIT 8
+        "#,
+    )
+    .bind(&user_id)
+    .bind(days)
+    .fetch_all(&state.db)
+    .await
+    .map_err(db_err)?
+    .into_iter()
+    .map(|r| UserClientRow {
+        app_version: r.get("app_version"),
+        os: r.get("os"),
+        requests: r.get("requests"),
+        last_seen: r.get::<DateTime<Utc>, _>("last_seen").to_rfc3339(),
+    })
+    .collect();
+
+    let recent_runs = sqlx::query(&format!(
+        r#"
+        SELECT run_id, MIN({TRIGGER_SQL}) AS trigger, MIN(created_at) AS started_at,
+               COUNT(*)::bigint AS requests,
+               COALESCE(SUM(total_tokens), 0)::bigint AS tokens,
+               COALESCE(SUM(estimated_cost_usd), 0)::float8 AS cost,
+               COUNT(*) FILTER (WHERE {FAILED})::bigint AS failed,
+               (ARRAY_AGG(model_id ORDER BY created_at DESC))[1] AS model
+        FROM gateway_requests
+        WHERE user_id = $1 AND created_at > NOW() - ($2 || ' days')::INTERVAL
+        GROUP BY run_id
+        ORDER BY started_at DESC
+        LIMIT 15
+        "#
+    ))
+    .bind(&user_id)
+    .bind(days)
+    .fetch_all(&state.db)
+    .await
+    .map_err(db_err)?
+    .into_iter()
+    .map(|r| UserRun {
+        run_id: r.get("run_id"),
+        trigger: r.get("trigger"),
+        started_at: r.get::<DateTime<Utc>, _>("started_at").to_rfc3339(),
+        requests: r.get("requests"),
+        tokens: r.get("tokens"),
+        cost_usd: round4(r.get("cost")),
+        failed: r.get("failed"),
+        model: r.get("model"),
+    })
+    .collect();
+
+    Ok(Json(UserActivity {
+        window_days: days,
+        requests: totals.get("requests"),
+        runs: totals.get("runs"),
+        cost_usd: round4(totals.get("cost")),
+        failed: totals.get("failed"),
+        daily: daily_map.into_values().collect(),
+        models,
+        triggers,
+        clients,
+        recent_runs,
     }))
 }
 

@@ -741,6 +741,10 @@ struct AdminUserRow {
     estimated_cost_usd: f64,
     stripe_customer_id: Option<String>,
     subscription_status: Option<String>,
+    runs_30d: i64,
+    scheduled_runs_30d: i64,
+    /// App version of the user's latest tagged request.
+    app_version: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -4274,9 +4278,11 @@ async fn admin_list_users(
 ) -> Result<Json<Vec<AdminUserRow>>, StatusCode> {
     let _owner = ensure_owner_or_service(&state, &headers).await?;
 
+    // Cost is the stored per-request estimate (tokens × that model's list
+    // price), the same number the Finance tab sums.
     let users: Vec<AdminUserRow> = sqlx::query(
         r#"
-        SELECT 
+        SELECT
             u.user_id,
             u.email,
             u.name,
@@ -4286,6 +4292,10 @@ async fn admin_list_users(
             COUNT(g.id) as total_requests,
             COALESCE(SUM(g.prompt_tokens), 0)::bigint as total_prompt_tokens,
             COALESCE(SUM(g.completion_tokens), 0)::bigint as total_completion_tokens,
+            COALESCE(SUM(g.estimated_cost_usd), 0)::float8 as cost,
+            COUNT(DISTINCT g.run_id) FILTER (WHERE g.created_at > NOW() - INTERVAL '30 days')::bigint as runs_30d,
+            COUNT(DISTINCT g.run_id) FILTER (WHERE g.created_at > NOW() - INTERVAL '30 days' AND g.run_trigger = 'schedule')::bigint as scheduled_runs_30d,
+            (ARRAY_AGG(g.app_version ORDER BY g.created_at DESC) FILTER (WHERE COALESCE(g.app_version, '') <> ''))[1] as app_version,
             u.stripe_customer_id,
             u.subscription_status
         FROM app_users u
@@ -4299,18 +4309,7 @@ async fn admin_list_users(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     .into_iter()
     .map(|row| {
-        let prompt: i64 = row.get("total_prompt_tokens");
-        let completion: i64 = row.get("total_completion_tokens");
-        let model: String = row.get("tier");
-        // DeepSeek pricing per 1M tokens (cache miss, conservative)
-        let (input_rate, output_rate) = if model == "max" {
-            (0.435, 0.87) // pro model rates for max users
-        } else if model == "pro" {
-            (0.435, 0.87) // pro-tier model rates (conservative; pre-v4.1 pricing)
-        } else {
-            (0.14, 0.28) // deepseek-flash rates
-        };
-        let cost = (prompt as f64 / 1_000_000.0) * input_rate + (completion as f64 / 1_000_000.0) * output_rate;
+        let cost: f64 = row.get("cost");
         AdminUserRow {
             user_id: row.get("user_id"),
             email: row.get("email"),
@@ -4319,11 +4318,14 @@ async fn admin_list_users(
             created_at: row.get("created_at"),
             last_activity: row.get("last_activity"),
             total_requests: row.get("total_requests"),
-            total_prompt_tokens: prompt,
-            total_completion_tokens: completion,
-            estimated_cost_usd: (cost * 100.0).round() / 100.0,
+            total_prompt_tokens: row.get("total_prompt_tokens"),
+            total_completion_tokens: row.get("total_completion_tokens"),
+            estimated_cost_usd: (cost * 10_000.0).round() / 10_000.0,
             stripe_customer_id: row.get("stripe_customer_id"),
             subscription_status: row.get("subscription_status"),
+            runs_30d: row.get("runs_30d"),
+            scheduled_runs_30d: row.get("scheduled_runs_30d"),
+            app_version: row.get("app_version"),
         }
     })
     .collect();
@@ -5356,6 +5358,10 @@ async fn admin_metrics_engagement(
             COUNT(g.id)::bigint AS total_requests,
             COALESCE(SUM(g.prompt_tokens), 0)::bigint AS total_prompt_tokens,
             COALESCE(SUM(g.completion_tokens), 0)::bigint AS total_completion_tokens,
+            COALESCE(SUM(g.estimated_cost_usd), 0)::float8 AS cost,
+            COUNT(DISTINCT g.run_id)::bigint AS runs,
+            COUNT(DISTINCT g.run_id) FILTER (WHERE g.run_trigger = 'schedule')::bigint AS scheduled_runs,
+            (ARRAY_AGG(g.app_version ORDER BY g.created_at DESC) FILTER (WHERE COALESCE(g.app_version, '') <> ''))[1] AS app_version,
             u.stripe_customer_id, u.subscription_status
         FROM app_users u
         JOIN gateway_requests g ON u.user_id = g.user_id
@@ -5369,32 +5375,27 @@ async fn admin_metrics_engagement(
     .fetch_all(&state.db)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // Counts here are for the window, not lifetime.
     let top_active_users: Vec<AdminUserRow> = top_rows
         .into_iter()
         .map(|row| {
-            let prompt: i64 = row.get("total_prompt_tokens");
-            let completion: i64 = row.get("total_completion_tokens");
-            let tier: String = row.get("tier");
-            let (input_rate, output_rate) = if tier == "max" || tier == "pro" {
-                (0.435, 0.87)
-            } else {
-                (0.14, 0.28)
-            };
-            let cost = (prompt as f64 / 1_000_000.0) * input_rate
-                + (completion as f64 / 1_000_000.0) * output_rate;
+            let cost: f64 = row.get("cost");
             AdminUserRow {
                 user_id: row.get("user_id"),
                 email: row.get("email"),
                 name: row.get("name"),
-                tier,
+                tier: row.get("tier"),
                 created_at: row.get("created_at"),
                 last_activity: row.get("last_activity"),
                 total_requests: row.get("total_requests"),
-                total_prompt_tokens: prompt,
-                total_completion_tokens: completion,
-                estimated_cost_usd: (cost * 100.0).round() / 100.0,
+                total_prompt_tokens: row.get("total_prompt_tokens"),
+                total_completion_tokens: row.get("total_completion_tokens"),
+                estimated_cost_usd: (cost * 10_000.0).round() / 10_000.0,
                 stripe_customer_id: row.get("stripe_customer_id"),
                 subscription_status: row.get("subscription_status"),
+                runs_30d: row.get("runs"),
+                scheduled_runs_30d: row.get("scheduled_runs"),
+                app_version: row.get("app_version"),
             }
         })
         .collect();
@@ -7647,6 +7648,7 @@ async fn main() {
         .route("/api/admin/metrics/funnel", get(admin_insights::admin_metrics_funnel))
         .route("/api/admin/metrics/status", get(admin_insights::admin_metrics_status))
         .route("/api/admin/metrics/jobs", get(admin_insights::admin_metrics_jobs))
+        .route("/api/admin/users/:user_id/activity", get(admin_insights::admin_user_activity))
         .route("/api/admin/users", get(admin_list_users))
         .route("/api/admin/usage/by-time", get(admin_usage_by_time))
         .route("/api/admin/usage/by-model", get(admin_usage_by_model))
