@@ -1,7 +1,9 @@
 import { useMemo, useRef, useState } from "react";
 import gsap from "gsap";
+import { ScrollSmoother } from "gsap/ScrollSmoother";
+import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useGSAP } from "@gsap/react";
-import { ArrowRight, Check, Download, Plus } from "lucide-react";
+import { ArrowRight, ArrowUp, Check, Download, Plus } from "lucide-react";
 import { Logo } from "../clone/Logo";
 import { cn } from "../lib/cn";
 import { Link } from "../lib/router";
@@ -26,7 +28,7 @@ import {
 import { useReveal } from "./Demos";
 import { CopyCommand, GithubIcon, H2, Section } from "./ui";
 
-gsap.registerPlugin(useGSAP);
+gsap.registerPlugin(ScrollTrigger, ScrollSmoother, useGSAP);
 
 export function OpenSource() {
   const { stars } = useRepoStats();
@@ -457,7 +459,13 @@ export function FinalCta({ heading }: { heading?: "h1" } = {}) {
   );
 }
 
+/**
+ * The page's last word: the link columns over a full-bleed "zWork" that the
+ * footer's bottom edge crops. The letters rise into place as the page runs
+ * out and, with a mouse, lift a little under the pointer.
+ */
 export function Footer() {
+  const root = useRef<HTMLElement>(null);
   const cols: [string, [string, string][]][] = [
     [
       "Product",
@@ -488,30 +496,76 @@ export function Footer() {
       ],
     ],
   ];
+
+  useGSAP(
+    () => {
+      const el = root.current!;
+      const word = el.querySelector<HTMLElement>(".fw-word")!;
+      const letters = gsap.utils.toArray<HTMLElement>(".fw-letter", el);
+      const mm = gsap.matchMedia();
+      mm.add("(prefers-reduced-motion: no-preference)", () => {
+        gsap.fromTo(
+          letters,
+          { yPercent: 75 },
+          {
+            yPercent: 0,
+            ease: "none",
+            stagger: 0.08,
+            scrollTrigger: { trigger: word, start: "top bottom", end: "bottom bottom", scrub: 0.6 },
+          },
+        );
+      });
+      mm.add("(prefers-reduced-motion: no-preference) and (pointer: fine)", () => {
+        const inner = letters.map((l) => l.firstElementChild as HTMLElement);
+        const lift = inner.map((l) => gsap.quickTo(l, "y", { duration: 0.7, ease: "power3.out" }));
+        const move = (e: PointerEvent) =>
+          letters.forEach((l, i) => {
+            const r = l.getBoundingClientRect();
+            const d = Math.abs(e.clientX - (r.left + r.width / 2)) / r.width;
+            lift[i](-Math.max(0, 1 - d * 0.7) * r.height * 0.1);
+          });
+        const leave = () => lift.forEach((f) => f(0));
+        word.addEventListener("pointermove", move);
+        word.addEventListener("pointerleave", leave);
+        return () => {
+          word.removeEventListener("pointermove", move);
+          word.removeEventListener("pointerleave", leave);
+        };
+      });
+      return () => mm.revert();
+    },
+    { scope: root },
+  );
+
+  const toTop = () => {
+    const smoother = ScrollSmoother.get();
+    if (smoother) smoother.scrollTo(0, true);
+    else window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   return (
-    <footer className="border-t border-line">
-      <Section className="py-14">
-        <div className="grid gap-10 md:grid-cols-[1.4fr_repeat(3,1fr)]">
-          <div>
-            <div className="flex items-center gap-2.5">
-              <Logo size={24} className="text-ink" />
-              <span className="text-[15px] font-semibold text-ink">zWork</span>
-            </div>
-            <p className="mt-4 max-w-[30ch] text-[13.5px] leading-relaxed text-ink-muted">
-              The open-source AI agent that does the work on your computer.
+    <footer ref={root} className="relative overflow-hidden border-t border-line">
+      <Section className="pt-16 sm:pt-20">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 md:grid-cols-[1.6fr_repeat(3,1fr)] md:gap-12">
+          <div className="col-span-full md:col-span-1">
+            <p className="display max-w-[14ch] text-[34px] text-ink sm:text-[44px]">
+              Your weekly paperwork, <em className="text-ink-muted">done.</em>
             </p>
-            <a href={REPO_URL} className="mt-5 inline-flex items-center gap-2 text-[13px] text-ink-muted hover:text-ink">
-              <GithubIcon className="h-4 w-4" />
-              Ryz3nPlayZ/zWork
-            </a>
+            <Link
+              href="/download"
+              className="press mt-7 inline-flex h-10 items-center gap-2 rounded-full bg-ink px-5 text-[13.5px] font-medium text-paper hover:bg-ink/90"
+            >
+              <Download className="h-4 w-4" />
+              Download free
+            </Link>
           </div>
           {cols.map(([title, links]) => (
             <div key={title}>
-              <h3 className="text-[12.5px] font-semibold text-ink">{title}</h3>
+              <h3 className="eyebrow">{title}</h3>
               <ul className="mt-4 flex flex-col gap-2.5">
                 {links.map(([label, href]) => (
                   <li key={label}>
-                    <Link href={href} className="text-[13.5px] text-ink-muted transition-colors hover:text-ink">
+                    <Link href={href} className="text-[14px] text-ink-muted transition-colors hover:text-ink">
                       {label}
                     </Link>
                   </li>
@@ -520,8 +574,31 @@ export function Footer() {
             </div>
           ))}
         </div>
-        <p className="mt-14 text-[12.5px] text-ink-faint">© {new Date().getFullYear()} zWork. MIT licensed.</p>
+        <div className="mt-16 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-line pt-5 text-[12.5px] text-ink-faint">
+          <span>© {new Date().getFullYear()} zWork. MIT licensed.</span>
+          <a href={REPO_URL} className="inline-flex items-center gap-1.5 transition-colors hover:text-ink">
+            <GithubIcon className="h-3.5 w-3.5" />
+            Ryz3nPlayZ/zWork
+          </a>
+          <button
+            type="button"
+            onClick={toTop}
+            className="press ml-auto inline-flex items-center gap-1.5 transition-colors hover:text-ink"
+          >
+            Back to top
+            <ArrowUp className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </Section>
+
+      {/* Sized to the viewport so it runs edge to edge; the footer's own edge crops the bottom. */}
+      <div aria-hidden="true" className="fw-word mt-10 flex h-[32vw] select-none justify-center px-[2vw]">
+        {[..."zWork"].map((c, i) => (
+          <span key={i} className="fw-letter block">
+            <span className="block font-serif text-[48.5vw] leading-[0.82] tracking-[-0.045em] text-ink">{c}</span>
+          </span>
+        ))}
+      </div>
     </footer>
   );
 }
