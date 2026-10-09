@@ -851,6 +851,7 @@ async fn run_durable_once(
         let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
         let writes = [
             ("turn.chat_id", json!(shared.chat_id)),
+            ("turn.run_id", json!(shared.run_id)),
             ("turn.model_id", json!(model_product_id)),
             ("turn.system_prompt", json!(system_prompt)),
             ("turn.cwd", json!(cwd)),
@@ -1290,7 +1291,39 @@ fn resolve_model(model_id: &str, s: &settings::Settings) -> Resolved {
     }
 }
 
-fn build_model(r: &Resolved, model_id: &str) -> Model {
+/// What a hosted-router call belongs to. The router groups calls by run id:
+/// the first call of a run counts against the user's message quota and the
+/// rest are continuations. Version, OS and trigger feed the admin dashboard
+/// (versions in use, platforms, scheduled vs interactive use).
+struct RouterTag<'a> {
+    run_id: &'a str,
+    chat_id: &'a str,
+    project_id: &'a str,
+    /// `schedule`, `chat` or `background` (titles and other side calls).
+    trigger: &'a str,
+}
+
+/// Scheduled runs are the ones the scheduler starts (`sched_…` run ids).
+fn trigger_for(run_id: &str) -> &'static str {
+    if run_id.starts_with("sched_") { "schedule" } else { "chat" }
+}
+
+fn router_headers(tag: &RouterTag) -> BTreeMap<String, String> {
+    let mut h = BTreeMap::from([
+        ("x-zwork-run-id".to_string(), tag.run_id.to_string()),
+        ("x-zwork-trigger".to_string(), tag.trigger.to_string()),
+        ("x-zwork-app-version".to_string(), env!("CARGO_PKG_VERSION").to_string()),
+        ("x-zwork-os".to_string(), std::env::consts::OS.to_string()),
+    ]);
+    for (k, v) in [("x-zwork-chat-id", tag.chat_id), ("x-zwork-project-id", tag.project_id)] {
+        if !v.is_empty() {
+            h.insert(k.to_string(), v.to_string());
+        }
+    }
+    h
+}
+
+fn build_model(r: &Resolved, model_id: &str, tag: Option<&RouterTag>) -> Model {
     let mut model = catalog::build_model(
         &catalog::global(),
         catalog::Target { provider: &r.provider, model_id, base_url: &r.base_url, api: r.api },
@@ -1304,6 +1337,9 @@ fn build_model(r: &Resolved, model_id: &str) -> Model {
     // bearer token in addition to x-api-key (matches the legacy loop).
     if model.api == Api::AnthropicMessages && !r.api_key.is_empty() && !r.api_key.starts_with("sk-ant-") {
         model.headers = Some(BTreeMap::from([("authorization".to_string(), format!("Bearer {}", r.api_key))]));
+    }
+    if let (true, Some(tag)) = (r.provider == "zwork_router", tag) {
+        model.headers.get_or_insert_with(BTreeMap::new).extend(router_headers(tag));
     }
     model
 }
@@ -1366,7 +1402,9 @@ async fn complete_text_on(preferred: Option<&str>, system: &str, prompt: &str, m
         .map(|id| resolve_model(id, &s))
         .find(|r| r.configured)
         .ok_or_else(|| "No model credentials configured. Add an API key in Settings.".to_string())?;
-    let model = build_model(&resolved, &resolved.real_model_id);
+    let run_id = uuid::Uuid::new_v4().to_string();
+    let tag = RouterTag { run_id: &run_id, chat_id: "", project_id: "", trigger: "background" };
+    let model = build_model(&resolved, &resolved.real_model_id, Some(&tag));
     let context = crate::harness::transcript::normalize_context(Some(system), None, vec![Message::user_text(prompt)]);
     let options = crate::harness::types::StreamOptions {
         api_key: Some(resolved.api_key.clone()),
@@ -1504,7 +1542,9 @@ pub fn run_agent_turn(
     let turn_handle = tokio::spawn(async move {
         let _guard = RunGuard(chat_id.clone());
         let s = settings::load();
-        let run_id = if run_id.is_empty() { chat_id.clone() } else { run_id };
+        // A fresh id per turn: the router counts a run's first call against
+        // the quota, so reusing the chat id would make later turns free.
+        let run_id = if run_id.is_empty() { uuid::Uuid::new_v4().to_string() } else { run_id };
         log_agent_event(&chat_id, &run_id, "turn_start", json!({
             "model_id": model_id,
             "project_id": project_id,
@@ -1566,10 +1606,11 @@ pub fn run_agent_turn(
             let _ = tx.send(json!({ "type": "end" })).await;
             return;
         }
-        let model = build_model(&resolved, &resolved.real_model_id);
+        let tag = RouterTag { run_id: &run_id, chat_id: &chat_id, project_id: &project_id, trigger: trigger_for(&run_id) };
+        let model = build_model(&resolved, &resolved.real_model_id, Some(&tag));
         let compaction_model = {
             let id = compaction_model_id(resolved.shape(), &resolved.real_model_id);
-            build_model(&resolved, &id)
+            build_model(&resolved, &id, Some(&tag))
         };
 
         // ── System prompt (unchanged from the legacy loop) ──────────────
@@ -2121,7 +2162,9 @@ pub async fn spawn_subagent_at_depth(
         let _ = tx.send(json!({ "type": "subagent_done", "task_id": task_id, "error": "No credentials configured" })).await;
         return Err("No credentials configured".to_string());
     }
-    let model = build_model(&resolved, &resolved.real_model_id);
+    // Helpers bill to the run that spawned them.
+    let tag = RouterTag { run_id: parent_run_id, chat_id, project_id: "", trigger: trigger_for(parent_run_id) };
+    let model = build_model(&resolved, &resolved.real_model_id, Some(&tag));
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let mut tools: Vec<DynTool> = crate::harness::tools::create_coding_tools(&cwd, None)
@@ -2303,6 +2346,8 @@ async fn resume_one_interrupted(
     if model_product_id.is_empty() || system_prompt.is_empty() {
         return "incomplete-metadata";
     }
+    // Sessions from before run ids were stored resume as a new run.
+    let run_id = read_str("turn.run_id").unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
     let restored = match crate::harness::runtime::restore::restore_session(&session) {
         Ok(restored) => restored,
@@ -2332,7 +2377,8 @@ async fn resume_one_interrupted(
     if !resolved.configured {
         return "no-credentials";
     }
-    let model = build_model(&resolved, &resolved.real_model_id);
+    let tag = RouterTag { run_id: &run_id, chat_id: &chat_id, project_id: "", trigger: trigger_for(&run_id) };
+    let model = build_model(&resolved, &resolved.real_model_id, Some(&tag));
 
     // A dead channel with the receiver DROPPED: every wire send fails
     // immediately (and is ignored), while chatstore persistence still
@@ -2559,6 +2605,29 @@ mod tests {
     }
 
     #[test]
+    fn router_calls_carry_run_tags() {
+        let r = Resolved {
+            api_key: "zw_abc".into(),
+            base_url: "https://api.tryzwork.app/api/".into(),
+            provider: "zwork_router".into(),
+            api: Some(Api::AnthropicMessages),
+            real_model_id: "deepseek-flash".into(),
+            provider_display_name: "zWork Cloud Router".into(),
+            configured: true,
+        };
+        let run_id = "sched_t1_ab12";
+        let tag = RouterTag { run_id, chat_id: "c1", project_id: "", trigger: trigger_for(run_id) };
+        let h = build_model(&r, &r.real_model_id, Some(&tag)).headers.unwrap();
+        assert_eq!(h["authorization"], "Bearer zw_abc");
+        assert_eq!(h["x-zwork-run-id"], run_id);
+        assert_eq!(h["x-zwork-trigger"], "schedule");
+        assert_eq!(h["x-zwork-chat-id"], "c1");
+        assert_eq!(h["x-zwork-os"], std::env::consts::OS);
+        assert!(!h.contains_key("x-zwork-project-id"), "empty ids are left out");
+        assert_eq!(trigger_for("3f2a"), "chat");
+    }
+
+    #[test]
     fn router_keys_get_bearer_header() {
         let r = Resolved {
             api_key: "zw_abc".into(),
@@ -2569,14 +2638,15 @@ mod tests {
             provider_display_name: "zWork Cloud Router".into(),
             configured: true,
         };
-        let m = build_model(&r, &r.real_model_id);
+        let m = build_model(&r, &r.real_model_id, None);
         assert_eq!(m.api, Api::AnthropicMessages);
         assert_eq!(m.base_url, "https://api.tryzwork.app/api");
         assert_eq!(m.headers.unwrap()["authorization"], "Bearer zw_abc");
         assert!(!m.reasoning, "router pins its own thinking policy");
         let anthropic = Resolved { api_key: "sk-ant-x".into(), provider: "anthropic".into(), api: None, ..r };
-        let m = build_model(&anthropic, "claude-sonnet-4-5");
-        assert!(m.headers.is_none());
+        let tag = RouterTag { run_id: "r1", chat_id: "c1", project_id: "", trigger: "chat" };
+        let m = build_model(&anthropic, "claude-sonnet-4-5", Some(&tag));
+        assert!(m.headers.is_none(), "run tags only go to the zWork router");
         assert_eq!(m.api, Api::AnthropicMessages);
         assert!(m.reasoning && m.max_tokens >= 64_000);
         assert!(m.context_window <= 200_000);

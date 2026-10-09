@@ -215,7 +215,9 @@ async fn run_task(task: ScheduledTask) {
     );
 
     // 3. Run the agent turn. Drained below — no HTTP SSE involved.
-    let run_id = format!("sched_{}", chrono::Local::now().format("%Y%m%d%H%M%S"));
+    // Unique per run: the router counts a run's first call against the quota
+    // and treats later calls with the same id as continuations.
+    let run_id = format!("sched_{}_{}", chrono::Local::now().format("%Y%m%d%H%M%S"), &uuid::Uuid::new_v4().simple().to_string()[..8]);
     let stream = crate::agent::run_agent_turn(
         chat.id.clone(),
         run_id,

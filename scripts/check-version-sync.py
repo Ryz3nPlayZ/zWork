@@ -43,6 +43,8 @@ def main() -> int:
         "app/package.json": package_version,
         "app/src-tauri/tauri.conf.json": tauri_version,
         "app/src-tauri/Cargo.toml": cargo_version,
+        # The sidecar reports this to the hosted router as the app version.
+        "sidecar-rust/Cargo.toml": read_cargo_version(ROOT / "sidecar-rust/Cargo.toml"),
     }
     # The Homebrew cask left this repo in v0.5.2; check it only if it returns.
     cask = ROOT / "Casks/zwork.rb"

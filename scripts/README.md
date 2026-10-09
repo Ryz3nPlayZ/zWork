@@ -29,7 +29,7 @@ scripts/release.sh v0.4.2               # needs the artifacts in dist/
 
 | Script | What it does |
 |--------|--------------|
-| `check-version-sync.py` | Fails if `app/package.json`, `app/src-tauri/tauri.conf.json` and `app/src-tauri/Cargo.toml` (and the Homebrew cask, if present) disagree on the version. Run before tagging. |
+| `check-version-sync.py` | Fails if `app/package.json`, `app/src-tauri/tauri.conf.json`, `app/src-tauri/Cargo.toml` and `sidecar-rust/Cargo.toml` (and the Homebrew cask, if present) disagree on the version. Run before tagging. |
 | `generate-updater-manifest.py --tag vX.Y.Z [--dist dist] [--notes …]` | Writes `dist/latest.json` for the Tauri updater from the signed artifacts in `dist/`. Notes default to the matching `CHANGELOG.md` section. |
 | `release.sh [tag]` | Runs the version check, generates the updater manifest, and creates the GitHub release with everything in `dist/`, using the version's `CHANGELOG.md` section as the notes. The tag defaults to `v<app/package.json version>`. `ZWORK_REPO` overrides the repo (default `Ryz3nPlayZ/zWork`). |
 

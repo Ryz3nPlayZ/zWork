@@ -26,8 +26,9 @@ export default defineConfig(({ mode }) => ({
     },
     // Files under ../app/src would otherwise be free to resolve bare imports
     // from ../app/node_modules; a second React there would break hooks.
-    // Always take these from admin-web.
-    dedupe: ["react", "react-dom", "recharts", "lucide-react"],
+    // Always take these from admin-web (which also means the build works
+    // without ../app/node_modules installed).
+    dedupe: ["react", "react-dom", "recharts", "lucide-react", "clsx", "tailwind-merge"],
   },
   server: {
     port: 4311,
