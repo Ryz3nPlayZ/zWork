@@ -112,7 +112,7 @@ export function Capabilities() {
   return (
     <Section className="pb-32 sm:pb-44">
       <div ref={root}>
-        {/* A warm dark horizon: the six capabilities sit on a planet whose rim
+        {/* A dark graphite horizon: the six capabilities sit on a planet whose rim
             lights up as you arrive. Dark in both themes. */}
         <div className="horizon relative overflow-hidden rounded-[28px] border border-cream/[.06] sm:rounded-[36px]">
           <header className="relative z-10 mx-auto max-w-[760px] px-6 pt-20 text-center sm:pt-28">
