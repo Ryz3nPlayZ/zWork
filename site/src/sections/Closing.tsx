@@ -504,16 +504,18 @@ export function Footer() {
       const letters = gsap.utils.toArray<HTMLElement>(".fw-letter", el);
       const mm = gsap.matchMedia();
       mm.add("(prefers-reduced-motion: no-preference)", () => {
-        gsap.fromTo(
-          letters,
-          { yPercent: 75 },
-          {
-            yPercent: 0,
-            ease: "none",
-            stagger: 0.08,
-            scrollTrigger: { trigger: word, start: "top bottom", end: "bottom bottom", scrub: 0.6 },
-          },
-        );
+        // Set up front, not as a fromTo(): the page's trigger refresh can undo
+        // its first render, so the letters would show risen before dropping.
+        // Any transform a previous run left behind is cleared first, or it's
+        // read back as pixels and the letters end up lowered twice.
+        gsap.set(letters, { clearProps: "transform" });
+        gsap.set(letters, { yPercent: 75 });
+        gsap.to(letters, {
+          yPercent: 0,
+          ease: "none",
+          stagger: 0.08,
+          scrollTrigger: { trigger: word, start: "top bottom", end: "bottom bottom", scrub: 0.6 },
+        });
       });
       mm.add("(prefers-reduced-motion: no-preference) and (pointer: fine)", () => {
         const inner = letters.map((l) => l.firstElementChild as HTMLElement);

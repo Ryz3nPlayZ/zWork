@@ -16,16 +16,13 @@ export function Statement() {
       const mm = gsap.matchMedia();
       mm.add("(prefers-reduced-motion: no-preference)", () => {
         const split = SplitText.create(".statement", { type: "words", wordsClass: "statement-word" });
-        gsap.fromTo(
-          split.words,
-          { opacity: 0.14 },
-          {
-            opacity: 1,
-            stagger: 0.1,
-            ease: "none",
-            scrollTrigger: { trigger: ".statement", start: "top 78%", end: "bottom 45%", scrub: true },
-          },
-        );
+        gsap.set(split.words, { opacity: 0.14 });
+        gsap.to(split.words, {
+          opacity: 1,
+          stagger: 0.1,
+          ease: "none",
+          scrollTrigger: { trigger: ".statement", start: "top 78%", end: "bottom 45%", scrub: true },
+        });
         return () => split.revert();
       });
     },
@@ -91,7 +88,10 @@ export function Capabilities() {
         gsap.set(split.words, { autoAlpha: 0, y: 18, filter: "blur(10px)" });
         gsap.set(".horizon-sub", { autoAlpha: 0, y: 12 });
         gsap.set(".horizon", { "--sweep": "30deg" });
-        gsap.set(".horizon-glow", { autoAlpha: 0, xPercent: -35, scaleX: 0.6 });
+        // GSAP takes over the glow's CSS centring (translate: -50%), so the
+        // -50% is part of every value here.
+        gsap.set(".horizon-glow", { clearProps: "transform" });
+        gsap.set(".horizon-glow", { autoAlpha: 0, x: 0, xPercent: -85, scaleX: 0.6 });
         gsap.set(".horizon-cap", { autoAlpha: 0, y: 24 });
 
         // The headline comes in word by word as it scrolls into view.
@@ -105,7 +105,7 @@ export function Capabilities() {
         gsap
           .timeline({ scrollTrigger: { trigger: ".horizon-arc", start: "top 78%", toggleActions: "play none none reverse" } })
           .to(".horizon", { "--sweep": "160deg", duration: 2.4, ease: "power2.inOut" }, 0)
-          .to(".horizon-glow", { autoAlpha: 1, xPercent: 0, scaleX: 1, duration: 2.4, ease: "power2.inOut" }, 0)
+          .to(".horizon-glow", { autoAlpha: 1, xPercent: -50, scaleX: 1, duration: 2.4, ease: "power2.inOut" }, 0)
           .to(".horizon-cap", { autoAlpha: 1, y: 0, duration: 0.8, stagger: 0.07, ease: "power3.out" }, 0.7);
 
         return () => split.revert();

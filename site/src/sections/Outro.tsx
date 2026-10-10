@@ -40,6 +40,9 @@ export function Outro() {
         gsap.set(q(".outro-in"), { autoAlpha: 0, y: 24 });
         // Set up front, not as a from(): the page's trigger refresh can undo
         // a from()'s first render, so the lines would show before rising in.
+        // A transform left by a previous run is cleared first, or it's read
+        // back as pixels and the lines settle too low.
+        gsap.set(q(".outro-line > *"), { clearProps: "transform" });
         gsap.set(q(".outro-line > *"), { yPercent: 40, autoAlpha: 0 });
 
         gsap.to(q(".outro-line > *"), {

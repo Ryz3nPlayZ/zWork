@@ -13,8 +13,9 @@ export function PageHeader({ eyebrow, title, children }: { eyebrow: string; titl
     () => {
       const mm = gsap.matchMedia();
       mm.add("(prefers-reduced-motion: no-preference)", () => {
+        gsap.set("[data-intro]", { autoAlpha: 0, y: 32 });
         const tl = gsap.timeline({ paused: true });
-        tl.from("[data-intro]", { autoAlpha: 0, y: 32, duration: 0.9, stagger: 0.08, ease: "power3.out" });
+        tl.to("[data-intro]", { autoAlpha: 1, y: 0, duration: 0.9, stagger: 0.08, ease: "power3.out" });
         return onReveal(() => tl.play());
       });
       return () => mm.revert();

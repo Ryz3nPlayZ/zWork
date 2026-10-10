@@ -20,10 +20,14 @@ function useReveal() {
     () => {
       const mm = gsap.matchMedia();
       mm.add("(prefers-reduced-motion: no-preference)", () => {
-        ScrollTrigger.batch(root.current!.querySelectorAll("[data-reveal]"), {
+        // Hidden from the start, so they don't show finished and then snap
+        // back when they enter.
+        const els = root.current!.querySelectorAll("[data-reveal]");
+        gsap.set(els, { autoAlpha: 0, y: 36 });
+        ScrollTrigger.batch(els, {
           start: "top 88%",
           once: true,
-          onEnter: (els) => gsap.from(els, { autoAlpha: 0, y: 36, duration: 0.9, stagger: 0.1, ease: "power3.out" }),
+          onEnter: (batch) => gsap.to(batch, { autoAlpha: 1, y: 0, duration: 0.9, stagger: 0.1, ease: "power3.out" }),
         });
       });
     },
