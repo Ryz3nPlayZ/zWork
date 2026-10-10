@@ -1,6 +1,6 @@
 # zWork Admin Dashboard (admin-web)
 
-Password-gated admin SPA served at **`admin.tryzwork.app`**. Covers operational health, business/revenue, product/engagement, real-time activity, users, usage, models, and an admin audit log.
+Password-gated admin SPA served at **`admin.tryzwork.app`**. Covers operational health, business/revenue, scheduled jobs, product/engagement, real-time activity, users (with per-user activity), usage, models, and an admin audit log.
 
 This is a thin Vite shell around the dashboard components that live in [`../app/src/components/admin/`](../app/src/components/admin) and [`../app/src/components/AdminPage.tsx`](../app/src/components/AdminPage.tsx). Those are imported via the `@app/*` TypeScript alias (see `tsconfig.json` + `vite.config.ts`) so the desktop app and this web build share one source of truth — edit the dashboard once, both pick it up.
 
@@ -52,4 +52,4 @@ On first deploy, also:
 - **Backend.** All endpoints are documented in [`docs/CLOUD.md`](../docs/CLOUD.md) under "Admin dashboard". The time-series endpoints take `?days=N`, and each tab's window picker only offers values the server accepts: health, providers and engagement allow up to 90 days; revenue and usage allow up to 365.
 - **Shared components.** The tabs are built from `app/src/components/admin/shared.tsx` (`useAdminData`, `StatCard`, `DataTable` with sort, CSV export and expandable rows, and the chart cards) and from the app-wide `app/src/components/page/Page.tsx` (`Badge`, `Segmented`, `useConfirm`, …). Follow [`design.md`](../design.md): token colors only, no raw Tailwind palette.
 - **Money.** Costs are estimates from token counts × list prices. Margins compare like with like: the daily margin is MRR ÷ 30 minus that day's cost, and the window margin prorates MRR to the window.
-- **One React.** `vite.config.ts` dedupes `react`, `react-dom`, `recharts` and `lucide-react`. Without that, files under `../app/src` could resolve their own copies from `../app/node_modules`.
+- **One React.** `vite.config.ts` dedupes `react`, `react-dom`, `recharts`, `lucide-react`, `clsx` and `tailwind-merge`, and `tsconfig.json` `paths` maps the same packages to `admin-web/node_modules`. Without that, files under `../app/src` would resolve their own copies from `../app/node_modules`, and the build would need it installed. Add a package to both lists when a shared component starts importing it.

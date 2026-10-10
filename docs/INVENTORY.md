@@ -52,6 +52,20 @@ opens a shell on it. Caddy config is `cloud-src/Caddyfile`; services are in
    earlier build ("AI that works on your machine") whose og:url is `zwork.ai`
    and which claims "no cloud, no telemetry". Both are now wrong. The redesigned
    `landing/` is on `harness/pi-port`, so merge it to `main` to replace the page.
+8. **`zwork.ai` is a parked domain.** Checked 2026-10-09: it serves GoDaddy's
+   free parking page (A records 3.33.130.190 and 15.197.148.33, nameservers
+   `domaincontrol.com`), registered at GoDaddy behind Domains By Proxy, created
+   2024-05-29 and expiring 2028-05-29. It has **no MX record**, so
+   `hello@zwork.ai` (the contact address in `landing-legacy/` pricing, privacy,
+   terms and refund pages) bounces. If the domain is in our GoDaddy account,
+   either point it at `tryzwork.app` and add mail, or change the contact address
+   to one on `tryzwork.app`. If it isn't ours, drop every `zwork.ai` reference
+   (`landing-legacy/` og:url, `docs/TELEMETRY_SETUP.md`).
+9. **Router calls weren't tagged.** From the pi port until 34798b5 the sidecar
+   sent hosted-router calls without a run id, so every model call in a task
+   counted as a new message against the quota, and app version and OS were
+   blank. Fixed in the sidecar and the API; the Jobs tab shows how much traffic
+   still comes from untagged builds.
 
 ## What the dashboard measures
 
@@ -73,6 +87,8 @@ What a dev/ops team wants to know, and where each answer lives now.
 | Requests, tokens, errors, latency | Usage, Health | ✅ |
 | What is happening right now? | Live | ✅ |
 | Who did what in the admin? | Audit | ✅ |
+| Do people schedule recurring work? How often, at what cost? | Jobs | ✅ (from the first build with run tagging) |
+| What did one user run, on which build? | Users → click a row | ✅ |
 
 ### Not measured yet
 

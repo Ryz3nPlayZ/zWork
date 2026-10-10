@@ -239,6 +239,13 @@ The checkout route should return `401` signed out, and should return a Stripe ch
 
 - coupon unlocks can still exercise the paid path, but Stripe checkout and portal routes now exist and should be treated as the primary paid-plan path
 - Rate limits should be enforced on root user requests, not every internal model continuation.
+  The desktop sidecar tags every hosted-router call with `x-zwork-run-id`,
+  `x-zwork-trigger` (`schedule`, `chat` or `background`), `x-zwork-app-version`
+  and `x-zwork-os`. When a call has a run id but no `x-zwork-request-kind`, the
+  API stores it as a continuation if that user already has a request under the
+  same run, so a multi-step task uses one message of the quota. Builds from
+  before run tagging (and background helper calls such as chat titles, which get
+  their own run id) still count each call as a message.
 - The updater path is only as trustworthy as the release pipeline; keep the release workflow green and signed.
 
 ## Admin dashboard
@@ -281,7 +288,9 @@ All gated by `ensure_owner_or_service`. Endpoints with a window take `?days=N`
 | `GET /api/admin/metrics/downloads` | | GitHub release downloads (installers by platform and release, update bundles, update checks), stars/forks/issues, daily deltas from `release_download_snapshots`, app versions and OSes seen by the gateway in the last 7 days |
 | `GET /api/admin/metrics/funnel` | 365 | Signup → first request → active on 3+ days → subscribed for users who signed up in the window, median hours to first request, and weekly retention for the last 8 signup cohorts |
 | `GET /api/admin/metrics/status` | | Every public host probed from the server (expected status per host), database size and largest tables, and which integrations and providers are configured |
-| `GET /api/admin/users` | | Full user table with usage + subscription summary |
+| `GET /api/admin/metrics/jobs` | 365 | Runs, requests, users and spend by trigger (`schedule`, `chat`, `background`, `untagged`), runs per day by trigger, users with a scheduled run per week, top schedulers, and the last 24 hours' telemetry gaps (no version, no OS, no trigger, share stored as continuations) |
+| `GET /api/admin/users` | | Full user table with usage + subscription summary, 30-day runs and scheduled runs, and the latest app version seen |
+| `GET /api/admin/users/:user_id/activity` | 365 | One user's requests, runs and spend per day, models, triggers, builds (version × OS) and the 15 most recent runs |
 | `GET /api/admin/usage/by-time` | 365 | Daily request/token rollup, newest first |
 | `GET /api/admin/usage/by-model` | 365 | Per-model request/token rollup for the window |
 | `PUT /api/admin/users/:user_id/tier` | | Change a user's tier (`free`, `pro`, `max`; audited). zWork only: it does not touch Stripe |
@@ -318,6 +327,10 @@ When you add or change an endpoint, update the matching handler in
   from installer and update-bundle downloads. Set `GITHUB_TOKEN` (no scopes
   needed) to raise GitHub's 60 requests/hour anonymous limit; `GITHUB_REPO`
   overrides `Ryz3nPlayZ/zWork`.
+- **Runs and triggers.** A run is one task: all model calls that share a
+  `run_id`. `gateway_requests.run_trigger` stores the `x-zwork-trigger` header;
+  rows without it are **untagged** (builds from before run tagging, which also
+  gave every call its own run id). Scheduler run ids start with `sched_`.
 - **Gross margin** compares like with like. Daily margin is MRR ÷ 30 minus that
   day's cost. The window margin is MRR × days ÷ 30 minus the window's cost, as a
   share of that revenue (floored at −100%).
@@ -328,11 +341,13 @@ The frontend (`app/src/components/AdminPage.tsx` + `app/src/components/admin/`) 
 
 | Group | Tab | What it answers | Endpoint |
 |-------|-----|-----------------|----------|
-| | **Overview** | Headline numbers, plus a "Needs attention" list built from the other endpoints (a surface down, error rate ≥ 2%, unprofitable paying users, margin under 30%, free users over half of spend, unpriced models, spend on track for 1.5× last month, under half of active users on a week-old release, stale GitHub stats) | overview, finance, health, status, downloads |
+| | **Overview** | Headline numbers, scheduled work, plus a "Needs attention" list built from the other endpoints (a surface down, error rate ≥ 2%, unprofitable paying users, margin under 30%, free users over half of spend, unpriced models, spend on track for 1.5× last month, under half of active users on a week-old release, stale GitHub stats, over 5% of traffic from builds without run tags) | overview, finance, health, status, downloads, jobs |
 | Business | **Finance** | Upstream spend vs revenue and margin, month projection, free vs paying spend, spend per tier, unprofitable paying users, top spenders, spend by model, unpriced traffic | `finance` |
 | | **Revenue** | MRR, subscriptions and churn | `revenue` |
 | | **Growth** | Installer and update downloads, versions in use, the sign-up → request → 3 active days → subscribed funnel, weekly retention cohorts | `downloads`, `funnel` |
-| Product | **Users**, **Usage**, **Models**, **Engagement** | Accounts and tiers, request volume, per-model traffic and failures, retention and feature use | `users`, `usage/*`, `engagement` |
+| Product | **Jobs** | Scheduled vs chat runs, users with schedules per week, calls and spend per run, who runs work on a schedule, how much traffic is still untagged | `jobs` |
+| | **Users** | Accounts, tiers, runs and versions; click a row for that user's activity | `users`, `users/:id/activity` |
+| | **Usage**, **Models**, **Engagement** | Request volume, per-model traffic and failures, retention and feature use | `usage/*`, `engagement` |
 | Ops | **Health**, **Live** | Gateway errors, latency, provider saturation; the last few minutes | `health`, `live` |
 | | **Status** | Every public host with its expected status code, database latency and largest tables, which integrations have keys | `status` |
 | | **Audit** | Admin sign-ins and changes | `audit` |
