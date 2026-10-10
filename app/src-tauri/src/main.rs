@@ -661,9 +661,13 @@ async fn begin_desktop_auth(app: tauri::AppHandle, start_url: String) -> Result<
     let nonce_ok = callback_nonce.as_deref() == Some(nonce.as_str());
     let ok = code.is_some() && error_message.is_none() && nonce_ok;
     let html = if ok {
-        "<!doctype html><html><body style=\"font-family:Georgia,serif;background:#f6efe5;color:#151313;display:grid;place-items:center;min-height:100vh;margin:0\"><div style=\"padding:24px 28px;border:1px solid rgba(21,19,19,.1);border-radius:20px;background:rgba(255,255,255,.86)\"><h1 style=\"margin:0 0 10px;font-size:28px\">Signed in</h1><p style=\"margin:0;color:#6a615b\">You can close this tab and return to zWork.</p></div></body></html>"
+        auth_callback_page(
+            true,
+            "You're signed in",
+            "Head back to zWork to pick up where you left off. You can close this tab.",
+        )
     } else {
-        "<!doctype html><html><body style=\"font-family:Georgia,serif;background:#f6efe5;color:#151313;display:grid;place-items:center;min-height:100vh;margin:0\"><div style=\"padding:24px 28px;border:1px solid rgba(21,19,19,.1);border-radius:20px;background:rgba(255,255,255,.86)\"><h1 style=\"margin:0 0 10px;font-size:28px\">Sign-in failed</h1><p style=\"margin:0;color:#6a615b\">Return to zWork and try again.</p></div></body></html>"
+        auth_callback_page(false, "Sign-in didn't finish", "Go back to zWork and try signing in again.")
     };
     let response = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -727,6 +731,86 @@ fn hex_digit(b: u8) -> Option<u8> {
         b'A'..=b'F' => Some(b - b'A' + 10),
         _ => None,
     }
+}
+
+/// The page the browser lands on after the OAuth round trip, in the app's own
+/// look: paper and ink, the mark, one line of type. Self-contained, since it's
+/// served straight off the callback socket.
+fn auth_callback_page(ok: bool, title: &str, body: &str) -> String {
+    let slats: String = (0..6)
+        .map(|i| {
+            format!(
+                "<g transform=\"rotate({}) translate(0 -12.5)\"><rect x=\"-2.1\" y=\"-5.5\" width=\"4.2\" height=\"11\" rx=\"1.6\" transform=\"skewX(-18)\"/></g>",
+                i * 60
+            )
+        })
+        .collect();
+    let badge = if ok {
+        "<path d=\"M5 10.5l3.2 3.2L15 6.8\"/>"
+    } else {
+        "<path d=\"M6.5 6.5l7 7M13.5 6.5l-7 7\"/>"
+    };
+    format!(
+        r##"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title} · zWork</title>
+<style>
+  :root {{ --paper: 242 240 232; --raised: 246 244 236; --ink: 48 46 40; --muted: 110 106 96; --faint: 155 150 138; --line: 48 46 40 / .1; --tone: {tone}; color-scheme: light dark; }}
+  @media (prefers-color-scheme: dark) {{
+    :root {{ --paper: 22 22 24; --raised: 31 31 34; --ink: 236 236 234; --muted: 160 160 157; --faint: 108 108 106; --line: 236 236 234 / .1; }}
+  }}
+  * {{ box-sizing: border-box; }}
+  html, body {{ height: 100%; margin: 0; }}
+  body {{
+    display: grid; place-items: center; padding: 24px;
+    background: rgb(var(--paper));
+    background-image: radial-gradient(rgb(var(--ink) / .05) 1px, transparent 1px);
+    background-size: 22px 22px;
+    color: rgb(var(--ink));
+    font: 15px/1.6 "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }}
+  main {{
+    width: 100%; max-width: 420px; padding: 40px 36px 34px; text-align: center;
+    background: rgb(var(--raised)); border-radius: 24px;
+    box-shadow: 0 0 0 1px rgb(var(--line)), 0 24px 60px -28px rgb(0 0 0 / .28);
+    animation: rise .5s cubic-bezier(.2,.8,.2,1) both;
+  }}
+  .mark {{ position: relative; width: 64px; height: 64px; margin: 0 auto; color: rgb(var(--ink)); }}
+  .mark svg {{ width: 64px; height: 64px; animation: turn 1.1s cubic-bezier(.2,.8,.2,1) both; }}
+  .badge {{
+    position: absolute; right: -6px; bottom: -4px; width: 26px; height: 26px; border-radius: 50%;
+    display: grid; place-items: center; background: rgb(var(--tone)); box-shadow: 0 0 0 3px rgb(var(--raised));
+    animation: pop .4s .45s cubic-bezier(.3,1.6,.5,1) both;
+  }}
+  .badge svg {{ width: 16px; height: 16px; fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }}
+  h1 {{ margin: 26px 0 8px; font-size: 26px; line-height: 1.2; font-weight: 600; letter-spacing: -.02em; }}
+  p {{ margin: 0 auto; max-width: 30ch; color: rgb(var(--muted)); }}
+  .foot {{ margin-top: 28px; padding-top: 18px; border-top: 1px solid rgb(var(--line)); font-size: 12.5px; color: rgb(var(--faint)); }}
+  .foot b {{ font-weight: 600; color: rgb(var(--muted)); }}
+  @keyframes rise {{ from {{ opacity: 0; transform: translateY(10px) scale(.985); }} }}
+  @keyframes turn {{ from {{ opacity: 0; transform: rotate(-60deg) scale(.8); }} }}
+  @keyframes pop {{ from {{ opacity: 0; transform: scale(.4); }} }}
+  @media (prefers-reduced-motion: reduce) {{ main, .mark svg, .badge {{ animation: none; }} }}
+</style>
+</head>
+<body>
+<main>
+  <div class="mark">
+    <svg viewBox="0 0 40 40" aria-hidden="true"><g transform="translate(20 20)" fill="currentColor">{slats}</g></svg>
+    <span class="badge"><svg viewBox="0 0 20 20" aria-hidden="true">{badge}</svg></span>
+  </div>
+  <h1>{title}</h1>
+  <p>{body}</p>
+  <div class="foot"><b>zWork</b> · your weekly paperwork, done</div>
+</main>
+</body>
+</html>"##,
+        tone = if ok { "34 150 92" } else { "200 72 60" },
+    )
 }
 
 fn percent_decode(input: &str) -> String {
