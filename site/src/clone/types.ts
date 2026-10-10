@@ -31,6 +31,8 @@ export type AssistantMsg = {
   streaming: boolean;
   artifact?: { title: string; kind: ArtifactKind };
   footer?: string;
+  /** The hands-on demo's "get the app" buttons, under the reply. */
+  cta?: boolean;
 };
 
 export type Msg = UserMsg | AssistantMsg;

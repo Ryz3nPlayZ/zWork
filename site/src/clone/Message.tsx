@@ -1,10 +1,11 @@
-import { Fragment, type ReactNode } from "react";
+import { Fragment, useMemo, type ReactNode } from "react";
 import {
   BarChart3,
   Calendar,
   CheckCircle2,
   ChevronDown,
   Copy,
+  Download,
   FileCode,
   FileText,
   GitFork,
@@ -22,7 +23,8 @@ import {
 } from "lucide-react";
 import { ThinkingOrb, type OrbState } from "thinking-orbs";
 import { cn } from "../lib/cn";
-import { useHit } from "./live";
+import { detectPlatform, downloadUrl } from "../lib/site";
+import { useHit, useLive } from "./live";
 import { Logo } from "./Logo";
 import type { AssistantMsg, ArtifactKind, Step, ToolIcon, UserMsg } from "./types";
 
@@ -166,6 +168,37 @@ export function WorkingLabel({ word }: { word: string }) {
   );
 }
 
+/** The way out of the hands-on demo: the app, or back to the composer. */
+function GetTheApp({ id }: { id: string }) {
+  const live = useLive();
+  const platform = useMemo(detectPlatform, []);
+  if (!live) return null;
+  return (
+    <div className="mt-3.5 flex flex-wrap gap-2 animate-[fade-in_320ms_ease-out]">
+      <a
+        data-live
+        href={downloadUrl(platform)}
+        className="press inline-flex h-9 items-center gap-2 whitespace-nowrap rounded-full bg-ink px-4 text-[13.5px] font-medium text-paper hover:bg-ink/90"
+      >
+        <Download className="h-4 w-4" />
+        {platform ? `Download for ${platform === "Mac" ? "macOS" : platform}` : "Download zWork"}
+      </a>
+      <button
+        data-live
+        type="button"
+        onClick={(e) => {
+          const win = e.currentTarget.closest(".clone");
+          live.api.dismissCta(id);
+          win?.querySelector<HTMLElement>("[data-composer]")?.focus({ preventScroll: true });
+        }}
+        className="press h-9 whitespace-nowrap rounded-full border border-line bg-paper px-4 text-[13.5px] font-medium text-ink hover:bg-paper-sunken"
+      >
+        Keep looking
+      </button>
+    </div>
+  );
+}
+
 export function AssistantMessage({ m, pressed }: { m: AssistantMsg; pressed: string | null }) {
   const running = m.steps.find((st) => !st.done);
   const summary = m.working
@@ -209,6 +242,7 @@ export function AssistantMessage({ m, pressed }: { m: AssistantMsg; pressed: str
             <RichText text={m.text} streaming={m.streaming} />
           </div>
         )}
+        {m.cta && <GetTheApp id={m.id} />}
         {m.artifact && (
           <div
             data-target="artifact-card"

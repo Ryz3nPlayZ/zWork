@@ -1,16 +1,13 @@
-import { createContext, useContext, useEffect, useMemo, useRef } from "react";
+import { createContext, useContext } from "react";
 import gsap from "gsap";
-import { Download } from "lucide-react";
-import { detectPlatform, downloadUrl } from "../lib/site";
 import { THINKING_WORDS } from "./engine";
-import { Logo } from "./Logo";
 import type { ArtifactKind, AssistantMsg, CloneState, Msg, Panel, ToolIcon, View } from "./types";
 
 /**
  * The hands-on half of the desktop demo. Clicking into the clone stops the
  * scripted run where it is and hands the window to the visitor: the sidebar,
  * the chats in it, steps, documents, the model menu and the composer all
- * work, and anything sent gets a polite reply pointing at the download.
+ * work, and anything sent gets a polite reply with a way to get the app.
  */
 
 /** The conversation behind a sidebar entry. */
@@ -21,7 +18,7 @@ type Saved = { title: string; messages: Msg[]; panel: Panel | null };
 const REPLIES = [
   `I'd start on that right away, but this is only a preview running in your browser, so I can't reach your files from here.
 
-Download zWork and ask me again. It runs on your computer, works on your real files, and checks with you before anything is sent.`,
+**Ready for the real thing?** Get zWork, sign in with a free account and ask me again. I'll work on your real files and check with you before anything is sent.`,
   "Same answer, I'm afraid: this page is only a preview. In the app I'd get on with it.",
 ];
 
@@ -38,6 +35,7 @@ export type LiveApi = {
   setModel(name: string): void;
   toggleTask(id: string): void;
   toggleInbox(id: string): void;
+  dismissCta(id: string): void;
 };
 
 export class LiveSession implements LiveApi {
@@ -51,7 +49,6 @@ export class LiveSession implements LiveApi {
     start: CloneState,
     private commit: (s: CloneState) => void,
     private canned: Record<string, CannedChat>,
-    private onAsk: () => void,
   ) {
     // Whatever the script was halfway through, land it.
     this.cur = {
@@ -158,6 +155,10 @@ export class LiveSession implements LiveApi {
     this.set((s) => ({ inbox: s.inbox.map((i) => (i.id === id ? { ...i, open: !i.open, read: true } : i)) }));
   }
 
+  dismissCta(id: string) {
+    this.patchMsg(id, () => ({ cta: false }));
+  }
+
   send() {
     const text = this.cur.composer.trim();
     if (!text || this.cur.working) return;
@@ -215,9 +216,13 @@ export class LiveSession implements LiveApi {
         },
       })
       .call(() => {
-        this.patchMsg(aid, () => ({ text: reply, streaming: false }));
-        this.set({ working: false });
-        this.onAsk();
+        // Only the latest reply offers the buttons.
+        this.set((s) => ({
+          working: false,
+          messages: s.messages.map((m) =>
+            m.role !== "assistant" ? m : m.id === aid ? { ...m, text: reply, streaming: false, cta: true } : m.cta ? { ...m, cta: false } : m,
+          ),
+        }));
       });
     this.runs.push(run);
   }
@@ -238,6 +243,7 @@ export function liveApi(get: () => LiveSession): LiveApi {
     setModel: (m) => get().setModel(m),
     toggleTask: (id) => get().toggleTask(id),
     toggleInbox: (id) => get().toggleInbox(id),
+    dismissCta: (id) => get().dismissCta(id),
   };
 }
 
@@ -250,57 +256,4 @@ export const useLive = () => useContext(LiveContext);
 export function useHit() {
   const live = useLive();
   return (fn: (api: LiveApi) => void) => (live ? { "data-live": "", onClick: () => fn(live.api) } : {});
-}
-
-/** Where sending anything ends up. Real size, over the scaled window. */
-export function DownloadSheet({ onClose }: { onClose: () => void }) {
-  const platform = useMemo(detectPlatform, []);
-  const link = useRef<HTMLAnchorElement>(null);
-
-  useEffect(() => {
-    link.current?.focus({ preventScroll: true });
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  return (
-    <div
-      role="dialog"
-      aria-labelledby="demo-sheet-title"
-      aria-describedby="demo-sheet-body"
-      className="absolute inset-x-0 bottom-[9%] z-30 flex justify-center px-4 animate-[sheet-in_420ms_cubic-bezier(.2,.8,.2,1)]"
-    >
-      <div className="w-full max-w-[400px] rounded-[20px] border border-line bg-paper-raised/95 p-5 shadow-pop backdrop-blur-xl">
-        <div className="flex items-start gap-3">
-          <Logo size={26} className="mt-0.5 shrink-0 text-ink" />
-          <div className="min-w-0">
-            <h3 id="demo-sheet-title" className="text-[15px] font-semibold text-ink">
-              Ready for the real thing?
-            </h3>
-            <p id="demo-sheet-body" className="mt-1 text-[13.5px] leading-relaxed text-ink-muted">
-              zWork runs on your computer and works on your actual files. It's free to start.
-            </p>
-          </div>
-        </div>
-        <div className="mt-4 flex gap-2">
-          <a
-            ref={link}
-            href={downloadUrl(platform)}
-            className="press inline-flex h-10 flex-1 items-center justify-center gap-2 whitespace-nowrap rounded-full bg-ink px-4 text-[13.5px] font-medium text-paper hover:bg-ink/90"
-          >
-            <Download className="h-4 w-4" />
-            {platform ? `Download for ${platform === "Mac" ? "macOS" : platform}` : "Download zWork"}
-          </a>
-          <button
-            type="button"
-            onClick={onClose}
-            className="press h-10 whitespace-nowrap rounded-full border border-line bg-paper px-4 text-[13.5px] font-medium text-ink hover:bg-paper-sunken"
-          >
-            Keep looking
-          </button>
-        </div>
-      </div>
-    </div>
-  );
 }

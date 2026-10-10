@@ -4,7 +4,7 @@ import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useGSAP } from "@gsap/react";
 import { AppWindow } from "./AppWindow";
-import { DownloadSheet, LiveContext, LiveSession, liveApi } from "./live";
+import { LiveContext, LiveSession, liveApi } from "./live";
 import { Script, type Scenario } from "./engine";
 import type { CloneState } from "./types";
 
@@ -65,13 +65,11 @@ export function LiveDemo({
   const trigger = useRef<ScrollTrigger | null>(null);
   const session = useRef<LiveSession | null>(null);
   const [live, setLive] = useState(false);
-  const [asked, setAsked] = useState(false);
 
   const replay = useCallback(() => {
     session.current?.dispose();
     session.current = null;
     setLive(false);
-    setAsked(false);
     liveRef.current?.(null);
     const tl = script.current?.tl;
     if (!tl) return;
@@ -87,7 +85,7 @@ export function LiveDemo({
     run.tl.pause();
     const cursor = inner.current?.querySelector("[data-cursor]");
     if (cursor) gsap.set(cursor, { autoAlpha: 0 });
-    session.current = new LiveSession(run.state, setState, scenario.chats ?? {}, () => setAsked(true));
+    session.current = new LiveSession(run.state, setState, scenario.chats ?? {});
     setLive(true);
     liveRef.current?.(replay);
     return session.current;
@@ -95,10 +93,6 @@ export function LiveDemo({
 
   const api = useMemo(() => liveApi(() => session.current ?? takeOver()), [takeOver]);
   const ctx = useMemo(() => (interactive ? { api, active: live } : null), [interactive, api, live]);
-  const closeSheet = useCallback(() => {
-    setAsked(false);
-    inner.current?.querySelector<HTMLElement>("[data-composer]")?.focus({ preventScroll: true });
-  }, []);
 
   useEffect(() => () => session.current?.dispose(), []);
 
@@ -191,7 +185,6 @@ export function LiveDemo({
           </span>
         </div>
       )}
-      {asked && <DownloadSheet onClose={closeSheet} />}
     </div>
   );
 }

@@ -203,13 +203,6 @@ body {
   -webkit-user-select: text;
 }
 
-@keyframes sheet-in {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-}
-
 /* Fine scrollbars inside the clone, like the app's. */
 .clone-scroll {
   scrollbar-width: none;
