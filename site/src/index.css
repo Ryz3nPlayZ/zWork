@@ -272,59 +272,33 @@ body {
 }
 
 /* ---- The desktop the demo plays on ---- */
+/* The wallpaper is Albert Bierstadt's "Alaskan Coast Range" oil sketch
+   (Smithsonian American Art Museum, 1967.136.7, public domain), shaded
+   down in dark mode. No menu bar or dock: just the windows on the painting. */
 .desk {
   --pad: 10px;
+  --wall: url("/wallpaper.webp");
+  --shade: linear-gradient(transparent, transparent);
   height: calc(100dvh - 2 * var(--pad));
-  background: #8fb8ee url("/wallpaper-light.webp") center / cover no-repeat;
+  background-color: #8d93a8;
+  background-image: var(--shade), var(--wall);
+  background-position: center 42%;
+  background-size: cover;
+  background-repeat: no-repeat;
   box-shadow: 0 0 0 1px rgb(var(--border-overlay) / 0.08), 0 30px 80px -30px rgb(var(--shadow) / 0.45);
-  /* What sits straight on the wallpaper: menu bar text, dock dots. */
-  --desk-ink: 0 0 0;
+}
+@media (max-width: 1023px) {
+  .desk { --wall: url("/wallpaper-small.webp"); }
 }
 @media (min-width: 640px) {
   .desk { --pad: 20px; }
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .desk { background-image: url("/wallpaper-dark.webp"); background-color: #101c3c; --desk-ink: 255 255 255; }
+  :root:not([data-theme="light"]) .desk { --shade: linear-gradient(rgb(10 12 20 / 0.42), rgb(10 12 20 / 0.58)); background-color: #2a2d38; }
 }
-:root[data-theme="dark"] .desk { background-image: url("/wallpaper-dark.webp"); background-color: #101c3c; --desk-ink: 255 255 255; }
+:root[data-theme="dark"] .desk { --shade: linear-gradient(rgb(10 12 20 / 0.42), rgb(10 12 20 / 0.58)); background-color: #2a2d38; }
 
-.mac-font {
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter Variable", system-ui, sans-serif;
-  letter-spacing: -0.01em;
-}
-.desk-ink { color: rgb(var(--desk-ink) / 0.88); }
-.mac-dot { background: rgb(var(--desk-ink) / 0.6); }
-.mac-sep { background: rgb(var(--desk-ink) / 0.16); }
-
-/* Liquid Glass, approximated: a clear slab that bends a little light along
-   its rim. Solid where transparency is reduced. */
-.mac-glass {
-  background: linear-gradient(180deg, rgb(255 255 255 / 0.30), rgb(255 255 255 / 0.16));
-  -webkit-backdrop-filter: blur(22px) saturate(1.9) brightness(1.06);
-  backdrop-filter: blur(22px) saturate(1.9) brightness(1.06);
-  box-shadow:
-    inset 0 1px 0.5px rgb(255 255 255 / 0.75),
-    inset 0 -1px 0.5px rgb(255 255 255 / 0.25),
-    inset 0 0 0 0.5px rgb(255 255 255 / 0.45),
-    0 0 0 0.5px rgb(0 0 0 / 0.12),
-    0 12px 30px -10px rgb(0 0 0 / 0.35);
-}
-@media (prefers-reduced-transparency: reduce) {
-  .mac-glass { background: rgb(236 236 238); -webkit-backdrop-filter: none; backdrop-filter: none; }
-}
-.mac-icon {
-  box-shadow: inset 0 0 0 0.5px rgb(255 255 255 / 0.35), 0 1px 1.5px rgb(0 0 0 / 0.22), 0 4px 10px -4px rgb(0 0 0 / 0.3);
-}
-.mac-icon::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  background: linear-gradient(160deg, rgb(255 255 255 / 0.32), transparent 42%);
-  box-shadow: inset 0 1px 1px rgb(255 255 255 / 0.55);
-}
-/* Frosted OS chrome (menu bar, dock, widget). An approximation of macOS
+/* Frosted OS chrome (the progress widget and captions). An approximation of macOS
    vibrancy; solid where transparency is reduced. */
 .desk-glass {
   background: rgb(255 255 255 / 0.32);
@@ -339,31 +313,33 @@ body {
   .desk-glass { background: rgb(var(--paper-raised)); -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
 /* The zWork window: as wide as the free height allows at the app's 1440×880
-   shape (menu bar 28px + dock 88px + breathing room). */
+   shape, leaving room for the caption under it. */
 .desk-app {
   width: 94%;
 }
 @media (min-width: 1024px) {
-  .desk-app { width: min(78%, calc((100dvh - 2 * var(--pad) - 116px - 48px) * 1.6364)); }
+  .desk-app { width: min(78%, calc((100dvh - 2 * var(--pad) - 132px) * 1.6364)); }
 }
 .desk-window-shadow {
   box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.22), 0 22px 70px -12px rgb(0 0 0 / 0.42), 0 8px 20px -8px rgb(0 0 0 / 0.2);
 }
 
-/* ---- The dive from the hero into the desktop ---- */
-/* Without motion the hero and desktop are stacked and the mark is the plain
-   logo in its slot. With it, the hero lies over the pinned desktop on a
-   paper layer (.hero-bg) that fades as the mark's slats fly past. */
-.dive-mark { display: none; }
-.dive.is-diving .dive-hero {
-  position: absolute;
-  inset: 0;
-  z-index: 10;
-  min-height: 0;
-  background: transparent;
+/* ---- The slide from the hero to the desktop ---- */
+/* Without motion the hero and the desktop are stacked. With it they sit
+   side by side on one track, pinned, and scrolling slides it left. */
+.slide.is-sliding .slide-track {
+  display: flex;
+  width: 200%;
+  height: 100dvh;
 }
-.dive.is-diving .dive-mark { display: block; }
-.dive.is-diving .dive-logo-slot > svg { visibility: hidden; }
+.slide.is-sliding .slide-panel {
+  flex: 0 0 50%;
+  height: 100%;
+}
+.slide.is-sliding .hero-panel {
+  min-height: 0;
+  height: 100%;
+}
 
 /* Capabilities: a dark horizon in neutral graphite (no warm cast), with a
    soft white light on the rim. The rim is drawn whole and revealed by a

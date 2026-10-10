@@ -3,7 +3,7 @@ import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useGSAP } from "@gsap/react";
 import { ArrowRight, Download, Menu, Moon, Sun, X } from "lucide-react";
-import { Logo, LogoSlat } from "../clone/Logo";
+import { Logo } from "../clone/Logo";
 import { LogoParticles } from "./LogoParticles";
 import { cn } from "../lib/cn";
 import { onReveal } from "../lib/intro";
@@ -164,7 +164,7 @@ export function Hero() {
           let dead = false;
           const tl = gsap.timeline({ paused: true, defaults: { ease: "power3.out" } });
           tl.from(
-            ".dive-mark-intro",
+            ".hero-mark",
             { rotation: -140, scale: 0.4, autoAlpha: 0, transformOrigin: "50% 50%", duration: 1.4, ease: "expo.out" },
             0,
           )
@@ -193,8 +193,6 @@ export function Hero() {
           const off = onReveal(() => {
             document.fonts.ready.then(() => {
               if (dead) return;
-              // "inherit", not "visible", or the title would stay clickable
-              // over the desktop after the dive hides .hero-body.
               gsap.set(".hero-title", { visibility: "inherit" });
               tl.play();
             });
@@ -213,31 +211,16 @@ export function Hero() {
     <div
       ref={root}
       id="top"
-      className="dive-hero relative flex min-h-[92dvh] items-center overflow-hidden bg-paper pb-16 pt-24 sm:pt-28"
+      className="hero-panel relative flex min-h-[92dvh] items-center overflow-hidden bg-paper pb-16 pt-24 sm:pt-28"
     >
-      {/* The paper behind the hero; it fades on the way into the desktop. */}
       <div className="hero-bg pointer-events-none absolute inset-0 bg-paper">
         <div className="grain absolute inset-0 [mask-image:linear-gradient(to_bottom,black,transparent_70%)]" />
         {/* The mark's lower slats run behind the paragraph; thin them there. */}
         <LogoParticles className="absolute inset-0 h-full w-full sm:[mask-image:radial-gradient(ellipse_44%_13%_at_50%_70%,rgb(0_0_0/.3)_35%,black)]" />
       </div>
-      {/* The mark you dive through on the way to the desktop. It's drawn
-          across the whole stage so it stays sharp at any size; the slot below
-          only marks where it starts. */}
-      <svg className="dive-mark pointer-events-none absolute inset-0 z-20 h-full w-full text-ink" aria-hidden="true">
-        <g className="dive-mark-g" fill="currentColor">
-          <g className="dive-mark-intro">
-            {Array.from({ length: 6 }, (_, i) => (
-              <g key={i} className="dive-slat" transform={`rotate(${i * 60}) translate(0 -12.5)`}>
-                <LogoSlat />
-              </g>
-            ))}
-          </g>
-        </g>
-      </svg>
-      <div className="relative mx-auto w-full max-w-[1240px] px-4 text-center sm:px-8">
-        <div className="dive-logo-slot mx-auto mb-7 h-11 w-11 sm:mb-9 sm:h-14 sm:w-14">
-          <Logo className="h-full w-full text-ink" />
+      <div className="hero-content relative mx-auto w-full max-w-[1240px] px-4 text-center sm:px-8">
+        <div className="mx-auto mb-7 h-11 w-11 sm:mb-9 sm:h-14 sm:w-14">
+          <Logo className="hero-mark h-full w-full text-ink" />
         </div>
         <div className="hero-body">
           <h1 className="hero-title display text-[56px] text-ink sm:text-[92px] lg:text-[118px]">
@@ -249,7 +232,7 @@ export function Hero() {
               <span className="hero-line">
                 <span className="relative">
                   {CHORES.map((w, i) => (
-                    <span key={w} className={cn("hero-chore", i > 0 && "absolute inset-x-0 top-0")}>
+                    <span key={w} className={cn("hero-chore", i > 0 && "absolute inset-x-0 top-0 motion-reduce:invisible")}>
                       {w},
                     </span>
                   ))}

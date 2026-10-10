@@ -8,7 +8,7 @@ import { onReveal } from "../lib/intro";
  * loose dust drifts around it.
  *
  * One 2D canvas, a single fill per frame, DPR capped at 2, paused while the
- * hero is off screen, hidden by the dive, or the tab is in the background.
+ * hero is off screen or the tab is in the background.
  * With reduced motion it draws the settled mark once.
  */
 
