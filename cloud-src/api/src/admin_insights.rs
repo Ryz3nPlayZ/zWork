@@ -108,7 +108,8 @@ pub struct FinanceOverview {
     /// Stripe MRR prorated to the window (discounts applied).
     revenue_usd: f64,
     margin_usd: f64,
-    margin_pct: f64,
+    /// None when there was no revenue in the window (a margin of nothing).
+    margin_pct: Option<f64>,
     mrr: f64,
     paid_users: i64,
     mtd_spend_usd: f64,
@@ -417,7 +418,7 @@ pub async fn admin_metrics_finance(
         prev_spend_usd: round4(prev_spend),
         revenue_usd: round2(revenue),
         margin_usd: round2(margin),
-        margin_pct: if revenue > 0.0 { (margin / revenue * 100.0).max(-999.0) } else { 0.0 },
+        margin_pct: (revenue > 0.0).then(|| (margin / revenue * 100.0).max(-999.0)),
         mrr,
         paid_users,
         mtd_spend_usd: round4(mtd),
