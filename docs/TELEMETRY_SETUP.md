@@ -12,7 +12,6 @@ can go. For the event list and the self-hosted collector, see
 | Sidecar local log | always on while telemetry is enabled | `<data dir>/zWork/state/telemetry.jsonl` per install |
 | Sidecar → `ZW_TELEMETRY_ENDPOINT` | env var in the sidecar's environment **at runtime** | Optional, for `telemetry-collector/`. Not set in shipped builds. |
 | Cloud API `POST /api/telemetry/event` → PostHog | `POSTHOG_API_KEY` / `POSTHOG_HOST` in `cloud-src/.env` | Requires a gateway token, which the sidecar doesn't send, so nothing calls it today. |
-| `netlify/functions/api/telemetry.ts` | | Legacy proxy from the pre-redesign landing site. It reads `install_id` and `os` fields the app no longer sends. Superseded by posthog-js. |
 
 The user's Settings toggle gates all of them: `telemetry.ts` drops events and
 opts posthog-js out, and the sidecar checks the setting again before it writes

@@ -31,7 +31,7 @@ The older `cloud/` directory is not the deployment source to trust for current b
 | Host | Expected purpose | Current posture |
 |------|------------------|-----------------|
 | `api.tryzwork.app` | auth + API | public |
-| `app.tryzwork.app` | public web chat demo (no login) | public |
+| `app.tryzwork.app` | web chat (account required, Flash only) | public |
 | `analytics.tryzwork.app` | shortcut to PostHog | public |
 | `db.tryzwork.app` | pgAdmin | blocked with `403` by default |
 
@@ -56,19 +56,26 @@ flowchart TD
     Axum --> Upstream
 ```
 
-## Web demo (app.tryzwork.app)
+## Web app (app.tryzwork.app)
 
-A public, **no-login chat demo** lives at `app.tryzwork.app`. It's the **real
-desktop app** (`app/`) running in a "demo mode" with desktop-only features
-disabled at runtime — same UI as the desktop app, chat-only, no login. Caddy
-serves it from `/var/www/app.tryzwork.app`.
+`app.tryzwork.app` is the **real desktop app** (`app/`) built for the web
+(`IS_WEB` in `app/src/lib/api.ts`). Since 2026-10-09 it **requires an account**:
+there is no anonymous demo on that origin any more. Caddy serves it from
+`/var/www/app.tryzwork.app`.
 
-- **Demo mode activation:** `app/src/lib/preview.ts` exports `isDemoMode()`,
-  which returns `true` when `window.location.origin` is one of the demo origins
-  (`app.tryzwork.app`, `tryzwork.app`, `www.tryzwork.app`, overridable via
-  `VITE_ZWORK_DEMO_ORIGIN` at build time). The desktop app (`tauri://localhost`)
-  and the vite dev server (`localhost:1420`) never match, so their behavior is
-  unchanged — the same source builds both targets.
+- **What the web build does:** plain chat on zWork Flash only. `streamChatWeb`
+  posts to `/api/v1/chat/completions` with a short system prompt (date, local
+  time, "the desktop app can use tools, this can't") plus the last 20 turns of
+  the thread, and the effort picker's value as `reasoning.effort`. No tool
+  calls, no web search, no connectors.
+- **What it hides:** Settings shows only Appearance and Account; the sidebar has
+  no Projects; the composer has no document or permission (Full access)
+  controls; Pro, Ultra and ?????? live in the desktop app. This gating is
+  client-side only: the gateway can't tell a web request from a desktop one.
+- **Demo mode (opt-in, no login):** `app/src/lib/preview.ts` exports
+  `isDemoMode()`. It's on only for an origin named in `VITE_ZWORK_DEMO_ORIGIN`
+  at build time, or with `?preview=demo`; no origin is a demo by default. The
+  desktop app (`tauri://localhost`) and the vite dev server never match.
 - **What demo mode disables (all gated on `isDemoMode()`):**
   - **LoginScreen / cloud auth** — a stub user is seeded in `App.tsx`, so the
     auth gate is bypassed. No `fetchCloudSession()`, no BetterAuth.
@@ -113,8 +120,8 @@ serves it from `/var/www/app.tryzwork.app`.
 
 ```bash
 # Frontend: builds app/ (the real desktop app source) as a web bundle and
-# rsyncs dist/ to /var/www/app.tryzwork.app. Demo mode auto-activates on the
-# app.tryzwork.app origin. Desktop build (npm run tauri build) is unaffected.
+# rsyncs dist/ to /var/www/app.tryzwork.app. The web build requires sign-in;
+# demo mode needs VITE_ZWORK_DEMO_ORIGIN. Desktop build is unaffected.
 ./scripts/deploy-app-demo.sh
 ```
 

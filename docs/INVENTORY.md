@@ -10,7 +10,7 @@ same probes from the API server on every load, so check there for current state.
 |------|--------|-----------|-------------|--------|
 | `tryzwork.app` | Marketing site (`landing/`) | Vercel | Vercel git integration, root dir `landing` | 200 |
 | `www.tryzwork.app` | Redirect to the apex | Vercel | Vercel domain settings | 307 |
-| `app.tryzwork.app` | The real desktop app (`app/`) built for web, in demo mode: no login, chat goes to `/api/demo/chat` | Caddy on the VM, `/var/www/app.tryzwork.app` | `scripts/deploy-app-demo.sh` | 200 |
+| `app.tryzwork.app` | The real desktop app (`app/`) built for web: account required, Flash only, plain chat through `/api/v1/chat/completions` | Caddy on the VM, `/var/www/app.tryzwork.app` | `scripts/deploy-app-demo.sh` | 200 |
 | `admin.tryzwork.app` | Admin dashboard (`admin-web/`), password gated | Caddy on the VM, `/var/www/admin.tryzwork.app` | `scripts/deploy-admin-web.sh` | 200 |
 | `api.tryzwork.app` | Cloud API (`cloud-src/api`, axum) and Better Auth under `/api/auth/*` | Caddy on the VM → docker compose | `ssh-connect.sh 'cd ~/cloud && sudo docker compose up -d --build axum_api'` | 200 on `/health`, `/api/health` |
 | `analytics.tryzwork.app` | Redirect to the PostHog project | Caddy on the VM | `cloud-src/Caddyfile` | 302 |

@@ -29,6 +29,6 @@ A web search for that wording turns up nothing written about zWork, so no outsid
    - how to delete your account.
 
    Then fix the "never transmitted" sentence in `legal/PRIVACY.md` and point `PRIVACY_URL` at the new page. A clear, short policy *is* the privacy pitch; it doesn't need "local-only" to carry it.
-6. **Retire the old briefs.** Update `LANDING_PAGE_BRIEF.md` and `PRODUCT.md`, or mark them superseded by POSITIONING.md.
+6. **Retire the old briefs.** Done for `LANDING_PAGE_BRIEF.md` (deleted 2026-10-09; POSITIONING.md replaces it). `PRODUCT.md` still needs the same.
 
 Steps 1, 2 and 5 are text edits and do the most. Search and AI answers pick up changes as pages are recrawled (days to weeks); Search Console's "Request indexing" on tryzwork.app speeds up Google.

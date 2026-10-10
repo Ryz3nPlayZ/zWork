@@ -5,8 +5,8 @@
 #
 # What it does:
 #   1. Builds the app/ SPA (Vite → dist/) WITHOUT the Tauri-specific
-#      prepare-bundle step (that only stages src-tauri resources). The demo
-#      activates on the app.tryzwork.app origin automatically — no flag needed.
+#      prepare-bundle step (that only stages src-tauri resources). The web
+#      build requires sign-in; set VITE_ZWORK_DEMO_ORIGIN for an anonymous demo.
 #   2. rsyncs dist/ to /var/www/app.tryzwork.app on the prod server (Caddy
 #      serves that host path; --delete replaces any prior build).
 #
