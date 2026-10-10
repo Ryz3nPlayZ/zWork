@@ -58,7 +58,7 @@ export default function PrivacyPage() {
 
             <section>
               <h2 className="text-lg font-semibold text-[#171716] mb-3">4. Website Data</h2>
-              <p>When visiting zwork.ai, we may collect:</p>
+              <p>When visiting tryzwork.app, we may collect:</p>
               <ul className="list-disc list-inside mt-2 space-y-1">
                 <li>Basic analytics (page views, referral source, browser type) to improve the site</li>
                 <li>Cookies necessary for site functionality</li>
@@ -126,8 +126,8 @@ export default function PrivacyPage() {
               <h2 className="text-lg font-semibold text-[#171716] mb-3">12. Contact</h2>
               <p>
                 For privacy-related inquiries or to exercise your data rights, contact us at{" "}
-                <a href="mailto:hello@zwork.ai" className="underline text-[#171716] hover:text-[#6b6a65] transition-colors">
-                  hello@zwork.ai
+                <a href="mailto:privacy@tryzwork.app" className="underline text-[#171716] hover:text-[#6b6a65] transition-colors">
+                  privacy@tryzwork.app
                 </a>
                 .
               </p>

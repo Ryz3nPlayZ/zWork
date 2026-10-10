@@ -50,7 +50,7 @@ const tiers = [
       "Dedicated support channel",
     ],
     cta: "Contact us",
-    ctaLink: "mailto:hello@zwork.ai",
+    ctaLink: "mailto:legal@tryzwork.app",
     highlight: false,
   },
 ];

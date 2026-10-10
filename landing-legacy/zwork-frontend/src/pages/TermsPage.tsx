@@ -108,8 +108,8 @@ export default function TermsPage() {
               <h2 className="text-lg font-semibold text-[#171716] mb-3">10. Contact</h2>
               <p>
                 If you have questions about these Terms, contact us at{" "}
-                <a href="mailto:hello@zwork.ai" className="underline text-[#171716] hover:text-[#6b6a65] transition-colors">
-                  hello@zwork.ai
+                <a href="mailto:legal@tryzwork.app" className="underline text-[#171716] hover:text-[#6b6a65] transition-colors">
+                  legal@tryzwork.app
                 </a>
                 .
               </p>

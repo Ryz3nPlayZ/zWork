@@ -50,7 +50,7 @@ export default function RefundPage() {
                 We offer a full refund within 14 days of your initial subscription purchase if you are not satisfied with the service. To request a refund:
               </p>
               <ul className="list-disc list-inside mt-2 space-y-1">
-                <li>Contact us at <a href="mailto:hello@zwork.ai" className="underline text-[#171716] hover:text-[#6b6a65] transition-colors">hello@zwork.ai</a> within 14 days of your first payment</li>
+                <li>Contact us at <a href="mailto:legal@tryzwork.app" className="underline text-[#171716] hover:text-[#6b6a65] transition-colors">legal@tryzwork.app</a> within 14 days of your first payment</li>
                 <li>Include your account email and the reason for the request</li>
                 <li>Refunds are processed within 5-10 business days to the original payment method</li>
               </ul>
@@ -77,8 +77,8 @@ export default function RefundPage() {
               <h2 className="text-lg font-semibold text-[#171716] mb-3">How to Cancel or Request a Refund</h2>
               <p>
                 Email us at{" "}
-                <a href="mailto:hello@zwork.ai" className="underline text-[#171716] hover:text-[#6b6a65] transition-colors">
-                  hello@zwork.ai
+                <a href="mailto:legal@tryzwork.app" className="underline text-[#171716] hover:text-[#6b6a65] transition-colors">
+                  legal@tryzwork.app
                 </a>{" "}
                 with "Cancel" or "Refund" in the subject line. Include the email address associated with your account. We aim to respond within 2 business days.
               </p>

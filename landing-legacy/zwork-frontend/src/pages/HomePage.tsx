@@ -248,7 +248,7 @@ export default function HomePage() {
                 <CheckItem text="Dedicated support channel" />
               </ul>
               <a
-                href="mailto:hello@zwork.ai"
+                href="mailto:legal@tryzwork.app"
                 className="inline-flex items-center gap-2 rounded-full bg-[#171716] px-5 py-2.5 text-[13px] font-semibold text-[#f7f6f3] hover:bg-[#25241f] transition-colors"
               >
                 Contact us

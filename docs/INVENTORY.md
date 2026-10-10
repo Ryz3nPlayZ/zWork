@@ -48,24 +48,22 @@ opens a shell on it. Caddy config is `cloud-src/Caddyfile`; services are in
    (matching `docs/DEVELOPER_GUIDE.md`). Fixed in the README.
 6. **The landing has no deploy script in the repo.** It deploys through Vercel's
    git integration, so a push to `main` that touches `landing/` ships it.
-7. **The live apex is an old page.** As of 2026-10-01 `tryzwork.app` serves an
-   earlier build ("AI that works on your machine") whose og:url is `zwork.ai`
-   and which claims "no cloud, no telemetry". Both are now wrong. The redesigned
-   `landing/` is on `harness/pi-port`, so merge it to `main` to replace the page.
-8. **`zwork.ai` is a parked domain.** Checked 2026-10-09: it serves GoDaddy's
-   free parking page (A records 3.33.130.190 and 15.197.148.33, nameservers
-   `domaincontrol.com`), registered at GoDaddy behind Domains By Proxy, created
-   2024-05-29 and expiring 2028-05-29. It has **no MX record**, so
-   `hello@zwork.ai` (the contact address in `landing-legacy/` pricing, privacy,
-   terms and refund pages) bounces. If the domain is in our GoDaddy account,
-   either point it at `tryzwork.app` and add mail, or change the contact address
-   to one on `tryzwork.app`. If it isn't ours, drop every `zwork.ai` reference
-   (`landing-legacy/` og:url, `docs/TELEMETRY_SETUP.md`).
+7. **The live apex was an old page.** Until early October `tryzwork.app` served
+   an earlier build ("AI that works on your machine") that claimed "no cloud, no
+   telemetry". Resolved: as of 2026-10-09 the apex serves the redesigned
+   `landing/` ("your weekly paperwork, done").
+8. **`zwork.ai` is not ours.** It's a GoDaddy parked domain (registered behind
+   Domains By Proxy, no MX record), so links to it and `hello@zwork.ai` went
+   nowhere. Resolved 2026-10-09: every reference is gone. `landing-legacy/`
+   now points at `tryzwork.app` and uses `privacy@tryzwork.app` /
+   `legal@tryzwork.app`, the addresses `legal/` already publishes (tryzwork.app
+   mail is on Zoho). Don't reintroduce the domain.
 9. **Router calls weren't tagged.** From the pi port until 34798b5 the sidecar
    sent hosted-router calls without a run id, so every model call in a task
    counted as a new message against the quota, and app version and OS were
-   blank. Fixed in the sidecar and the API; the Jobs tab shows how much traffic
-   still comes from untagged builds.
+   blank. Fixed in the sidecar and the API (API deployed 2026-10-09); users only
+   get the fix with the next desktop release, and the Jobs tab shows how much
+   traffic still comes from untagged builds.
 
 ## What the dashboard measures
 
