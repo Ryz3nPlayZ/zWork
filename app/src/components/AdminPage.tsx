@@ -3,6 +3,7 @@ import {
   Activity,
   BarChart3,
   Boxes,
+  CalendarClock,
   DollarSign,
   Globe,
   HeartPulse,
@@ -30,6 +31,7 @@ import { OverviewTab } from "./admin/OverviewTab";
 import { FinanceTab } from "./admin/FinanceTab";
 import { GrowthTab } from "./admin/GrowthTab";
 import { StatusTab } from "./admin/StatusTab";
+import { JobsTab } from "./admin/JobsTab";
 import type { AdminTabId } from "./admin/shared";
 import { formatRelative } from "./admin/format";
 
@@ -71,7 +73,8 @@ const GROUPS: { label: string | null; tabs: TabDef[] }[] = [
   {
     label: "Product",
     tabs: [
-      { id: "users", label: "Users", icon: Users, blurb: "Every account, its tier and its usage." },
+      { id: "jobs", label: "Jobs", icon: CalendarClock, blurb: "Scheduled work, the product's wedge: who runs tasks on a schedule, how often, and what it costs." },
+      { id: "users", label: "Users", icon: Users, blurb: "Every account, its tier and its usage. Click a row for that user's activity." },
       { id: "usage", label: "Usage", icon: BarChart3, blurb: "Requests and tokens over time." },
       { id: "models", label: "Models", icon: Boxes, blurb: "Traffic, latency and failures by model." },
       { id: "engagement", label: "Engagement", icon: Activity, blurb: "How often people come back and what they do." },
@@ -364,6 +367,7 @@ export function AdminPage({ standalone = false }: { standalone?: boolean }) {
             {tab === "finance" && <FinanceTab apiFetch={apiFetch} refreshKey={refreshKey} />}
             {tab === "revenue" && <RevenueTab apiFetch={apiFetch} refreshKey={refreshKey} />}
             {tab === "growth" && <GrowthTab apiFetch={apiFetch} refreshKey={refreshKey} />}
+            {tab === "jobs" && <JobsTab apiFetch={apiFetch} refreshKey={refreshKey} />}
             {tab === "users" && <UsersTab apiFetch={apiFetch} refreshKey={refreshKey} setTier={setTier} />}
             {tab === "usage" && <UsageTab apiFetch={apiFetch} refreshKey={refreshKey} />}
             {tab === "models" && <ModelsTab apiFetch={apiFetch} refreshKey={refreshKey} />}

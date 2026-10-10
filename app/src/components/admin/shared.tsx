@@ -26,6 +26,7 @@ export type AdminTabId =
   | "finance"
   | "revenue"
   | "growth"
+  | "jobs"
   | "users"
   | "usage"
   | "models"

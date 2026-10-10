@@ -1,4 +1,18 @@
-import { Activity, AlertTriangle, CheckCircle2, ChevronRight, DollarSign, Percent, Timer, TrendingUp, Users, Wallet } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  CalendarClock,
+  CheckCircle2,
+  ChevronRight,
+  DollarSign,
+  ListChecks,
+  Percent,
+  Tag,
+  Timer,
+  TrendingUp,
+  Users,
+  Wallet,
+} from "lucide-react";
 import { cn } from "../../lib/cn";
 import {
   AreaChartCard,
@@ -17,6 +31,7 @@ import type { ModelUsage, UsageRow } from "./UsageTab";
 import type { FinanceOverview } from "./FinanceTab";
 import type { StatusOverview } from "./StatusTab";
 import type { DownloadsOverview } from "./GrowthTab";
+import { UNTAGGED_WARN_PCT, type JobsOverview } from "./JobsTab";
 
 interface Metrics {
   total_users: number;
@@ -58,6 +73,7 @@ export function OverviewTab({
   const finance = useAdminData<FinanceOverview>(apiFetch, "/api/admin/metrics/finance?days=30", refreshKey);
   const status = useAdminData<StatusOverview>(apiFetch, "/api/admin/metrics/status", refreshKey);
   const downloads = useAdminData<DownloadsOverview>(apiFetch, "/api/admin/metrics/downloads", refreshKey);
+  const jobs = useAdminData<JobsOverview>(apiFetch, "/api/admin/metrics/jobs?days=30", refreshKey);
 
   const m = metrics.data;
   if (!m) return <TabStatus loading={metrics.loading} error={metrics.error} onRetry={metrics.reload} />;
@@ -71,7 +87,13 @@ export function OverviewTab({
   const maxReq = Math.max(1, ...topModels.map((x) => x.requests));
   const h = health.data;
   const f = finance.data;
-  const attention = attentionItems(m, h, f, status.data, downloads.data);
+  const attention = attentionItems(m, h, f, status.data, downloads.data, jobs.data);
+  const j = jobs.data;
+  const sched = j?.by_trigger.find((r) => r.trigger === "schedule");
+  const chatRuns = j?.by_trigger.find((r) => r.trigger === "chat")?.runs ?? 0;
+  const thisWeek = j?.weekly_schedulers[j.weekly_schedulers.length - 1];
+  const lastWeek = j?.weekly_schedulers[j.weekly_schedulers.length - 2];
+  const jobsSub = (s: string) => (j ? s : jobs.error || "…");
 
   return (
     <div className="space-y-5">
@@ -127,6 +149,36 @@ export function OverviewTab({
           value={h ? formatMs(h.latency_p95_ms) : "—"}
           sub={h ? `TTFT p95 ${formatMs(h.ttft_p95_ms)}` : health.error || "…"}
           hint="95th percentile of total request time; TTFT is time to first token"
+        />
+      </StatGrid>
+      <StatGrid>
+        <StatCard
+          icon={CalendarClock}
+          label="Users with schedules, this week"
+          value={j ? formatNumber(thisWeek?.users ?? 0) : "—"}
+          delta={lastWeek ? { ratio: change(thisWeek?.users ?? 0, lastWeek.users), good: "up", label: `vs last week (${lastWeek.users})` } : undefined}
+          sub={jobsSub(thisWeek ? `${formatNumber(thisWeek.runs)} scheduled runs since Monday` : "none yet")}
+          hint="Distinct users with a scheduled run since Monday (UTC). Recurring work is the product's wedge."
+        />
+        <StatCard
+          icon={Activity}
+          label="Scheduled share of runs, 30d"
+          value={sched && sched.runs + chatRuns > 0 ? formatPct(sched.runs / (sched.runs + chatRuns), 0) : "—"}
+          sub={jobsSub(`${formatNumber(sched?.runs ?? 0)} scheduled · ${formatNumber(chatRuns)} chat`)}
+        />
+        <StatCard
+          icon={ListChecks}
+          label="Calls per scheduled run"
+          value={sched ? sched.calls_per_run.toFixed(1) : "—"}
+          sub={jobsSub(sched ? `${formatUsd(sched.runs > 0 ? sched.cost_usd / sched.runs : 0)} per run` : "no scheduled runs yet")}
+        />
+        <StatCard
+          icon={Tag}
+          label="Untagged traffic, last 24h"
+          value={j ? `${j.quality.missing_trigger_pct.toFixed(1)}%` : "—"}
+          tone={!j ? "default" : j.quality.missing_trigger_pct > 20 ? "error" : j.quality.missing_trigger_pct > UNTAGGED_WARN_PCT ? "warn" : "ok"}
+          sub={jobsSub(`${formatNumber(j?.quality.untagged_users_24h ?? 0)} users on builds without run tags`)}
+          hint="Requests with no x-zwork-trigger header. Those builds bill every model call as a message."
         />
       </StatGrid>
 
@@ -198,6 +250,7 @@ function attentionItems(
   f: FinanceOverview | null,
   st: StatusOverview | null,
   dl: DownloadsOverview | null,
+  j: JobsOverview | null,
 ): Attention[] {
   const out: Attention[] = [];
   for (const s of st?.surfaces ?? []) {
@@ -250,6 +303,13 @@ function attentionItems(
     if (latest && ageDays >= 7 && total >= 10 && on / total < 0.5) {
       out.push({ tone: "warn", text: `Only ${formatPct(on / total, 0)} of active users run v${latest}`, tab: "growth" });
     }
+  }
+  if (j?.tagged_since && j.quality.missing_trigger_pct > UNTAGGED_WARN_PCT) {
+    out.push({
+      tone: j.quality.missing_trigger_pct > 20 ? "error" : "warn",
+      text: `${j.quality.missing_trigger_pct.toFixed(0)}% of the last 24h's requests come from builds without run tags: each step counts as a message against the quota`,
+      tab: "jobs",
+    });
   }
   if (m.churn_rate >= 0.5) {
     out.push({ tone: "warn", text: `${formatPct(m.churn_rate, 0)} of this month's active users went quiet this week`, tab: "engagement" });

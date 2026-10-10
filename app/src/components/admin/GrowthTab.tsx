@@ -243,7 +243,10 @@ export function GrowthTab({ apiFetch, refreshKey }: { apiFetch: ApiFetch; refres
                 )}
                 {d.os_split.length > 0 && (
                   <p className="border-t border-line pt-2.5 text-[11.5px] text-ink-muted">
-                    {d.os_split.map((o) => `${o.os} ${formatNumber(o.users)}`).join(" · ")}
+                    {/* "desktop" is what builds before run tagging sent as their OS. */}
+                    {d.os_split
+                      .map((o) => `${["desktop", "unknown", ""].includes(o.os) ? "untagged" : o.os} ${formatNumber(o.users)}`)
+                      .join(" · ")}
                   </p>
                 )}
               </div>

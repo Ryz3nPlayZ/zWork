@@ -52,6 +52,9 @@ function users() {
     const completion = Math.floor(prompt * (0.05 + r() * 0.1));
     const created = Date.now() - Math.floor(r() * 180) * DAY;
     const paid = tier !== "free" && !coupon;
+    const runs = Math.floor(requests / (4 + r() * 4));
+    // About a third of active users have something on a schedule.
+    const scheduled = r() < 0.35 ? Math.floor(runs * (0.2 + r() * 0.6)) : 0;
     return {
       user_id: `usr_${(i * 2654435761).toString(36).padStart(10, "0").slice(0, 12)}`,
       email: `${first}.${last}${i}@example.com`.toLowerCase(),
@@ -65,8 +68,153 @@ function users() {
       estimated_cost_usd: round((prompt * 0.09 + completion * 0.3) / 1e6, 4),
       stripe_customer_id: paid ? `cus_${(i * 99991).toString(36)}` : null,
       subscription_status: paid ? (r() < 0.9 ? "active" : "past_due") : null,
+      runs_30d: runs,
+      scheduled_runs_30d: scheduled,
+      app_version: requests ? (r() < 0.6 ? "0.6.0" : r() < 0.7 ? "0.5.3" : "0.5.2") : null,
     };
   });
+}
+
+// The router started tagging runs (x-zwork-trigger) five days ago; older
+// builds still send nothing, so the tagged share ramps up.
+const TAGGED_DAYS = 5;
+
+function jobs(days: number) {
+  const r = rng(61 + days);
+  const daily = series(days, 67).map(({ date, base }, i) => {
+    const runs = Math.floor(base / 5);
+    const age = days - 1 - i;
+    const tagged = age >= TAGGED_DAYS ? 0 : Math.min(0.85, 0.3 + (TAGGED_DAYS - age) * 0.13);
+    const t = Math.floor(runs * tagged);
+    const schedule = Math.floor(t * (0.26 + r() * 0.08));
+    const background = Math.floor(t * 0.22);
+    return { date, schedule, chat: t - schedule - background, background, untagged: runs - t };
+  });
+  const sum = (k: "schedule" | "chat" | "background" | "untagged") => daily.reduce((a, d) => a + d[k], 0);
+  const row = (trigger: string, runs: number, perRun: number, users: number, costPerRun: number) => ({
+    trigger,
+    requests: Math.floor(runs * perRun),
+    runs,
+    users,
+    cost_usd: round(runs * costPerRun, 4),
+    calls_per_run: perRun,
+  });
+  const by_trigger = [
+    // Untagged rows are one call per "run": each call got its own run id.
+    row("untagged", sum("untagged") * 6, 1, 96, 0.0011),
+    row("chat", sum("chat"), 6.4, 71, 0.0068),
+    row("schedule", sum("schedule"), 8.2, 23, 0.0091),
+    row("background", sum("background"), 1, 74, 0.0002),
+  ].filter((x) => x.runs > 0);
+  const all = users().filter((u) => u.scheduled_runs_30d > 0);
+  const top_schedulers = all
+    .sort((a, b) => b.scheduled_runs_30d - a.scheduled_runs_30d)
+    .slice(0, 20)
+    .map((u) => {
+      const runs = Math.max(1, Math.floor((u.scheduled_runs_30d * Math.min(days, 30)) / 30 * 0.3));
+      return {
+        user_id: u.user_id,
+        email: u.email,
+        name: u.name,
+        tier: tierOverrides.get(u.user_id) ?? u.tier,
+        runs,
+        requests: Math.floor(runs * (6 + r() * 5)),
+        cost_usd: round(runs * (0.004 + r() * 0.01), 4),
+        active_days: Math.min(TAGGED_DAYS, Math.max(1, Math.floor(runs / 2))),
+        last_run_at: iso(Date.now() - Math.floor(r() * 30) * 3600_000),
+      };
+    });
+  const monday = new Date();
+  monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7));
+  const weekly_schedulers = [1, 0].map((w) => ({
+    week_start: day(monday.getTime() - w * 7 * DAY),
+    users: w ? 9 : 23,
+    runs: w ? 41 : 132,
+  }));
+  return {
+    window_days: days,
+    tagged_since: iso(Date.now() - TAGGED_DAYS * DAY + 3 * 3600_000),
+    by_trigger,
+    daily,
+    weekly_schedulers,
+    top_schedulers,
+    quality: {
+      requests_24h: 9412,
+      missing_version_pct: 21.4,
+      missing_os_pct: 21.9,
+      missing_trigger_pct: 21.4,
+      continuation_pct: 63.8,
+      untagged_users_24h: 14,
+    },
+  };
+}
+
+function userActivity(id: string, days: number) {
+  const u = users().find((x) => x.user_id === id);
+  if (!u) return null;
+  let seed = 0;
+  for (const c of id) seed = (seed * 31 + c.charCodeAt(0)) | 0;
+  const r = rng(seed + days);
+  const scale = u.total_requests / 4000;
+  const daily = series(days, seed).map(({ date, base }) => {
+    const requests = Math.floor(base * scale * 0.06 * r());
+    const runs = Math.floor(requests / (4 + r() * 4));
+    return { date, requests, runs, cost_usd: round(requests * 0.0012 * (0.5 + r()), 4) };
+  });
+  const requests = daily.reduce((a, d) => a + d.requests, 0);
+  const runs = daily.reduce((a, d) => a + d.runs, 0);
+  const cost = daily.reduce((a, d) => a + d.cost_usd, 0);
+  const models = MODELS.slice(0, 4).map(([, model], i) => {
+    const n = Math.floor(requests / (i + 1.6));
+    return { model, requests: n, tokens: n * Math.floor(6000 + r() * 4000), cost_usd: round(n * 0.0011, 4) };
+  }).filter((m) => m.requests > 0);
+  // Partition the same totals the header shows. Background and untagged calls
+  // each get their own run id, so their runs equal their calls.
+  const sched = u.scheduled_runs_30d ? Math.floor(runs * 0.3) : 0;
+  const bg = Math.floor(runs * 0.3);
+  const untagged = Math.floor(requests * 0.05);
+  const triggers = [
+    { trigger: "chat", runs: runs - sched, requests: Math.floor((requests - bg - untagged) * (sched ? 0.6 : 1)) },
+    { trigger: "schedule", runs: sched, requests: sched ? Math.ceil((requests - bg - untagged) * 0.4) : 0 },
+    { trigger: "background", runs: bg, requests: bg },
+    { trigger: "untagged", runs: untagged, requests: untagged },
+  ].filter((t) => t.runs > 0);
+  const clients = u.app_version
+    ? [
+        { app_version: u.app_version, os: "macos", requests: Math.floor(requests * 0.8), last_seen: u.last_activity ?? iso(Date.now()) },
+        { app_version: "unknown", os: "unknown", requests: Math.floor(requests * 0.2), last_seen: iso(Date.now() - 6 * DAY) },
+      ]
+    : [];
+  const kinds = ["chat", "schedule", "chat", "background", "chat", "untagged"];
+  const recent_runs = runs
+    ? Array.from({ length: Math.min(15, runs) }, (_, i) => {
+        const trigger = kinds[i % kinds.length] === "schedule" && !sched ? "chat" : kinds[i % kinds.length];
+        const n = trigger === "background" || trigger === "untagged" ? 1 : Math.floor(2 + r() * 12);
+        const failed = r() < 0.08 ? 1 : 0;
+        return {
+          run_id: trigger === "schedule" ? `sched_${day(Date.now() - i * 5 * 3600_000).replace(/-/g, "")}090000_${(seed >>> 0).toString(16).slice(0, 8)}` : `${(seed + i).toString(16)}-run`,
+          trigger,
+          started_at: iso(Date.now() - i * 5 * 3600_000 - Math.floor(r() * 3600_000)),
+          requests: n,
+          tokens: n * Math.floor(5000 + r() * 6000),
+          cost_usd: round(n * 0.0012, 4),
+          failed,
+          model: MODELS[i % 3][1],
+        };
+      })
+    : [];
+  return {
+    window_days: days,
+    requests,
+    runs: triggers.reduce((a, t) => a + t.runs, 0),
+    cost_usd: round(cost, 4),
+    failed: Math.floor(requests * 0.012),
+    daily,
+    models,
+    triggers,
+    clients,
+    recent_runs,
+  };
 }
 
 function series(days: number, seed: number) {
@@ -433,17 +581,19 @@ function downloads() {
       update_checks: Math.floor(base / 6),
     })),
     versions_in_use: [
+      { version: "0.6.0", users: 52, requests: 6120 },
       { version: "0.5.3", users: 39, requests: 4870 },
       { version: "0.5.2", users: 44, requests: 5210 },
       { version: "0.5.1", users: 16, requests: 1061 },
       { version: "0.5.0", users: 11, requests: 870 },
       { version: "0.4.9", users: 6, requests: 402 },
-      { version: "unknown", users: 2, requests: 55 },
+      { version: "unknown", users: 14, requests: 2015 },
     ],
     os_split: [
       { os: "macos", users: 74 },
       { os: "windows", users: 37 },
       { os: "linux", users: 7 },
+      { os: "desktop", users: 14 },
     ],
   };
 }
@@ -595,6 +745,12 @@ export function mockAdminApi(): Plugin {
         if (path === "/api/admin/metrics/downloads") return send(res, 200, downloads());
         if (path === "/api/admin/metrics/funnel") return send(res, 200, funnel(Math.min(Math.max(days, 7), 365)));
         if (path === "/api/admin/metrics/status") return send(res, 200, status());
+        if (path === "/api/admin/metrics/jobs") return send(res, 200, jobs(Math.min(days, 365)));
+        const activity = path.match(/^\/api\/admin\/users\/([^/]+)\/activity$/);
+        if (activity) {
+          const a = userActivity(decodeURIComponent(activity[1]), Math.min(days, 365));
+          return a ? send(res, 200, a) : send(res, 404, { error: "no such user" });
+        }
         if (path === "/api/admin/usage/by-time") return send(res, 200, usageByTime(Math.min(days, 365)));
         if (path === "/api/admin/usage/by-model") return send(res, 200, usageByModel(Math.min(days, 365)));
         if (path === "/api/admin/audit") return send(res, 200, audit);

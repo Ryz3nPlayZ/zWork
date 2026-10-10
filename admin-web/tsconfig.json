@@ -18,8 +18,18 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
+    // Bare imports from ../app/src resolve here too, mirroring resolve.dedupe in
+    // vite.config.ts, so type-checking works without ../app/node_modules.
     "paths": {
-      "@app/*": ["../app/src/*"]
+      "@app/*": ["../app/src/*"],
+      "react": ["./node_modules/@types/react"],
+      "react/*": ["./node_modules/@types/react/*"],
+      "react-dom": ["./node_modules/@types/react-dom"],
+      "react-dom/*": ["./node_modules/@types/react-dom/*"],
+      "recharts": ["./node_modules/recharts"],
+      "lucide-react": ["./node_modules/lucide-react"],
+      "clsx": ["./node_modules/clsx"],
+      "tailwind-merge": ["./node_modules/tailwind-merge"]
     }
   },
   "include": ["src", "../app/src/components/admin", "../app/src/components/AdminPage.tsx", "../app/src/lib/cn.ts", "../app/src/components/page"],

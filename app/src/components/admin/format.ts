@@ -30,6 +30,8 @@ export function formatNumber(n: Num): string {
 
 export function formatUsd(n: Num): string {
   if (missing(n)) return "—";
+  // Most runs cost a fraction of a cent; "$0.00" would hide them.
+  if (n !== 0 && Math.abs(n) < 0.01) return `${n < 0 ? "−" : ""}$${Math.abs(n).toLocaleString("en-US", { maximumSignificantDigits: 2 })}`;
   return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 

@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
-import { Copy } from "lucide-react";
-import { RowIconButton, SearchField, Segmented, useConfirm } from "../page/Page";
+import { SearchField, Segmented, useConfirm } from "../page/Page";
 import {
   DataTable,
   ErrorBox,
@@ -11,7 +10,8 @@ import {
   type ApiFetch,
   useAdminData,
 } from "./shared";
-import { formatDate, formatDay, formatNumber, formatRelative, formatUsd } from "./format";
+import { formatDay, formatNumber, formatRelative, formatUsd } from "./format";
+import { UserActivityPanel } from "./UserActivity";
 
 export interface AdminUser {
   user_id: string;
@@ -26,6 +26,9 @@ export interface AdminUser {
   estimated_cost_usd: number;
   stripe_customer_id: string | null;
   subscription_status: string | null;
+  runs_30d: number;
+  scheduled_runs_30d: number;
+  app_version: string | null;
 }
 
 const TIERS = ["free", "pro", "max"] as const;
@@ -115,7 +118,7 @@ export function UsersTab({
         empty={users.length === 0 ? "No users yet." : "No users match."}
         exportName="users"
         limit={100}
-        expand={(u) => <UserDetails u={u} />}
+        expand={(u) => <UserActivityPanel u={u} apiFetch={apiFetch} refreshKey={refreshKey} />}
         columns={[
           { key: "email", label: "User", render: (u) => <UserCell name={u.name} email={u.email} /> },
           { key: "tier", label: "Tier", render: (u) => <TierBadge tier={u.tier} /> },
@@ -127,7 +130,25 @@ export function UsersTab({
             value: (u) => u.total_prompt_tokens + u.total_completion_tokens,
             render: (u) => formatNumber(u.total_prompt_tokens + u.total_completion_tokens),
           },
+          { key: "runs_30d", label: "Runs 30d", numeric: true, render: (u) => formatNumber(u.runs_30d) },
+          {
+            key: "scheduled_runs_30d",
+            label: "Scheduled",
+            numeric: true,
+            render: (u) =>
+              u.scheduled_runs_30d ? (
+                <span className="text-success">{formatNumber(u.scheduled_runs_30d)}</span>
+              ) : (
+                <span className="text-ink-faint">—</span>
+              ),
+          },
           { key: "estimated_cost_usd", label: "Est. cost", numeric: true, render: (u) => formatUsd(u.estimated_cost_usd) },
+          {
+            key: "app_version",
+            label: "Version",
+            mono: true,
+            render: (u) => <span className="text-ink-muted">{u.app_version ?? "—"}</span>,
+          },
           {
             key: "subscription_status",
             label: "Billing",
@@ -172,38 +193,5 @@ export function UsersTab({
       />
       {confirmDialog}
     </div>
-  );
-}
-
-function UserDetails({ u }: { u: AdminUser }) {
-  const fields: [string, string | null, boolean?][] = [
-    ["User id", u.user_id, true],
-    ["Stripe customer", u.stripe_customer_id, true],
-    ["Joined", formatDate(u.created_at)],
-    ["Last active", formatDate(u.last_activity)],
-    ["Prompt tokens", u.total_prompt_tokens.toLocaleString()],
-    ["Completion tokens", u.total_completion_tokens.toLocaleString()],
-  ];
-  return (
-    <dl className="grid grid-cols-1 gap-x-6 gap-y-1 pt-1 text-[11.5px] sm:grid-cols-2 lg:grid-cols-3">
-      {fields.map(([label, value, copyable]) => (
-        <div key={label} className="flex min-w-0 items-center gap-1.5">
-          <dt className="shrink-0 text-ink-faint">{label}</dt>
-          <dd className={copyable ? "truncate font-mono text-ink" : "truncate text-ink"}>{value ?? "—"}</dd>
-          {copyable && value && (
-            <RowIconButton
-              label={`Copy ${label.toLowerCase()}`}
-              className="h-5 w-5"
-              onClick={(e) => {
-                e.stopPropagation();
-                void navigator.clipboard?.writeText(value);
-              }}
-            >
-              <Copy />
-            </RowIconButton>
-          )}
-        </div>
-      ))}
-    </dl>
   );
 }
