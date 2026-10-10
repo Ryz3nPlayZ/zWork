@@ -83,25 +83,30 @@ export function Capabilities() {
     () => {
       const mm = gsap.matchMedia();
       mm.add("(prefers-reduced-motion: no-preference)", () => {
-        // The headline comes in word by word as it scrolls into view.
+        // The starting state is set up front rather than left to from() tweens:
+        // the page's trigger refresh can undo their first render, and the
+        // section then shows finished until its trigger snaps it back to
+        // the start.
         const split = SplitText.create(".horizon-title", { type: "words" });
+        gsap.set(split.words, { autoAlpha: 0, y: 18, filter: "blur(10px)" });
+        gsap.set(".horizon-sub", { autoAlpha: 0, y: 12 });
+        gsap.set(".horizon", { "--sweep": "30deg" });
+        gsap.set(".horizon-glow", { autoAlpha: 0, xPercent: -35, scaleX: 0.6 });
+        gsap.set(".horizon-cap", { autoAlpha: 0, y: 24 });
+
+        // The headline comes in word by word as it scrolls into view.
         gsap
           .timeline({ scrollTrigger: { trigger: ".horizon-title", start: "top 82%", toggleActions: "play none none reverse" } })
-          .from(split.words, { autoAlpha: 0, y: 18, filter: "blur(10px)", duration: 0.9, stagger: 0.07, ease: "power3.out" })
-          .from(".horizon-sub", { autoAlpha: 0, y: 12, duration: 0.8, ease: "power3.out" }, "-=0.5");
+          .to(split.words, { autoAlpha: 1, y: 0, filter: "blur(0px)", duration: 0.9, stagger: 0.07, ease: "power3.out" })
+          .to(".horizon-sub", { autoAlpha: 1, y: 0, duration: 0.8, ease: "power3.out" }, "-=0.5");
 
         // Then the rim lights from left to right, and the glow behind it
         // travels across with it.
         gsap
           .timeline({ scrollTrigger: { trigger: ".horizon-arc", start: "top 78%", toggleActions: "play none none reverse" } })
-          .fromTo(".horizon", { "--sweep": "30deg" }, { "--sweep": "160deg", duration: 2.4, ease: "power2.inOut" }, 0)
-          .fromTo(
-            ".horizon-glow",
-            { autoAlpha: 0, xPercent: -35, scaleX: 0.6 },
-            { autoAlpha: 1, xPercent: 0, scaleX: 1, duration: 2.4, ease: "power2.inOut" },
-            0,
-          )
-          .from(".horizon-cap", { autoAlpha: 0, y: 24, duration: 0.8, stagger: 0.07, ease: "power3.out" }, 0.7);
+          .to(".horizon", { "--sweep": "160deg", duration: 2.4, ease: "power2.inOut" }, 0)
+          .to(".horizon-glow", { autoAlpha: 1, xPercent: 0, scaleX: 1, duration: 2.4, ease: "power2.inOut" }, 0)
+          .to(".horizon-cap", { autoAlpha: 1, y: 0, duration: 0.8, stagger: 0.07, ease: "power3.out" }, 0.7);
 
         return () => split.revert();
       });

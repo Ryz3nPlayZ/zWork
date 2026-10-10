@@ -38,10 +38,13 @@ export function Outro() {
         const q = gsap.utils.selector(el);
         gsap.set(q(".outro-line"), { autoAlpha: 1 });
         gsap.set(q(".outro-in"), { autoAlpha: 0, y: 24 });
+        // Set up front, not as a from(): the page's trigger refresh can undo
+        // a from()'s first render, so the lines would show before rising in.
+        gsap.set(q(".outro-line > *"), { yPercent: 40, autoAlpha: 0 });
 
-        gsap.from(q(".outro-line > *"), {
-          yPercent: 40,
-          autoAlpha: 0,
+        gsap.to(q(".outro-line > *"), {
+          yPercent: 0,
+          autoAlpha: 1,
           duration: 1,
           stagger: 0.08,
           ease: "power3.out",
