@@ -230,6 +230,7 @@ async fn run_task(task: ScheduledTask) {
         false,                  // artifact_mode
         false,                  // web_search_enabled
         Some(extra),
+        None,                   // effort: the default
     );
 
     // 4. Drain the stream. Capture assistant text for the summary; watch for

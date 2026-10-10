@@ -81,6 +81,8 @@ struct TurnShared {
     /// current assistant row and opens a fresh one.
     assistant_msg_id: Mutex<String>,
     auto_approve: bool,
+    /// Reasoning effort picked in the prompt bar (`low`…`max`), if any.
+    effort: Option<String>,
     max_turns: u32,
     /// Display text streamed so far (persisted on every delta, as before).
     accumulated_text: Mutex<String>,
@@ -856,6 +858,7 @@ async fn run_durable_once(
             ("turn.system_prompt", json!(system_prompt)),
             ("turn.cwd", json!(cwd)),
             ("turn.auto_approve", json!(shared.auto_approve)),
+            ("turn.effort", json!(shared.effort.clone().unwrap_or_default())),
             ("turn.assistant_msg_id", json!(shared.assistant_row())),
         ];
         for (key, payload) in writes {
@@ -909,7 +912,7 @@ async fn run_durable_once(
         HarnessOptions {
             provider: model.provider.clone(),
             model_id: model.id.clone(),
-            thinking_level: thinking_level_for(&model),
+            thinking_level: thinking_level_for(&model, shared.effort.as_deref()),
             active_tool_names: tools.iter().map(|t| t.name().to_string()).collect(),
             config,
         },
@@ -1286,8 +1289,8 @@ fn resolve_model(model_id: &str, s: &settings::Settings) -> Resolved {
     }
     let real = router_real_model(model_id);
     match crate::server::resolve("zwork_router", s, "") {
-        Some(cred) => from_cred(cred, Some(Api::AnthropicMessages), real, "zWork Cloud Router".into()),
-        None => unconfigured("zwork_router", "https://api.tryzwork.app/api", Some(Api::AnthropicMessages), real, "zWork Cloud Router"),
+        Some(cred) => from_cred(cred, Some(Api::OpenAICompletions), real, "zWork Cloud Router".into()),
+        None => unconfigured("zwork_router", "https://api.tryzwork.app/api", Some(Api::OpenAICompletions), real, "zWork Cloud Router"),
     }
 }
 
@@ -1329,9 +1332,8 @@ fn build_model(r: &Resolved, model_id: &str, tag: Option<&RouterTag>) -> Model {
         catalog::Target { provider: &r.provider, model_id, base_url: &r.base_url, api: r.api },
     );
     model.context_window = context_window_for(model.context_window);
-    // The managed router serves a fixed lineup with its own thinking policy.
     if r.provider == "zwork_router" {
-        model.reasoning = false;
+        configure_router_model(&mut model);
     }
     // Router / gateway keys aren't Anthropic keys: they authenticate with a
     // bearer token in addition to x-api-key (matches the legacy loop).
@@ -1342,6 +1344,32 @@ fn build_model(r: &Resolved, model_id: &str, tag: Option<&RouterTag>) -> Model {
         model.headers.get_or_insert_with(BTreeMap::new).extend(router_headers(tag));
     }
     model
+}
+
+/// The managed router speaks OpenAI Chat Completions and forwards to
+/// OpenRouter, so effort goes out as OpenRouter's `reasoning.effort` (each
+/// upstream maps it to the nearest level it supports). Every tier reasons.
+/// The model id is a tier alias: rewrite legacy pinned ids (older installs
+/// stored upstream ids) and mark Pro text-only (GLM 5.3 takes no images, so
+/// the harness turns them into placeholders instead of a 400).
+fn configure_router_model(model: &mut Model) {
+    use crate::harness::types::{MaxTokensField, OpenAICompletionsCompat, ThinkingFormat};
+    model.id = router_real_model(&model.id);
+    model.api = Api::OpenAICompletions;
+    model.reasoning = true;
+    model.input = if model.id == "zwork-pro" {
+        vec![InputType::Text]
+    } else {
+        vec![InputType::Text, InputType::Image]
+    };
+    model.compat = Some(OpenAICompletionsCompat {
+        supports_store: Some(false),
+        supports_developer_role: Some(false),
+        supports_reasoning_effort: Some(true),
+        max_tokens_field: Some(MaxTokensField::MaxTokens),
+        thinking_format: Some(ThinkingFormat::Openrouter),
+        ..Default::default()
+    });
 }
 
 /// One-shot completion on the user's default model — for side features
@@ -1424,19 +1452,22 @@ async fn complete_text_on(preferred: Option<&str>, system: &str, prompt: &str, m
     }
 }
 
-/// Default reasoning effort for a model: on for models that reason (pi's and
-/// opencode's default), overridable with `ZWORK_THINKING=off|low|medium|high…`.
-fn thinking_level_for(model: &Model) -> crate::harness::types::ThinkingLevel {
+/// Reasoning effort for a turn: the effort picked in the prompt bar when there
+/// is one, else `ZWORK_THINKING=off|low|medium|high…`, else medium. Models
+/// that don't reason get none.
+fn thinking_level_for(model: &Model, effort: Option<&str>) -> crate::harness::types::ThinkingLevel {
     use crate::harness::types::ThinkingLevel as L;
     if !model.reasoning {
         return L::Off;
     }
-    match std::env::var("ZWORK_THINKING").unwrap_or_default().trim().to_ascii_lowercase().as_str() {
+    let env = std::env::var("ZWORK_THINKING").unwrap_or_default();
+    let chosen = effort.filter(|e| !e.trim().is_empty()).unwrap_or(env.as_str());
+    match chosen.trim().to_ascii_lowercase().as_str() {
         "off" | "none" | "0" => L::Off,
         "minimal" => L::Minimal,
         "low" => L::Low,
         "high" => L::High,
-        "xhigh" => L::Xhigh,
+        "xhigh" | "extra" => L::Xhigh,
         "max" => L::Max,
         _ => L::Medium,
     }
@@ -1535,6 +1566,7 @@ pub fn run_agent_turn(
     artifact_mode: bool,
     web_search_enabled: bool,
     extra_system_prompt: Option<String>,
+    effort: Option<String>,
 ) -> impl futures_util::Stream<Item = Result<Value, Infallible>> {
     let (tx, rx) = mpsc::channel(100);
 
@@ -1735,6 +1767,7 @@ pub fn run_agent_turn(
             tx: tx.clone(),
             assistant_msg_id: Mutex::new(assistant_msg_id),
             auto_approve,
+            effort,
             max_turns,
             accumulated_text: Mutex::new(String::new()),
             activities: Mutex::new(Vec::new()),
@@ -2059,7 +2092,7 @@ async fn spawn_subagent_durable(
         HarnessOptions {
             provider: model.provider.clone(),
             model_id: model.id.clone(),
-            thinking_level: thinking_level_for(&model),
+            thinking_level: thinking_level_for(&model, None),
             active_tool_names: tools.iter().map(|t| t.name().to_string()).collect(),
             config,
         },
@@ -2249,7 +2282,10 @@ pub fn compaction_model_id(shape: &str, main_model: &str) -> String {
         }
     }
     let m = main_model.to_ascii_lowercase();
-    if m.contains("deepseek") || m.contains("v4-pro") || m.contains("v4-flash") {
+    if m.starts_with("zwork-") {
+        // Hosted tiers summarize on Flash, the cheapest.
+        "zwork-flash".to_string()
+    } else if m.contains("deepseek") || m.contains("v4-pro") || m.contains("v4-flash") {
         "deepseek-flash".to_string()
     } else if m.contains("claude") || shape == "anthropic" && m.is_empty() {
         "claude-haiku-4-5-20251001".to_string()
@@ -2412,6 +2448,7 @@ async fn resume_one_interrupted(
         tx: dead_tx,
         assistant_msg_id: Mutex::new(assistant_msg_id),
         auto_approve: read_str("turn.auto_approve").map(|v| v == "true").unwrap_or(false),
+        effort: read_str("turn.effort").filter(|e| !e.is_empty()),
         max_turns: max_turns(),
         accumulated_text: Mutex::new(seed_text),
         activities: Mutex::new(seed_activities),
@@ -2484,7 +2521,7 @@ async fn resume_one_interrupted(
         HarnessOptions {
             provider: model.provider.clone(),
             model_id: model.id.clone(),
-            thinking_level: thinking_level_for(&model),
+            thinking_level: thinking_level_for(&model, shared.effort.as_deref()),
             active_tool_names: tools.iter().map(|t| t.name().to_string()).collect(),
             config,
         },
@@ -2610,15 +2647,14 @@ mod tests {
             api_key: "zw_abc".into(),
             base_url: "https://api.tryzwork.app/api/".into(),
             provider: "zwork_router".into(),
-            api: Some(Api::AnthropicMessages),
-            real_model_id: "deepseek-flash".into(),
+            api: Some(Api::OpenAICompletions),
+            real_model_id: "zwork-flash".into(),
             provider_display_name: "zWork Cloud Router".into(),
             configured: true,
         };
         let run_id = "sched_t1_ab12";
         let tag = RouterTag { run_id, chat_id: "c1", project_id: "", trigger: trigger_for(run_id) };
         let h = build_model(&r, &r.real_model_id, Some(&tag)).headers.unwrap();
-        assert_eq!(h["authorization"], "Bearer zw_abc");
         assert_eq!(h["x-zwork-run-id"], run_id);
         assert_eq!(h["x-zwork-trigger"], "schedule");
         assert_eq!(h["x-zwork-chat-id"], "c1");
@@ -2628,28 +2664,55 @@ mod tests {
     }
 
     #[test]
-    fn router_keys_get_bearer_header() {
+    fn router_models_are_tier_aliases_with_effort() {
+        use crate::harness::types::ThinkingFormat;
         let r = Resolved {
             api_key: "zw_abc".into(),
             base_url: "https://api.tryzwork.app/api/".into(),
             provider: "zwork_router".into(),
+            // Older installs registered the router with the Anthropic shape
+            // and pinned upstream ids.
             api: Some(Api::AnthropicMessages),
-            real_model_id: "claude-sonnet-4-5".into(),
+            real_model_id: "z-ai/glm-5.3-flash".into(),
             provider_display_name: "zWork Cloud Router".into(),
             configured: true,
         };
         let m = build_model(&r, &r.real_model_id, None);
-        assert_eq!(m.api, Api::AnthropicMessages);
+        assert_eq!(m.id, "zwork-pro");
+        assert_eq!(m.api, Api::OpenAICompletions);
         assert_eq!(m.base_url, "https://api.tryzwork.app/api");
-        assert_eq!(m.headers.unwrap()["authorization"], "Bearer zw_abc");
-        assert!(!m.reasoning, "router pins its own thinking policy");
-        let anthropic = Resolved { api_key: "sk-ant-x".into(), provider: "anthropic".into(), api: None, ..r };
+        assert!(m.reasoning, "effort reaches the router");
+        assert_eq!(m.input, vec![InputType::Text], "Pro is text-only");
+        assert_eq!(m.compat.as_ref().and_then(|c| c.thinking_format), Some(ThinkingFormat::Openrouter));
+        assert_eq!(thinking_level_for(&m, Some("xhigh")), crate::harness::types::ThinkingLevel::Xhigh);
+        assert_eq!(thinking_level_for(&m, Some("max")), crate::harness::types::ThinkingLevel::Max);
+
+        let ultra = build_model(&Resolved { real_model_id: "zwork-ultimate".into(), ..r }, "zwork-ultimate", None);
+        assert_eq!(ultra.id, "zwork-ultra");
+        assert!(ultra.input.contains(&InputType::Image));
+        assert_eq!(router_real_model("something-else"), "zwork-flash");
+    }
+
+    #[test]
+    fn anthropic_keys_keep_their_own_auth() {
+        let r = Resolved {
+            api_key: "sk-ant-x".into(),
+            base_url: "".into(),
+            provider: "anthropic".into(),
+            api: None,
+            real_model_id: "claude-sonnet-4-5".into(),
+            provider_display_name: "Anthropic".into(),
+            configured: true,
+        };
         let tag = RouterTag { run_id: "r1", chat_id: "c1", project_id: "", trigger: "chat" };
-        let m = build_model(&anthropic, "claude-sonnet-4-5", Some(&tag));
+        let m = build_model(&r, "claude-sonnet-4-5", Some(&tag));
         assert!(m.headers.is_none(), "run tags only go to the zWork router");
         assert_eq!(m.api, Api::AnthropicMessages);
         assert!(m.reasoning && m.max_tokens >= 64_000);
         assert!(m.context_window <= 200_000);
+        let gateway = Resolved { api_key: "gw_x".into(), base_url: "https://gw.example/".into(), api: Some(Api::AnthropicMessages), ..r };
+        let m = build_model(&gateway, "claude-sonnet-4-5", None);
+        assert_eq!(m.headers.unwrap()["authorization"], "Bearer gw_x");
     }
 
     #[test]

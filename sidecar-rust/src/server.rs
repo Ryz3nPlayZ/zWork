@@ -62,6 +62,9 @@ pub struct ChatStreamRequest {
     /// When true, the message is grounded with live web-search results.
     #[serde(default)]
     pub web_search_enabled: bool,
+    /// Reasoning effort from the prompt bar: low, medium, high, xhigh or max.
+    #[serde(default)]
+    pub effort: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -511,10 +514,10 @@ pub async fn get_providers() -> impl IntoResponse {
         let subtitle = if m.credential == "zwork_router" {
             // Keyed on the lineup slot, not the upstream model it's pinned to.
             let blurb = match m.id.as_str() {
-                "zwork-pro" => "Most capable model",
-                "zwork-ultimate" => "Frontier model · Max plan",
-                "zwork-vision" => "Vision and images",
-                _ => "Fast and efficient",
+                "zwork-pro" => "Smarter for harder tasks",
+                "zwork-ultra" | "zwork-ultimate" => "Smarter with best vision",
+                "zwork-apex" => "Smartest",
+                _ => "Fast and efficient, with vision",
             };
             if cred.is_some() { blurb.to_string() } else { format!("{blurb} · sign in to zWork to use") }
         } else {
@@ -922,6 +925,7 @@ pub async fn chat_stream_route(
         req.artifact_mode,
         req.web_search_enabled,
         None,
+        req.effort.filter(|e| matches!(e.as_str(), "low" | "medium" | "high" | "xhigh" | "max")),
     );
 
     // Map Value to Event
@@ -1003,8 +1007,7 @@ pub async fn onboard_complete(Json(body): Json<OnboardBody>) -> impl IntoRespons
         }
         if !model_id.is_empty() {
             let custom_id = if credkey == "zwork_router"
-                || model_id == "zwork-flash"
-                || model_id == "zwork-pro"
+                || matches!(model_id.as_str(), "zwork-flash" | "zwork-pro" | "zwork-ultra" | "zwork-apex")
             {
                 Some(model_id.clone())
             } else {

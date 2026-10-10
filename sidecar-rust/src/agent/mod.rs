@@ -38,26 +38,23 @@ fn log_agent_event(chat_id: &str, run_id: &str, event: &str, payload: Value) {
     }
 }
 
-/// Map a router-facing model id ("zwork-pro" / "zwork-flash", as registered in
-/// Settings) to the real upstream model the zWork Cloud Router serves.
-/// Explicit ids only — unknown ids fall back to flash WITH a log line, never
-/// a silent substring guess (`contains("pro")` mis-mapped ids like
-/// "grok-4-pro-fast" that happen to contain "pro").
+/// Map a router-facing model id (as registered in Settings) to the tier alias
+/// the zWork Cloud Router serves. The router picks the upstream model for each
+/// tier, so the app only ever sends aliases. Legacy ids keep their product
+/// tier; unknown ids fall back to Flash WITH a log line, never a substring
+/// guess (`contains("pro")` mis-mapped ids like "grok-4-pro-fast").
 fn router_real_model(model_id: &str) -> String {
     match model_id {
-        // Hosted lineup (all served via OpenRouter on the router's OpenAI
-        // path). Legacy v4 spellings keep their PRODUCT TIER: v4-flash was
-        // flash, v4.1-flash/v4-pro were pro.
-        "zwork-pro" | "deepseek-v4-pro" | "deepseek-v4.1-flash" => "z-ai/glm-5.3-flash".to_string(),
-        "zwork-flash" | "deepseek-v4-flash" => "deepseek/deepseek-v4-flash-0731".to_string(),
-        "zwork-ultimate" => "deepseek/deepseek-v4.1-flash".to_string(),
+        "zwork-flash" | "zwork-vision" | "deepseek-flash" | "deepseek-v4-flash" | "deepseek/deepseek-v4-flash-0731" => "zwork-flash",
+        "zwork-pro" | "deepseek-v4-pro" | "deepseek-v4.1-flash" | "z-ai/glm-5.3-flash" => "zwork-pro",
+        "zwork-ultra" | "zwork-ultimate" | "deepseek/deepseek-v4.1-flash" => "zwork-ultra",
+        "zwork-apex" => "zwork-apex",
         other => {
-            tracing::warn!(
-                "[agent] unknown router model id '{other}' — falling back to deepseek/deepseek-v4-flash-0731"
-            );
-            "deepseek/deepseek-v4-flash-0731".to_string()
+            tracing::warn!("[agent] unknown router model id '{other}' — falling back to zwork-flash");
+            "zwork-flash"
         }
     }
+    .to_string()
 }
 
 /// Classify a provider error message as transient (retryable) or permanent.
@@ -527,10 +524,11 @@ pub fn run_agent_turn(
     artifact_mode: bool,
     web_search_enabled: bool,
     extra_system_prompt: Option<String>,
+    effort: Option<String>,
 ) -> impl futures_util::Stream<Item = Result<Value, Infallible>> + Send {
     harness_turn::run_agent_turn(
         chat_id, run_id, model_id, user_message, attachments, project_id,
-        plan_mode, auto_approve, artifact_mode, web_search_enabled, extra_system_prompt,
+        plan_mode, auto_approve, artifact_mode, web_search_enabled, extra_system_prompt, effort,
     )
 }
 
