@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   TrendingUp,
   Loader2,
+  CalendarDays,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
@@ -133,6 +134,11 @@ export function AnalyticsPage() {
               loading={loading}
             />
           </div>
+          {!isPaid && !loading && summary?.free_pro_messages_left != null && (
+            <p className="mt-4 text-[12.5px] text-ink-soft">
+              zWork Pro: {summary.free_pro_messages_left} of {summary.free_pro_messages_limit ?? 3} free messages left this month.
+            </p>
+          )}
           {!isPaid && !loading && (
             <div className="mt-4 text-right">
               <p className="text-[12px] text-ink-faint">
@@ -146,6 +152,26 @@ export function AnalyticsPage() {
                 </button>
               </p>
             </div>
+          )}
+        </section>
+
+        {/* Past year heatmap */}
+        <section className="mb-8 rounded-2xl border border-line bg-paper-raised p-6">
+          <div className="mb-5 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CalendarDays className="h-4 w-4 text-ink-soft" />
+              <h2 className="text-[16px] font-bold text-ink">Past year</h2>
+            </div>
+            {summary?.past_year && (
+              <span className="text-[12px] text-ink-faint">
+                {formatNumber(summary.past_year.reduce((n, d) => n + d.roots, 0))} messages
+              </span>
+            )}
+          </div>
+          {loading && !summary ? (
+            <div className="h-[120px] animate-pulse rounded-lg bg-paper-sunken" />
+          ) : (
+            <YearHeatmap rows={summary?.past_year ?? []} />
           )}
         </section>
 
@@ -299,6 +325,71 @@ function UsageBar({
       </div>
       <div className="mt-1.5 flex justify-between text-[11px] text-ink-faint">
         <span>{loading ? "—" : `${formatNumber(used)} of ${formatNumber(limit)}`}</span>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Year heatmap: one cell per day, a column per week (Sunday first)  */
+/* ------------------------------------------------------------------ */
+const HEAT_LEVELS = ["bg-paper-sunken", "bg-accent/25", "bg-accent/45", "bg-accent/70", "bg-accent"];
+const WEEKS = 53;
+
+function YearHeatmap({ rows }: { rows: AnalyticsDay[] }) {
+  // The gateway buckets by UTC day, so the grid is built in UTC too.
+  const counts = new Map(rows.map((r) => [r.day, r.roots + r.continuations]));
+  const today = new Date();
+  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const DAY = 86_400_000;
+  // Start on the Sunday 52 weeks before this week's Sunday.
+  const start = todayUtc - (new Date(todayUtc).getUTCDay() + (WEEKS - 1) * 7) * DAY;
+
+  const cells: { key: string; value: number; future: boolean }[] = [];
+  for (let i = 0; i < WEEKS * 7; i++) {
+    const t = start + i * DAY;
+    const key = new Date(t).toISOString().slice(0, 10);
+    cells.push({ key, value: counts.get(key) ?? 0, future: t > todayUtc });
+  }
+  const max = Math.max(0, ...cells.map((c) => c.value));
+  const level = (v: number) => (v <= 0 || max === 0 ? 0 : Math.min(4, Math.ceil((v / max) * 4)));
+
+  // A month label over the first week that starts in that month.
+  const months: { col: number; label: string }[] = [];
+  for (let w = 0; w < WEEKS; w++) {
+    const d = new Date(start + w * 7 * DAY);
+    const prev = w === 0 ? null : new Date(start + (w - 1) * 7 * DAY);
+    if (!prev || prev.getUTCMonth() !== d.getUTCMonth()) {
+      if (w > WEEKS - 3 && months.length) continue;
+      months.push({ col: w, label: d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" }) });
+    }
+  }
+
+  const grid = { gridTemplateColumns: `repeat(${WEEKS}, minmax(0, 1fr))` };
+  return (
+    <div role="img" aria-label="Activity over the past year">
+      <div className="grid gap-[3px] pb-1.5 text-[10px] text-ink-faint" style={grid}>
+        {months.map((m) => (
+          <span key={`${m.col}-${m.label}`} className="whitespace-nowrap" style={{ gridColumnStart: m.col + 1 }}>
+            {m.label}
+          </span>
+        ))}
+      </div>
+      <div className="grid grid-flow-col grid-rows-7 gap-[3px]" style={grid}>
+        {cells.map((c) => (
+          <div
+            key={c.key}
+            className={cn("aspect-square rounded-[3px]", c.future ? "bg-transparent" : HEAT_LEVELS[level(c.value)])}
+            title={c.future ? undefined : `${formatDayLabel(c.key)}: ${formatNumber(c.value)} requests`}
+          />
+        ))}
+      </div>
+      <div className="mt-3 flex items-center justify-end gap-1.5 text-[10.5px] text-ink-faint">
+        <span>Less</span>
+        {HEAT_LEVELS.map((cls) => (
+          <span key={cls} className={cn("h-2.5 w-2.5 rounded-[3px]", cls)} />
+        ))}
+        <span>More</span>
       </div>
     </div>
   );

@@ -94,6 +94,11 @@ const SECTION_META: Record<Section, { title: string; description: string; icon: 
   },
 };
 
+/** The web app is a plain chat: only appearance and the account apply there. */
+const VISIBLE_SECTIONS: Section[] = IS_WEB
+  ? ["appearance", "account"]
+  : (Object.keys(SECTION_META) as Section[]);
+
 export function SettingsPage() {
   const settings = useApp((s) => s.settings);
   const providers = useApp((s) => s.providers);
@@ -107,7 +112,7 @@ export function SettingsPage() {
 
   const hasModels = (providers?.models ?? []).length > 0;
   const consumeSettingsSection = useApp((s) => s.consumeSettingsSection);
-  const [section, setSection] = useState<Section>("general");
+  const [section, setSection] = useState<Section>(IS_WEB ? "appearance" : "general");
 
   const refreshSettingsPage = useCallback(async () => {
     // The health poll only matters on desktop (local sidecar readiness). On
@@ -129,12 +134,12 @@ export function SettingsPage() {
   }, [refreshSettingsPage]);
 
   useEffect(() => {
-    if (!hasModels) setSection("models");
+    if (!hasModels && !IS_WEB) setSection("models");
   }, [hasModels]);
 
   useEffect(() => {
     const pending = consumeSettingsSection();
-    if (pending) setSection(pending as Section);
+    if (pending && VISIBLE_SECTIONS.includes(pending as Section)) setSection(pending as Section);
   }, [consumeSettingsSection]);
 
   const upsertCustomModel = useApp((s) => s.upsertCustomModel);
@@ -166,7 +171,7 @@ export function SettingsPage() {
         <div className="mx-auto flex w-full max-w-[1080px] gap-0 lg:gap-8 px-0 lg:px-8 py-0 lg:py-6 flex-1 min-h-0">
           {/* Section tabs — horizontal sticky on mobile, vertical sticky on desktop */}
           <nav className="flex shrink-0 flex-row gap-0 lg:flex-col lg:w-[200px] border-b border-line lg:border-b-0 lg:pt-2 overflow-x-auto lg:overflow-visible lg:sticky lg:top-0 bg-paper">
-            {(Object.keys(SECTION_META) as Section[]).map((key) => {
+            {VISIBLE_SECTIONS.map((key) => {
               const meta = SECTION_META[key];
               const isActive = section === key;
               return (

@@ -272,33 +272,21 @@ function sleep(ms: number) {
 }
 
 /**
- * Map an upstream model id (e.g. "deepseek/deepseek-v4-flash-0731",
- * "gemma4:31b") back to its friendly zWork display name. Returns undefined if
- * the id isn't a known upstream we whitelabel, so the caller can fall back to
- * the user-facing model id from the request. Used to scrub upstream provider
- * names from the UI.
- *
- * Order matters: the ultra id (deepseek/deepseek-v4.1-flash) must be matched
- * before the legacy bare deepseek ids, which named the old pro tier.
+ * Map a model id the router echoes (a tier alias, or an upstream id from an
+ * older router) to the user-facing tier id, so upstream providers are never
+ * shown. Flash ids are matched before Pro's: "glm-5.3-flash" contains
+ * "glm-5.3".
  */
 export function whitelabelModelName(upstreamId: string | null | undefined): string | undefined {
   if (!upstreamId) return undefined;
   const id = upstreamId.toLowerCase();
-  // Ultra (Max tier): deepseek v4.1 flash via OpenRouter — the prefixed id is
-  // the current upstream; the bare spelling was the OLD pro tier id.
-  if (id === "deepseek/deepseek-v4.1-flash") return "zwork-ultimate";
-  // Pro tier: GLM 5.3 flash via OpenRouter, plus legacy pro spellings.
-  if (id.includes("glm-5.3") || id.startsWith("z-ai/glm-5.3")) return "zwork-pro";
-  if (id.includes("deepseek-v4.1-flash") || id.includes("deepseek-v4-pro") || id === "deepseek-pro") return "zwork-pro";
-  // Flash tier: deepseek v4 flash via OpenRouter, DeepSeek's direct flash id,
-  // and legacy spellings.
-  if (id.includes("deepseek-v4-flash") || id.includes("deepseek-flash") || id.includes("deepseek-chat")) return "zwork-flash";
-  // Vision family (Gemma 4 31B cloud)
-  if (id.includes("gemma4") || id.includes("gemma-4") || id.includes("gemma")) return "zwork-vision";
-  // Legacy Ultimate (z-ai/glm-5.2 via OpenRouter).
-  if (id.includes("glm-5.2") || id.startsWith("z-ai/glm-5")) return "zwork-ultimate";
-  // Already-friendly ids pass through.
-  if (id === "zwork-flash" || id === "zwork-pro" || id === "zwork-vision" || id === "zwork-ultimate") return upstreamId;
+  if (id === "zwork-flash" || id === "zwork-pro" || id === "zwork-ultra" || id === "zwork-apex") return id;
+  if (id === "zwork-vision") return "zwork-flash";
+  if (id === "zwork-ultimate") return "zwork-ultra";
+  if (id.includes("gpt-6.1-sol")) return "zwork-apex";
+  if (id.includes("gemini")) return "zwork-ultra";
+  if (id.includes("gpt-6-luna") || id.includes("glm-5.3-flash") || id.includes("deepseek")) return "zwork-flash";
+  if (id.includes("glm-5")) return "zwork-pro";
   return undefined;
 }
 
@@ -1280,8 +1268,43 @@ export type StreamEvent =
   | { type: "user_message"; text: string; assistant_id?: string }
   | { type: "run_state"; live: boolean; run_id?: string; cursor?: number; started_at?: number };
 
-/** Web-mode streaming: sends Anthropic-format request to the Axum API and
- *  translates Anthropic SSE chunks into the custom event format the UI expects. */
+/** The web app's only context: who it is and the current date and time. */
+function webSystemPrompt(): string {
+  const now = new Date();
+  const date = now.toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  const time = now.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit", timeZoneName: "short" });
+  return [
+    "You are zWork, a helpful AI work assistant.",
+    `Today is ${date}. The user's local time is ${time}.`,
+    "This is the zWork web app: you can read text and images the user sends, but you cannot browse, open files or use tools here. If a task needs that, say the zWork desktop app can do it.",
+    "Reply in the language the user writes in. Be concise and direct.",
+  ].join("\n");
+}
+
+/** A router refusal in words a user can act on. */
+function routerErrorText(status: number, body: string): string {
+  const code = body.trim().replace(/^"+|"+$/g, "");
+  switch (code) {
+    case "root_request_quota_exceeded":
+      return "You've used this period's allowance. It refills over the next few hours; upgrading raises it.";
+    case "free_pro_messages_used":
+      return "You've used your 3 free zWork Pro messages for this month. zWork Flash is still available.";
+    case "model_requires_pro_tier":
+      return "That model needs the Pro plan.";
+    case "model_requires_max_tier":
+      return "That model needs the Max plan.";
+    case "too_many_active_runs":
+      return "Another reply is still running. Wait for it to finish, then try again.";
+    case "not_signed_in":
+    case "gateway_access_denied":
+      return "Your session expired. Sign in again.";
+    default:
+      return `${status}: ${code || "Request failed"}`;
+  }
+}
+
+/** Web-mode streaming: a plain chat completion through the router, its SSE
+ *  translated into the event format the UI expects. */
 async function streamChatWeb(
   body: {
     chat_id?: string;
@@ -1301,6 +1324,8 @@ async function streamChatWeb(
       kind: string;
     }>;
     web_search_enabled?: boolean;
+    effort?: string;
+    history?: { role: "user" | "assistant"; content: string }[];
   },
   onEvent: (evt: StreamEvent) => void,
   signal?: AbortSignal,
@@ -1309,24 +1334,9 @@ async function streamChatWeb(
     ? window.localStorage.getItem("zwork:cloud-token") || ""
     : "";
 
-  const isPro = body.model === "zwork-pro";
-  const isVision = body.model === "zwork-vision";
-  const isUltimate = body.model === "zwork-ultimate";
-  // Upstream model id sent to the router (never shown to the user). The whole
-  // hosted lineup is served via OpenRouter on the router's OpenAI-shaped
-  // /api/v1/chat/completions path; only vision keeps its alias (the router
-  // resolves it to the Gemma vision model).
-  const upstreamModel = isPro
-    ? "z-ai/glm-5.3-flash"
-    : isVision
-      ? "zwork-vision"
-      : isUltimate
-        ? "deepseek/deepseek-v4.1-flash"
-        : "deepseek/deepseek-v4-flash-0731";
-  // Friendly display name (whitelabel — never expose the upstream id).
-  const friendlyModel = body.model;
-  // Every hosted tier is OpenAI-shape (OpenRouter / vision included).
-  const useOpenAi = true;
+  // The web app is a plain chat on Flash: no tools, no larger tiers (those
+  // need the desktop app). The router picks Flash's upstream model.
+  const friendlyModel = "zwork-flash";
 
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -1337,32 +1347,25 @@ async function streamChatWeb(
   };
   if (cloudToken) headers["authorization"] = `Bearer ${cloudToken}`;
 
-  const userContent = isVision && body.attachments?.length
+  const images = (body.attachments ?? []).filter((a) => a.mime.startsWith("image/") && a.data_url);
+  const userContent = images.length
     ? [
         ...(body.message ? [{ type: "text" as const, text: body.message }] : []),
-        ...body.attachments
-          .filter((a) => a.mime.startsWith("image/") && a.data_url)
-          .map((a) => ({
-            type: "image_url" as const,
-            image_url: { url: a.data_url },
-          })),
+        ...images.map((a) => ({ type: "image_url" as const, image_url: { url: a.data_url } })),
       ]
     : body.message;
 
-  const upstreamBody = useOpenAi
-    ? {
-        model: upstreamModel,
-        messages: [{ role: "user" as const, content: userContent }],
-        stream: true,
-        max_tokens: 16384,
-      }
-    : {
-        model: upstreamModel,
-        system: `You are zWork, an action-oriented AI work assistant created by Zemu Liu. Respond in the same language the user writes in. Be concise, direct, and helpful. If the user writes in English, respond in English.`,
-        messages: [{ role: "user" as const, content: body.message }],
-        stream: true,
-        max_tokens: 16384,
-      };
+  const upstreamBody = {
+    model: friendlyModel,
+    messages: [
+      { role: "system" as const, content: webSystemPrompt() },
+      ...(body.history ?? []),
+      { role: "user" as const, content: userContent },
+    ],
+    stream: true,
+    max_tokens: 16384,
+    ...(body.effort ? { reasoning: { effort: body.effort } } : {}),
+  };
 
   const webChatTitle = body.message
     ? body.message.slice(0, 56)
@@ -1397,8 +1400,7 @@ async function streamChatWeb(
   onEvent({ type: "chat", id: serverChatId || `web_${Date.now()}`, title: webChatTitle });
   onEvent({ type: "status", text: "Thinking" });
 
-  const endpoint = useOpenAi ? "/api/v1/chat/completions" : "/api/v1/messages";
-  const resp = await fetch(u(endpoint), {
+  const resp = await fetch(u("/api/v1/chat/completions"), {
     method: "POST",
     headers,
     body: JSON.stringify(upstreamBody),
@@ -1407,7 +1409,7 @@ async function streamChatWeb(
 
   if (!resp.ok) {
     const text = await resp.text().catch(() => "");
-    onEvent({ type: "error", text: `${resp.status}: ${text}` });
+    onEvent({ type: "error", text: routerErrorText(resp.status, text) });
     onEvent({ type: "end" });
     return;
   }
@@ -1695,6 +1697,8 @@ export async function streamChat(
       kind: string;
     }>;
     web_search_enabled?: boolean;
+    effort?: string;
+    history?: { role: "user" | "assistant"; content: string }[];
   },
   onEvent: (evt: StreamEvent) => void,
   signal?: AbortSignal,

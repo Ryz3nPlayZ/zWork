@@ -10,19 +10,16 @@ function readPreviewParam(): string {
 }
 
 /**
- * Production origins where the bundle runs as a public, no-login chat demo.
- * On these origins the app boots into demo mode automatically: a stub user
- * is seeded (no LoginScreen), chat sends route to the public /api/demo/chat
- * endpoint, and desktop-only nav (Scheduled/Inbox/Connectors/etc.) is hidden.
- *
- * Override at build time with VITE_ZWORK_DEMO_ORIGIN (comma-separated) for
- * staging environments. The desktop app (tauri://localhost) and the vite dev
- * server (localhost:1420) never match, so their behavior is unchanged.
+ * Origins where the bundle runs as a public, no-login chat demo: a stub user
+ * is seeded (no LoginScreen) and sends go to the public /api/demo/chat
+ * endpoint. None by default — app.tryzwork.app requires an account. Set
+ * VITE_ZWORK_DEMO_ORIGIN (comma-separated) at build time to turn it on for
+ * a staging origin, or use ?preview=demo locally.
  */
 const DEMO_ORIGINS: string[] = (() => {
   const env = (import.meta.env.VITE_ZWORK_DEMO_ORIGIN as string | undefined)?.trim();
   if (env) return env.split(",").map((o) => o.trim()).filter(Boolean);
-  return ["https://app.tryzwork.app"];
+  return [];
 })();
 
 function isDemoOrigin(): boolean {

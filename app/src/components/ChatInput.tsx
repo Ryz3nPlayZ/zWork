@@ -347,8 +347,8 @@ export function ChatInput({
 
   // Consume an image pushed from the standalone Share Window picker (its own OS
   // window) via the store. Drain it into the local attachment list so it shows
-  // up as a thumbnail the user can send. The model switch to zwork-vision is
-  // done by the emitter (OverlayChatView); here we just attach the bytes.
+  // up as a thumbnail the user can send. Any model switch is done by the
+  // emitter (OverlayChatView); here we just attach the bytes.
   useEffect(() => {
     if (!pendingShareImage) return;
     const { dataUrl, mime, name } = pendingShareImage;
@@ -1332,16 +1332,22 @@ export function ChatInput({
               size="md"
               onClick={() => fileInputRef.current?.click()}
             />
-            <IconButton
-              icon={<FileText className="h-4 w-4" />}
-              label={artifactMode ? "Make a document: on" : "Make a document"}
-              tooltipSide="top"
-              variant="ghost"
-              size="md"
-              active={artifactMode}
-              onClick={() => setArtifactMode((v) => !v)}
-            />
-            <SecurityPresetPicker value={securityPreset} onChange={setSecurityPreset} />
+            {/* Documents and permissions are agent features; the web app is
+                a plain chat. */}
+            {!IS_WEB && (
+              <>
+                <IconButton
+                  icon={<FileText className="h-4 w-4" />}
+                  label={artifactMode ? "Make a document: on" : "Make a document"}
+                  tooltipSide="top"
+                  variant="ghost"
+                  size="md"
+                  active={artifactMode}
+                  onClick={() => setArtifactMode((v) => !v)}
+                />
+                <SecurityPresetPicker value={securityPreset} onChange={setSecurityPreset} />
+              </>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <ModelPicker />

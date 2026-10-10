@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { isMacOS, usesIntegratedTitleBar } from "../lib/platform";
-import { isDemoMode } from "../lib/preview";
+import { IS_WEB } from "../lib/api";
 import { nativeVibrancySupported, useTranslucencyPref } from "../lib/translucency";
 import { Logo } from "./Logo";
 import { IconButton } from "./IconButton";
@@ -27,7 +27,8 @@ import { useApp, bucketFor, type ChatBucket, type View } from "../lib/store";
 
 export function Sidebar() {
   const isMac = isMacOS();
-  const demo = isDemoMode();
+  // The web app is chat only; everything else lives in the desktop app.
+  const demo = IS_WEB;
   const translucency = useTranslucencyPref();
   const translucentOn = translucency === "on";
   // Native macOS vibrancy shows real desktop behind a fully transparent aside;
@@ -133,7 +134,7 @@ export function Sidebar() {
             onClick={() => openLanding()}
             active={view === "chat" && active === null}
           />
-          {/* Desktop-only views — hidden in the public web demo. */}
+          {/* Desktop-only views — hidden on the web. */}
           {!demo && (
             <SidebarButton
               icon={<Clock />}
@@ -156,15 +157,17 @@ export function Sidebar() {
               actions + backend (taskstore.rs) work, but the UX is being
               redesigned. The route still resolves if `setView("tasks")` is
               called directly. See docs/tasks-backlog.md for the plan. */}
-          <SidebarButton
-            icon={<FolderOpen />}
-            label="Projects"
-            onClick={() => {
-              setActiveProject(null);
-              setView("projects");
-            }}
-            active={view === "projects"}
-          />
+          {!demo && (
+            <SidebarButton
+              icon={<FolderOpen />}
+              label="Projects"
+              onClick={() => {
+                setActiveProject(null);
+                setView("projects");
+              }}
+              active={view === "projects"}
+            />
+          )}
           {!demo && (
             <SidebarButton
               icon={<Plug />}

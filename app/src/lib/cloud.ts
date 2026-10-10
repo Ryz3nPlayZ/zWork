@@ -125,6 +125,11 @@ export interface AnalyticsSummary {
   weekly_used: number;
   past_week: AnalyticsDay[];
   past_month: AnalyticsDay[];
+  /** Daily activity for the last 53 weeks, oldest first (the heatmap). */
+  past_year?: AnalyticsDay[];
+  /** Free plan only: zWork Pro messages left in the rolling 30 days. */
+  free_pro_messages_left?: number | null;
+  free_pro_messages_limit?: number;
   managed_gateway_ready: boolean;
   managed_gateway_status: string;
   billing_enabled: boolean;
@@ -162,7 +167,13 @@ function friendlyCloudError(status: number, statusText: string, body: string) {
               : normalized === "access_code_update_failed"
                 ? "The server could not apply this access code right now."
                 : normalized === "root_request_quota_exceeded"
-                  ? "You have reached the current five-hour quota. Wait for quota to roll forward or upgrade your plan."
+                  ? "You've used this period's allowance. It refills over the next few hours; upgrading raises it."
+                  : normalized === "free_pro_messages_used"
+                    ? "You've used your 3 free zWork Pro messages for this month. zWork Flash is still available."
+                  : normalized === "model_requires_pro_tier"
+                    ? "That model needs the Pro plan."
+                  : normalized === "model_requires_max_tier"
+                    ? "That model needs the Max plan."
                   : normalized === "too_many_active_runs"
                     ? "You already have too many active runs. Wait for one to finish before starting another."
                     : normalized === "hosted_gateway_not_configured"

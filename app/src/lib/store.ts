@@ -31,8 +31,30 @@ const LEGACY_MANAGED_MODEL_IDS = new Set([
   "ollama-minimax-m2-7-cloud",
   "zwork-managed-proxy",
   "minimax-m2.7:cloud",
+  "zwork-vision",
+  "zwork-ultimate",
 ]);
 const ROUTER_BASE_URL = "https://api.tryzwork.app/api";
+/** The hosted lineup. The router picks the upstream model for each tier. */
+const HOSTED_MODELS = [
+  { id: "zwork-flash", name: "zWork Flash" },
+  { id: "zwork-pro", name: "zWork Pro" },
+  { id: "zwork-ultra", name: "zWork Ultra" },
+  { id: "zwork-apex", name: "??????" },
+] as const;
+
+async function upsertHostedModels() {
+  for (const m of HOSTED_MODELS) {
+    await api.upsertCustomModel({
+      id: m.id,
+      name: m.name,
+      shape: "openai",
+      credential: "zwork_router",
+      model_id: m.id,
+      base_url_override: ROUTER_BASE_URL,
+    });
+  }
+}
 const ONBOARDING_DONE_KEY = "zwork:onboarding-completed";
 const SECURITY_PRESET_KEY = "zwork:security-preset";
 export type SecurityPreset = "ask" | "edit" | "plan" | "full";
@@ -56,6 +78,26 @@ function loadSecurityPreset(): SecurityPreset {
 }
 
 const INITIAL_PRESET = loadSecurityPreset();
+
+/** Reasoning effort sent with each message; the router passes it upstream as
+ *  `reasoning.effort`. Medium is the default: GLM otherwise thinks at max. */
+export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
+export const EFFORTS: { id: Effort; label: string }[] = [
+  { id: "low", label: "Low" },
+  { id: "medium", label: "Medium" },
+  { id: "high", label: "High" },
+  { id: "xhigh", label: "Extra" },
+  { id: "max", label: "Max" },
+];
+const EFFORT_KEY = "zwork:effort";
+
+function loadEffort(): Effort {
+  try {
+    const v = localStorage.getItem(EFFORT_KEY);
+    if (v && EFFORTS.some((e) => e.id === v)) return v as Effort;
+  } catch {}
+  return "medium";
+}
 
 function hasCompletedOnboardingLocally(): boolean {
   if (typeof window === "undefined") return false;
@@ -612,39 +654,25 @@ function stripArtifactJunk(text: string): string {
   return out;
 }
 
+/** Prior turns of a chat as plain text, for the web app's stateless calls. */
+function webHistory(chat: Chat | undefined): { role: "user" | "assistant"; content: string }[] {
+  if (!chat) return [];
+  return chat.messages
+    .filter((m) => (m.role === "user" || m.role === "assistant") && m.content.trim())
+    .slice(-20)
+    .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+}
+
 function needsManagedRouterMigration(settings: SettingsPublic): boolean {
   const defaultModel = settings.default_model || "";
   const customModels = settings.custom_models || [];
-  const flash = customModels.find((m) => m.id === "zwork-flash");
-  const pro = customModels.find((m) => m.id === "zwork-pro");
-  const vision = customModels.find((m) => m.id === "zwork-vision");
-  const ultimate = customModels.find((m) => m.id === "zwork-ultimate");
   const hasOldRouter = customModels.some((model) => model.id === "zwork-router");
   const hasLegacyCustomModel = customModels.some((model) => LEGACY_MANAGED_MODEL_IDS.has(model.id) || LEGACY_MANAGED_MODEL_IDS.has(model.model_id));
-
-  // Check that flash/pro/vision/ultimate exist AND have correct
-  // names/model_ids/shapes. The hosted lineup runs via OpenRouter (OpenAI
-  // shape); a stale install still holding DeepSeek-shaped entries gets
-  // migrated by migrateManagedRouterSettings.
-  const flashCorrupted = !flash
-    || flash.name !== "zWork Flash"
-    || flash.model_id !== "deepseek/deepseek-v4-flash-0731"
-    || flash.shape !== "openai"
-    || flash.credential !== "zwork_router";
-  const proCorrupted = !pro
-    || pro.name !== "zWork Pro"
-    || pro.model_id !== "z-ai/glm-5.3-flash"
-    || pro.shape !== "openai"
-    || pro.credential !== "zwork_router";
-  const visionMissing = !vision
-    || vision.name !== "zWork Vision"
-    || vision.model_id !== "zwork-vision"
-    || vision.credential !== "zwork_router";
-  const ultimateMissing = !ultimate
-    || ultimate.name !== "zWork Ultimate"
-    || ultimate.model_id !== "deepseek/deepseek-v4.1-flash"
-    || ultimate.shape !== "openai"
-    || ultimate.credential !== "zwork_router";
+  // Every tier exists, named and pointed at its alias over the OpenAI shape.
+  const lineupStale = HOSTED_MODELS.some(({ id, name }) => {
+    const m = customModels.find((c) => c.id === id);
+    return !m || m.name !== name || m.model_id !== id || m.shape !== "openai" || m.credential !== "zwork_router";
+  });
 
   return (
     LEGACY_MANAGED_BASE_URLS.has(settings.provider_config?.openai?.base_url || "") ||
@@ -652,10 +680,7 @@ function needsManagedRouterMigration(settings: SettingsPublic): boolean {
     LEGACY_MANAGED_MODEL_IDS.has(defaultModel) ||
     hasLegacyCustomModel ||
     hasOldRouter ||
-    flashCorrupted ||
-    proCorrupted ||
-    visionMissing ||
-    ultimateMissing
+    lineupStale
   );
 }
 
@@ -679,41 +704,7 @@ async function migrateManagedRouterSettings(settings: SettingsPublic): Promise<S
     }
   }
 
-  await api.upsertCustomModel({
-    id: "zwork-flash",
-    name: "zWork Flash",
-    shape: "openai",
-    credential: "zwork_router",
-    model_id: "deepseek/deepseek-v4-flash-0731",
-    base_url_override: ROUTER_BASE_URL,
-  });
-
-  await api.upsertCustomModel({
-    id: "zwork-pro",
-    name: "zWork Pro",
-    shape: "openai",
-    credential: "zwork_router",
-    model_id: "z-ai/glm-5.3-flash",
-    base_url_override: ROUTER_BASE_URL,
-  });
-
-  await api.upsertCustomModel({
-    id: "zwork-vision",
-    name: "zWork Vision",
-    shape: "openai",
-    credential: "zwork_router",
-    model_id: "zwork-vision",
-    base_url_override: ROUTER_BASE_URL,
-  });
-
-  await api.upsertCustomModel({
-    id: "zwork-ultimate",
-    name: "zWork Ultimate",
-    shape: "openai",
-    credential: "zwork_router",
-    model_id: "deepseek/deepseek-v4.1-flash",
-    base_url_override: ROUTER_BASE_URL,
-  });
+  await upsertHostedModels();
 
   return await api.getSettings();
 }
@@ -728,41 +719,7 @@ async function syncManagedRouterToken() {
     },
   });
   
-  await api.upsertCustomModel({
-    id: "zwork-flash",
-    name: "zWork Flash",
-    shape: "openai",
-    credential: "zwork_router",
-    model_id: "deepseek/deepseek-v4-flash-0731",
-    base_url_override: ROUTER_BASE_URL,
-  });
-
-  await api.upsertCustomModel({
-    id: "zwork-pro",
-    name: "zWork Pro",
-    shape: "openai",
-    credential: "zwork_router",
-    model_id: "z-ai/glm-5.3-flash",
-    base_url_override: ROUTER_BASE_URL,
-  });
-
-  await api.upsertCustomModel({
-    id: "zwork-vision",
-    name: "zWork Vision",
-    shape: "openai",
-    credential: "zwork_router",
-    model_id: "zwork-vision",
-    base_url_override: ROUTER_BASE_URL,
-  });
-
-  await api.upsertCustomModel({
-    id: "zwork-ultimate",
-    name: "zWork Ultimate",
-    shape: "openai",
-    credential: "zwork_router",
-    model_id: "deepseek/deepseek-v4.1-flash",
-    base_url_override: ROUTER_BASE_URL,
-  });
+  await upsertHostedModels();
 }
 
 export interface User {
@@ -909,6 +866,8 @@ interface AppState {
   /** Security preset bundles auto-approve, plan-mode, and web-search toggles. */
   securityPreset: "ask" | "edit" | "plan" | "full";
   setSecurityPreset: (preset: "ask" | "edit" | "plan" | "full") => void;
+  effort: Effort;
+  setEffort: (effort: Effort) => void;
 
   // Subagent state
   subagents: SubagentTask[];
@@ -1260,6 +1219,13 @@ export const useApp = create<AppState>((set, get) => ({
   extensionConnected: null,
   webSearchEnabled: SECURITY_PRESET_META[INITIAL_PRESET].webSearchEnabled,
   setWebSearchEnabled: (v) => set({ webSearchEnabled: v }),
+  effort: loadEffort(),
+  setEffort: (effort) => {
+    try {
+      localStorage.setItem(EFFORT_KEY, effort);
+    } catch {}
+    set({ effort });
+  },
   securityPreset: INITIAL_PRESET,
   setSecurityPreset: (preset) => {
     try {
@@ -1569,7 +1535,7 @@ export const useApp = create<AppState>((set, get) => ({
       // Mark onboarding done in web (no local sidecar)
       rememberOnboardingDone(true);
 
-      // Provide a synthetic providers object so the model picker shows zWork Flash/Pro
+      // The web app runs Flash only; the larger tiers need the desktop app.
       const webProviders: ProvidersResponse = {
         credentials: {},
         default_model: "zwork-flash",
@@ -1577,40 +1543,10 @@ export const useApp = create<AppState>((set, get) => ({
           {
             id: "zwork-flash",
             name: "zWork Flash",
-            subtitle: "Fast and efficient",
+            subtitle: "Fast and efficient, with vision",
             shape: "openai",
             credential: "managed",
             model_id: "zwork-flash",
-            configured: true,
-            synthesized: false,
-          },
-          {
-            id: "zwork-pro",
-            name: "zWork Pro",
-            subtitle: "Most capable model",
-            shape: "openai",
-            credential: "managed",
-            model_id: "zwork-pro",
-            configured: true,
-            synthesized: false,
-          },
-          {
-            id: "zwork-vision",
-            name: "zWork Vision",
-            subtitle: "Vision and images",
-            shape: "openai",
-            credential: "managed",
-            model_id: "zwork-vision",
-            configured: true,
-            synthesized: false,
-          },
-          {
-            id: "zwork-ultimate",
-            name: "zWork Ultimate",
-            subtitle: "Frontier model · Max plan",
-            shape: "openai",
-            credential: "managed",
-            model_id: "zwork-ultimate",
             configured: true,
             synthesized: false,
           },
@@ -2334,6 +2270,9 @@ export const useApp = create<AppState>((set, get) => ({
     const autoApproveDestructive = options?.autoApproveDestructive ?? get().autoApproveDestructive;
     const activeProjectId = get().activeProjectId;
 
+    // The web app has no server-side agent, so it sends the thread itself.
+    const priorHistory = IS_WEB && currentId ? webHistory(get().chats[currentId]) : undefined;
+
     // Optimistically place the user message into a local chat.
     // If there's no active chat yet, create a provisional client-side one; the
     // server will assign the real id via the "chat" SSE event and we reconcile.
@@ -2476,6 +2415,8 @@ export const useApp = create<AppState>((set, get) => ({
           auto_approve_destructive: autoApproveDestructive,
           attachments,
           web_search_enabled: get().webSearchEnabled,
+          effort: get().effort,
+          history: priorHistory,
         },
         (evt) => {
           // Any event means the stream is alive — push the silence watchdog
