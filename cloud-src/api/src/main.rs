@@ -127,17 +127,27 @@ struct GatewayConfig {
     router_label: String,
     providers: Vec<GatewayProvider>,
     bearer_token: String,
-    root_requests_per_5h: i64,
-    weekly_limit_multiplier: i64,
     max_concurrent_roots: i64,
     pro_max_concurrent_roots: i64,
     max_max_concurrent_roots: i64,
     dev_coupon_codes: Vec<String>,
-    /// Total root requests available to ALL free users combined per 5 hours.
-    /// Each free user gets an equal share: pool / active_free_users (floor 5).
-    free_tier_pool_5h: i64,
-    pro_root_requests_per_5h: i64,
-    max_root_requests_per_5h: i64,
+    /// Weekly API spend per plan, in USD. Pro defaults to $4 a month of its
+    /// $12 price; Max to the same third of its $50.
+    pro_weekly_usd: f64,
+    max_weekly_usd: f64,
+    /// One weekly pool shared by all free users, split evenly across those
+    /// active this week and clamped per user.
+    free_pool_weekly_usd: f64,
+    free_user_weekly_min_usd: f64,
+    free_user_weekly_max_usd: f64,
+    /// Share of the weekly budget one 5-hour window may use.
+    five_hour_share: f64,
+    /// Pro messages a free user may start per 30 days (outside the pool).
+    free_pro_messages_30d: i64,
+    /// How far past the budget a run already under way may go.
+    continuation_headroom: f64,
+    /// Dollars per usage unit shown in the app (≈ one typical Flash message).
+    usage_unit_usd: f64,
 }
 
 #[derive(Clone)]
@@ -158,6 +168,10 @@ enum GatewayProtocol {
 
 fn env_or(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_string())
+}
+
+fn env_f64(key: &str, default: f64) -> f64 {
+    std::env::var(key).ok().and_then(|v| v.trim().parse::<f64>().ok()).unwrap_or(default)
 }
 
 fn env_bool(key: &str, default: bool) -> bool {
@@ -233,231 +247,117 @@ fn auth_endpoint_url(auth_internal_base: &Url, endpoint: &str) -> Url {
         .unwrap_or_else(|_| panic!("failed to build auth endpoint URL: {endpoint}"))
 }
 
-/// Allowed model IDs that the router will serve (includes app aliases).
-///
-/// Product lineup (all three tiers are served via OpenRouter):
-///   - zwork-flash    → deepseek/deepseek-v4-flash-0731
-///   - zwork-pro      → z-ai/glm-5.3-flash
-///   - zwork-ultimate → deepseek/deepseek-v4.1-flash
-/// `deepseek-flash` (DeepSeek's own API id) serves the public demo and
-/// compaction through the DeepSeek providers directly. The bare v4 names are
-/// legacy client spellings; resolve_upstream_model normalizes them.
-const ALLOWED_MODELS: &[&str] = &[
-    "deepseek-flash",
-    "deepseek/deepseek-v4-flash-0731",
-    "z-ai/glm-5.3-flash",
-    "deepseek/deepseek-v4.1-flash",
-    // Legacy DeepSeek ids from older desktop clients.
-    "deepseek-v4-flash",
-    "deepseek-v4.1-flash",
-    "deepseek-v4-pro",
-    "zwork-flash",
-    "zwork-pro",
-    "zwork-vision",
-    "zwork-ultimate",
-    "gemma4:31b",
-    "llama-3.2-90b-vision",
-    "meta-llama/llama-4-scout-17b-16e-instruct",
-];
-/// Models restricted to pro+ tiers.
-const PRO_ONLY_MODELS: &[&str] = &[
-    "z-ai/glm-5.3-flash",
-    // Legacy pro-tier spellings from older desktop clients.
-    "deepseek-v4.1-flash",
-    "deepseek-v4-pro",
-    "zwork-pro",
-    "zwork-vision",
-    "gemma4:31b",
-    "meta-llama/llama-4-scout-17b-16e-instruct",
-];
-/// Models restricted to the max tier only (frontier models).
-/// Checked in BOTH gateway handlers; the OpenAI-shape path (`ai_proxy`) did not
-/// previously validate models at all, so this gate is added there alongside
-/// the allowlist check.
-const MAX_ONLY_MODELS: &[&str] = &["zwork-ultimate", "deepseek/deepseek-v4.1-flash"];
-
-/// Resolve app-facing model aliases and legacy ids to the actual upstream
-/// model ID. Legacy DeepSeek spellings keep their PRODUCT TIER: v4-flash was
-/// the flash tier and v4.1-flash/v4-pro were the pro tier, so they map onto
-/// the current tier's model, not the id that most resembles them.
-fn resolve_upstream_model(model: &str) -> &str {
-    match model {
-        "zwork-flash" | "deepseek-v4-flash" => "deepseek/deepseek-v4-flash-0731",
-        "zwork-pro" | "deepseek-v4-pro" | "deepseek-v4.1-flash" => "z-ai/glm-5.3-flash",
-        "zwork-ultimate" => "deepseek/deepseek-v4.1-flash",
-        "zwork-vision" => "gemma4:31b",
-        other => other,
-    }
+/// One product tier of the hosted lineup. Every tier is served by OpenRouter
+/// with `:floor` routing (cheapest healthy provider first).
+struct HostedTier {
+    /// App-facing id (what clients send as `model`).
+    alias: &'static str,
+    /// OpenRouter ids, tried in order (later ones are fallbacks). Flash
+    /// spreads paid runs across all three; see `upstream_candidates`.
+    upstream: &'static [&'static str],
+    /// Lowest plan that may use the tier ("free" < "pro" < "max").
+    plan: &'static str,
 }
 
-fn load_gateway_providers() -> Vec<GatewayProvider> {
-    let mut providers = Vec::new();
+/// The hosted lineup. Plan access: Free gets Flash (its cheapest model only)
+/// plus `free_pro_messages_30d` Pro messages; Pro unlocks up to Ultra; Max
+/// unlocks everything. Usage is metered in dollars of OpenRouter cost, so a
+/// tier's weight is simply what it costs (see `enforce_usage`).
+const HOSTED_TIERS: &[HostedTier] = &[
+    HostedTier {
+        alias: "zwork-flash",
+        upstream: &[
+            "openai/gpt-6-luna:floor",
+            "z-ai/glm-5.3-flash:floor",
+            "deepseek/deepseek-v4.1-flash:floor",
+        ],
+        plan: "free",
+    },
+    HostedTier { alias: "zwork-pro", upstream: &["z-ai/glm-5.3:floor"], plan: "free" },
+    HostedTier { alias: "zwork-ultra", upstream: &["google/gemini-3.8-flash:floor"], plan: "pro" },
+    HostedTier { alias: "zwork-apex", upstream: &["openai/gpt-6.1-sol:floor"], plan: "max" },
+];
 
-    let api_key = std::env::var("DEEPSEEK_API_KEY").unwrap_or_default();
-    if !api_key.trim().is_empty() {
-        // DeepSeek exposes TWO wire formats over the same API key:
-        //   - https://api.deepseek.com/anthropic  → Anthropic Messages shape
-        //   - https://api.deepseek.com             → OpenAI Chat Completions shape
-        // The two gateway handlers (`ai_proxy_anthropic` for /api/v1/messages,
-        // `ai_proxy` for /api/v1/chat/completions) each filter providers by
-        // `protocol`, so a single provider entry can only serve one shape.
-        // Registering DeepSeek under BOTH protocols lets the desktop sidecar
-        // (Anthropic shape) and the web demo (OpenAI shape) share the same
-        // upstream — without this, only one endpoint has a provider and the
-        // other returns a bare 502 with an empty failure list.
-        //
-        // `DEEPSEEK_PROTOCOL` is preserved as a backward-compat hint but is no
-        // longer exclusive: if it pins "anthropic" or "openai" explicitly, only
-        // that variant registers; otherwise (unset / "both" / anything else)
-        // both variants register.
-        let primary = env_or("DEEPSEEK_MODEL_PRIMARY", "deepseek-flash");
-        let fallback = env_or("DEEPSEEK_MODEL_FALLBACK", "deepseek-flash");
-        let pin = std::env::var("DEEPSEEK_PROTOCOL")
-            .unwrap_or_default()
-            .trim()
-            .to_ascii_lowercase();
-        let register_anthropic = pin.is_empty() || pin == "both" || pin == "anthropic";
-        let register_openai = pin.is_empty() || pin == "both" || pin == "openai";
-
-        if register_anthropic {
-            providers.push(GatewayProvider {
-                name: "DeepSeek".to_string(),
-                base_url: env_or("DEEPSEEK_BASE_URL", "https://api.deepseek.com/anthropic"),
-                api_key: api_key.clone(),
-                primary_model: primary.clone(),
-                fallback_model: fallback.clone(),
-                protocol: GatewayProtocol::Anthropic,
-            });
-        }
-        if register_openai {
-            providers.push(GatewayProvider {
-                name: "DeepSeek".to_string(),
-                base_url: env_or("DEEPSEEK_OPENAI_BASE_URL", "https://api.deepseek.com"),
-                api_key: api_key.clone(),
-                primary_model: primary.clone(),
-                fallback_model: fallback.clone(),
-                protocol: GatewayProtocol::OpenAi,
-            });
-        }
-    }
-
-    // Load Groq provider
-    let groq_key = std::env::var("GROQ_API_KEY").unwrap_or_default();
-    if !groq_key.trim().is_empty() {
-        providers.push(GatewayProvider {
-            name: "Groq".to_string(),
-            base_url: env_or("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
-            api_key: groq_key,
-            primary_model: env_or("GROQ_MODEL_PRIMARY", "meta-llama/llama-4-scout-17b-16e-instruct"),
-            fallback_model: env_or("GROQ_MODEL_FALLBACK", "meta-llama/llama-4-scout-17b-16e-instruct"),
-            protocol: GatewayProtocol::OpenAi,
-        });
-    }
-
-    // Load OpenRouter providers (the whole hosted lineup runs through
-    // OpenRouter: pro = z-ai/glm-5.3-flash, flash =
-    // deepseek/deepseek-v4-flash-0731, ultra = deepseek/deepseek-v4.1-flash —
-    // the v4.1 id only exists on OpenRouter; DeepSeek's own API rejects it).
-    // OpenRouter is OpenAI-compatible: POST {base_url}/chat/completions with
-    // `Authorization: Bearer {key}`. The X-Title and HTTP-Referer headers are
-    // optional but set them for attribution/ranking on the OpenRouter dashboard.
-    // One provider entry per tier: the gateway routes by matching the resolved
-    // model id against each provider's primary/fallback slot.
-    let openrouter_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
-    if !openrouter_key.trim().is_empty() {
-        let base_url = env_or("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1");
-        let openrouter_tier = |primary: String| GatewayProvider {
-            name: "OpenRouter".to_string(),
-            base_url: base_url.clone(),
-            api_key: openrouter_key.clone(),
-            fallback_model: primary.clone(),
-            primary_model: primary,
-            protocol: GatewayProtocol::OpenAi,
-        };
-        // Pro tier.
-        providers.push(openrouter_tier(env_or("OPENROUTER_MODEL", "z-ai/glm-5.3-flash")));
-        // Flash tier.
-        providers.push(openrouter_tier(env_or(
-            "OPENROUTER_MODEL_FLASH",
-            "deepseek/deepseek-v4-flash-0731",
-        )));
-        // Ultra tier (max).
-        providers.push(openrouter_tier(env_or(
-            "OPENROUTER_MODEL_ULTRA",
-            "deepseek/deepseek-v4.1-flash",
-        )));
-    }
-
-    // Load up to 5 Ollama/Vision providers
-    for i in 1..=5 {
-        let key_env = format!("OLLAMA_API_KEY_{}", i);
-        let base_env = format!("OLLAMA_BASE_URL_{}", i);
-        let model_env = format!("OLLAMA_MODEL_{}", i);
-
-        let key = std::env::var(&key_env).unwrap_or_default();
-        let base_url = std::env::var(&base_env).unwrap_or_default();
-        let model = std::env::var(&model_env).unwrap_or_else(|_| "gemma4:31b".to_string());
-
-        if !base_url.trim().is_empty() {
-            providers.push(GatewayProvider {
-                name: format!("OllamaCloud_{}", i),
-                base_url,
-                api_key: key,
-                primary_model: model.clone(),
-                fallback_model: model,
-                protocol: GatewayProtocol::OpenAi,
-            });
-        }
-    }
-
-    providers
-}
-
-/// Ensure assistant messages include a thinking block for DeepSeek compatibility.
-/// DeepSeek requires thinking content to be passed back in multi-turn conversations.
-fn ensure_thinking_blocks(body: &mut Value) {
-    let Some(messages) = body.get_mut("messages").and_then(|m| m.as_array_mut()) else {
-        return;
+/// Map a requested model id to its tier. Older desktop builds send upstream
+/// ids instead of aliases; those keep the PRODUCT TIER they were sold as
+/// (glm-5.3-flash and the v4.1/v4-pro spellings were Pro, v4.1-flash with the
+/// vendor prefix was Ultimate, everything flash/vision-ish was Flash).
+fn hosted_tier(model: &str) -> Option<&'static HostedTier> {
+    let alias = match model {
+        "zwork-flash" | "zwork-vision" | "deepseek-flash" | "deepseek-v4-flash"
+        | "deepseek/deepseek-v4-flash-0731" | "gemma4:31b" | "llama-3.2-90b-vision"
+        | "meta-llama/llama-4-scout-17b-16e-instruct" => "zwork-flash",
+        "zwork-pro" | "z-ai/glm-5.3-flash" | "deepseek-v4.1-flash" | "deepseek-v4-pro" => "zwork-pro",
+        "zwork-ultra" | "zwork-ultimate" | "deepseek/deepseek-v4.1-flash" => "zwork-ultra",
+        "zwork-apex" => "zwork-apex",
+        _ => return None,
     };
-    for msg in messages.iter_mut() {
-        if msg.get("role").and_then(|r| r.as_str()) != Some("assistant") {
-            continue;
-        }
-        let Some(content) = msg.get_mut("content") else {
-            continue;
-        };
-        // If content is a string, convert to content blocks with a synthetic thinking block
-        if let Some(text) = content.as_str() {
-            let mut blocks: Vec<Value> = vec![serde_json::json!({
-                "type": "thinking",
-                "thinking": "(thinking omitted)",
-                "signature": "synthetic"
-            })];
-            if !text.is_empty() {
-                blocks.push(serde_json::json!({"type": "text", "text": text}));
-            }
-            *content = Value::Array(blocks);
-            continue;
-        }
-        // If content is already content blocks, ensure first block is thinking
-        if let Some(blocks) = content.as_array_mut() {
-            let has_thinking = blocks
-                .first()
-                .and_then(|b| b.get("type"))
-                .and_then(|t| t.as_str())
-                == Some("thinking");
-            if !has_thinking {
-                blocks.insert(
-                    0,
-                    serde_json::json!({
-                        "type": "thinking",
-                        "thinking": "(thinking omitted)",
-                        "signature": "synthetic"
-                    }),
-                );
-            }
+    HOSTED_TIERS.iter().find(|t| t.alias == alias)
+}
+
+fn plan_rank(plan: &str) -> u8 {
+    match plan {
+        "max" => 2,
+        "pro" => 1,
+        _ => 0,
+    }
+}
+
+/// Upstream models to try for a request, preferred first. Free users stay on
+/// Flash's cheapest model (the others are only failover). Paid Flash runs are
+/// spread across the three models by run id, so one run stays on one model
+/// and keeps its prompt cache warm.
+fn upstream_candidates(tier: &HostedTier, user_plan: &str, run_id: &str) -> Vec<&'static str> {
+    let mut models = tier.upstream.to_vec();
+    if tier.alias == "zwork-flash" && plan_rank(user_plan) > 0 && !run_id.is_empty() {
+        let spread = run_id.bytes().fold(0usize, |h, b| h.wrapping_mul(31).wrapping_add(b as usize));
+        let n = models.len();
+        models.rotate_left(spread % n);
+    }
+    models
+}
+
+/// The router's only upstream is OpenRouter. It is registered twice: the
+/// OpenAI Chat Completions shape (current desktop and web clients) and the
+/// Anthropic Messages shape (older desktop builds and the public demo).
+fn load_gateway_providers() -> Vec<GatewayProvider> {
+    let api_key = std::env::var("OPENROUTER_API_KEY").unwrap_or_default();
+    if api_key.trim().is_empty() {
+        return Vec::new();
+    }
+    let cheapest = HOSTED_TIERS[0].upstream[0].to_string();
+    let provider = |base_url: String, protocol| GatewayProvider {
+        name: "OpenRouter".to_string(),
+        base_url,
+        api_key: api_key.clone(),
+        primary_model: cheapest.clone(),
+        fallback_model: cheapest.clone(),
+        protocol,
+    };
+    vec![
+        provider(env_or("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"), GatewayProtocol::OpenAi),
+        // POST {base}/v1/messages.
+        provider(env_or("OPENROUTER_ANTHROPIC_BASE_URL", "https://openrouter.ai/api"), GatewayProtocol::Anthropic),
+    ]
+}
+
+/// Ask OpenRouter to report the billed cost in the response's `usage`, and
+/// pass the effort level through as its unified `reasoning` parameter.
+fn prepare_upstream_body(body: &mut Value, model: &str) {
+    let Some(obj) = body.as_object_mut() else { return };
+    obj.insert("model".to_string(), Value::String(model.to_string()));
+    obj.insert("usage".to_string(), serde_json::json!({ "include": true }));
+    // Effort may arrive as OpenAI's `reasoning_effort`; OpenRouter's own
+    // `reasoning.effort` wins when both are set.
+    if let Some(effort) = obj.remove("reasoning_effort").and_then(|v| v.as_str().map(str::to_string)) {
+        if !obj.contains_key("reasoning") && is_effort(&effort) {
+            obj.insert("reasoning".to_string(), serde_json::json!({ "effort": effort }));
         }
     }
+}
+
+fn is_effort(effort: &str) -> bool {
+    matches!(effort, "low" | "medium" | "high" | "xhigh" | "max")
 }
 
 #[derive(Deserialize)]
@@ -677,8 +577,12 @@ struct AnalyticsSummary {
     five_hour_used: i64,
     weekly_limit: i64,
     weekly_used: i64,
+    /// Pro messages a free user has left this 30 days; None on paid plans.
+    free_pro_messages_left: Option<i64>,
+    free_pro_messages_limit: i64,
     past_week: Vec<AnalyticsDay>,
     past_month: Vec<AnalyticsDay>,
+    past_year: Vec<AnalyticsDay>,
     managed_gateway_ready: bool,
     managed_gateway_status: String,
     billing_enabled: bool,
@@ -1198,6 +1102,17 @@ async fn bootstrap_schema(db: &PgPool) -> Result<(), sqlx::Error> {
         r#"
         ALTER TABLE gateway_requests
         ADD COLUMN IF NOT EXISTS run_trigger TEXT;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    // The product tier a request was billed as (zwork-flash, zwork-pro, …):
+    // free users' Pro allowance is counted from it. NULL before 0.7.
+    sqlx::query(
+        r#"
+        ALTER TABLE gateway_requests
+        ADD COLUMN IF NOT EXISTS model_tier TEXT;
         "#,
     )
     .execute(db)
@@ -1862,97 +1777,120 @@ async fn better_auth_sign_up_email(
     }
 }
 
-/// Resolve the 5-hour root-request limit for a user, applying dynamic
-/// free-tier pooling when the user is on the free plan.
-///
-/// Free users share a fixed pool (`free_tier_pool_5h`). Each active free
-/// user gets an equal slice: pool / active_free_users (floor 5).
-///
-/// Pro and Max users have fixed limits unaffected by the pool.
-async fn resolve_user_5h_limit(state: &AppState, tier: &str) -> i64 {
-    match tier {
-        "pro" => state.gateway.pro_root_requests_per_5h,
-        "max" => state.gateway.max_root_requests_per_5h,
-        _ => {
-            if state.gateway.free_tier_pool_5h <= 0 {
-                state.gateway.root_requests_per_5h
-            } else {
-                let active_free: i64 = sqlx::query_scalar(
-                    r#"
-                    SELECT COUNT(DISTINCT user_id)
-                    FROM (
-                        SELECT gr.user_id
-                        FROM gateway_requests gr
-                        JOIN app_users au ON au.user_id = gr.user_id
-                        WHERE au.tier = 'free'
-                          AND gr.request_kind = 'root'
-                          AND gr.created_at >= NOW() - INTERVAL '5 hours'
-                        GROUP BY gr.user_id
-                    ) sub
-                    "#,
-                )
-                .fetch_one(&state.db)
-                .await
-                .unwrap_or(1)
-                .max(1);
-                (state.gateway.free_tier_pool_5h / active_free).max(5)
-            }
-        }
-    }
+/// A user's API-spend allowance, in USD.
+struct UsageLimits {
+    five_hour_usd: f64,
+    weekly_usd: f64,
 }
 
-/// Enforce rate limits with dynamic free-tier pooling.
-/// Pro model requests (deepseek-v4-pro / zwork-pro and the legacy
-/// deepseek-v4.1-flash spelling) count as 3x usage.
-async fn enforce_root_rate_limit(state: &AppState, user_id: &str, tier: &str, requested_model: &str) -> Result<(), StatusCode> {
-    let limit_5h = resolve_user_5h_limit(state, tier).await;
+/// Pro and Max get a fixed weekly budget. Free users split one weekly pool
+/// evenly across the free users active this week, clamped to a floor (so a
+/// busy week still leaves room for some work) and a ceiling (so a quiet week
+/// doesn't hand one user the whole pool). A 5-hour window allows a share of
+/// the week.
+async fn resolve_usage_limits(state: &AppState, plan: &str) -> UsageLimits {
+    let g = &state.gateway;
+    let weekly_usd = match plan {
+        "pro" => g.pro_weekly_usd,
+        "max" => g.max_weekly_usd,
+        _ => {
+            let active_free: i64 = sqlx::query_scalar(
+                r#"
+                SELECT COUNT(DISTINCT gr.user_id)
+                FROM gateway_requests gr
+                JOIN app_users au ON au.user_id = gr.user_id
+                WHERE au.tier = 'free'
+                  AND gr.created_at >= NOW() - INTERVAL '7 days'
+                "#,
+            )
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or(1)
+            .max(1);
+            (g.free_pool_weekly_usd / active_free as f64)
+                .clamp(g.free_user_weekly_min_usd, g.free_user_weekly_max_usd)
+        }
+    };
+    UsageLimits { five_hour_usd: weekly_usd * g.five_hour_share, weekly_usd }
+}
 
-    // Weight pro model requests as 3x in the usage count
-    let pro_models = ["z-ai/glm-5.3-flash", "deepseek-v4.1-flash", "deepseek-v4-pro", "zwork-pro"];
-    let request_weight: i64 = if pro_models.contains(&requested_model) { 3 } else { 1 };
-
-    // Count historical usage with pro-model weighting
-    let used_last_5h: i64 = sqlx::query_scalar(
+/// Dollars a user spent in the last `hours`. A free user's Pro messages come
+/// out of their separate allowance, not the shared pool, so they're left out.
+async fn spent_usd(state: &AppState, user_id: &str, plan: &str, hours: i64) -> Result<f64, StatusCode> {
+    sqlx::query_scalar(
         r#"
-        SELECT COALESCE(SUM(
-            CASE WHEN model_id IN ('z-ai/glm-5.3-flash', 'deepseek-v4.1-flash', 'deepseek-v4-pro', 'zwork-pro') THEN 3 ELSE 1 END
-        ), 0)
+        SELECT COALESCE(SUM(estimated_cost_usd), 0)::float8
+        FROM gateway_requests
+        WHERE user_id = $1
+          AND created_at >= NOW() - make_interval(hours => $2::int)
+          AND NOT ($3 AND COALESCE(model_tier, '') = 'zwork-pro')
+        "#,
+    )
+    .bind(user_id)
+    .bind(hours as i32)
+    .bind(plan_rank(plan) == 0)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+/// Pro messages a free user started in the last 30 days.
+async fn free_pro_messages_used(state: &AppState, user_id: &str) -> Result<i64, StatusCode> {
+    sqlx::query_scalar(
+        r#"
+        SELECT COUNT(*)
         FROM gateway_requests
         WHERE user_id = $1
           AND request_kind = 'root'
-          AND created_at >= NOW() - INTERVAL '5 hours'
+          AND model_tier = 'zwork-pro'
+          AND created_at >= NOW() - INTERVAL '30 days'
         "#,
     )
     .bind(user_id)
     .fetch_one(&state.db)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
 
-    if used_last_5h + request_weight > limit_5h {
-        return Err(StatusCode::TOO_MANY_REQUESTS);
+/// Gate a request on plan access and spend. Usage is metered in dollars of
+/// upstream cost, so a model's weight is exactly what it costs: a Pro message
+/// uses about ten Flash messages' worth. Roots are refused once a window's
+/// budget is spent; continuations of a run already under way get headroom
+/// (`continuation_headroom`) so a task isn't cut off mid-step, which still
+/// stops a runaway loop.
+async fn enforce_usage(
+    state: &AppState,
+    user: &AppUser,
+    tier: &HostedTier,
+    kind: RequestKind,
+) -> Result<(), (StatusCode, String)> {
+    let deny = |code: &str| (StatusCode::TOO_MANY_REQUESTS, code.to_string());
+    let internal = |_: StatusCode| (StatusCode::INTERNAL_SERVER_ERROR, "gateway_rate_limit_failed".to_string());
+    let is_root = matches!(kind, RequestKind::Root);
+    let free = plan_rank(&user.tier) == 0;
+
+    if plan_rank(&user.tier) < plan_rank(tier.plan) {
+        let code = if tier.plan == "max" { "model_requires_max_tier" } else { "model_requires_pro_tier" };
+        return Err((StatusCode::FORBIDDEN, code.to_string()));
     }
 
-    let weekly_limit = limit_5h * state.gateway.weekly_limit_multiplier.max(1);
-    let used_last_7d: i64 = sqlx::query_scalar(
-        r#"
-        SELECT COALESCE(SUM(
-            CASE WHEN model_id IN ('z-ai/glm-5.3-flash', 'deepseek-v4.1-flash', 'deepseek-v4-pro', 'zwork-pro') THEN 3 ELSE 1 END
-        ), 0)
-        FROM gateway_requests
-        WHERE user_id = $1
-          AND request_kind = 'root'
-          AND created_at >= NOW() - INTERVAL '7 days'
-        "#,
-    )
-    .bind(user_id)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    if used_last_7d + request_weight > weekly_limit {
-        return Err(StatusCode::TOO_MANY_REQUESTS);
+    if free && tier.alias == "zwork-pro" {
+        if is_root && free_pro_messages_used(state, &user.user_id).await.map_err(internal)? >= state.gateway.free_pro_messages_30d {
+            return Err(deny("free_pro_messages_used"));
+        }
+    } else {
+        let limits = resolve_usage_limits(state, &user.tier).await;
+        let headroom = if is_root { 1.0 } else { state.gateway.continuation_headroom };
+        let spent_5h = spent_usd(state, &user.user_id, &user.tier, 5).await.map_err(internal)?;
+        let spent_7d = spent_usd(state, &user.user_id, &user.tier, 24 * 7).await.map_err(internal)?;
+        if spent_5h >= limits.five_hour_usd * headroom || spent_7d >= limits.weekly_usd * headroom {
+            return Err(deny("root_request_quota_exceeded"));
+        }
     }
 
+    if !is_root {
+        return Ok(());
+    }
     let active_roots: i64 = sqlx::query_scalar(
         r#"
         SELECT COUNT(DISTINCT run_id)
@@ -1963,21 +1901,25 @@ async fn enforce_root_rate_limit(state: &AppState, user_id: &str, tier: &str, re
           AND created_at >= NOW() - INTERVAL '30 minutes'
         "#,
     )
-    .bind(user_id)
+    .bind(&user.user_id)
     .fetch_one(&state.db)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let concurrent_limit = match tier {
+    .map_err(|_| internal(StatusCode::INTERNAL_SERVER_ERROR))?;
+    let concurrent_limit = match user.tier.as_str() {
         "pro" => state.gateway.pro_max_concurrent_roots,
         "max" => state.gateway.max_max_concurrent_roots,
         _ => state.gateway.max_concurrent_roots,
     };
     if active_roots >= concurrent_limit {
-        return Err(StatusCode::TOO_MANY_REQUESTS);
+        return Err(deny("too_many_active_runs"));
     }
-
     Ok(())
+}
+
+/// Spend expressed in usage units (one unit ≈ one typical Flash message), the
+/// number the app shows on its usage bars.
+fn usd_to_units(state: &AppState, usd: f64) -> i64 {
+    (usd / state.gateway.usage_unit_usd.max(1e-6)).round() as i64
 }
 
 async fn mark_gateway_request_upstream(
@@ -2061,31 +2003,30 @@ fn redact_image_data(value: &Value) -> Value {
     }
 }
 
-/// Very rough cost estimation from provider/model token counts. Returns None when
-/// pricing is unknown. Prices are per 1M tokens (input / output).
-fn estimate_cost(provider: &str, model: &str, input: Option<i64>, output: Option<i64>) -> Option<f64> {
-    let (input_price_1m, output_price_1m): (f64, f64) = match (provider, model) {
-        ("DeepSeek", "deepseek-v4-pro") => (1.74, 3.48),
-        ("DeepSeek", "deepseek-flash") => (0.14, 0.28),
-        // OpenRouter lineup (prices per OpenRouter's model catalog, per 1M).
-        ("OpenRouter", "deepseek/deepseek-v4-flash-0731") => (0.04, 0.08),
-        ("OpenRouter", "z-ai/glm-5.3-flash") => (0.09, 0.30),
-        ("OpenRouter", "deepseek/deepseek-v4.1-flash") => (0.15, 0.60),
-        // Legacy flash spellings kept so historical rows still estimate.
-        ("DeepSeek", "deepseek-v4.1-flash") => (0.14, 0.28),
-        ("DeepSeek", "deepseek-v4-flash") => (0.14, 0.28),
-        ("Groq", _) => (0.15, 0.30),
-        // Ollama Cloud is a flat subscription per account (OllamaCloud_1..N),
-        // so its marginal per-token cost is zero.
-        (p, _) if p.starts_with("OllamaCloud") => (0.0, 0.0),
-        // z-ai/glm-5.2 on OpenRouter (former zWork Ultimate model). Per 1M tokens.
-        ("OpenRouter", "z-ai/glm-5.2") => (1.25, 9.0),
+/// Cost of a request in USD from token counts, used when OpenRouter's billed
+/// `usage.cost` is missing. Prices are per 1M tokens (input / output) at the
+/// cheapest provider, matching `:floor` routing. Cached input is billed lower
+/// upstream, so this errs high, which is the safe direction for limits.
+fn estimate_cost(model: &str, input: Option<i64>, output: Option<i64>) -> Option<f64> {
+    let (input_price_1m, output_price_1m): (f64, f64) = match model.trim_end_matches(":floor") {
+        "openai/gpt-6-luna" => (0.05, 0.25),
+        "z-ai/glm-5.3-flash" => (0.075, 0.25),
+        "deepseek/deepseek-v4.1-flash" => (0.09, 0.18),
+        "z-ai/glm-5.3" => (0.5625, 2.5),
+        "google/gemini-3.8-flash" => (0.375, 1.875),
+        "openai/gpt-6.1-sol" => (1.0, 5.0),
         _ => return None,
     };
     match (input, output) {
         (Some(i), Some(o)) => Some((i as f64 * input_price_1m + o as f64 * output_price_1m) / 1_000_000.0),
         _ => None,
     }
+}
+
+/// The USD cost OpenRouter billed, reported in `usage.cost` when the request
+/// sets `usage: {include: true}`.
+fn usage_cost(body_json: &Value) -> Option<f64> {
+    body_json.pointer("/usage/cost").and_then(|v| v.as_f64())
 }
 
 fn parse_usage_counts(body_json: &Value) -> (Option<i64>, Option<i64>, Option<i64>) {
@@ -2108,127 +2049,91 @@ fn parse_usage_counts(body_json: &Value) -> (Option<i64>, Option<i64>, Option<i6
     (prompt, completion, total)
 }
 
-/// Extracts token usage from an SSE `data:` line (Anthropic message_delta / message_start).
-fn extract_sse_usage(line: &str) -> Option<(Option<i64>, Option<i64>, Option<i64>)> {
-    let data = line.strip_prefix("data: ")?;
-    let json: Value = serde_json::from_str(data).ok()?;
-    let event_type = json.get("type")?.as_str()?;
-    match event_type {
-        "message_delta" => {
-            let usage = json.get("usage")?;
-            let output = usage.get("output_tokens").and_then(|v| v.as_i64());
-            Some((None, output, None))
+/// What an upstream response used, gathered while it streams.
+#[derive(Debug, Default)]
+struct StreamUsage {
+    /// The whole response, kept only when it isn't passed through.
+    bytes: Vec<u8>,
+    first_byte_at: Option<DateTime<Utc>>,
+    prompt_tokens: Option<i64>,
+    completion_tokens: Option<i64>,
+    total_tokens: Option<i64>,
+    cost_usd: Option<f64>,
+}
+
+/// Fold one SSE line's usage into `usage`. Handles OpenAI chunks (`usage` on
+/// the final chunk) and Anthropic events (`message.usage` on message_start,
+/// `usage` on message_delta); OpenRouter adds `cost` to either.
+fn absorb_sse_usage(line: &str, usage: &mut StreamUsage) {
+    let Some(data) = line.strip_prefix("data:").map(str::trim) else { return };
+    if data == "[DONE]" {
+        return;
+    }
+    let Ok(json) = serde_json::from_str::<Value>(data) else { return };
+    for u in [json.get("usage"), json.pointer("/message/usage")].into_iter().flatten() {
+        let int = |k: &str| u.get(k).and_then(|v| v.as_i64());
+        if let Some(v) = int("prompt_tokens").or_else(|| int("input_tokens")).filter(|v| *v > 0) {
+            usage.prompt_tokens = Some(v);
         }
-        "message_start" => {
-            let usage = json.pointer("/message/usage")?;
-            let input = usage.get("input_tokens").and_then(|v| v.as_i64());
-            let output = usage.get("output_tokens").and_then(|v| v.as_i64());
-            Some((input, output, None))
+        if let Some(v) = int("completion_tokens").or_else(|| int("output_tokens")) {
+            usage.completion_tokens = Some(v);
         }
-        _ => None,
+        if let Some(v) = u.get("cost").and_then(|v| v.as_f64()) {
+            usage.cost_usd = Some(v);
+        }
     }
 }
 
-/// Wraps an SSE byte stream to extract token usage from Anthropic events.
-/// Returns the stream for passthrough and a oneshot receiver with the captured
-/// usage plus the timestamp of the first received chunk.
-fn sse_stream_with_usage(
+/// Read an upstream response, scanning SSE lines for usage. With `passthrough`
+/// the bytes go to the returned body as they arrive (real streaming);
+/// otherwise they're buffered into `StreamUsage::bytes`. The receiver resolves
+/// when the upstream ends or the client hangs up.
+fn stream_with_usage(
     stream: impl futures::Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
-) -> (
-    axum::body::Body,
-    tokio::sync::oneshot::Receiver<(Option<DateTime<Utc>>, Option<i64>, Option<i64>, Option<i64>)>,
-) {
+    passthrough: bool,
+) -> (Option<axum::body::Body>, tokio::sync::oneshot::Receiver<StreamUsage>) {
     let (tx, rx) = tokio::sync::oneshot::channel();
     let (body_tx, body_rx) = tokio::sync::mpsc::channel::<Result<axum::body::Bytes, std::io::Error>>(32);
 
     tokio::spawn(async move {
         use futures::StreamExt;
-        let mut first_byte_at: Option<DateTime<Utc>> = None;
-        let mut final_input: Option<i64> = None;
-        let mut final_output: Option<i64> = None;
+        let mut usage = StreamUsage::default();
+        let mut pending: Vec<u8> = Vec::new();
         let mut stream = Box::pin(stream);
         while let Some(chunk) = stream.next().await {
             if let Ok(ref bytes) = chunk {
-                if first_byte_at.is_none() {
-                    first_byte_at = Some(Utc::now());
+                usage.first_byte_at.get_or_insert_with(Utc::now);
+                // Lines can straddle chunks; only parse complete ones.
+                pending.extend_from_slice(bytes);
+                while let Some(end) = pending.iter().position(|b| *b == b'\n') {
+                    let line: Vec<u8> = pending.drain(..=end).collect();
+                    absorb_sse_usage(String::from_utf8_lossy(&line).trim_end(), &mut usage);
                 }
-                let text = String::from_utf8_lossy(bytes);
-                for line in text.lines() {
-                    if let Some((i, o, _)) = extract_sse_usage(line) {
-                        if i.is_some() { final_input = i; }
-                        if o.is_some() { final_output = o; }
-                    }
+                if !passthrough {
+                    usage.bytes.extend_from_slice(bytes);
                 }
             }
-            let bytes = chunk.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
-            if body_tx.send(bytes).await.is_err() {
+            if passthrough {
+                let chunk = chunk.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
+                if body_tx.send(chunk).await.is_err() {
+                    break;
+                }
+            } else if chunk.is_err() {
                 break;
             }
         }
-        let total = match (final_input, final_output) {
+        absorb_sse_usage(String::from_utf8_lossy(&pending).trim_end(), &mut usage);
+        usage.total_tokens = match (usage.prompt_tokens, usage.completion_tokens) {
             (Some(i), Some(o)) => Some(i + o),
             _ => None,
         };
-        let _ = tx.send((first_byte_at, final_input, final_output, total));
+        let _ = tx.send(usage);
     });
 
-    let body_stream = tokio_stream::wrappers::ReceiverStream::new(body_rx);
-    (axum::body::Body::from_stream(body_stream), rx)
-}
-
-/// Wraps an upstream byte stream to capture:
-///   - the timestamp of the first received chunk (`first_byte_at`)
-///   - the full accumulated response bytes
-///   - usage extracted from OpenAI-format SSE chunks
-/// Returns a oneshot receiver with (bytes, first_byte_at, prompt_tokens, completion_tokens, total_tokens).
-fn capture_stream_metadata(
-    stream: impl futures::Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static,
-) -> tokio::sync::oneshot::Receiver<(Vec<u8>, Option<DateTime<Utc>>, Option<i64>, Option<i64>, Option<i64>)>
-{
-    let (tx, rx) = tokio::sync::oneshot::channel();
-
-    tokio::spawn(async move {
-        use futures::StreamExt;
-        let mut buf = Vec::new();
-        let mut first_byte_at: Option<DateTime<Utc>> = None;
-        let mut final_input: Option<i64> = None;
-        let mut final_output: Option<i64> = None;
-        let mut stream = Box::pin(stream);
-        while let Some(chunk) = stream.next().await {
-            if let Ok(ref bytes) = chunk {
-                if first_byte_at.is_none() {
-                    first_byte_at = Some(Utc::now());
-                }
-                buf.extend_from_slice(bytes);
-                // Extract usage from SSE chunks if present.
-                let text = String::from_utf8_lossy(bytes);
-                for line in text.lines() {
-                    if let Some(data) = line.strip_prefix("data: ") {
-                        if data == "[DONE]" {
-                            continue;
-                        }
-                        if let Ok(json) = serde_json::from_str::<Value>(data) {
-                            if let Some(usage) = json.get("usage").and_then(|u| u.as_object()) {
-                                if let Some(v) = usage.get("prompt_tokens").and_then(|v| v.as_i64()) {
-                                    final_input = Some(v);
-                                }
-                                if let Some(v) = usage.get("completion_tokens").and_then(|v| v.as_i64()) {
-                                    final_output = Some(v);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        let total = match (final_input, final_output) {
-            (Some(i), Some(o)) => Some(i + o),
-            _ => None,
-        };
-        let _ = tx.send((buf, first_byte_at, final_input, final_output, total));
+    let body = passthrough.then(|| {
+        axum::body::Body::from_stream(tokio_stream::wrappers::ReceiverStream::new(body_rx))
     });
-
-    rx
+    (body, rx)
 }
 
 fn wrap_json_completion_as_sse(body_json: &Value) -> Option<Vec<u8>> {
@@ -2335,6 +2240,8 @@ struct GatewayRequestMeta {
     max_tokens: Option<i64>,
     tool_count: Option<i32>,
     run_trigger: Option<String>,
+    /// Product tier the request was billed as (zwork-flash, zwork-pro, …).
+    model_tier: Option<String>,
 }
 
 async fn insert_gateway_request(
@@ -2355,10 +2262,10 @@ async fn insert_gateway_request(
             user_id, run_id, request_kind,
             chat_id, project_id, app_version, os,
             request_payload, request_body_size_bytes,
-            stream, max_tokens, tool_count, run_trigger,
+            stream, max_tokens, tool_count, run_trigger, model_tier,
             started_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
         RETURNING id
         "#,
     )
@@ -2375,6 +2282,7 @@ async fn insert_gateway_request(
     .bind(meta.max_tokens)
     .bind(meta.tool_count)
     .bind(&meta.run_trigger)
+    .bind(&meta.model_tier)
     .fetch_one(&state.db)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -2530,12 +2438,18 @@ async fn ai_proxy(
     let request_kind =
         infer_request_kind(&state, &headers, app_user.as_ref(), &run_id, request_kind).await;
 
-    if state.gateway.providers.is_empty() {
+    let Some(provider) = state
+        .gateway
+        .providers
+        .iter()
+        .find(|p| p.protocol == GatewayProtocol::OpenAi)
+        .cloned()
+    else {
         return Err((
             StatusCode::SERVICE_UNAVAILABLE,
             "hosted_gateway_not_configured".to_string(),
         ));
-    }
+    };
     let body_bytes = axum::body::to_bytes(req.into_body(), 1024 * 1024 * 10)
         .await
         .map_err(|_| {
@@ -2547,57 +2461,28 @@ async fn ai_proxy(
     let body_json: Value = serde_json::from_slice(&body_bytes)
         .map_err(|_| (StatusCode::BAD_REQUEST, "invalid_chat_payload".to_string()))?;
 
-    // Extract model for rate-limit weighting (pro models = 3x cost)
-    let openai_model = body_json
+    let requested_model = body_json
         .get("model")
         .and_then(|m| m.as_str())
         .unwrap_or("")
         .to_string();
-
-    // Validate requested model (OpenAI-shape path previously did no validation).
-    // Mirrors ai_proxy_anthropic: allowlist + tier gating.
-    if !ALLOWED_MODELS.contains(&openai_model.as_str()) {
-        return Err((
+    let tier = hosted_tier(&requested_model).ok_or_else(|| {
+        (
             StatusCode::BAD_REQUEST,
-            format!("unsupported_model: {openai_model}"),
-        ));
-    }
-    {
-        let user_tier = app_user
-            .as_ref()
-            .map(|u| u.tier.as_str())
-            .unwrap_or("free");
-        if MAX_ONLY_MODELS.contains(&openai_model.as_str()) && user_tier != "max" {
-            return Err((
-                StatusCode::FORBIDDEN,
-                "model_requires_max_tier".to_string(),
-            ));
+            format!("unsupported_model: {requested_model}"),
+        )
+    })?;
+    let user_plan = app_user.as_ref().map(|u| u.tier.as_str()).unwrap_or("free");
+    match &app_user {
+        Some(user) => enforce_usage(&state, user, tier, request_kind).await?,
+        None if plan_rank(tier.plan) > 0 => {
+            return Err((StatusCode::FORBIDDEN, "model_requires_pro_tier".to_string()));
         }
-        if PRO_ONLY_MODELS.contains(&openai_model.as_str())
-            && !matches!(user_tier, "pro" | "max")
-        {
-            return Err((
-                StatusCode::FORBIDDEN,
-                "model_requires_pro_tier".to_string(),
-            ));
-        }
+        None => {}
     }
 
-    if let (Some(user), RequestKind::Root) = (&app_user, request_kind) {
-        enforce_root_rate_limit(&state, &user.user_id, &user.tier, &openai_model)
-            .await
-            .map_err(|status| {
-                let message = match status {
-                    StatusCode::TOO_MANY_REQUESTS => "root_request_quota_exceeded".to_string(),
-                    StatusCode::CONFLICT => "too_many_active_runs".to_string(),
-                    _ => "gateway_rate_limit_failed".to_string(),
-                };
-                (status, message)
-            })?;
-    }
-
-    // Build request metadata from client headers and payload.
     let request_payload = redact_image_data(&body_json);
+    let wants_stream = body_json.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
     let meta = GatewayRequestMeta {
         chat_id: header_str(&headers, "x-zwork-chat-id"),
         project_id: header_str(&headers, "x-zwork-project-id"),
@@ -2605,13 +2490,14 @@ async fn ai_proxy(
         os: header_str(&headers, "x-zwork-os"),
         request_payload: Some(request_payload),
         request_body_size_bytes: Some(body_bytes.len() as i64),
-        stream: body_json.get("stream").and_then(|v| v.as_bool()),
+        stream: Some(wants_stream),
         max_tokens: body_json.get("max_tokens").and_then(|v| v.as_i64()),
         tool_count: body_json
             .get("tools")
             .and_then(|v| v.as_array())
             .map(|a| a.len() as i32),
         run_trigger: header_str(&headers, "x-zwork-trigger"),
+        model_tier: Some(tier.alias.to_string()),
     };
 
     let request_id = if let Some(user) = &app_user {
@@ -2629,227 +2515,144 @@ async fn ai_proxy(
         None
     };
 
-    let mut failures: Vec<String> = Vec::new();
-    let mut attempt_number: i32 = 0;
-
-    let resolved_model = resolve_upstream_model(&openai_model);
-    let mut providers_to_try: Vec<&GatewayProvider> = Vec::new();
-    for p in &state.gateway.providers {
-        if p.protocol == GatewayProtocol::OpenAi && (p.primary_model == resolved_model || p.fallback_model == resolved_model) {
-            providers_to_try.push(p);
-        }
-    }
-    for p in &state.gateway.providers {
-        if p.protocol == GatewayProtocol::OpenAi && !(p.primary_model == resolved_model || p.fallback_model == resolved_model) {
-            providers_to_try.push(p);
-        }
-    }
-
-    // Build routing decision record.
+    let candidates = upstream_candidates(tier, user_plan, &run_id);
     let routing_decision = serde_json::json!({
-        "requested_model": openai_model,
-        "resolved_model": resolved_model,
-        "provider_order": providers_to_try.iter().map(|p| serde_json::json!({
-            "name": p.name,
-            "primary_model": p.primary_model,
-            "fallback_model": p.fallback_model,
-        })).collect::<Vec<_>>(),
+        "requested_model": requested_model,
+        "tier": tier.alias,
+        "candidates": candidates,
     });
+    let mut failures: Vec<String> = Vec::new();
 
-    for provider in providers_to_try {
-        // Build the list of models to try for this provider. If the provider
-        // claims to support the requested model (primary or fallback matches),
-        // prefer the requested model so users actually get what they selected.
-        // Otherwise fall back to the provider's configured models.
-        let supports_requested = provider.primary_model == resolved_model
-            || provider.fallback_model == resolved_model;
-
-        let mut models: Vec<String> = Vec::new();
-        if supports_requested {
-            models.push(resolved_model.to_string());
-        }
-        if !supports_requested || provider.primary_model != resolved_model {
-            models.push(provider.primary_model.clone());
-        }
-        if !provider.fallback_model.trim().is_empty()
-            && provider.fallback_model != provider.primary_model
-            && provider.fallback_model != resolved_model
-        {
-            models.push(provider.fallback_model.clone());
-        }
-
-        for model_name in models {
-            attempt_number += 1;
-            let attempt_started = Utc::now();
-            let mut attempt_body = body_json.clone();
+    for (attempt_index, model_name) in candidates.iter().enumerate() {
+        let attempt_number = attempt_index as i32 + 1;
+        let attempt_started = Utc::now();
+        let mut attempt_body = body_json.clone();
+        prepare_upstream_body(&mut attempt_body, model_name);
+        if wants_stream {
             if let Some(obj) = attempt_body.as_object_mut() {
-                obj.insert("model".to_string(), Value::String(model_name.clone()));
+                obj.insert("stream_options".to_string(), serde_json::json!({ "include_usage": true }));
             }
+        }
 
-            let endpoint = format!(
-                "{}/chat/completions",
-                provider.base_url.trim_end_matches('/')
-            );
-            let builder = state
-                .http_client
-                .post(endpoint)
-                .header("Content-Type", "application/json")
-                .header("Authorization", format!("Bearer {}", provider.api_key))
-                // OpenRouter attribution headers (harmless for other providers;
-                // OpenRouter uses them for app ranking on its dashboard).
-                .header("X-Title", "zWork Router")
-                .header("HTTP-Referer", "https://tryzwork.app")
-                .json(&attempt_body);
-
-            let resp = match builder.send().await {
-                Ok(resp) => resp,
-                Err(e) => {
-                    let msg = format!("{}:{} unreachable: {}", provider.name, model_name, e);
-                    failures.push(msg.clone());
-                    if let Some(req_id) = request_id {
-                        let attempt_id = insert_gateway_attempt(&state, req_id, attempt_number, &provider.name, &model_name).await.ok();
-                        if let Some(aid) = attempt_id {
-                            finish_gateway_attempt(
-                                &state, aid, None, Some("unreachable"), Some(&msg),
-                                None, None, None,
-                                Some((Utc::now() - attempt_started).num_milliseconds()),
-                            ).await;
-                        }
-                    }
-                    continue;
-                }
-            };
-
-            let status = resp.status();
-            let upstream_headers = resp.headers().clone();
-            if !status.is_success() {
-                let detail = resp
-                    .text()
-                    .await
-                    .unwrap_or_default()
-                    .chars()
-                    .take(500)
-                    .collect::<String>();
-                let msg = format!(
-                    "{}:{} {} {}",
-                    provider.name,
-                    model_name,
-                    status.as_u16(),
-                    detail
-                );
-                failures.push(msg.clone());
-                if let Some(req_id) = request_id {
-                    let attempt_id = insert_gateway_attempt(&state, req_id, attempt_number, &provider.name, &model_name).await.ok();
-                    if let Some(aid) = attempt_id {
-                        finish_gateway_attempt(
-                            &state, aid, Some(status.as_u16() as i32), Some("upstream_error"), Some(&detail),
-                            None, None, None,
-                            Some((Utc::now() - attempt_started).num_milliseconds()),
-                        ).await;
-                    }
-                }
-                continue;
-            }
-
-            // Success path: capture the full response stream, timing, and usage.
-            let attempt_id = if let Some(req_id) = request_id {
-                insert_gateway_attempt(&state, req_id, attempt_number, &provider.name, &model_name).await.ok()
-            } else {
-                None
-            };
-
-            let stream = resp.bytes_stream();
-            let rx = capture_stream_metadata(stream);
-            let (response_bytes, first_byte_at, stream_input, stream_output, stream_total) = rx.await.unwrap_or_else(|_| (Vec::new(), None, None, None, None));
-            let attempt_finished = Utc::now();
-            let attempt_duration_ms = (attempt_finished - attempt_started).num_milliseconds();
-            let upstream_duration_ms = first_byte_at.map(|ft| (attempt_finished - ft).num_milliseconds());
-
-            let body_json: Option<Value> = serde_json::from_slice(&response_bytes).ok();
-            let (mut prompt_tokens, mut completion_tokens, mut total_tokens) = (stream_input, stream_output, stream_total);
-            if let Some(ref json) = body_json {
-                if prompt_tokens.is_none() || completion_tokens.is_none() {
-                    let (p, c, t) = parse_usage_counts(json);
-                    prompt_tokens = prompt_tokens.or(p);
-                    completion_tokens = completion_tokens.or(c);
-                    total_tokens = total_tokens.or(t);
-                }
-            }
-
-            let response_payload = body_json.as_ref().map(redact_image_data);
-            let response_body_size_bytes = Some(response_bytes.len() as i64);
-            let status_i32 = Some(status.as_u16() as i32);
-            let cost = estimate_cost(&provider.name, &model_name, prompt_tokens, completion_tokens);
-
-            if let Some(req_id) = request_id {
-                mark_gateway_request_upstream(
-                    &state,
-                    req_id,
-                    &provider.name,
-                    &model_name,
-                    prompt_tokens,
-                    completion_tokens,
-                    total_tokens,
-                    first_byte_at,
-                    upstream_duration_ms,
-                    cost,
-                    Some(routing_decision.clone()),
-                    Some(serde_json::Value::Array(failures.iter().map(|f| serde_json::Value::String(f.clone())).collect())),
-                ).await;
-                finish_gateway_request(
-                    &state,
-                    req_id,
-                    status_i32,
-                    response_payload,
-                    response_body_size_bytes,
-                    Some((Utc::now() - started_at).num_milliseconds()),
-                ).await;
-            }
-
-            if let Some(aid) = attempt_id {
-                finish_gateway_attempt(
-                    &state, aid, status_i32, None, None,
-                    prompt_tokens, completion_tokens, total_tokens,
-                    Some(attempt_duration_ms),
-                ).await;
-            }
-
-            upsert_provider_snapshot(
-                &state,
-                &provider.name,
-                &model_name,
-                status.as_u16() as i32,
-                &upstream_headers,
-            )
+        let endpoint = format!("{}/chat/completions", provider.base_url.trim_end_matches('/'));
+        let resp = state
+            .http_client
+            .post(endpoint)
+            .header("Content-Type", "application/json")
+            .header("Authorization", format!("Bearer {}", provider.api_key))
+            // OpenRouter attribution (app ranking on its dashboard).
+            .header("X-Title", "zWork Router")
+            .header("HTTP-Referer", "https://tryzwork.app")
+            .json(&attempt_body)
+            .send()
             .await;
 
-            let response_bytes = body_json
-                .as_ref()
-                .and_then(wrap_json_completion_as_sse)
-                .unwrap_or_else(|| response_bytes);
-            let body = axum::body::Body::from(response_bytes);
-            let mut response = Response::new(body);
-            *response.status_mut() = status;
-            response.headers_mut().insert(
-                header::CONTENT_TYPE,
-                HeaderValue::from_static("text/event-stream; charset=utf-8"),
-            );
-            response.headers_mut().insert(
-                HeaderName::from_static("x-zwork-router-provider"),
-                HeaderValue::from_str(&provider.name)
-                    .unwrap_or_else(|_| HeaderValue::from_static("zwork-router")),
-            );
-            response.headers_mut().insert(
-                HeaderName::from_static("x-zwork-router-model"),
-                HeaderValue::from_str(&model_name)
-                    .unwrap_or_else(|_| HeaderValue::from_static("unknown")),
-            );
-            response.headers_mut().insert(
-                HeaderName::from_static("x-zwork-router-label"),
-                HeaderValue::from_str(&state.gateway.router_label)
-                    .unwrap_or_else(|_| HeaderValue::from_static("zWork Router")),
-            );
-            return Ok(response);
+        let failure = match resp {
+            Err(e) => Some((None, "unreachable", format!("{}:{} unreachable: {}", provider.name, model_name, e))),
+            Ok(resp) if !resp.status().is_success() => {
+                let status = resp.status();
+                let detail = resp.text().await.unwrap_or_default().chars().take(500).collect::<String>();
+                Some((Some(status.as_u16() as i32), "upstream_error", format!("{}:{} {} {}", provider.name, model_name, status.as_u16(), detail)))
+            }
+            Ok(resp) => {
+                let status = resp.status();
+                let upstream_headers = resp.headers().clone();
+                let attempt_id = match request_id {
+                    Some(req_id) => insert_gateway_attempt(&state, req_id, attempt_number, &provider.name, model_name).await.ok(),
+                    None => None,
+                };
+                let (passthrough, usage_rx) = stream_with_usage(resp.bytes_stream(), wants_stream);
+
+                // Book the request once the upstream finishes: tokens, the
+                // cost OpenRouter billed (or an estimate) and timings.
+                let record = {
+                    let state = state.clone();
+                    let provider_name = provider.name.clone();
+                    let model_name = model_name.to_string();
+                    let routing = routing_decision.clone();
+                    let failure_json = Value::Array(failures.iter().cloned().map(Value::String).collect());
+                    async move {
+                        let usage = usage_rx.await.unwrap_or_default();
+                        let finished = Utc::now();
+                        let body_json: Option<Value> = serde_json::from_slice(&usage.bytes).ok();
+                        let (mut prompt, mut completion, mut total, mut cost) =
+                            (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens, usage.cost_usd);
+                        if let Some(json) = &body_json {
+                            let (p, c, t) = parse_usage_counts(json);
+                            prompt = prompt.or(p);
+                            completion = completion.or(c);
+                            total = total.or(t);
+                            cost = cost.or_else(|| usage_cost(json));
+                        }
+                        let cost = cost.or_else(|| estimate_cost(&model_name, prompt, completion));
+                        if let Some(req_id) = request_id {
+                            mark_gateway_request_upstream(
+                                &state, req_id, &provider_name, &model_name,
+                                prompt, completion, total, usage.first_byte_at,
+                                usage.first_byte_at.map(|ft| (finished - ft).num_milliseconds()),
+                                cost, Some(routing), Some(failure_json),
+                            ).await;
+                            finish_gateway_request(
+                                &state, req_id, Some(status.as_u16() as i32),
+                                body_json.as_ref().map(redact_image_data),
+                                Some(usage.bytes.len() as i64),
+                                Some((finished - started_at).num_milliseconds()),
+                            ).await;
+                        }
+                        if let Some(aid) = attempt_id {
+                            finish_gateway_attempt(
+                                &state, aid, Some(status.as_u16() as i32), None, None,
+                                prompt, completion, total,
+                                Some((finished - attempt_started).num_milliseconds()),
+                            ).await;
+                        }
+                        (body_json, usage.bytes)
+                    }
+                };
+
+                upsert_provider_snapshot(&state, &provider.name, model_name, status.as_u16() as i32, &upstream_headers).await;
+
+                let body = match passthrough {
+                    Some(body) => {
+                        tokio::spawn(record);
+                        body
+                    }
+                    // A non-streamed completion still reaches the client as SSE.
+                    None => {
+                        let (json, raw) = record.await;
+                        let bytes = json.as_ref().and_then(wrap_json_completion_as_sse).unwrap_or(raw);
+                        axum::body::Body::from(bytes)
+                    }
+                };
+                let mut response = Response::new(body);
+                *response.status_mut() = status;
+                let h = response.headers_mut();
+                h.insert(header::CONTENT_TYPE, HeaderValue::from_static("text/event-stream; charset=utf-8"));
+                h.insert(HeaderName::from_static("x-zwork-router-provider"), HeaderValue::from_static("OpenRouter"));
+                h.insert(
+                    HeaderName::from_static("x-zwork-router-model"),
+                    HeaderValue::from_str(tier.alias).unwrap_or_else(|_| HeaderValue::from_static("unknown")),
+                );
+                h.insert(
+                    HeaderName::from_static("x-zwork-router-label"),
+                    HeaderValue::from_str(&state.gateway.router_label)
+                        .unwrap_or_else(|_| HeaderValue::from_static("zWork Router")),
+                );
+                return Ok(response);
+            }
+        };
+
+        if let Some((status, kind, msg)) = failure {
+            failures.push(msg.clone());
+            if let Some(req_id) = request_id {
+                if let Ok(aid) = insert_gateway_attempt(&state, req_id, attempt_number, &provider.name, model_name).await {
+                    finish_gateway_attempt(
+                        &state, aid, status, Some(kind), Some(&msg),
+                        None, None, None,
+                        Some((Utc::now() - attempt_started).num_milliseconds()),
+                    ).await;
+                }
+            }
         }
     }
 
@@ -2864,18 +2667,9 @@ async fn ai_proxy(
         )
         .await;
         mark_gateway_request_upstream(
-            &state,
-            request_id,
-            "",
-            "",
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            &state, request_id, "", "", None, None, None, None, None, None,
             Some(routing_decision),
-            Some(serde_json::Value::Array(failures.iter().map(|f| serde_json::Value::String(f.clone())).collect())),
+            Some(Value::Array(failures.iter().cloned().map(Value::String).collect())),
         ).await;
     }
 
@@ -2906,12 +2700,18 @@ async fn ai_proxy_anthropic(
     let request_kind =
         infer_request_kind(&state, &headers, app_user.as_ref(), &run_id, request_kind).await;
 
-    if state.gateway.providers.is_empty() {
+    let Some(provider) = state
+        .gateway
+        .providers
+        .iter()
+        .find(|p| p.protocol == GatewayProtocol::Anthropic)
+        .cloned()
+    else {
         return Err((
             StatusCode::SERVICE_UNAVAILABLE,
             "hosted_gateway_not_configured".to_string(),
         ));
-    }
+    };
 
     let body_bytes = axum::body::to_bytes(req.into_body(), 1024 * 1024 * 10)
         .await
@@ -2921,57 +2721,31 @@ async fn ai_proxy_anthropic(
                 "request_body_too_large".to_string(),
             )
         })?;
-    let mut body_json: Value = serde_json::from_slice(&body_bytes).map_err(|_| {
+    let body_json: Value = serde_json::from_slice(&body_bytes).map_err(|_| {
         (
             StatusCode::BAD_REQUEST,
             "invalid_messages_payload".to_string(),
         )
     })?;
 
-    // Validate requested model
     let requested_model = body_json
         .get("model")
         .and_then(|m| m.as_str())
         .unwrap_or("")
         .to_string();
-    if !ALLOWED_MODELS.contains(&requested_model.as_str()) {
-        return Err((
+    let tier = hosted_tier(&requested_model).ok_or_else(|| {
+        (
             StatusCode::BAD_REQUEST,
             format!("unsupported_model: {requested_model}"),
-        ));
-    }
-
-    // Enforce tier restrictions
-    let user_tier = app_user
-        .as_ref()
-        .map(|u| u.tier.as_str())
-        .unwrap_or("free");
-    if MAX_ONLY_MODELS.contains(&requested_model.as_str()) && user_tier != "max" {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "model_requires_max_tier".to_string(),
-        ));
-    }
-    if PRO_ONLY_MODELS.contains(&requested_model.as_str())
-        && !matches!(user_tier, "pro" | "max")
-    {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "model_requires_pro_tier".to_string(),
-        ));
-    }
-
-    if let (Some(user), RequestKind::Root) = (&app_user, request_kind) {
-        enforce_root_rate_limit(&state, &user.user_id, &user.tier, &requested_model)
-            .await
-            .map_err(|status| {
-                let message = match status {
-                    StatusCode::TOO_MANY_REQUESTS => "root_request_quota_exceeded".to_string(),
-                    StatusCode::CONFLICT => "too_many_active_runs".to_string(),
-                    _ => "gateway_rate_limit_failed".to_string(),
-                };
-                (status, message)
-            })?;
+        )
+    })?;
+    let user_plan = app_user.as_ref().map(|u| u.tier.as_str()).unwrap_or("free");
+    match &app_user {
+        Some(user) => enforce_usage(&state, user, tier, request_kind).await?,
+        None if plan_rank(tier.plan) > 0 => {
+            return Err((StatusCode::FORBIDDEN, "model_requires_pro_tier".to_string()));
+        }
+        None => {}
     }
 
     let request_payload = redact_image_data(&body_json);
@@ -2989,6 +2763,7 @@ async fn ai_proxy_anthropic(
             .and_then(|v| v.as_array())
             .map(|a| a.len() as i32),
         run_trigger: header_str(&headers, "x-zwork-trigger"),
+        model_tier: Some(tier.alias.to_string()),
     };
 
     let request_id = if let Some(user) = &app_user {
@@ -3006,75 +2781,54 @@ async fn ai_proxy_anthropic(
         None
     };
 
-    // Ensure thinking blocks are present in assistant messages for DeepSeek
-    ensure_thinking_blocks(&mut body_json);
-
-    let mut failures: Vec<String> = Vec::new();
-    let mut attempt_number: i32 = 0;
-    let resolved_model = resolve_upstream_model(&requested_model);
+    let candidates = upstream_candidates(tier, user_plan, &run_id);
     let routing_decision = serde_json::json!({
         "requested_model": requested_model,
-        "resolved_model": resolved_model,
-        "provider_order": state.gateway.providers.iter()
-            .filter(|p| p.protocol == GatewayProtocol::Anthropic)
-            .map(|p| serde_json::json!({
-                "name": p.name,
-                "primary_model": p.primary_model,
-                "fallback_model": p.fallback_model,
-            }))
-            .collect::<Vec<_>>(),
+        "tier": tier.alias,
+        "candidates": candidates,
     });
+    let mut failures: Vec<String> = Vec::new();
 
-    for provider in &state.gateway.providers {
-        if provider.protocol != GatewayProtocol::Anthropic {
-            continue;
-        }
-
-        attempt_number += 1;
+    for (attempt_index, model_name) in candidates.iter().enumerate() {
+        let attempt_number = attempt_index as i32 + 1;
         let attempt_started = Utc::now();
-        // Legacy desktop clients send router aliases (e.g. zwork-flash) over
-        // the Anthropic path, but the current lineup is served via OpenRouter
-        // (OpenAI shape). When no Anthropic provider serves the resolved id,
-        // fall back to this provider's primary model (DeepSeek direct) rather
-        // than forwarding an id the upstream rejects.
-        let upstream_model = if provider.primary_model == resolved_model
-            || provider.fallback_model == resolved_model
-        {
-            resolved_model.to_string()
-        } else {
-            provider.primary_model.clone()
-        };
-
-        if let Some(obj) = body_json.as_object_mut() {
-            // Resolve app aliases (zwork-flash → deepseek/deepseek-v4-flash-0731)
-            // before sending upstream
-            obj.insert(
-                "model".to_string(),
-                Value::String(upstream_model.clone()),
-            );
+        let mut attempt_body = body_json.clone();
+        prepare_upstream_body(&mut attempt_body, model_name);
+        if let Some(obj) = attempt_body.as_object_mut() {
             obj.insert("stream".to_string(), Value::Bool(true));
         }
 
         let endpoint = format!("{}/v1/messages", provider.base_url.trim_end_matches('/'));
-        let resp = match state
+        let resp = state
             .http_client
             .post(endpoint)
             .header("Content-Type", "application/json")
+            .header("Authorization", format!("Bearer {}", provider.api_key))
             .header("x-api-key", provider.api_key.clone())
             .header("anthropic-version", "2023-06-01")
-            .json(&body_json)
+            .header("X-Title", "zWork Router")
+            .header("HTTP-Referer", "https://tryzwork.app")
+            .json(&attempt_body)
             .send()
-            .await
-        {
-            Ok(resp) => resp,
-            Err(e) => {
-                let msg = format!("{}:{} unreachable: {}", provider.name, upstream_model, e);
+            .await;
+
+        let resp = match resp {
+            Ok(resp) if resp.status().is_success() => resp,
+            other => {
+                let (status, kind, msg) = match other {
+                    Err(e) => (None, "unreachable", format!("{}:{} unreachable: {}", provider.name, model_name, e)),
+                    Ok(resp) => {
+                        let status = resp.status();
+                        let detail = resp.text().await.unwrap_or_default().chars().take(500).collect::<String>();
+                        tracing::warn!("Anthropic-shape upstream {}:{} returned {} {}", provider.name, model_name, status.as_u16(), detail);
+                        (Some(status.as_u16() as i32), "upstream_error", format!("{}:{} {} {}", provider.name, model_name, status.as_u16(), detail))
+                    }
+                };
                 failures.push(msg.clone());
                 if let Some(req_id) = request_id {
-                    let attempt_id = insert_gateway_attempt(&state, req_id, attempt_number, &provider.name, &upstream_model).await.ok();
-                    if let Some(aid) = attempt_id {
+                    if let Ok(aid) = insert_gateway_attempt(&state, req_id, attempt_number, &provider.name, model_name).await {
                         finish_gateway_attempt(
-                            &state, aid, None, Some("unreachable"), Some(&msg),
+                            &state, aid, status, Some(kind), Some(&msg),
                             None, None, None,
                             Some((Utc::now() - attempt_started).num_milliseconds()),
                         ).await;
@@ -3086,135 +2840,56 @@ async fn ai_proxy_anthropic(
 
         let status = resp.status();
         let upstream_headers = resp.headers().clone();
-        if !status.is_success() {
-            let detail = resp
-                .text()
-                .await
-                .unwrap_or_default()
-                .chars()
-                .take(500)
-                .collect::<String>();
-            // Log tool names to help debug duplicate-tool-name errors
-            if let Some(tools) = body_json.get("tools").and_then(|t| t.as_array()) {
-                let names: Vec<&str> = tools
-                    .iter()
-                    .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
-                    .collect();
-                tracing::warn!(
-                    "Anthropic upstream {} returned {} {}. {} tools: {:?}",
-                    provider.name,
-                    status.as_u16(),
-                    &detail,
-                    names.len(),
-                    names,
-                );
-            } else {
-                tracing::warn!(
-                    "Anthropic upstream {} returned {} {}",
-                    provider.name,
-                    status.as_u16(),
-                    &detail,
-                );
-            }
-            let msg = format!(
-                "{}:{} {} {}",
-                provider.name,
-                upstream_model,
-                status.as_u16(),
-                detail
-            );
-            failures.push(msg.clone());
-            if let Some(req_id) = request_id {
-                let attempt_id = insert_gateway_attempt(&state, req_id, attempt_number, &provider.name, &upstream_model).await.ok();
-                if let Some(aid) = attempt_id {
-                    finish_gateway_attempt(
-                        &state, aid, Some(status.as_u16() as i32), Some("upstream_error"), Some(&detail),
-                        None, None, None,
-                        Some((Utc::now() - attempt_started).num_milliseconds()),
-                    ).await;
-                }
-            }
-            continue;
-        }
-
-        // Stream the response, intercepting SSE events to extract token usage
-        let attempt_id = if let Some(req_id) = request_id {
-            insert_gateway_attempt(&state, req_id, attempt_number, &provider.name, &upstream_model).await.ok()
-        } else {
-            None
+        let attempt_id = match request_id {
+            Some(req_id) => insert_gateway_attempt(&state, req_id, attempt_number, &provider.name, model_name).await.ok(),
+            None => None,
         };
-        let upstream_body = resp.bytes_stream();
-        let (body, usage_rx) = sse_stream_with_usage(upstream_body);
+        let (body, usage_rx) = stream_with_usage(resp.bytes_stream(), true);
 
         if let Some(req_id) = request_id {
-            let state_clone = state.clone();
+            let state = state.clone();
             let provider_name = provider.name.clone();
-            let upstream_model_clone = upstream_model.clone();
-            let started = started_at;
+            let model_name = model_name.to_string();
             let routing = routing_decision.clone();
-            let failure_json = serde_json::Value::Array(failures.iter().map(|f| serde_json::Value::String(f.clone())).collect());
+            let failure_json = Value::Array(failures.iter().cloned().map(Value::String).collect());
             tokio::spawn(async move {
-                let Ok((first_byte_at, prompt_tokens, completion_tokens, total_tokens)) = usage_rx.await else { return; };
-                let finished_at = Utc::now();
-                let upstream_duration_ms = first_byte_at.map(|ft| (finished_at - ft).num_milliseconds());
-                let total_duration_ms = (finished_at - started).num_milliseconds();
-                let cost = estimate_cost(&provider_name, &upstream_model_clone, prompt_tokens, completion_tokens);
+                let Ok(usage) = usage_rx.await else { return };
+                let finished = Utc::now();
+                let cost = usage.cost_usd.or_else(|| {
+                    estimate_cost(&model_name, usage.prompt_tokens, usage.completion_tokens)
+                });
                 mark_gateway_request_upstream(
-                    &state_clone,
-                    req_id,
-                    &provider_name,
-                    &upstream_model_clone,
-                    prompt_tokens,
-                    completion_tokens,
-                    total_tokens,
-                    first_byte_at,
-                    upstream_duration_ms,
-                    cost,
-                    Some(routing),
-                    Some(failure_json),
+                    &state, req_id, &provider_name, &model_name,
+                    usage.prompt_tokens, usage.completion_tokens, usage.total_tokens,
+                    usage.first_byte_at,
+                    usage.first_byte_at.map(|ft| (finished - ft).num_milliseconds()),
+                    cost, Some(routing), Some(failure_json),
                 ).await;
                 finish_gateway_request(
-                    &state_clone,
-                    req_id,
-                    Some(status.as_u16() as i32),
-                    None,
-                    None,
-                    Some(total_duration_ms),
+                    &state, req_id, Some(status.as_u16() as i32), None, None,
+                    Some((finished - started_at).num_milliseconds()),
                 ).await;
                 if let Some(aid) = attempt_id {
                     finish_gateway_attempt(
-                        &state_clone, aid, Some(status.as_u16() as i32), None, None,
-                        prompt_tokens, completion_tokens, total_tokens,
-                        Some((finished_at - attempt_started).num_milliseconds()),
+                        &state, aid, Some(status.as_u16() as i32), None, None,
+                        usage.prompt_tokens, usage.completion_tokens, usage.total_tokens,
+                        Some((finished - attempt_started).num_milliseconds()),
                     ).await;
                 }
             });
         }
-        upsert_provider_snapshot(
-            &state,
-            &provider.name,
-            &upstream_model,
-            status.as_u16() as i32,
-            &upstream_headers,
-        )
-        .await;
-        let mut response = Response::new(body);
+        upsert_provider_snapshot(&state, &provider.name, model_name, status.as_u16() as i32, &upstream_headers).await;
+
+        let mut response = Response::new(body.unwrap_or_default());
         *response.status_mut() = status;
-        response.headers_mut().insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("text/event-stream; charset=utf-8"),
-        );
-        response.headers_mut().insert(
-            HeaderName::from_static("x-zwork-router-provider"),
-            HeaderValue::from_str(&provider.name)
-                .unwrap_or_else(|_| HeaderValue::from_static("zwork-router")),
-        );
-        response.headers_mut().insert(
+        let h = response.headers_mut();
+        h.insert(header::CONTENT_TYPE, HeaderValue::from_static("text/event-stream; charset=utf-8"));
+        h.insert(HeaderName::from_static("x-zwork-router-provider"), HeaderValue::from_static("OpenRouter"));
+        h.insert(
             HeaderName::from_static("x-zwork-router-model"),
-            HeaderValue::from_str(&requested_model)
-                .unwrap_or_else(|_| HeaderValue::from_static("unknown")),
+            HeaderValue::from_str(tier.alias).unwrap_or_else(|_| HeaderValue::from_static("unknown")),
         );
-        response.headers_mut().insert(
+        h.insert(
             HeaderName::from_static("x-zwork-router-label"),
             HeaderValue::from_str(&state.gateway.router_label)
                 .unwrap_or_else(|_| HeaderValue::from_static("zWork Router")),
@@ -3233,18 +2908,9 @@ async fn ai_proxy_anthropic(
         )
         .await;
         mark_gateway_request_upstream(
-            &state,
-            request_id,
-            "",
-            "",
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            &state, request_id, "", "", None, None, None, None, None, None,
             Some(routing_decision),
-            Some(serde_json::Value::Array(failures.iter().map(|f| serde_json::Value::String(f.clone())).collect())),
+            Some(Value::Array(failures.iter().cloned().map(Value::String).collect())),
         ).await;
     }
 
@@ -3256,8 +2922,8 @@ async fn ai_proxy_anthropic(
 
 /// Public, no-login chat demo at `POST /api/demo/chat`.
 ///
-/// Streams an Anthropic-shaped SSE response from the same DeepSeek provider
-/// the authenticated gateway uses, but WITHOUT calling `ensure_gateway_access`
+/// Streams an Anthropic-shaped SSE response from the same OpenRouter provider
+/// the authenticated gateway uses (Flash's cheapest model), but WITHOUT calling `ensure_gateway_access`
 /// — there is no token, no cookie, no DB user. Abuse is bounded by:
 ///   - a tower-governor per-IP burst limiter on the route (see `demo_router`)
 ///   - a per-IP daily message cap enforced here (`DemoConfig.daily_counts`)
@@ -3282,7 +2948,7 @@ async fn demo_chat(
         ));
     }
 
-    // Pick the Anthropic-protocol provider (DeepSeek anthropic endpoint).
+    // Pick the Anthropic-protocol provider (OpenRouter's /v1/messages).
     // This is the same upstream `/api/v1/messages` uses.
     let provider = state
         .gateway
@@ -3338,23 +3004,24 @@ async fn demo_chat(
         .collect();
 
     let model = provider.primary_model.clone();
-    let mut upstream_body = serde_json::json!({
+    let upstream_body = serde_json::json!({
         "model": model,
         "max_tokens": state.demo.max_tokens,
         "stream": true,
         "system": state.demo.system_prompt,
         "messages": upstream_messages,
     });
-    // DeepSeek requires assistant turns to carry a thinking block.
-    ensure_thinking_blocks(&mut upstream_body);
 
     let endpoint = format!("{}/v1/messages", provider.base_url.trim_end_matches('/'));
     let resp = state
         .http_client
         .post(endpoint)
         .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", provider.api_key))
         .header("x-api-key", provider.api_key.clone())
         .header("anthropic-version", "2023-06-01")
+        .header("X-Title", "zWork Demo")
+        .header("HTTP-Referer", "https://tryzwork.app")
         .json(&upstream_body)
         .send()
         .await
@@ -3383,11 +3050,12 @@ async fn demo_chat(
     // accepted it (so a 5xx from the provider doesn't burn a user's quota).
     state.demo.daily_counts.increment(&ip_key, today);
 
-    // Pass the SSE stream straight through. `sse_stream_with_usage` scans for
+    // Pass the SSE stream straight through. `stream_with_usage` scans for
     // usage events; we drop the receiver (no DB row to write them to for a
     // anonymous demo) but still benefit from the stream plumbing.
     let upstream_body_stream = resp.bytes_stream();
-    let (body, _usage_rx) = sse_stream_with_usage(upstream_body_stream);
+    let (body, _usage_rx) = stream_with_usage(upstream_body_stream, true);
+    let body = body.unwrap_or_default();
 
     let mut response = Response::new(body);
     *response.status_mut() = status;
@@ -6921,37 +6589,18 @@ async fn analytics_summary(
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let five_hour_used: i64 = sqlx::query_scalar(
-        r#"
-        SELECT COALESCE(SUM(
-            CASE WHEN model_id IN ('z-ai/glm-5.3-flash', 'deepseek-v4.1-flash', 'deepseek-v4-pro', 'zwork-pro') THEN 3 ELSE 1 END
-        ), 0)
-        FROM gateway_requests
-        WHERE user_id = $1
-          AND request_kind = 'root'
-          AND created_at >= NOW() - INTERVAL '5 hours'
-        "#,
-    )
-    .bind(&user.user_id)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    let weekly_used: i64 = sqlx::query_scalar(
-        r#"
-        SELECT COALESCE(SUM(
-            CASE WHEN model_id IN ('z-ai/glm-5.3-flash', 'deepseek-v4.1-flash', 'deepseek-v4-pro', 'zwork-pro') THEN 3 ELSE 1 END
-        ), 0)
-        FROM gateway_requests
-        WHERE user_id = $1
-          AND request_kind = 'root'
-          AND created_at >= NOW() - INTERVAL '7 days'
-        "#,
-    )
-    .bind(&user.user_id)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // Usage bars count spend in units (one ≈ a typical Flash message), so a
+    // costlier model fills them faster in proportion to what it costs.
+    let limits = resolve_usage_limits(&state, &user.tier).await;
+    let five_hour_used = usd_to_units(&state, spent_usd(&state, &user.user_id, &user.tier, 5).await?);
+    let weekly_used = usd_to_units(&state, spent_usd(&state, &user.user_id, &user.tier, 24 * 7).await?);
+    let five_hour_limit = usd_to_units(&state, limits.five_hour_usd).max(1);
+    let weekly_limit = usd_to_units(&state, limits.weekly_usd).max(1);
+    let free_pro_messages_left = if plan_rank(&user.tier) == 0 {
+        Some((state.gateway.free_pro_messages_30d - free_pro_messages_used(&state, &user.user_id).await?).max(0))
+    } else {
+        None
+    };
 
     let rows = sqlx::query_as::<_, AnalyticsDayRow>(
         r#"
@@ -7007,6 +6656,34 @@ async fn analytics_summary(
         })
         .collect();
 
+    // A year of daily activity for the Analytics heatmap (53 full weeks).
+    let year_rows = sqlx::query_as::<_, AnalyticsDayRow>(
+        r#"
+        SELECT
+            DATE(created_at) AS day,
+            COUNT(*) FILTER (WHERE request_kind = 'root')::BIGINT AS roots,
+            COUNT(*) FILTER (WHERE request_kind = 'continuation')::BIGINT AS continuations
+        FROM gateway_requests
+        WHERE user_id = $1
+          AND created_at >= NOW() - INTERVAL '371 days'
+        GROUP BY DATE(created_at)
+        ORDER BY day ASC
+        "#,
+    )
+    .bind(&user.user_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let past_year = year_rows
+        .into_iter()
+        .map(|row| AnalyticsDay {
+            day: row.day.to_string(),
+            roots: row.roots,
+            continuations: row.continuations,
+        })
+        .collect();
+
     let managed_gateway_ready =
         state.features.hosted_gateway && !state.gateway.providers.is_empty();
     let managed_gateway_status = if managed_gateway_ready {
@@ -7048,8 +6725,6 @@ async fn analytics_summary(
         "Stripe billing is not configured yet. Set the Stripe secret and Pro price IDs on the server.".to_string()
     };
 
-    let five_hour_limit = resolve_user_5h_limit(&state, &user.tier).await;
-    let weekly_limit = five_hour_limit * state.gateway.weekly_limit_multiplier.max(1);
     let mut owner_provider_overview = Vec::new();
 
     if is_owner_email(&state, &user.email) {
@@ -7134,8 +6809,11 @@ async fn analytics_summary(
         five_hour_used,
         weekly_limit,
         weekly_used,
+        free_pro_messages_left,
+        free_pro_messages_limit: state.gateway.free_pro_messages_30d,
         past_week,
         past_month,
+        past_year,
         managed_gateway_ready,
         managed_gateway_status,
         billing_enabled,
@@ -7435,15 +7113,6 @@ async fn main() {
             router_label: env_or("ROUTER_LABEL", "zWork Router"),
             providers: load_gateway_providers(),
             bearer_token: std::env::var("ZWORK_GATEWAY_TOKEN").unwrap_or_default(),
-            root_requests_per_5h: std::env::var("ROOT_REQUESTS_PER_5H")
-                .or_else(|_| std::env::var("ROOT_REQUESTS_PER_DAY"))
-                .ok()
-                .and_then(|v| v.parse::<i64>().ok())
-                .unwrap_or(20),
-            weekly_limit_multiplier: std::env::var("WEEKLY_LIMIT_MULTIPLIER")
-                .ok()
-                .and_then(|v| v.parse::<i64>().ok())
-                .unwrap_or(5),
             max_concurrent_roots: std::env::var("MAX_CONCURRENT_ROOT_RUNS")
                 .ok()
                 .and_then(|v| v.parse::<i64>().ok())
@@ -7456,18 +7125,18 @@ async fn main() {
                 .ok()
                 .and_then(|v| v.parse::<i64>().ok())
                 .unwrap_or(20),
-            free_tier_pool_5h: std::env::var("FREE_TIER_POOL_5H")
+            pro_weekly_usd: env_f64("PRO_WEEKLY_USD", 0.92),
+            max_weekly_usd: env_f64("MAX_WEEKLY_USD", 3.83),
+            free_pool_weekly_usd: env_f64("FREE_POOL_WEEKLY_USD", 15.0),
+            free_user_weekly_min_usd: env_f64("FREE_USER_WEEKLY_MIN_USD", 0.03),
+            free_user_weekly_max_usd: env_f64("FREE_USER_WEEKLY_MAX_USD", 0.10),
+            five_hour_share: env_f64("FIVE_HOUR_SHARE", 0.35),
+            free_pro_messages_30d: std::env::var("FREE_PRO_MESSAGES_30D")
                 .ok()
                 .and_then(|v| v.parse::<i64>().ok())
-                .unwrap_or(200),
-            pro_root_requests_per_5h: std::env::var("PRO_ROOT_REQUESTS_PER_5H")
-                .ok()
-                .and_then(|v| v.parse::<i64>().ok())
-                .unwrap_or(200),
-            max_root_requests_per_5h: std::env::var("MAX_ROOT_REQUESTS_PER_5H")
-                .ok()
-                .and_then(|v| v.parse::<i64>().ok())
-                .unwrap_or(1000),
+                .unwrap_or(3),
+            continuation_headroom: env_f64("CONTINUATION_HEADROOM", 1.5),
+            usage_unit_usd: env_f64("USAGE_UNIT_USD", 0.008),
             dev_coupon_codes: std::env::var("DEV_COUPON_CODES")
                 .unwrap_or_default()
                 .split(',')
@@ -7691,4 +7360,58 @@ async fn main() {
     let listener = TcpListener::bind("0.0.0.0:8080").await.unwrap();
     info!("Server running on 0.0.0.0:8080");
     axum::serve(listener, app).await.unwrap();
+}
+
+#[cfg(test)]
+mod router_tests {
+    use super::*;
+
+    #[test]
+    fn tiers_resolve_aliases_and_legacy_ids() {
+        assert_eq!(hosted_tier("zwork-flash").unwrap().alias, "zwork-flash");
+        assert_eq!(hosted_tier("zwork-ultimate").unwrap().alias, "zwork-ultra");
+        assert_eq!(hosted_tier("z-ai/glm-5.3-flash").unwrap().alias, "zwork-pro");
+        assert_eq!(hosted_tier("zwork-apex").unwrap().plan, "max");
+        assert!(hosted_tier("gpt-4o").is_none());
+        for tier in HOSTED_TIERS {
+            assert!(tier.upstream.iter().all(|m| m.ends_with(":floor")));
+        }
+    }
+
+    #[test]
+    fn free_flash_prefers_the_cheapest_model() {
+        let flash = hosted_tier("zwork-flash").unwrap();
+        for run in ["a", "b", "run-123"] {
+            assert_eq!(upstream_candidates(flash, "free", run)[0], "openai/gpt-6-luna:floor");
+            assert_eq!(upstream_candidates(flash, "pro", run).len(), 3);
+        }
+    }
+
+    #[test]
+    fn upstream_body_gets_model_usage_and_effort() {
+        let mut body = serde_json::json!({ "model": "zwork-pro", "reasoning_effort": "high" });
+        prepare_upstream_body(&mut body, "z-ai/glm-5.3:floor");
+        assert_eq!(body["model"], "z-ai/glm-5.3:floor");
+        assert_eq!(body["usage"]["include"], true);
+        assert_eq!(body["reasoning"]["effort"], "high");
+        assert!(body.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn sse_usage_reads_openai_and_anthropic_shapes() {
+        let mut u = StreamUsage::default();
+        absorb_sse_usage(r#"data: {"usage":{"prompt_tokens":100,"completion_tokens":20,"cost":0.0012}}"#, &mut u);
+        assert_eq!((u.prompt_tokens, u.completion_tokens, u.cost_usd), (Some(100), Some(20), Some(0.0012)));
+
+        let mut u = StreamUsage::default();
+        absorb_sse_usage(r#"data: {"type":"message_start","message":{"usage":{"input_tokens":50,"output_tokens":1}}}"#, &mut u);
+        absorb_sse_usage(r#"data: {"type":"message_delta","usage":{"output_tokens":9,"cost":0.0003}}"#, &mut u);
+        assert_eq!((u.prompt_tokens, u.completion_tokens, u.cost_usd), (Some(50), Some(9), Some(0.0003)));
+    }
+
+    #[test]
+    fn estimate_cost_strips_floor_suffix() {
+        let c = estimate_cost("openai/gpt-6.1-sol:floor", Some(1_000_000), Some(0)).unwrap();
+        assert!((c - 1.0).abs() < 1e-9);
+    }
 }
