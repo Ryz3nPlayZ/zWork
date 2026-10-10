@@ -248,14 +248,20 @@ body {
   }
 }
 
-/* SplitText line masks clip at the line box; give descenders and italic
-   overhang room without changing the layout. */
-.hero-title > div {
+/* The hero headline's lines are masks the words rise through. Give
+   descenders and italic overhang room without changing the layout. */
+.hero-line {
+  display: block;
+  overflow: hidden;
   padding: 0 0.08em 0.16em;
   margin: 0 -0.08em -0.16em;
 }
+.hero-line > *,
+.hero-chore {
+  display: block;
+}
 
-/* Hidden until the serif loads and SplitText has measured real lines. The
+/* Hidden until the serif loads. The
    rest of the hero and the statement's words start in their animated-from
    state in CSS, so nothing shows before its entrance plays. */
 @media (prefers-reduced-motion: no-preference) {

@@ -1,7 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
-import { SplitText } from "gsap/SplitText";
 import { useGSAP } from "@gsap/react";
 import { ArrowRight, Download, Menu, Moon, Sun, X } from "lucide-react";
 import { Logo, LogoSlat } from "../clone/Logo";
@@ -12,7 +11,11 @@ import { Link, usePath } from "../lib/router";
 import { DEMO_URL, REPO_URL, detectPlatform, downloadUrl, useRepoStats } from "../lib/site";
 import { GithubIcon } from "./ui";
 
-gsap.registerPlugin(ScrollTrigger, SplitText, useGSAP);
+gsap.registerPlugin(ScrollTrigger, useGSAP);
+
+/** What "your weekly ___, done" cycles through. The first is what shows
+ *  without motion and what screen readers hear. */
+const CHORES = ["paperwork", "invoices", "reports", "timesheets", "homework", "expenses", "spreadsheets", "payroll"];
 
 type Theme = "light" | "dark" | null;
 
@@ -155,11 +158,9 @@ export function Hero() {
         { motion: "(prefers-reduced-motion: no-preference)", reduce: "(prefers-reduced-motion: reduce)" },
         (ctx) => {
           if (ctx.conditions?.reduce) return;
-          // The headline rises in as the preloader slides off. Split only once
-          // the serif is in, so the first measurement uses real line breaks
-          // (the title is CSS-hidden until then); autoSplit handles resizes,
-          // and the returned tween keeps its progress across re-splits.
-          let split: SplitText | undefined;
+          // The headline's three lines rise in as the preloader slides off,
+          // once the serif is in. Then the middle line starts trading words,
+          // only while the hero is on screen.
           let dead = false;
           const tl = gsap.timeline({ paused: true, defaults: { ease: "power3.out" } });
           tl.from(
@@ -167,17 +168,31 @@ export function Hero() {
             { rotation: -140, scale: 0.4, autoAlpha: 0, transformOrigin: "50% 50%", duration: 1.4, ease: "expo.out" },
             0,
           )
+            .from(".hero-line > *", { yPercent: 110, duration: 1.0, stagger: 0.09 }, 0)
             .fromTo(".hero-sub", { autoAlpha: 0, y: 16 }, { autoAlpha: 1, y: 0, duration: 0.8 }, 0.55)
             .fromTo(".hero-cta > *", { autoAlpha: 0, y: 14 }, { autoAlpha: 1, y: 0, duration: 0.6, stagger: 0.08 }, "-=0.5");
+
+          const words = gsap.utils.toArray<HTMLElement>(".hero-chore");
+          gsap.set(words.slice(1), { yPercent: 110 });
+          const turn = { duration: 0.75, ease: "power3.inOut" };
+          const cycle = gsap.timeline({ paused: true, repeat: -1 });
+          words.forEach((w, i) => {
+            const next = words[(i + 1) % words.length];
+            cycle
+              .to(w, { yPercent: -110, ...turn }, "+=1.7")
+              .fromTo(next, { yPercent: 110 }, { yPercent: 0, immediateRender: false, ...turn }, "<");
+          });
+          const st = ScrollTrigger.create({
+            trigger: root.current,
+            start: "top bottom",
+            end: "bottom top",
+            onToggle: (self) => tl.progress() > 0 && (self.isActive ? cycle.play() : cycle.pause()),
+          });
+          tl.eventCallback("onComplete", () => st.isActive && cycle.play());
+
           const off = onReveal(() => {
             document.fonts.ready.then(() => {
               if (dead) return;
-              split = SplitText.create(".hero-title", {
-                type: "words,lines",
-                mask: "lines",
-                autoSplit: true,
-                onSplit: (self) => gsap.from(self.words, { yPercent: 110, duration: 1.0, stagger: 0.06, ease: "power3.out" }),
-              });
               // "inherit", not "visible", or the title would stay clickable
               // over the desktop after the dive hides .hero-body.
               gsap.set(".hero-title", { visibility: "inherit" });
@@ -187,7 +202,6 @@ export function Hero() {
           return () => {
             dead = true;
             off();
-            split?.revert();
           };
         },
       );
@@ -226,8 +240,25 @@ export function Hero() {
           <Logo className="h-full w-full text-ink" />
         </div>
         <div className="hero-body">
-          <h1 className="hero-title display mx-auto max-w-[13ch] text-[56px] text-ink sm:text-[92px] lg:text-[118px]">
-            Your weekly paperwork, <em className="text-ink-soft">done.</em>
+          <h1 className="hero-title display text-[56px] text-ink sm:text-[92px] lg:text-[118px]">
+            <span className="sr-only">Your weekly {CHORES[0]}, done.</span>
+            <span aria-hidden="true">
+              <span className="hero-line">
+                <span>Your weekly</span>
+              </span>
+              <span className="hero-line">
+                <span className="relative">
+                  {CHORES.map((w, i) => (
+                    <span key={w} className={cn("hero-chore", i > 0 && "absolute inset-x-0 top-0")}>
+                      {w},
+                    </span>
+                  ))}
+                </span>
+              </span>
+              <span className="hero-line">
+                <em className="text-ink-soft">done.</em>
+              </span>
+            </span>
           </h1>
           <p className="hero-sub mx-auto mt-8 max-w-[60ch] text-[17px] leading-relaxed text-ink-muted sm:text-[19px]">
             zWork is an AI assistant on your computer for the reports, spreadsheets and emails you redo every week. Show it the
