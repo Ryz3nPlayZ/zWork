@@ -56,6 +56,47 @@ flowchart TD
     Axum --> Upstream
 ```
 
+## Hosted lineup and the auto router
+
+Clients see two hosted models, and the gateway (`choose_route` in
+`cloud-src/api/src/main.rs`) decides what serves them. Every upstream is an
+OpenRouter id with `:floor` routing.
+
+| App id | Name | Plans | Served by |
+|---|---|---|---|
+| `zwork-auto` | zWork | all | the auto router, below |
+| `zwork-apex` | ?????? | Pro, Max | `openai/gpt-6.1-sol` |
+
+The auto router picks a route on a run's first call and stores it on every
+request (`gateway_requests.route`, with the reason in `routing_decision.why`).
+Later calls of the run keep the route, so the prompt cache stays warm. A route
+only ever moves up.
+
+| Route | Model | When |
+|---|---|---|
+| `flash` | `deepseek/deepseek-v4.1-flash` | the default |
+| `vision` | `google/gemini-3.8-flash` | the run has images and isn't escalated |
+| `escalated` | `xiaomi/mimo-v2.6-pro` | see below |
+| `ab-luna`, `ab-glm` | `openai/gpt-6-luna`, `z-ai/glm-5.3-flash` | `ROUTER_AB_PERCENT` of paid runs, by run id, to compare cost and completion with `flash` |
+
+A run is escalated in one of two ways:
+
+- **On its first call:** a one-word DeepSeek Flash classifier (about $0.00003;
+  its cost is in `routing_decision.why.classifier_cost_usd`) calls the user's
+  message hard.
+- **Mid-run, when it struggles:**
+  - the same tool call three times among the last eight;
+  - three errors among the last six tool results;
+  - `ROUTER_ESCALATE_AFTER_CALLS` calls in the run.
+
+Only requests that carry `tools` are classified or escalated, so plain chat
+(the web app included) always stays on `flash`. Paid plans escalate freely. A
+free user gets `FREE_ESCALATIONS_30D` escalated runs per 30 days, and their
+cost is kept out of the free pool.
+
+Retired ids map to `zwork-auto`: `zwork-flash`, `zwork-pro`, `zwork-ultra`,
+`zwork-ultimate`, `zwork-vision`, and the upstream ids older installs pinned.
+
 ## Web app (app.tryzwork.app)
 
 `app.tryzwork.app` is the **real desktop app** (`app/`) built for the web
@@ -63,14 +104,15 @@ flowchart TD
 there is no anonymous demo on that origin any more. Caddy serves it from
 `/var/www/app.tryzwork.app`.
 
-- **What the web build does:** plain chat on zWork Flash only. `streamChatWeb`
+- **What the web build does:** plain chat on `zwork-auto` only (no tools, so
+  the router keeps it on DeepSeek Flash). `streamChatWeb`
   posts to `/api/v1/chat/completions` with a short system prompt (date, local
   time, "the desktop app can use tools, this can't") plus the last 20 turns of
   the thread, and the effort picker's value as `reasoning.effort`. No tool
   calls, no web search, no connectors.
 - **What it hides:** Settings shows only Appearance and Account; the sidebar has
   no Projects; the composer has no document or permission (Full access)
-  controls; Pro, Ultra and ?????? live in the desktop app. This gating is
+  controls; ?????? lives in the desktop app. This gating is
   client-side only: the gateway can't tell a web request from a desktop one.
 - **Demo mode (opt-in, no login):** `app/src/lib/preview.ts` exports
   `isDemoMode()`. It's on only for an origin named in `VITE_ZWORK_DEMO_ORIGIN`
@@ -163,11 +205,7 @@ STRIPE_WEBHOOK_SECRET=...
 STRIPE_PRICE_PRO_MONTHLY=price_...
 STRIPE_PRICE_PRO_ANNUAL=price_...
 
-DEEPSEEK_API_KEY=...
-DEEPSEEK_BASE_URL=https://api.deepseek.com/anthropic
-DEEPSEEK_PROTOCOL=anthropic
-DEEPSEEK_MODEL_PRIMARY=deepseek-flash
-DEEPSEEK_MODEL_FALLBACK=
+OPENROUTER_API_KEY=...
 
 AUTH_INTERNAL_BASE=http://better_auth:3000/api/auth
 AUTH_SESSION_URL=http://better_auth:3000/api/auth/get-session
@@ -177,8 +215,13 @@ ENABLE_BILLING=false
 ENABLE_EMAIL_AUTH=false
 ENABLE_COUPONS=false
 
-ROOT_REQUESTS_PER_5H=200
-WEEKLY_LIMIT_MULTIPLIER=5
+# Usage is metered in dollars of OpenRouter cost (see cloud-src/.env.example).
+PRO_WEEKLY_USD=0.92
+MAX_WEEKLY_USD=3.83
+FREE_POOL_WEEKLY_USD=15
+FREE_ESCALATIONS_30D=3
+ROUTER_AB_PERCENT=5
+ROUTER_ESCALATE_AFTER_CALLS=40
 MAX_CONCURRENT_ROOT_RUNS=3
 DEV_COUPON_CODES=zwork-dev-pro
 
@@ -191,7 +234,7 @@ Notes:
 - email/password verification requires SMTP env to be valid
 - Better Auth sends a verification **link**, not a numeric code
 - Stripe billing is only ready when `STRIPE_SECRET_KEY` and at least `STRIPE_PRICE_PRO_MONTHLY` are set
-- zWork Router is only ready when at least one provider API key is set
+- zWork Router is only ready when `OPENROUTER_API_KEY` is set
 
 ## Deployment
 
