@@ -11,7 +11,7 @@ import { api, type OnboardingAnswer, type OnboardingCredential } from "../lib/ap
 import LightRays from "./LightRays";
 import { EarlyScreenChrome } from "./TitleBar";
 
-const ZWORK_ROUTER_TARGET_MODEL_ID = "zwork-flash";
+const ZWORK_ROUTER_TARGET_MODEL_ID = "zwork-auto";
 
 /* ------------------------------------------------------------------ *
  *  Question model
@@ -198,8 +198,8 @@ interface CredentialPreset {
 const PRESETS: CredentialPreset[] = [
   {
     id: "zwork_managed",
-    label: "zWork Flash / Pro",
-    subtitle: "Use the hosted zWork router with high-speed DeepSeek V4 Flash or Pro",
+    label: "zWork",
+    subtitle: "Use the hosted zWork router, which picks the right model for each task",
     shape: "anthropic",
     credential: "zwork_router",
     defaultBaseUrl: "https://api.tryzwork.app/api",
@@ -255,27 +255,15 @@ export interface ModelChoice {
 export const MODEL_CATALOG: Record<CredentialPreset["id"], ModelChoice[]> = {
   zwork_managed: [
     {
-      id: "zwork-flash",
-      label: "zWork Flash",
-      description: "Fast and efficient, with vision.",
-      cost: "Managed by zWork",
-    },
-    {
-      id: "zwork-pro",
-      label: "zWork Pro",
-      description: "Smarter for harder tasks.",
-      cost: "Managed by zWork",
-    },
-    {
-      id: "zwork-ultra",
-      label: "zWork Ultra",
-      description: "Smarter with best vision. Pro plan.",
+      id: "zwork-auto",
+      label: "zWork",
+      description: "Picks the right model for each task.",
       cost: "Managed by zWork",
     },
     {
       id: "zwork-apex",
       label: "??????",
-      description: "Smartest. Max plan.",
+      description: "Smartest. Pro plan.",
       cost: "Managed by zWork",
     },
   ],

@@ -290,7 +290,7 @@ export function baseState(over: Partial<CloneState> = {}): CloneState {
     panel: null,
     tasks: [],
     inbox: [],
-    model: "zWork Pro",
+    model: "zWork",
     preset: "ask",
     modelMenu: false,
     pressed: null,

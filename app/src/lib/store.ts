@@ -33,13 +33,18 @@ const LEGACY_MANAGED_MODEL_IDS = new Set([
   "minimax-m2.7:cloud",
   "zwork-vision",
   "zwork-ultimate",
+  // Retired when the router went automatic.
+  "zwork-flash",
+  "zwork-pro",
+  "zwork-ultra",
 ]);
 const ROUTER_BASE_URL = "https://api.tryzwork.app/api";
-/** The hosted lineup. The router picks the upstream model for each tier. */
+/**
+ * The hosted lineup: zWork picks the model for each task itself (cheap by
+ * default, stronger when the task needs it); ?????? is the strongest model.
+ */
 const HOSTED_MODELS = [
-  { id: "zwork-flash", name: "zWork Flash" },
-  { id: "zwork-pro", name: "zWork Pro" },
-  { id: "zwork-ultra", name: "zWork Ultra" },
+  { id: "zwork-auto", name: "zWork" },
   { id: "zwork-apex", name: "??????" },
 ] as const;
 
@@ -473,7 +478,7 @@ function demoSummariesFromChats(chats: Record<string, Chat>): ApiChatSummary[] {
         created_at: c.messages[0]?.createdAt ?? c.updatedAt,
         updated_at: c.updatedAt,
         message_count: c.messages.length,
-        model: "zwork-flash",
+        model: "zwork-auto",
         kind: "chat",
         project_id: c.projectId ?? undefined,
         preview: lastTextMsg?.content?.slice(0, 140) ?? "",
@@ -691,7 +696,7 @@ async function migrateManagedRouterSettings(settings: SettingsPublic): Promise<S
     provider_config: {
       zwork_router: { base_url: ROUTER_BASE_URL },
     },
-    default_model: "zwork-flash",
+    default_model: "zwork-auto",
   });
 
   for (const model of settings.custom_models || []) {
@@ -1535,25 +1540,25 @@ export const useApp = create<AppState>((set, get) => ({
       // Mark onboarding done in web (no local sidecar)
       rememberOnboardingDone(true);
 
-      // The web app runs Flash only; the larger tiers need the desktop app.
+      // The web app runs the auto router only; ?????? needs the desktop app.
       const webProviders: ProvidersResponse = {
         credentials: {},
-        default_model: "zwork-flash",
+        default_model: "zwork-auto",
         models: [
           {
-            id: "zwork-flash",
-            name: "zWork Flash",
-            subtitle: "Fast and efficient, with vision",
+            id: "zwork-auto",
+            name: "zWork",
+            subtitle: "Picks the right model for each task",
             shape: "openai",
             credential: "managed",
-            model_id: "zwork-flash",
+            model_id: "zwork-auto",
             configured: true,
             synthesized: false,
           },
         ],
       };
 
-      set({ onboardingDone: true, model: "zwork-flash", providers: webProviders, backendReady: true });
+      set({ onboardingDone: true, model: "zwork-auto", providers: webProviders, backendReady: true });
 
       if (isDemoMode()) {
         // Anonymous demo: hydrate previously-cached demo chats so the session

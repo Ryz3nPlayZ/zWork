@@ -26,8 +26,8 @@ export const PRESET_META: Record<Preset, { icon: ReactNode; label: string; descr
 };
 
 export const MODELS: { id: string; name: string; subtitle: string }[] = [
-  { id: "zwork-flash", name: "zWork Flash", subtitle: "Hosted by zWork · fast" },
-  { id: "zwork-pro", name: "zWork Pro", subtitle: "Hosted by zWork · strongest" },
+  { id: "zwork-auto", name: "zWork", subtitle: "Hosted by zWork · picks the model" },
+  { id: "zwork-apex", name: "??????", subtitle: "Hosted by zWork · smartest" },
   { id: "claude", name: "Claude Opus 5.5", subtitle: "Anthropic · your key" },
   { id: "gpt", name: "GPT-5.5", subtitle: "OpenAI · your key" },
   { id: "gemini", name: "Gemini 3 Pro", subtitle: "Google · your key" },

@@ -134,9 +134,9 @@ export function AnalyticsPage() {
               loading={loading}
             />
           </div>
-          {!isPaid && !loading && summary?.free_pro_messages_left != null && (
+          {!isPaid && !loading && summary?.free_escalations_left != null && (
             <p className="mt-4 text-[12.5px] text-ink-soft">
-              zWork Pro: {summary.free_pro_messages_left} of {summary.free_pro_messages_limit ?? 3} free messages left this month.
+              Harder tasks: {summary.free_escalations_left} of {summary.free_escalations_limit ?? 3} left this month on the stronger model.
             </p>
           )}
           {!isPaid && !loading && (

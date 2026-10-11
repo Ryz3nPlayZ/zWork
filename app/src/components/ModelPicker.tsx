@@ -6,15 +6,14 @@ import { fetchAnalyticsSummary, getCloudToken } from "../lib/cloud";
 import { useApp, EFFORTS } from "../lib/store";
 
 /**
- * Hosted tiers: how much of the allowance a message uses next to Flash
- * (from typical-task cost at floor prices), and the plan that unlocks it.
- * Free users get Flash plus a few Pro messages a month.
+ * Hosted tiers: how much of the allowance a message uses next to zWork's
+ * everyday model (from typical-task cost at floor prices), and the plan that
+ * unlocks it. zWork routes each task itself, so its cost varies; free users
+ * get a few tasks a month on the stronger model.
  */
 const HOSTED_TIERS: Record<string, { multiplier: string; plan: 0 | 1 | 2 }> = {
-  "zwork-flash": { multiplier: "1×", plan: 0 },
-  "zwork-pro": { multiplier: "10×", plan: 0 },
-  "zwork-ultra": { multiplier: "6×", plan: 1 },
-  "zwork-apex": { multiplier: "15×", plan: 2 },
+  "zwork-auto": { multiplier: "", plan: 0 },
+  "zwork-apex": { multiplier: "30×", plan: 1 },
 };
 const PLAN_RANK = { free: 0, pro: 1, max: 2 } as const;
 const PLAN_NAME = ["Free", "Pro", "Max"] as const;
@@ -30,7 +29,7 @@ export function ModelPicker() {
 
   const [open, setOpen] = useState(false);
   const [dropDown, setDropDown] = useState(false);
-  const [freeProLeft, setFreeProLeft] = useState<number | null>(null);
+  const [freeEscalationsLeft, setFreeEscalationsLeft] = useState<number | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
   const updateDirection = useCallback(() => {
@@ -54,12 +53,12 @@ export function ModelPicker() {
     };
   }, [open]);
 
-  // Free users see how many Pro messages are left this month.
+  // Free users see how many harder tasks the router may still escalate.
   useEffect(() => {
     if (!open || plan > 0 || IS_WEB || !getCloudToken()) return;
     let live = true;
     fetchAnalyticsSummary()
-      .then((s) => { if (live) setFreeProLeft(s.free_pro_messages_left ?? null); })
+      .then((s) => { if (live) setFreeEscalationsLeft(s.free_escalations_left ?? null); })
       .catch(() => {});
     return () => { live = false; };
   }, [open, plan]);
@@ -114,11 +113,12 @@ export function ModelPicker() {
             const selected = m.id === model;
             const hosted = HOSTED_TIERS[m.id];
             const locked = !!hosted && plan < hosted.plan;
-            const proUsedUp = m.id === "zwork-pro" && plan === 0 && freeProLeft === 0;
-            const disabled = !m.configured || locked || proUsedUp;
+            const disabled = !m.configured || locked;
             let note = "";
             if (locked) note = `${PLAN_NAME[hosted.plan]} plan`;
-            else if (m.id === "zwork-pro" && plan === 0 && freeProLeft !== null) note = `${freeProLeft} left this month`;
+            else if (m.id === "zwork-auto" && plan === 0 && freeEscalationsLeft !== null) {
+              note = `${freeEscalationsLeft} harder task${freeEscalationsLeft === 1 ? "" : "s"} left this month`;
+            }
             return (
               <button
                 key={m.id}
@@ -141,7 +141,7 @@ export function ModelPicker() {
                 <span className={cn("flex-1 min-w-0", locked && "opacity-55")}>
                   <span className="flex items-center gap-1.5">
                     <span className="truncate text-[12.5px] font-medium text-ink">{m.name}</span>
-                    {hosted && (
+                    {hosted?.multiplier && (
                       <span className="shrink-0 rounded-full bg-paper-sunken px-1.5 py-px text-[10px] font-medium tabular-nums text-ink-muted">
                         {hosted.multiplier}
                       </span>
@@ -193,7 +193,7 @@ export function ModelPicker() {
           <div className="border-t border-line pt-1">
             {IS_WEB ? (
               <div className="px-2.5 py-2 text-[11.5px] text-ink-muted">
-                Pro, Ultra and the rest of the lineup are in the desktop app.
+                ?????? and custom models are in the desktop app.
               </div>
             ) : (
               <button

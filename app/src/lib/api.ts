@@ -274,19 +274,13 @@ function sleep(ms: number) {
 /**
  * Map a model id the router echoes (a tier alias, or an upstream id from an
  * older router) to the user-facing tier id, so upstream providers are never
- * shown. Flash ids are matched before Pro's: "glm-5.3-flash" contains
- * "glm-5.3".
+ * shown. Sol is ??????; every other id is the auto router.
  */
 export function whitelabelModelName(upstreamId: string | null | undefined): string | undefined {
   if (!upstreamId) return undefined;
   const id = upstreamId.toLowerCase();
-  if (id === "zwork-flash" || id === "zwork-pro" || id === "zwork-ultra" || id === "zwork-apex") return id;
-  if (id === "zwork-vision") return "zwork-flash";
-  if (id === "zwork-ultimate") return "zwork-ultra";
-  if (id.includes("gpt-6.1-sol")) return "zwork-apex";
-  if (id.includes("gemini")) return "zwork-ultra";
-  if (id.includes("gpt-6-luna") || id.includes("glm-5.3-flash") || id.includes("deepseek")) return "zwork-flash";
-  if (id.includes("glm-5")) return "zwork-pro";
+  if (id === "zwork-apex" || id.includes("gpt-6.1-sol")) return "zwork-apex";
+  if (id.startsWith("zwork-") || /gemini|luna|glm|deepseek|mimo/.test(id)) return "zwork-auto";
   return undefined;
 }
 
@@ -1287,8 +1281,6 @@ function routerErrorText(status: number, body: string): string {
   switch (code) {
     case "root_request_quota_exceeded":
       return "You've used this period's allowance. It refills over the next few hours; upgrading raises it.";
-    case "free_pro_messages_used":
-      return "You've used your 3 free zWork Pro messages for this month. zWork Flash is still available.";
     case "model_requires_pro_tier":
       return "That model needs the Pro plan.";
     case "model_requires_max_tier":
@@ -1334,9 +1326,9 @@ async function streamChatWeb(
     ? window.localStorage.getItem("zwork:cloud-token") || ""
     : "";
 
-  // The web app is a plain chat on Flash: no tools, no larger tiers (those
-  // need the desktop app). The router picks Flash's upstream model.
-  const friendlyModel = "zwork-flash";
+  // The web app is a plain chat on the auto router: no tools, so it stays on
+  // the cheap model, and no ?????? (that needs the desktop app).
+  const friendlyModel = "zwork-auto";
 
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -1419,7 +1411,7 @@ async function streamChatWeb(
   // zWork name so the upstream provider is never surfaced to the user.
   const provider = resp.headers.get("x-zwork-router-provider") || "zwork-router";
   const rawRouterModel = resp.headers.get("x-zwork-router-model");
-  const displayModel = whitelabelModelName(rawRouterModel) ?? friendlyModel ?? "zwork-flash";
+  const displayModel = whitelabelModelName(rawRouterModel) ?? friendlyModel;
   onEvent({ type: "meta", provider, resolved_model: displayModel, upstream_provider: provider });
 
   onEvent({ type: "status", text: "Drafting" });
@@ -1603,7 +1595,7 @@ async function streamChatDemo(
 
   // Provider/model from response headers (the demo endpoint sets x-zwork-router-*).
   const provider = resp.headers.get("x-zwork-router-provider") || "zwork-demo";
-  const routerModel = resp.headers.get("x-zwork-router-model") || "zwork-flash";
+  const routerModel = whitelabelModelName(resp.headers.get("x-zwork-router-model")) ?? "zwork-auto";
   onEvent({ type: "meta", provider, resolved_model: routerModel, upstream_provider: provider });
   onEvent({ type: "status", text: "Drafting" });
 

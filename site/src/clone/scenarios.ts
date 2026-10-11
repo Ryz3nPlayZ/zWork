@@ -175,7 +175,7 @@ Over $1,000: Northwind Design, $2,400.00, due Oct 9.
 Due this week: Hetzner €38.20 (Oct 7), Figma $45.00 (Oct 8).`;
 
 export const scheduleScenario: Scenario = {
-  initial: baseState({ history: HISTORY, tasks: TASKS, inbox: INBOX, model: "zWork Pro" }),
+  initial: baseState({ history: HISTORY, tasks: TASKS, inbox: INBOX, model: "zWork" }),
   build: (s) => {
     const a = "a-sched";
     s.wait(0.6)
@@ -292,7 +292,7 @@ export const approvalScenario: Scenario = {
 /* ------------------------------------------------------------------ */
 
 export const modelScenario: Scenario = {
-  initial: baseState({ model: "zWork Pro", composer: "Summarize this week's support tickets by theme" }),
+  initial: baseState({ model: "zWork", composer: "Summarize this week's support tickets by theme" }),
   build: (s) => {
     const pick = (id: string, name: string) =>
       s
@@ -309,6 +309,6 @@ export const modelScenario: Scenario = {
     pick("claude", "Claude Opus 5.5");
     pick("local", "gpt-oss:120b");
     pick("deepseek", "DeepSeek V4 Pro");
-    pick("zwork-pro", "zWork Pro");
+    pick("zwork-auto", "zWork");
   },
 };

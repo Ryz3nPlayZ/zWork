@@ -71,8 +71,8 @@ export function OverlayChatView() {
 
   // Listen for captures from the standalone Share Window picker (its own OS
   // window). On capture, push the image to the store for the active ChatInput
-  // to consume as an attachment. Every hosted tier but Pro (text-only) reads
-  // images, so only Pro is switched to Flash. (This logic used to live in ChatInput's in-overlay
+  // to consume as an attachment. Every hosted tier reads images. (This logic
+  // used to live in ChatInput's in-overlay
   // picker; it moved here when the picker became a separate window.)
   useEffect(() => {
     if (!IS_TAURI) return;
@@ -88,7 +88,6 @@ export function OverlayChatView() {
           mime: payload.mime || "image/png",
           name: "Shared window",
         });
-        if (useApp.getState().model === "zwork-pro") useApp.getState().setModel("zwork-flash");
       }).then((u) => {
         if (cancelled) u();
         else unlisten = u;
