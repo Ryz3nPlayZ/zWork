@@ -514,10 +514,8 @@ pub async fn get_providers() -> impl IntoResponse {
         let subtitle = if m.credential == "zwork_router" {
             // Keyed on the lineup slot, not the upstream model it's pinned to.
             let blurb = match m.id.as_str() {
-                "zwork-pro" => "Smarter for harder tasks",
-                "zwork-ultra" | "zwork-ultimate" => "Smarter with best vision",
                 "zwork-apex" => "Smartest",
-                _ => "Fast and efficient, with vision",
+                _ => "Picks the right model for each task",
             };
             if cred.is_some() { blurb.to_string() } else { format!("{blurb} · sign in to zWork to use") }
         } else {
@@ -1007,7 +1005,7 @@ pub async fn onboard_complete(Json(body): Json<OnboardBody>) -> impl IntoRespons
         }
         if !model_id.is_empty() {
             let custom_id = if credkey == "zwork_router"
-                || matches!(model_id.as_str(), "zwork-flash" | "zwork-pro" | "zwork-ultra" | "zwork-apex")
+                || matches!(model_id.as_str(), "zwork-auto" | "zwork-apex" | "zwork-flash" | "zwork-pro" | "zwork-ultra")
             {
                 Some(model_id.clone())
             } else {

@@ -1350,18 +1350,13 @@ fn build_model(r: &Resolved, model_id: &str, tag: Option<&RouterTag>) -> Model {
 /// OpenRouter, so effort goes out as OpenRouter's `reasoning.effort` (each
 /// upstream maps it to the nearest level it supports). Every tier reasons.
 /// The model id is a tier alias: rewrite legacy pinned ids (older installs
-/// stored upstream ids) and mark Pro text-only (GLM 5.3 takes no images, so
-/// the harness turns them into placeholders instead of a 400).
+/// stored upstream ids and retired tiers). Every route reads images.
 fn configure_router_model(model: &mut Model) {
     use crate::harness::types::{MaxTokensField, OpenAICompletionsCompat, ThinkingFormat};
     model.id = router_real_model(&model.id);
     model.api = Api::OpenAICompletions;
     model.reasoning = true;
-    model.input = if model.id == "zwork-pro" {
-        vec![InputType::Text]
-    } else {
-        vec![InputType::Text, InputType::Image]
-    };
+    model.input = vec![InputType::Text, InputType::Image];
     model.compat = Some(OpenAICompletionsCompat {
         supports_store: Some(false),
         supports_developer_role: Some(false),
@@ -1422,7 +1417,7 @@ pub async fn complete_text(system: &str, prompt: &str, max_tokens: u64) -> Resul
 /// work for BYOK users whose default is still the (unconfigured) router.
 async fn complete_text_on(preferred: Option<&str>, system: &str, prompt: &str, max_tokens: u64) -> Result<String, String> {
     let s = settings::load();
-    let default = if s.default_model.is_empty() { "zwork-flash" } else { s.default_model.as_str() };
+    let default = if s.default_model.is_empty() { "zwork-auto" } else { s.default_model.as_str() };
     let resolved = preferred
         .into_iter()
         .chain([default])
@@ -2283,8 +2278,9 @@ pub fn compaction_model_id(shape: &str, main_model: &str) -> String {
     }
     let m = main_model.to_ascii_lowercase();
     if m.starts_with("zwork-") {
-        // Hosted tiers summarize on Flash, the cheapest.
-        "zwork-flash".to_string()
+        // Hosted tiers summarize on the auto router, which keeps a request
+        // without tools on its cheapest model.
+        "zwork-auto".to_string()
     } else if m.contains("deepseek") || m.contains("v4-pro") || m.contains("v4-flash") {
         "deepseek-flash".to_string()
     } else if m.contains("claude") || shape == "anthropic" && m.is_empty() {
@@ -2648,7 +2644,7 @@ mod tests {
             base_url: "https://api.tryzwork.app/api/".into(),
             provider: "zwork_router".into(),
             api: Some(Api::OpenAICompletions),
-            real_model_id: "zwork-flash".into(),
+            real_model_id: "zwork-auto".into(),
             provider_display_name: "zWork Cloud Router".into(),
             configured: true,
         };
@@ -2678,19 +2674,21 @@ mod tests {
             configured: true,
         };
         let m = build_model(&r, &r.real_model_id, None);
-        assert_eq!(m.id, "zwork-pro");
+        assert_eq!(m.id, "zwork-auto");
         assert_eq!(m.api, Api::OpenAICompletions);
         assert_eq!(m.base_url, "https://api.tryzwork.app/api");
         assert!(m.reasoning, "effort reaches the router");
-        assert_eq!(m.input, vec![InputType::Text], "Pro is text-only");
+        assert!(m.input.contains(&InputType::Image));
         assert_eq!(m.compat.as_ref().and_then(|c| c.thinking_format), Some(ThinkingFormat::Openrouter));
         assert_eq!(thinking_level_for(&m, Some("xhigh")), crate::harness::types::ThinkingLevel::Xhigh);
         assert_eq!(thinking_level_for(&m, Some("max")), crate::harness::types::ThinkingLevel::Max);
 
-        let ultra = build_model(&Resolved { real_model_id: "zwork-ultimate".into(), ..r }, "zwork-ultimate", None);
-        assert_eq!(ultra.id, "zwork-ultra");
-        assert!(ultra.input.contains(&InputType::Image));
-        assert_eq!(router_real_model("something-else"), "zwork-flash");
+        let apex = build_model(&Resolved { real_model_id: "zwork-apex".into(), ..r }, "zwork-apex", None);
+        assert_eq!(apex.id, "zwork-apex");
+        for retired in ["zwork-flash", "zwork-pro", "zwork-ultra", "zwork-ultimate"] {
+            assert_eq!(router_real_model(retired), "zwork-auto");
+        }
+        assert_eq!(router_real_model("something-else"), "zwork-auto");
     }
 
     #[test]

@@ -39,19 +39,19 @@ fn log_agent_event(chat_id: &str, run_id: &str, event: &str, payload: Value) {
 }
 
 /// Map a router-facing model id (as registered in Settings) to the tier alias
-/// the zWork Cloud Router serves. The router picks the upstream model for each
-/// tier, so the app only ever sends aliases. Legacy ids keep their product
-/// tier; unknown ids fall back to Flash WITH a log line, never a substring
-/// guess (`contains("pro")` mis-mapped ids like "grok-4-pro-fast").
+/// the zWork Cloud Router serves: `zwork-apex`, or the auto router, which
+/// picks the upstream model for each run itself. Retired tier ids and the
+/// upstream ids older installs pinned all mean auto; unknown ids fall back to
+/// it WITH a log line.
 fn router_real_model(model_id: &str) -> String {
     match model_id {
-        "zwork-flash" | "zwork-vision" | "deepseek-flash" | "deepseek-v4-flash" | "deepseek/deepseek-v4-flash-0731" => "zwork-flash",
-        "zwork-pro" | "deepseek-v4-pro" | "deepseek-v4.1-flash" | "z-ai/glm-5.3-flash" => "zwork-pro",
-        "zwork-ultra" | "zwork-ultimate" | "deepseek/deepseek-v4.1-flash" => "zwork-ultra",
         "zwork-apex" => "zwork-apex",
+        "zwork-auto" | "zwork-flash" | "zwork-pro" | "zwork-ultra" | "zwork-ultimate" | "zwork-vision"
+        | "deepseek-flash" | "deepseek-v4-flash" | "deepseek/deepseek-v4-flash-0731" | "deepseek-v4-pro"
+        | "deepseek-v4.1-flash" | "z-ai/glm-5.3-flash" | "deepseek/deepseek-v4.1-flash" => "zwork-auto",
         other => {
-            tracing::warn!("[agent] unknown router model id '{other}' — falling back to zwork-flash");
-            "zwork-flash"
+            tracing::warn!("[agent] unknown router model id '{other}' — falling back to zwork-auto");
+            "zwork-auto"
         }
     }
     .to_string()
