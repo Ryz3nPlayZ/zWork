@@ -142,8 +142,13 @@ struct GatewayConfig {
     free_user_weekly_max_usd: f64,
     /// Share of the weekly budget one 5-hour window may use.
     five_hour_share: f64,
-    /// Pro messages a free user may start per 30 days (outside the pool).
-    free_pro_messages_30d: i64,
+    /// Runs a free user may have escalated to the stronger model per 30 days
+    /// (their cost stays outside the pool).
+    free_escalations_30d: i64,
+    /// Percent of paid Flash runs sent to an A/B model instead.
+    router_ab_percent: u64,
+    /// A run this many calls long moves to the stronger model (0 = never).
+    escalate_after_calls: i64,
     /// How far past the budget a run already under way may go.
     continuation_headroom: f64,
     /// Dollars per usage unit shown in the app (≈ one typical Flash message).
@@ -247,48 +252,33 @@ fn auth_endpoint_url(auth_internal_base: &Url, endpoint: &str) -> Url {
         .unwrap_or_else(|_| panic!("failed to build auth endpoint URL: {endpoint}"))
 }
 
-/// One product tier of the hosted lineup. Every tier is served by OpenRouter
-/// with `:floor` routing (cheapest healthy provider first).
+/// One product tier of the hosted lineup. Clients only ever see these ids;
+/// which model serves a request is the router's call (see `Route`).
 struct HostedTier {
     /// App-facing id (what clients send as `model`).
     alias: &'static str,
-    /// OpenRouter ids, tried in order (later ones are fallbacks). Flash
-    /// spreads paid runs across all three; see `upstream_candidates`.
-    upstream: &'static [&'static str],
     /// Lowest plan that may use the tier ("free" < "pro" < "max").
     plan: &'static str,
 }
 
-/// The hosted lineup. Plan access: Free gets Flash (its cheapest model only)
-/// plus `free_pro_messages_30d` Pro messages; Pro unlocks up to Ultra; Max
-/// unlocks everything. Usage is metered in dollars of OpenRouter cost, so a
-/// tier's weight is simply what it costs (see `enforce_usage`).
+/// The hosted lineup: `zwork-auto` (every plan) routes each run to the
+/// cheapest model that can do it; `zwork-apex` is the strongest model, for
+/// Pro and Max. Usage is metered in dollars of OpenRouter cost, so a route's
+/// weight is simply what it costs (see `enforce_usage`).
 const HOSTED_TIERS: &[HostedTier] = &[
-    HostedTier {
-        alias: "zwork-flash",
-        upstream: &[
-            "openai/gpt-6-luna:floor",
-            "z-ai/glm-5.3-flash:floor",
-            "deepseek/deepseek-v4.1-flash:floor",
-        ],
-        plan: "free",
-    },
-    HostedTier { alias: "zwork-pro", upstream: &["z-ai/glm-5.3:floor"], plan: "free" },
-    HostedTier { alias: "zwork-ultra", upstream: &["google/gemini-3.8-flash:floor"], plan: "pro" },
-    HostedTier { alias: "zwork-apex", upstream: &["openai/gpt-6.1-sol:floor"], plan: "max" },
+    HostedTier { alias: "zwork-auto", plan: "free" },
+    HostedTier { alias: "zwork-apex", plan: "pro" },
 ];
 
-/// Map a requested model id to its tier. Older desktop builds send upstream
-/// ids instead of aliases; those keep the PRODUCT TIER they were sold as
-/// (glm-5.3-flash and the v4.1/v4-pro spellings were Pro, v4.1-flash with the
-/// vendor prefix was Ultimate, everything flash/vision-ish was Flash).
+/// Map a requested model id to its tier. Every retired tier id, and the
+/// upstream ids older desktop builds sent, now land on the auto router.
 fn hosted_tier(model: &str) -> Option<&'static HostedTier> {
     let alias = match model {
-        "zwork-flash" | "zwork-vision" | "deepseek-flash" | "deepseek-v4-flash"
-        | "deepseek/deepseek-v4-flash-0731" | "gemma4:31b" | "llama-3.2-90b-vision"
-        | "meta-llama/llama-4-scout-17b-16e-instruct" => "zwork-flash",
-        "zwork-pro" | "z-ai/glm-5.3-flash" | "deepseek-v4.1-flash" | "deepseek-v4-pro" => "zwork-pro",
-        "zwork-ultra" | "zwork-ultimate" | "deepseek/deepseek-v4.1-flash" => "zwork-ultra",
+        "zwork-auto" | "zwork-flash" | "zwork-pro" | "zwork-ultra" | "zwork-ultimate"
+        | "zwork-vision" | "deepseek-flash" | "deepseek-v4-flash" | "deepseek-v4.1-flash"
+        | "deepseek-v4-pro" | "deepseek/deepseek-v4-flash-0731" | "deepseek/deepseek-v4.1-flash"
+        | "z-ai/glm-5.3-flash" | "gemma4:31b" | "llama-3.2-90b-vision"
+        | "meta-llama/llama-4-scout-17b-16e-instruct" => "zwork-auto",
         "zwork-apex" => "zwork-apex",
         _ => return None,
     };
@@ -303,18 +293,358 @@ fn plan_rank(plan: &str) -> u8 {
     }
 }
 
-/// Upstream models to try for a request, preferred first. Free users stay on
-/// Flash's cheapest model (the others are only failover). Paid Flash runs are
-/// spread across the three models by run id, so one run stays on one model
-/// and keeps its prompt cache warm.
-fn upstream_candidates(tier: &HostedTier, user_plan: &str, run_id: &str) -> Vec<&'static str> {
-    let mut models = tier.upstream.to_vec();
-    if tier.alias == "zwork-flash" && plan_rank(user_plan) > 0 && !run_id.is_empty() {
-        let spread = run_id.bytes().fold(0usize, |h, b| h.wrapping_mul(31).wrapping_add(b as usize));
-        let n = models.len();
-        models.rotate_left(spread % n);
+const DEEPSEEK_FLASH: &str = "deepseek/deepseek-v4.1-flash:floor";
+const MIMO_PRO: &str = "xiaomi/mimo-v2.6-pro:floor";
+const GEMINI_FLASH: &str = "google/gemini-3.8-flash:floor";
+const GPT_SOL: &str = "openai/gpt-6.1-sol:floor";
+const GPT_LUNA: &str = "openai/gpt-6-luna:floor";
+const GLM_FLASH: &str = "z-ai/glm-5.3-flash:floor";
+
+/// Which model serves a run. Chosen on the run's first call and stored on
+/// every request (`gateway_requests.route`), so a run stays on one model and
+/// keeps its prompt cache warm; it only ever moves up (to `Vision` when images
+/// show up, to `Escalated` when the run struggles).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Route {
+    /// DeepSeek Flash: the default for everything.
+    Flash,
+    /// Gemini Flash: runs with images in them.
+    Vision,
+    /// MiMo Pro: work the classifier judged hard, or a run that struggled.
+    Escalated,
+    /// A small slice of paid runs, to compare cost and completion against Flash.
+    AbLuna,
+    AbGlm,
+    /// The `zwork-apex` tier.
+    Apex,
+}
+
+impl Route {
+    fn as_str(self) -> &'static str {
+        match self {
+            Route::Flash => "flash",
+            Route::Vision => "vision",
+            Route::Escalated => "escalated",
+            Route::AbLuna => "ab-luna",
+            Route::AbGlm => "ab-glm",
+            Route::Apex => "apex",
+        }
     }
-    models
+
+    fn parse(s: &str) -> Option<Route> {
+        Some(match s {
+            "flash" => Route::Flash,
+            "vision" => Route::Vision,
+            "escalated" => Route::Escalated,
+            "ab-luna" => Route::AbLuna,
+            "ab-glm" => Route::AbGlm,
+            "apex" => Route::Apex,
+            _ => return None,
+        })
+    }
+
+    /// OpenRouter ids to try, preferred first; later ones are failover.
+    fn candidates(self) -> &'static [&'static str] {
+        match self {
+            Route::Flash => &[DEEPSEEK_FLASH, GPT_LUNA, GLM_FLASH],
+            Route::Vision => &[GEMINI_FLASH, MIMO_PRO],
+            Route::Escalated => &[MIMO_PRO, DEEPSEEK_FLASH],
+            Route::AbLuna => &[GPT_LUNA, DEEPSEEK_FLASH],
+            Route::AbGlm => &[GLM_FLASH, DEEPSEEK_FLASH],
+            Route::Apex => &[GPT_SOL],
+        }
+    }
+}
+
+fn run_hash(run_id: &str) -> usize {
+    run_id.bytes().fold(0usize, |h, b| h.wrapping_mul(31).wrapping_add(b as usize))
+}
+
+/// `percent` of runs, picked by run id, go to one of the A/B models.
+fn ab_route(run_id: &str, percent: u64) -> Option<Route> {
+    let h = run_hash(run_id);
+    if run_id.is_empty() || (h % 100) as u64 >= percent {
+        return None;
+    }
+    Some(if (h / 100) % 2 == 0 { Route::AbLuna } else { Route::AbGlm })
+}
+
+/// The request's conversation, in either wire shape.
+fn request_messages(body: &Value) -> &[Value] {
+    body.get("messages").and_then(|m| m.as_array()).map(Vec::as_slice).unwrap_or(&[])
+}
+
+fn request_has_tools(body: &Value) -> bool {
+    body.get("tools").and_then(|t| t.as_array()).is_some_and(|t| !t.is_empty())
+}
+
+/// An image anywhere in the conversation (OpenAI `image_url`, Anthropic
+/// `image`, Responses-style `input_image`).
+fn request_has_images(body: &Value) -> bool {
+    fn walk(v: &Value) -> bool {
+        match v {
+            Value::Array(items) => items.iter().any(walk),
+            Value::Object(obj) => {
+                matches!(obj.get("type").and_then(|t| t.as_str()), Some("image_url" | "image" | "input_image"))
+                    || obj.values().any(walk)
+            }
+            _ => false,
+        }
+    }
+    request_messages(body).iter().any(walk)
+}
+
+fn content_text(content: &Value) -> String {
+    match content {
+        Value::String(s) => s.clone(),
+        Value::Array(parts) => parts
+            .iter()
+            .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        _ => String::new(),
+    }
+}
+
+/// The latest thing the user typed, which is what the classifier reads.
+fn last_user_text(body: &Value) -> String {
+    request_messages(body)
+        .iter()
+        .rev()
+        .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+        .map(|m| content_text(m.get("content").unwrap_or(&Value::Null)))
+        .find(|t| !t.trim().is_empty())
+        .unwrap_or_default()
+}
+
+/// Signs in the request itself that a run is stuck: the same tool call made
+/// over and over, or most recent tool results being errors.
+#[derive(Debug, Default, PartialEq)]
+struct StruggleSignals {
+    /// Most times one identical tool call appears among the last 8.
+    repeated_call: usize,
+    /// Errors among the last 6 tool results.
+    recent_errors: usize,
+}
+
+fn struggle_signals(body: &Value) -> StruggleSignals {
+    let mut calls: Vec<String> = Vec::new();
+    let mut results: Vec<bool> = Vec::new();
+    for msg in request_messages(body) {
+        let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("");
+        // OpenAI shape: assistant `tool_calls`, then `tool` messages.
+        for call in msg.get("tool_calls").and_then(|c| c.as_array()).into_iter().flatten() {
+            let f = call.get("function").unwrap_or(&Value::Null);
+            calls.push(format!("{}|{}", f.get("name").and_then(|n| n.as_str()).unwrap_or(""), f.get("arguments").map(|a| a.to_string()).unwrap_or_default()));
+        }
+        if role == "tool" {
+            results.push(looks_like_error(&content_text(msg.get("content").unwrap_or(&Value::Null))));
+        }
+        // Anthropic shape: `tool_use` / `tool_result` content blocks.
+        for block in msg.get("content").and_then(|c| c.as_array()).into_iter().flatten() {
+            match block.get("type").and_then(|t| t.as_str()) {
+                Some("tool_use") => calls.push(format!(
+                    "{}|{}",
+                    block.get("name").and_then(|n| n.as_str()).unwrap_or(""),
+                    block.get("input").map(|a| a.to_string()).unwrap_or_default()
+                )),
+                Some("tool_result") => results.push(
+                    block.get("is_error").and_then(|e| e.as_bool()).unwrap_or(false)
+                        || looks_like_error(&content_text(block.get("content").unwrap_or(&Value::Null))),
+                ),
+                _ => {}
+            }
+        }
+    }
+    let recent_calls = &calls[calls.len().saturating_sub(8)..];
+    let repeated_call = recent_calls
+        .iter()
+        .map(|c| recent_calls.iter().filter(|o| *o == c).count())
+        .max()
+        .unwrap_or(0);
+    let recent_errors = results[results.len().saturating_sub(6)..].iter().filter(|e| **e).count();
+    StruggleSignals { repeated_call, recent_errors }
+}
+
+/// Tool results in the OpenAI shape carry no error flag, so go by the text.
+fn looks_like_error(text: &str) -> bool {
+    let head: String = text.trim_start().chars().take(160).collect::<String>().to_ascii_lowercase();
+    head.starts_with("error") || head.contains("error:") || head.contains("failed") || head.contains("not found")
+}
+
+/// Whether a run should move up to the stronger model mid-way.
+fn should_escalate(signals: &StruggleSignals, calls_in_run: i64, escalate_after_calls: i64) -> Option<&'static str> {
+    if signals.repeated_call >= 3 {
+        Some("repeated_tool_call")
+    } else if signals.recent_errors >= 3 {
+        Some("tool_errors")
+    } else if escalate_after_calls > 0 && calls_in_run >= escalate_after_calls {
+        Some("long_run")
+    } else {
+        None
+    }
+}
+
+const CLASSIFIER_PROMPT: &str = "You route requests for an AI assistant that works on the user's computer (files, apps, browser, documents). \
+Reply with one word. HARD: the task needs a strong model, such as multi-step research, writing or fixing substantial code, \
+complex analysis, careful planning across many steps, or long documents that must be right. \
+EASY: a small fast model can do it, such as conversation, a quick question, a short piece of writing, \
+a simple edit, one lookup, or a simple action in a file or app.";
+
+/// Ask the cheap model whether the run's first message needs the stronger
+/// one. Costs a few hundredths of a cent; any failure or timeout reads as
+/// "easy". Returns the verdict and what the call cost.
+async fn classify_needs_strong_model(state: &AppState, text: &str) -> (bool, Option<f64>) {
+    let Some(provider) = state.gateway.providers.iter().find(|p| p.protocol == GatewayProtocol::OpenAi) else {
+        return (false, None);
+    };
+    let text: String = text.chars().take(4000).collect();
+    if text.trim().is_empty() {
+        return (false, None);
+    }
+    let body = serde_json::json!({
+        "model": DEEPSEEK_FLASH,
+        "messages": [
+            { "role": "system", "content": CLASSIFIER_PROMPT },
+            { "role": "user", "content": text },
+        ],
+        "max_tokens": 16,
+        "temperature": 0,
+        "reasoning": { "enabled": false },
+        "usage": { "include": true },
+    });
+    let resp = state
+        .http_client
+        .post(format!("{}/chat/completions", provider.base_url.trim_end_matches('/')))
+        .header("Authorization", format!("Bearer {}", provider.api_key))
+        .header("X-Title", "zWork Router")
+        .header("HTTP-Referer", "https://tryzwork.app")
+        .timeout(std::time::Duration::from_secs(4))
+        .json(&body)
+        .send()
+        .await;
+    let Ok(resp) = resp else { return (false, None) };
+    let Ok(json) = resp.json::<Value>().await else { return (false, None) };
+    let verdict = json
+        .pointer("/choices/0/message/content")
+        .and_then(|c| c.as_str())
+        .unwrap_or("")
+        .to_ascii_uppercase();
+    (verdict.contains("HARD"), usage_cost(&json))
+}
+
+/// Runs a free user has had escalated to the stronger model in 30 days.
+async fn free_escalations_used(state: &AppState, user_id: &str) -> Result<i64, StatusCode> {
+    sqlx::query_scalar(
+        r#"
+        SELECT COUNT(DISTINCT run_id)
+        FROM gateway_requests
+        WHERE user_id = $1
+          AND route = 'escalated'
+          AND created_at >= NOW() - INTERVAL '30 days'
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+/// Pick the route for a request, and say why (stored with the request).
+///
+/// - `zwork-apex` is always Sol.
+/// - A run keeps the route of its earlier calls; it moves up to `Escalated`
+///   when the request shows it struggling, or to `Vision` once images appear.
+/// - A new run is escalated when the classifier calls it hard, goes to
+///   `Vision` when it has images, and otherwise runs on Flash (or, for a
+///   small slice of paid runs, an A/B model).
+///
+/// Only agent requests (ones that carry tools) are classified or escalated,
+/// so plain chat, the web app's included, always stays on the cheap model.
+/// Paid plans escalate freely; free users get `free_escalations_30d` runs.
+async fn choose_route(
+    state: &AppState,
+    tier: &HostedTier,
+    user: Option<&AppUser>,
+    run_id: &str,
+    kind: RequestKind,
+    body: &Value,
+) -> (Route, Value) {
+    if tier.alias == "zwork-apex" {
+        return (Route::Apex, serde_json::json!({ "reason": "apex" }));
+    }
+    let has_tools = request_has_tools(body);
+    let has_images = request_has_images(body);
+    let paid = user.is_some_and(|u| plan_rank(&u.tier) > 0);
+
+    let (prior, calls_in_run): (Option<String>, i64) = match user {
+        Some(u) => sqlx::query_as(
+            r#"
+            SELECT
+              (SELECT route FROM gateway_requests
+                WHERE user_id = $1 AND run_id = $2 AND route IS NOT NULL
+                ORDER BY created_at DESC LIMIT 1),
+              (SELECT COUNT(*) FROM gateway_requests WHERE user_id = $1 AND run_id = $2)
+            "#,
+        )
+        .bind(&u.user_id)
+        .bind(run_id)
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or((None, 0)),
+        None => (None, 0),
+    };
+    let prior = prior.as_deref().and_then(Route::parse);
+
+    let can_escalate = || async {
+        match user {
+            None => false,
+            Some(_) if paid => true,
+            Some(u) => free_escalations_used(state, &u.user_id)
+                .await
+                .is_ok_and(|n| n < state.gateway.free_escalations_30d),
+        }
+    };
+
+    if prior == Some(Route::Escalated) {
+        return (Route::Escalated, serde_json::json!({ "reason": "sticky" }));
+    }
+
+    if let Some(route) = prior.or((kind == RequestKind::Continuation).then_some(Route::Flash)) {
+        if has_tools {
+            let signals = struggle_signals(body);
+            if let Some(why) = should_escalate(&signals, calls_in_run, state.gateway.escalate_after_calls) {
+                if can_escalate().await {
+                    return (
+                        Route::Escalated,
+                        serde_json::json!({ "reason": why, "from": route.as_str(), "calls_in_run": calls_in_run }),
+                    );
+                }
+            }
+        }
+        if has_images && matches!(route, Route::Flash | Route::AbLuna | Route::AbGlm) {
+            return (Route::Vision, serde_json::json!({ "reason": "images", "from": route.as_str() }));
+        }
+        return (route, serde_json::json!({ "reason": "sticky" }));
+    }
+
+    if has_tools && can_escalate().await {
+        let (hard, cost) = classify_needs_strong_model(state, &last_user_text(body)).await;
+        if hard {
+            return (Route::Escalated, serde_json::json!({ "reason": "classifier", "classifier_cost_usd": cost }));
+        }
+        if has_images {
+            return (Route::Vision, serde_json::json!({ "reason": "images", "classifier_cost_usd": cost }));
+        }
+        if let Some(ab) = ab_route(run_id, if paid { state.gateway.router_ab_percent } else { 0 }) {
+            return (ab, serde_json::json!({ "reason": "ab_test", "classifier_cost_usd": cost }));
+        }
+        return (Route::Flash, serde_json::json!({ "reason": "classifier_easy", "classifier_cost_usd": cost }));
+    }
+    if has_images {
+        return (Route::Vision, serde_json::json!({ "reason": "images" }));
+    }
+    (Route::Flash, serde_json::json!({ "reason": "default" }))
 }
 
 /// The router's only upstream is OpenRouter. It is registered twice: the
@@ -325,7 +655,7 @@ fn load_gateway_providers() -> Vec<GatewayProvider> {
     if api_key.trim().is_empty() {
         return Vec::new();
     }
-    let cheapest = HOSTED_TIERS[0].upstream[0].to_string();
+    let cheapest = DEEPSEEK_FLASH.to_string();
     let provider = |base_url: String, protocol| GatewayProvider {
         name: "OpenRouter".to_string(),
         base_url,
@@ -577,9 +907,10 @@ struct AnalyticsSummary {
     five_hour_used: i64,
     weekly_limit: i64,
     weekly_used: i64,
-    /// Pro messages a free user has left this 30 days; None on paid plans.
-    free_pro_messages_left: Option<i64>,
-    free_pro_messages_limit: i64,
+    /// Runs a free user may still have escalated to the stronger model in
+    /// this 30 days; None on paid plans.
+    free_escalations_left: Option<i64>,
+    free_escalations_limit: i64,
     past_week: Vec<AnalyticsDay>,
     past_month: Vec<AnalyticsDay>,
     past_year: Vec<AnalyticsDay>,
@@ -1107,12 +1438,24 @@ async fn bootstrap_schema(db: &PgPool) -> Result<(), sqlx::Error> {
     .execute(db)
     .await?;
 
-    // The product tier a request was billed as (zwork-flash, zwork-pro, …):
-    // free users' Pro allowance is counted from it. NULL before 0.7.
+    // The product tier a request was billed as (zwork-auto, zwork-apex; the
+    // retired zwork-flash/pro/ultra before the auto router). NULL before 0.7.
     sqlx::query(
         r#"
         ALTER TABLE gateway_requests
         ADD COLUMN IF NOT EXISTS model_tier TEXT;
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    // The auto router's choice for the request (flash, vision, escalated,
+    // ab-luna, ab-glm, apex): later calls of a run keep it, and free users'
+    // escalations are counted from it.
+    sqlx::query(
+        r#"
+        ALTER TABLE gateway_requests
+        ADD COLUMN IF NOT EXISTS route TEXT;
         "#,
     )
     .execute(db)
@@ -1814,8 +2157,9 @@ async fn resolve_usage_limits(state: &AppState, plan: &str) -> UsageLimits {
     UsageLimits { five_hour_usd: weekly_usd * g.five_hour_share, weekly_usd }
 }
 
-/// Dollars a user spent in the last `hours`. A free user's Pro messages come
-/// out of their separate allowance, not the shared pool, so they're left out.
+/// Dollars a user spent in the last `hours`. A free user's escalated runs (and
+/// the Pro messages before the auto router) come out of their separate
+/// allowance, not the shared pool, so they're left out.
 async fn spent_usd(state: &AppState, user_id: &str, plan: &str, hours: i64) -> Result<f64, StatusCode> {
     sqlx::query_scalar(
         r#"
@@ -1823,7 +2167,7 @@ async fn spent_usd(state: &AppState, user_id: &str, plan: &str, hours: i64) -> R
         FROM gateway_requests
         WHERE user_id = $1
           AND created_at >= NOW() - make_interval(hours => $2::int)
-          AND NOT ($3 AND COALESCE(model_tier, '') = 'zwork-pro')
+          AND NOT ($3 AND (COALESCE(route, '') = 'escalated' OR COALESCE(model_tier, '') = 'zwork-pro'))
         "#,
     )
     .bind(user_id)
@@ -1834,27 +2178,9 @@ async fn spent_usd(state: &AppState, user_id: &str, plan: &str, hours: i64) -> R
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
-/// Pro messages a free user started in the last 30 days.
-async fn free_pro_messages_used(state: &AppState, user_id: &str) -> Result<i64, StatusCode> {
-    sqlx::query_scalar(
-        r#"
-        SELECT COUNT(*)
-        FROM gateway_requests
-        WHERE user_id = $1
-          AND request_kind = 'root'
-          AND model_tier = 'zwork-pro'
-          AND created_at >= NOW() - INTERVAL '30 days'
-        "#,
-    )
-    .bind(user_id)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
-}
-
 /// Gate a request on plan access and spend. Usage is metered in dollars of
-/// upstream cost, so a model's weight is exactly what it costs: a Pro message
-/// uses about ten Flash messages' worth. Roots are refused once a window's
+/// upstream cost, so a model's weight is exactly what it costs: a Sol message
+/// uses about thirty Flash messages' worth. Roots are refused once a window's
 /// budget is spent; continuations of a run already under way get headroom
 /// (`continuation_headroom`) so a task isn't cut off mid-step, which still
 /// stops a runaway loop.
@@ -1867,25 +2193,18 @@ async fn enforce_usage(
     let deny = |code: &str| (StatusCode::TOO_MANY_REQUESTS, code.to_string());
     let internal = |_: StatusCode| (StatusCode::INTERNAL_SERVER_ERROR, "gateway_rate_limit_failed".to_string());
     let is_root = matches!(kind, RequestKind::Root);
-    let free = plan_rank(&user.tier) == 0;
 
     if plan_rank(&user.tier) < plan_rank(tier.plan) {
         let code = if tier.plan == "max" { "model_requires_max_tier" } else { "model_requires_pro_tier" };
         return Err((StatusCode::FORBIDDEN, code.to_string()));
     }
 
-    if free && tier.alias == "zwork-pro" {
-        if is_root && free_pro_messages_used(state, &user.user_id).await.map_err(internal)? >= state.gateway.free_pro_messages_30d {
-            return Err(deny("free_pro_messages_used"));
-        }
-    } else {
-        let limits = resolve_usage_limits(state, &user.tier).await;
-        let headroom = if is_root { 1.0 } else { state.gateway.continuation_headroom };
-        let spent_5h = spent_usd(state, &user.user_id, &user.tier, 5).await.map_err(internal)?;
-        let spent_7d = spent_usd(state, &user.user_id, &user.tier, 24 * 7).await.map_err(internal)?;
-        if spent_5h >= limits.five_hour_usd * headroom || spent_7d >= limits.weekly_usd * headroom {
-            return Err(deny("root_request_quota_exceeded"));
-        }
+    let limits = resolve_usage_limits(state, &user.tier).await;
+    let headroom = if is_root { 1.0 } else { state.gateway.continuation_headroom };
+    let spent_5h = spent_usd(state, &user.user_id, &user.tier, 5).await.map_err(internal)?;
+    let spent_7d = spent_usd(state, &user.user_id, &user.tier, 24 * 7).await.map_err(internal)?;
+    if spent_5h >= limits.five_hour_usd * headroom || spent_7d >= limits.weekly_usd * headroom {
+        return Err(deny("root_request_quota_exceeded"));
     }
 
     if !is_root {
@@ -2011,7 +2330,8 @@ fn estimate_cost(model: &str, input: Option<i64>, output: Option<i64>) -> Option
     let (input_price_1m, output_price_1m): (f64, f64) = match model.trim_end_matches(":floor") {
         "openai/gpt-6-luna" => (0.05, 0.25),
         "z-ai/glm-5.3-flash" => (0.075, 0.25),
-        "deepseek/deepseek-v4.1-flash" => (0.09, 0.18),
+        "deepseek/deepseek-v4.1-flash" => (0.0348, 0.1392),
+        "xiaomi/mimo-v2.6-pro" => (0.435, 0.87),
         "z-ai/glm-5.3" => (0.5625, 2.5),
         "google/gemini-3.8-flash" => (0.375, 1.875),
         "openai/gpt-6.1-sol" => (1.0, 5.0),
@@ -2240,8 +2560,10 @@ struct GatewayRequestMeta {
     max_tokens: Option<i64>,
     tool_count: Option<i32>,
     run_trigger: Option<String>,
-    /// Product tier the request was billed as (zwork-flash, zwork-pro, …).
+    /// Product tier the request was billed as (zwork-auto, zwork-apex).
     model_tier: Option<String>,
+    /// The auto router's choice (see `Route`).
+    route: Option<String>,
 }
 
 async fn insert_gateway_request(
@@ -2262,10 +2584,10 @@ async fn insert_gateway_request(
             user_id, run_id, request_kind,
             chat_id, project_id, app_version, os,
             request_payload, request_body_size_bytes,
-            stream, max_tokens, tool_count, run_trigger, model_tier,
+            stream, max_tokens, tool_count, run_trigger, model_tier, route,
             started_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
         RETURNING id
         "#,
     )
@@ -2283,6 +2605,7 @@ async fn insert_gateway_request(
     .bind(meta.tool_count)
     .bind(&meta.run_trigger)
     .bind(&meta.model_tier)
+    .bind(&meta.route)
     .fetch_one(&state.db)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
@@ -2472,7 +2795,6 @@ async fn ai_proxy(
             format!("unsupported_model: {requested_model}"),
         )
     })?;
-    let user_plan = app_user.as_ref().map(|u| u.tier.as_str()).unwrap_or("free");
     match &app_user {
         Some(user) => enforce_usage(&state, user, tier, request_kind).await?,
         None if plan_rank(tier.plan) > 0 => {
@@ -2480,6 +2802,8 @@ async fn ai_proxy(
         }
         None => {}
     }
+    let (route, route_reason) =
+        choose_route(&state, tier, app_user.as_ref(), &run_id, request_kind, &body_json).await;
 
     let request_payload = redact_image_data(&body_json);
     let wants_stream = body_json.get("stream").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -2498,6 +2822,7 @@ async fn ai_proxy(
             .map(|a| a.len() as i32),
         run_trigger: header_str(&headers, "x-zwork-trigger"),
         model_tier: Some(tier.alias.to_string()),
+        route: Some(route.as_str().to_string()),
     };
 
     let request_id = if let Some(user) = &app_user {
@@ -2515,10 +2840,12 @@ async fn ai_proxy(
         None
     };
 
-    let candidates = upstream_candidates(tier, user_plan, &run_id);
+    let candidates = route.candidates();
     let routing_decision = serde_json::json!({
         "requested_model": requested_model,
         "tier": tier.alias,
+        "route": route.as_str(),
+        "why": route_reason,
         "candidates": candidates,
     });
     let mut failures: Vec<String> = Vec::new();
@@ -2739,7 +3066,6 @@ async fn ai_proxy_anthropic(
             format!("unsupported_model: {requested_model}"),
         )
     })?;
-    let user_plan = app_user.as_ref().map(|u| u.tier.as_str()).unwrap_or("free");
     match &app_user {
         Some(user) => enforce_usage(&state, user, tier, request_kind).await?,
         None if plan_rank(tier.plan) > 0 => {
@@ -2747,6 +3073,8 @@ async fn ai_proxy_anthropic(
         }
         None => {}
     }
+    let (route, route_reason) =
+        choose_route(&state, tier, app_user.as_ref(), &run_id, request_kind, &body_json).await;
 
     let request_payload = redact_image_data(&body_json);
     let meta = GatewayRequestMeta {
@@ -2764,6 +3092,7 @@ async fn ai_proxy_anthropic(
             .map(|a| a.len() as i32),
         run_trigger: header_str(&headers, "x-zwork-trigger"),
         model_tier: Some(tier.alias.to_string()),
+        route: Some(route.as_str().to_string()),
     };
 
     let request_id = if let Some(user) = &app_user {
@@ -2781,10 +3110,12 @@ async fn ai_proxy_anthropic(
         None
     };
 
-    let candidates = upstream_candidates(tier, user_plan, &run_id);
+    let candidates = route.candidates();
     let routing_decision = serde_json::json!({
         "requested_model": requested_model,
         "tier": tier.alias,
+        "route": route.as_str(),
+        "why": route_reason,
         "candidates": candidates,
     });
     let mut failures: Vec<String> = Vec::new();
@@ -2923,7 +3254,7 @@ async fn ai_proxy_anthropic(
 /// Public, no-login chat demo at `POST /api/demo/chat`.
 ///
 /// Streams an Anthropic-shaped SSE response from the same OpenRouter provider
-/// the authenticated gateway uses (Flash's cheapest model), but WITHOUT calling `ensure_gateway_access`
+/// the authenticated gateway's Flash route uses (DeepSeek Flash), but WITHOUT calling `ensure_gateway_access`
 /// — there is no token, no cookie, no DB user. Abuse is bounded by:
 ///   - a tower-governor per-IP burst limiter on the route (see `demo_router`)
 ///   - a per-IP daily message cap enforced here (`DemoConfig.daily_counts`)
@@ -6596,8 +6927,8 @@ async fn analytics_summary(
     let weekly_used = usd_to_units(&state, spent_usd(&state, &user.user_id, &user.tier, 24 * 7).await?);
     let five_hour_limit = usd_to_units(&state, limits.five_hour_usd).max(1);
     let weekly_limit = usd_to_units(&state, limits.weekly_usd).max(1);
-    let free_pro_messages_left = if plan_rank(&user.tier) == 0 {
-        Some((state.gateway.free_pro_messages_30d - free_pro_messages_used(&state, &user.user_id).await?).max(0))
+    let free_escalations_left = if plan_rank(&user.tier) == 0 {
+        Some((state.gateway.free_escalations_30d - free_escalations_used(&state, &user.user_id).await?).max(0))
     } else {
         None
     };
@@ -6809,8 +7140,8 @@ async fn analytics_summary(
         five_hour_used,
         weekly_limit,
         weekly_used,
-        free_pro_messages_left,
-        free_pro_messages_limit: state.gateway.free_pro_messages_30d,
+        free_escalations_left,
+        free_escalations_limit: state.gateway.free_escalations_30d,
         past_week,
         past_month,
         past_year,
@@ -7131,10 +7462,19 @@ async fn main() {
             free_user_weekly_min_usd: env_f64("FREE_USER_WEEKLY_MIN_USD", 0.03),
             free_user_weekly_max_usd: env_f64("FREE_USER_WEEKLY_MAX_USD", 0.10),
             five_hour_share: env_f64("FIVE_HOUR_SHARE", 0.35),
-            free_pro_messages_30d: std::env::var("FREE_PRO_MESSAGES_30D")
+            free_escalations_30d: std::env::var("FREE_ESCALATIONS_30D")
                 .ok()
                 .and_then(|v| v.parse::<i64>().ok())
                 .unwrap_or(3),
+            router_ab_percent: std::env::var("ROUTER_AB_PERCENT")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(5)
+                .min(100),
+            escalate_after_calls: std::env::var("ROUTER_ESCALATE_AFTER_CALLS")
+                .ok()
+                .and_then(|v| v.parse::<i64>().ok())
+                .unwrap_or(40),
             continuation_headroom: env_f64("CONTINUATION_HEADROOM", 1.5),
             usage_unit_usd: env_f64("USAGE_UNIT_USD", 0.008),
             dev_coupon_codes: std::env::var("DEV_COUPON_CODES")
@@ -7368,30 +7708,73 @@ mod router_tests {
 
     #[test]
     fn tiers_resolve_aliases_and_legacy_ids() {
-        assert_eq!(hosted_tier("zwork-flash").unwrap().alias, "zwork-flash");
-        assert_eq!(hosted_tier("zwork-ultimate").unwrap().alias, "zwork-ultra");
-        assert_eq!(hosted_tier("z-ai/glm-5.3-flash").unwrap().alias, "zwork-pro");
-        assert_eq!(hosted_tier("zwork-apex").unwrap().plan, "max");
-        assert!(hosted_tier("gpt-4o").is_none());
-        for tier in HOSTED_TIERS {
-            assert!(tier.upstream.iter().all(|m| m.ends_with(":floor")));
+        for old in ["zwork-flash", "zwork-pro", "zwork-ultra", "zwork-ultimate", "z-ai/glm-5.3-flash"] {
+            assert_eq!(hosted_tier(old).unwrap().alias, "zwork-auto");
         }
+        assert_eq!(hosted_tier("zwork-apex").unwrap().plan, "pro");
+        assert!(hosted_tier("gpt-4o").is_none());
+        for route in [Route::Flash, Route::Vision, Route::Escalated, Route::AbLuna, Route::AbGlm, Route::Apex] {
+            assert_eq!(Route::parse(route.as_str()), Some(route));
+            assert!(route.candidates().iter().all(|m| m.ends_with(":floor")));
+        }
+        assert_eq!(Route::Flash.candidates()[0], DEEPSEEK_FLASH);
+        assert_eq!(Route::Escalated.candidates()[0], MIMO_PRO);
+        assert_eq!(Route::Vision.candidates()[0], GEMINI_FLASH);
     }
 
     #[test]
-    fn free_flash_prefers_the_cheapest_model() {
-        let flash = hosted_tier("zwork-flash").unwrap();
-        for run in ["a", "b", "run-123"] {
-            assert_eq!(upstream_candidates(flash, "free", run)[0], "openai/gpt-6-luna:floor");
-            assert_eq!(upstream_candidates(flash, "pro", run).len(), 3);
-        }
+    fn ab_slice_is_about_the_configured_share() {
+        let hits = (0..10_000).filter(|i| ab_route(&format!("run-{i}"), 5).is_some()).count();
+        assert!((300..=700).contains(&hits), "{hits}");
+        assert!((0..1000).all(|i| ab_route(&format!("run-{i}"), 0).is_none()));
+        assert!(ab_route("", 100).is_none());
+    }
+
+    #[test]
+    fn images_and_tools_are_detected_in_both_shapes() {
+        let openai = serde_json::json!({ "tools": [{}], "messages": [
+            { "role": "user", "content": [{ "type": "text", "text": "what is this" }, { "type": "image_url", "image_url": { "url": "data:" } }] },
+        ]});
+        assert!(request_has_images(&openai) && request_has_tools(&openai));
+        assert_eq!(last_user_text(&openai), "what is this");
+        let anthropic = serde_json::json!({ "messages": [
+            { "role": "user", "content": [{ "type": "tool_result", "content": [{ "type": "image", "source": {} }] }] },
+        ]});
+        assert!(request_has_images(&anthropic) && !request_has_tools(&anthropic));
+        assert!(!request_has_images(&serde_json::json!({ "messages": [{ "role": "user", "content": "hi" }] })));
+    }
+
+    #[test]
+    fn struggling_runs_escalate() {
+        let call = |args: &str| serde_json::json!({ "role": "assistant", "tool_calls": [{ "function": { "name": "read", "arguments": args } }] });
+        let result = |text: &str| serde_json::json!({ "role": "tool", "content": text });
+        let looping = serde_json::json!({ "messages": [call("a"), result("ok"), call("a"), result("ok"), call("a"), result("ok")] });
+        assert_eq!(should_escalate(&struggle_signals(&looping), 3, 40), Some("repeated_tool_call"));
+
+        let erroring = serde_json::json!({ "messages": [
+            call("a"), result("Error: no such file"), call("b"), result("command failed with exit 1"),
+            call("c"), result("Error: permission denied"),
+        ]});
+        assert_eq!(should_escalate(&struggle_signals(&erroring), 3, 40), Some("tool_errors"));
+
+        let anthropic = serde_json::json!({ "messages": [{ "role": "user", "content": [
+            { "type": "tool_result", "is_error": true, "content": "x" },
+            { "type": "tool_result", "is_error": true, "content": "y" },
+            { "type": "tool_result", "is_error": true, "content": "z" },
+        ]}]});
+        assert_eq!(struggle_signals(&anthropic).recent_errors, 3);
+
+        let healthy = serde_json::json!({ "messages": [call("a"), result("ok"), call("b"), result("done")] });
+        assert_eq!(should_escalate(&struggle_signals(&healthy), 3, 40), None);
+        assert_eq!(should_escalate(&struggle_signals(&healthy), 40, 40), Some("long_run"));
+        assert_eq!(should_escalate(&struggle_signals(&healthy), 400, 0), None);
     }
 
     #[test]
     fn upstream_body_gets_model_usage_and_effort() {
-        let mut body = serde_json::json!({ "model": "zwork-pro", "reasoning_effort": "high" });
-        prepare_upstream_body(&mut body, "z-ai/glm-5.3:floor");
-        assert_eq!(body["model"], "z-ai/glm-5.3:floor");
+        let mut body = serde_json::json!({ "model": "zwork-auto", "reasoning_effort": "high" });
+        prepare_upstream_body(&mut body, MIMO_PRO);
+        assert_eq!(body["model"], MIMO_PRO);
         assert_eq!(body["usage"]["include"], true);
         assert_eq!(body["reasoning"]["effort"], "high");
         assert!(body.get("reasoning_effort").is_none());
