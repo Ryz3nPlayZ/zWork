@@ -8,12 +8,19 @@
     {
       "comment": "Local loopback / template placeholders in docs (OAuth callback examples, docker-compose hostnames). markdown-link-check can't meaningfully fetch these.",
       "pattern": "^(http|https)://(localhost|127\\.0\\.0\\.1|better_auth)"
+    },
+    {
+      "comment": "arXiv drops connections from CI runners (status 0) though the page is up; flaky, not link rot.",
+      "pattern": "^https://arxiv\\.org/"
     }
   ],
   "replacementPatterns": [],
   "httpHeaders": [
     {
-      "urls": ["https://github.com", "https://api.github.com"],
+      "urls": [
+        "https://github.com",
+        "https://api.github.com"
+      ],
       "headers": {
         "User-Agent": "markdown-link-check"
       }
@@ -22,5 +29,12 @@
   "timeout": "10s",
   "retryOn429": true,
   "retryCount": 3,
-  "fallbackResponseStatus": [200, 301, 302, 308, 401, 403]
+  "fallbackResponseStatus": [
+    200,
+    301,
+    302,
+    308,
+    401,
+    403
+  ]
 }

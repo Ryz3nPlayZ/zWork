@@ -140,6 +140,7 @@ mod tests {
     #[test]
     fn newest_compaction_replaces_history() {
         let kept = AgentMessage::user_text("kept");
+        let fresh = AgentMessage::user_text("fresh");
         let compaction = Entry {
             id: "k2".into(),
             parent_id: Some("old".into()),
@@ -171,7 +172,7 @@ mod tests {
             },
             message_entry("old", Some("k1"), AgentMessage::user_text("stale")),
             compaction,
-            message_entry("after", Some("k2"), AgentMessage::user_text("fresh")),
+            message_entry("after", Some("k2"), fresh.clone()),
         ];
         let messages = build_session_context(&entries, &EntryProjectors::new()).unwrap();
         assert_eq!(messages.len(), 3);
@@ -181,7 +182,7 @@ mod tests {
             Some("second")
         );
         assert_eq!(messages[1], kept);
-        assert_eq!(messages[2], AgentMessage::user_text("fresh"));
+        assert_eq!(messages[2], fresh);
     }
 
     #[test]
@@ -203,6 +204,15 @@ mod tests {
             Arc::new(|entry: &Entry| Ok(vec![AgentMessage::user_text(format!("log:{}", entry.id))])),
         );
         let messages = build_session_context(std::slice::from_ref(&custom), &projectors).unwrap();
-        assert_eq!(messages, vec![AgentMessage::user_text("log:x")]);
+        // Compare the text alone: the projector stamps its own timestamp.
+        assert!(matches!(
+            messages.as_slice(),
+            [AgentMessage::Llm(crate::harness::types::Message::User(
+                crate::harness::types::UserMessage {
+                    content: crate::harness::types::UserMessageContent::Text(text),
+                    ..
+                }
+            ))] if text == "log:x"
+        ));
     }
 }
