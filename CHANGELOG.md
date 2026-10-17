@@ -16,6 +16,8 @@ All notable changes to zWork are documented in this file.
 - **Built-in Python and Node.** Installed on first launch (checksum-verified), so document skills and `npx`/`uvx` connectors work on a stock Mac with nothing else to install.
 - **Integrated Windows title bar.** The Windows build no longer stacks the app under a native, mismatched title-bar strip. The window ships undecorated (`tauri.windows.conf.json`) and a new `TitleBar` component owns the top chrome: a full-width strip in the surface color (the sidebar/frame fill, so the window edge, sidebar, and pane seams read as one continuous surface) hosting the search + sidebar-toggle controls, the active chat's title and metadata (rename, message count, export menu, a working pulse) — or the current view's name on non-chat screens — with Windows-style minimize/maximize/close caption buttons at the right edge. Empty strip space drags the window and double-click toggles maximize. The chat pane starts below the strip and ChatView drops its in-pane header there, so there's one continuous bar instead of two stacked ones. Boot/login/onboarding screens carry their own drag strip + caption buttons. macOS (native traffic-light overlay), Linux (native decorations), and the web build are unchanged.
 - **Working-state border beams.** The chat input glows with a circling border beam ([border-beam](https://libraries.dev/beam.html)) whenever the agent is working — slowed to a 3.5s revolution (the 1.96s default's crossings read as jumps) and boosted in strength — and the send/stop button gets a spinning beam ring that exists only while the button is in Stop state (the send button stays matte). Both adapt to light/dark theme and follow `prefers-reduced-motion`.
+- **zWork picks the model.** The hosted lineup is now zWork, which sends everyday work to a fast model and moves genuinely hard or stuck tasks to a stronger one, and ??????, the smartest model, on Pro and Max. Free plans get 3 harder tasks a month; every hosted model reads images.
+- **Effort control.** Choose Low to Max in the model menu to trade speed for depth.
 
 ### Improvements
 - **Steps read in plain language.** "Read expenses.csv", "Ran Python script clean.py", "Used Gmail: send email" instead of raw tool names.
@@ -25,6 +27,7 @@ All notable changes to zWork are documented in this file.
 - **The attach picker accepts Office, iWork and zip files.**
 
 ### Fixes
+- A reply that reconnects after a dropped connection no longer repeats earlier messages or shows the hidden context sent with your message.
 - A dropped model stream retries with a 2 second backoff instead of ending the reply blank.
 - A reopened chat whose run failed before answering says so instead of showing an empty reply.
 - Reopened chats turn saved documents back into documents instead of showing the raw marker.
