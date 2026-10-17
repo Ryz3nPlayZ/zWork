@@ -6,7 +6,7 @@ import { File, FileImage, FileSpreadsheet, FileText, FolderOpen, Presentation } 
 import { api } from "../lib/api";
 
 // A path-looking inline code span: optional dirs, a name, a short extension.
-const FILE_LIKE = /^(?:~\/|\/|\.{1,2}\/)?(?:[^\s`*?<>|"]+\/)*[^\s`*?<>|"/]+\.[A-Za-z][A-Za-z0-9]{0,4}$/;
+const FILE_LIKE = /^(?:~\/|\/|\.{1,2}\/)?(?:[^\s`*?<>|"/]+\/)*[^\s`*?<>|"/]+\.[A-Za-z][A-Za-z0-9]{0,4}$/;
 
 export function looksLikeFile(s: string) {
   return s.length < 260 && FILE_LIKE.test(s);

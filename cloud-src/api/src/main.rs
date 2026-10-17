@@ -6135,7 +6135,11 @@ async fn composio_disconnect(
             .to_lowercase();
         if acc_app == app_slug {
             let account_id = acc.get("id").and_then(|v| v.as_str()).unwrap_or("");
-            let delete_url = format!("{}/connected_accounts/{}", COMPOSIO_BASE_URL, account_id);
+            let delete_url = format!(
+                "{}/connected_accounts/{}",
+                COMPOSIO_BASE_URL,
+                urlencoding::encode(account_id)
+            );
             let _ = state
                 .http_client
                 .delete(&delete_url)
@@ -6329,6 +6333,15 @@ async fn composio_execute(
         return Err((StatusCode::SERVICE_UNAVAILABLE, "composio_not_configured".into()));
     }
 
+    // Tool slugs are like GMAIL_SEND_EMAIL; anything else could walk the
+    // request to another Composio endpoint under our API key.
+    if slug.is_empty()
+        || !slug
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err((StatusCode::BAD_REQUEST, "invalid_tool_slug".into()));
+    }
     let exec_url = format!("{}/tools/execute/{}", COMPOSIO_BASE_URL, slug);
     let exec_body = serde_json::json!({
         "user_id": user.user_id,
