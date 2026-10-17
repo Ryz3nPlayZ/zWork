@@ -722,14 +722,10 @@ async fn map_harness_events(
     shared: Arc<TurnShared>,
     lane: std::sync::Arc<crate::harness::runtime::lane::Lane>,
     mut events: tokio::sync::mpsc::UnboundedReceiver<(u64, crate::harness::runtime::events::HarnessEvent)>,
+    user_entries: Arc<run_state::UserEntries>,
 ) {
     use crate::harness::runtime::events::HarnessEvent;
     let max_turns = shared.max_turns;
-    // The prompt's own user entry is the first user entry on the bus (the
-    // mapper subscribes before `prompt`; seeded history committed earlier and
-    // is never seen). The bridge persisted that row at turn start, so only
-    // LATER user entries — queue consumptions — project.
-    let mut seen_prompt_entry = false;
     while let Some((seq, event)) = events.recv().await {
         match event {
             HarnessEvent::TurnStart { .. } => {
@@ -758,12 +754,13 @@ async fn map_harness_events(
                 if recovery == Some(true) {
                     continue;
                 }
+                // History and the prompt are already persisted and on screen
+                // (the prompt's entry also carries the hidden turn context);
+                // only queued messages consumed mid-run project.
                 let Some(text) = entry_user_text(&entry) else { continue };
-                if !seen_prompt_entry {
-                    seen_prompt_entry = true;
-                    continue;
+                if user_entries.is_queued_message(&entry.id) {
+                    shared.consume_queued_message(&text).await;
                 }
-                shared.consume_queued_message(&text).await;
             }
             HarnessEvent::ToolEnd { tool_call_id, tool_name, result, is_error, .. } => {
                 push_tool_trace(&shared, &tool_call_id, &tool_name, &result, is_error);
@@ -932,12 +929,19 @@ async fn run_durable_once(
             return None;
         }
     };
+    let mut seeded = std::collections::HashSet::new();
     for message in history {
-        if let Err(error) = lane.append_message(message.clone()).await {
-            let _ = shared.send(json!({ "type": "error", "text": format!("Failed to seed history: {error}") })).await;
-            return None;
+        match lane.append_message(message.clone()).await {
+            Ok(entry_id) => {
+                seeded.insert(entry_id);
+            }
+            Err(error) => {
+                let _ = shared.send(json!({ "type": "error", "text": format!("Failed to seed history: {error}") })).await;
+                return None;
+            }
         }
     }
+    let user_entries = Arc::new(run_state::UserEntries::for_prompt(seeded));
 
     // Doom-loop guard on the durable registry (same rule as the agent-loop
     // hook): the same tool call three turns running blocks the call and
@@ -970,12 +974,14 @@ async fn run_durable_once(
         lane: lane.clone(),
         harness: harness.clone(),
         started_at: run_state::now_ms(),
+        user_entries: user_entries.clone(),
     });
 
     let mapper = tokio::spawn(map_harness_events(
         shared.clone(),
         lane.clone(),
         harness.events.subscribe(None),
+        user_entries,
     ));
 
     let record = harness.prompt("main", vec![prompt_message]).await.ok();
@@ -2533,6 +2539,7 @@ async fn resume_one_interrupted(
     // Recovery is observable too: an attached client polls
     // /api/chats/:id/run/live and watches the bus while resume settles.
     // try-register: a user turn that started meanwhile owns the slot.
+    let user_entries = Arc::new(run_state::UserEntries::for_resume());
     run_state::try_register_run(&chat_id, run_state::LiveRun {
         run_id: session_id.to_string(),
         session_id: session_id.to_string(),
@@ -2540,12 +2547,14 @@ async fn resume_one_interrupted(
         lane: lane.clone(),
         harness: harness.clone(),
         started_at: run_state::now_ms(),
+        user_entries: user_entries.clone(),
     });
 
     let mapper = tokio::spawn(map_harness_events(
         shared.clone(),
         lane.clone(),
         harness.events.subscribe(None),
+        user_entries,
     ));
     let record = harness.resume(&lane_name).await;
     let _ = tokio::time::timeout(std::time::Duration::from_secs(10), mapper).await;

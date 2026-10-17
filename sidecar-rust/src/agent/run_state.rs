@@ -8,7 +8,7 @@
 //! `CancelRequested` on the open operation, so a killed task reconciles as
 //! cancelled at startup instead of auto-resuming.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -42,6 +42,58 @@ pub struct LiveRun {
     pub lane: Arc<Lane>,
     pub harness: Arc<Harness>,
     pub started_at: u64,
+    /// Which committed user entries still need a bubble; shared with the
+    /// run's live mapper so a re-attach makes the same call.
+    pub user_entries: Arc<UserEntries>,
+}
+
+/// Sorts the user entries a run commits into the ones the client already
+/// shows and the ones it must be sent. Seeded history is on screen, and the
+/// run's own prompt was drawn from what was typed (its entry also carries
+/// the hidden per-turn context, which must never reach a bubble). Only
+/// queued messages consumed mid-run are new to the client.
+pub struct UserEntries {
+    seeded: HashSet<String>,
+    prompt: Mutex<PromptEntry>,
+}
+
+enum PromptEntry {
+    /// Not committed yet: the next unseeded user entry is the prompt.
+    Expected,
+    Committed(String),
+    /// Startup recovery: the prompt was committed before the restart, so it
+    /// never reaches this bus.
+    Absent,
+}
+
+impl UserEntries {
+    /// A fresh turn: `seeded` holds the ids of the history entries appended
+    /// before the prompt.
+    pub fn for_prompt(seeded: HashSet<String>) -> Self {
+        UserEntries { seeded, prompt: Mutex::new(PromptEntry::Expected) }
+    }
+
+    /// A resumed run, whose prompt and history were committed earlier.
+    pub fn for_resume() -> Self {
+        UserEntries { seeded: HashSet::new(), prompt: Mutex::new(PromptEntry::Absent) }
+    }
+
+    /// Whether the user entry `entry_id` is a consumed queued message, the
+    /// only kind the client still needs to be shown.
+    pub fn is_queued_message(&self, entry_id: &str) -> bool {
+        if self.seeded.contains(entry_id) {
+            return false;
+        }
+        let mut prompt = self.prompt.lock_unpoisoned();
+        match &*prompt {
+            PromptEntry::Expected => {
+                *prompt = PromptEntry::Committed(entry_id.to_string());
+                false
+            }
+            PromptEntry::Committed(id) => id != entry_id,
+            PromptEntry::Absent => true,
+        }
+    }
 }
 
 fn runs() -> &'static Mutex<HashMap<String, LiveRun>> {
@@ -425,31 +477,25 @@ pub fn attach_or_idle(
         "started_at": run.started_at,
     });
     let mut events = run.bus.subscribe(cursor);
+    let user_entries = run.user_entries.clone();
     let (tx, rx) = tokio::sync::mpsc::channel::<Value>(64);
     tokio::spawn(async move {
         if tx.send(header).await.is_err() {
             return;
         }
-        // Same first-user-entry rule as the live mapper: the prompt's own
-        // entry is skipped (the client rendered that bubble when it sent the
-        // message); later user entries are queue consumptions the client may
-        // have missed while disconnected.
-        let mut seen_prompt_entry = false;
+        // Same rule as the live mapper (shared `UserEntries`): history and
+        // the prompt's own entry are already on screen; queued messages
+        // consumed while the client was away still need their bubbles.
         while let Some((seq, event)) = events.recv().await {
             let ended = matches!(event, HarnessEvent::RunEnd { .. });
             let wire = match &event {
                 HarnessEvent::EntryAdded { entry, recovery, .. } => {
                     if recovery.is_some() {
                         None
-                    } else if let Some(text) = crate::agent::harness_turn::entry_user_text(entry) {
-                        if seen_prompt_entry {
-                            Some(json!({ "type": "user_message", "text": text }))
-                        } else {
-                            seen_prompt_entry = true;
-                            None
-                        }
                     } else {
-                        None
+                        crate::agent::harness_turn::entry_user_text(entry)
+                            .filter(|_| user_entries.is_queued_message(&entry.id))
+                            .map(|text| json!({ "type": "user_message", "text": text }))
                     }
                 }
                 _ => project_harness_event(&event),
@@ -596,7 +642,7 @@ mod tests {
         tx.send(text_delta("three")).unwrap();
         register_run(
             "chat-a",
-            LiveRun { run_id: "run-1".into(), session_id: "s1".into(), bus: event_bus.clone(), lane, harness, started_at: 0 },
+            LiveRun { run_id: "run-1".into(), session_id: "s1".into(), bus: event_bus.clone(), lane, harness, started_at: 0, user_entries: Arc::new(UserEntries::for_resume()) },
         );
         // Give the pump a beat to stamp the pushed events.
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -622,6 +668,86 @@ mod tests {
         assert!(stream.next().await.is_none());
     }
 
+    /// Seeds two history entries, commits the prompt (with its hidden turn
+    /// context) and one queued message, and registers the run. Returns the
+    /// bus, the run's filter and the prompt's entry id.
+    async fn register_run_with_history(chat_id: &str) -> (Arc<HarnessEventBus>, Arc<UserEntries>, String) {
+        let (harness, lane) = test_harness_lane().await;
+        let mut seeded = HashSet::new();
+        for text in ["first question", "second question"] {
+            seeded.insert(lane.append_message(AgentMessage::user_text(text)).await.unwrap());
+        }
+        let prompt_id = lane
+            .append_message(AgentMessage::user_text("<turn-context>hidden</turn-context>\n\nthird question"))
+            .await
+            .unwrap();
+        lane.append_message(AgentMessage::user_text("queued while busy")).await.unwrap();
+        // Give the pump a beat to stamp the commits.
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let bus = harness.events.clone();
+        let user_entries = Arc::new(UserEntries::for_prompt(seeded));
+        register_run(
+            chat_id,
+            LiveRun {
+                run_id: "r".into(),
+                session_id: format!("s-{chat_id}"),
+                bus: bus.clone(),
+                lane,
+                harness,
+                started_at: 0,
+                user_entries: user_entries.clone(),
+            },
+        );
+        (bus, user_entries, prompt_id)
+    }
+
+    async fn replayed_user_messages(chat_id: &str, cursor: u64) -> Vec<String> {
+        use futures_util::StreamExt;
+        let mut stream = attach_or_idle(chat_id, Some(cursor));
+        let mut texts = Vec::new();
+        while let Ok(Some(event)) = tokio::time::timeout(std::time::Duration::from_millis(200), stream.next()).await {
+            if event["type"] == "user_message" {
+                texts.push(event["text"].as_str().unwrap_or_default().to_string());
+            }
+        }
+        texts
+    }
+
+    #[tokio::test]
+    async fn reattach_from_start_shows_only_queued_messages() {
+        register_run_with_history("chat-replay").await;
+        // A stream that dropped before its first bus event re-attaches from
+        // 0: history and the prompt (hidden context included) must not come
+        // back as bubbles.
+        assert_eq!(replayed_user_messages("chat-replay", 0).await, vec!["queued while busy"]);
+    }
+
+    #[tokio::test]
+    async fn reattach_past_the_prompt_keeps_the_next_queued_message() {
+        let (bus, user_entries, prompt_id) = register_run_with_history("chat-late").await;
+        // The live mapper, subscribed before the prompt, has already seen it.
+        assert!(!user_entries.is_queued_message(&prompt_id));
+        // A re-attach whose cursor is past the prompt replays only the
+        // queued message's three events (start, end, added): the first user
+        // entry it sees is that message, which must still get its bubble.
+        let cursor = bus.latest_seq() - 3;
+        assert_eq!(replayed_user_messages("chat-late", cursor).await, vec!["queued while busy"]);
+    }
+
+    #[test]
+    fn resumed_runs_treat_every_user_entry_as_queued() {
+        let entries = UserEntries::for_resume();
+        assert!(entries.is_queued_message("a"));
+        assert!(entries.is_queued_message("b"));
+
+        let entries = UserEntries::for_prompt(HashSet::from(["h1".to_string()]));
+        assert!(!entries.is_queued_message("h1"));
+        assert!(!entries.is_queued_message("prompt"));
+        // Seeing the prompt again (live mapper and a re-attach) agrees.
+        assert!(!entries.is_queued_message("prompt"));
+        assert!(entries.is_queued_message("queued"));
+    }
+
     #[tokio::test]
     async fn attach_without_live_run_is_idle() {
         use futures_util::StreamExt;
@@ -644,6 +770,7 @@ mod tests {
             lane: lane.clone(),
             harness: harness.clone(),
             started_at: 0,
+            user_entries: Arc::new(UserEntries::for_resume()),
         };
         register_run("chat-b", make("s-old"));
         // Overflow retry supersedes the entry…
@@ -687,7 +814,7 @@ mod tests {
         let (bus, _tx) = HarnessEventBus::new();
         register_run(
             "chat-q",
-            LiveRun { run_id: "r".into(), session_id: "s".into(), bus, lane: lane.clone(), harness, started_at: 0 },
+            LiveRun { run_id: "r".into(), session_id: "s".into(), bus, lane: lane.clone(), harness, started_at: 0, user_entries: Arc::new(UserEntries::for_resume()) },
         );
 
         // Steer + follow-up enqueue durably with ids.

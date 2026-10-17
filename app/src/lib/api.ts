@@ -1801,8 +1801,9 @@ export async function streamChat(
     if (!liveChatId) return false;
     const sidecarToken = await getSidecarToken();
     // Attach from the last seq we saw; with none yet (dropped before the
-    // first bus event), from 0 so nothing is missed. Seq 0 is the prompt's
-    // own entry, which the projection skips — nothing user-visible is lost.
+    // first bus event), from 0 so nothing is missed. The replay can include
+    // the chat's history and the prompt's own entry; the sidecar only sends
+    // queued messages as user_message, so neither comes back as a bubble.
     const url = u(`/api/chats/${liveChatId}/run/live`) + `?after=${lastSeq ?? 0}`;
     let resp: Response;
     try {
