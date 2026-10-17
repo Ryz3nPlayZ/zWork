@@ -64,6 +64,7 @@ struct BashArgs {
     timeout: Option<f64>,
 }
 
+#[cfg(unix)]
 fn kill_process_group(pid: u32) {
     use nix::sys::signal::{killpg, Signal};
     use nix::unistd::Pid;
@@ -71,6 +72,20 @@ fn kill_process_group(pid: u32) {
     if killpg(pgid, Signal::SIGKILL).is_err() {
         let _ = nix::sys::signal::kill(pgid, Signal::SIGKILL);
     }
+}
+
+/// Windows has no process groups to signal; `taskkill /T` takes down the
+/// command's whole process tree instead.
+#[cfg(windows)]
+fn kill_process_group(pid: u32) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let _ = std::process::Command::new("taskkill")
+        .args(["/T", "/F", "/PID", &pid.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .status();
 }
 
 /// Kills the command's process group if the tool future is dropped mid-run
@@ -206,6 +221,7 @@ impl AgentTool for BashTool {
 
             let mut cmd = Command::new("bash");
             cmd.arg("-c").arg(&command).current_dir(&self.cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+            #[cfg(unix)]
             cmd.process_group(0);
             cmd.kill_on_drop(true);
             for (k, v) in &self.env {
