@@ -19,7 +19,7 @@ zWork is an AI agent that runs on your desktop. It can do scheduled tasks, brows
 
 Download it from https://github.com/Ryz3nPlayZ/zWork/releases/latest
 
-Install:
+## Install
 
 macOS:
 ```bash

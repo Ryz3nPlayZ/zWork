@@ -34,4 +34,3 @@ This is the quickest entry point for understanding the codebase, product directi
 - [Quality and security review](QUALITY.md) — Testing and security practices
 - [Telemetry Setup](TELEMETRY_SETUP.md) — Analytics and monitoring configuration
 - [Benchmarks](BENCHMARKS.md) — Regression tasks and evaluation prompts
-- [Archived planning notes](archive/) — Older plans, backlog, PRD, and brainstorm docs

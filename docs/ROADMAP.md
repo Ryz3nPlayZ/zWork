@@ -1,6 +1,6 @@
 # zWork Roadmap
 
-This document tracks the high-level direction of zWork. For archived implementation notes, see [PLAN.md](archive/PLAN.md). For a brainstorm of possible future features, see [FUTURE_FEATURES.md](archive/FUTURE_FEATURES.md).
+This document tracks the high-level direction of zWork.
 
 ---
 
@@ -35,8 +35,6 @@ Cross-platform desktop AI agent with chat, scheduled autonomous tasks, app integ
 | 6 | Sellable Use Cases — packaged demos for non-technical users | Planned |
 
 **Key principle:** Chat is the entry point, artifacts are the outputs, tasks and calendar are the follow-through.
-
-See [PLAN.md](archive/PLAN.md) for full phase breakdown, acceptance criteria, and implementation targets.
 
 ---
 
@@ -93,5 +91,3 @@ Areas under exploration. Not committed to a timeline.
 - **Workflow Builder** — record/replay, branching, scheduling, templates
 - **Safety & Governance** — permission scopes, risk classification, audit trails, dry-run mode
 - **Observability** — step traces, reproducible run reports, action explanations
-
-See [FUTURE_FEATURES.md](archive/FUTURE_FEATURES.md) for the full brainstorm.
