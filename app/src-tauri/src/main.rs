@@ -286,7 +286,20 @@ fn kill_stale_on_port(port: u16) {
     // whose process command contains "zwork-backend" are killed — blindly
     // SIGKILLing whatever holds the port could take out an unrelated user
     // process that happened to bind it.
-    let mut cmd = if cfg!(target_os = "linux") {
+    let mut cmd = if cfg!(windows) {
+        // No sh/fuser/lsof on Windows. zWork runs one backend per user and
+        // our own child is already stopped here, so any zwork-backend.exe
+        // left is an orphan (an update or crash exited zWork without it).
+        let mut c = Command::new("taskkill");
+        c.args(["/F", "/IM", "zwork-backend.exe"]);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            c.creation_flags(CREATE_NO_WINDOW);
+        }
+        c
+    } else if cfg!(target_os = "linux") {
         let mut c = Command::new("sh");
         c.arg("-c").arg(format!(
             "for pid in $(fuser {port_str}/tcp 2>/dev/null); do \
