@@ -22,7 +22,7 @@ function chatUsageSummary(messages: { usage?: { input: number; output: number; t
   return has ? sum : null;
 }
 
-import { isMacOS, usesIntegratedTitleBar } from "../lib/platform";
+import { hasTrafficLights, usesIntegratedTitleBar } from "../lib/platform";
 import { CAPTION_CLEARANCE } from "./TitleBar";
 import { downloadChatJson, downloadChatMarkdown } from "../lib/chatExport";
 import { cn } from "../lib/cn";
@@ -193,13 +193,13 @@ export function ChatView() {
             // When the sidebar is collapsed, the main pane slides left and the
             // chat title would slide under the window-level controls (search +
             // sidebar toggle). Reserve a left gutter matching those controls
-            // so the title stays clear. On macOS the controls sit at ~84px to
-            // clear the traffic lights; elsewhere they hug the corner at ~10px.
+            // so the title stays clear. Beside macOS traffic lights the
+            // controls sit at ~84px; elsewhere in the corner at 12px (58px wide).
             sidebarOpen
               ? "pl-5"
-              : isMacOS()
+              : hasTrafficLights()
                 ? "pl-[96px]"
-                : "pl-[52px]",
+                : "pl-[72px]",
           )}
         >
           <div className="flex min-w-0 items-center gap-2">
