@@ -2,6 +2,11 @@
 
 All notable changes to zWork are documented in this file.
 
+## v0.6.1
+
+### Fixes
+- **Windows updates finish again.** Updating could stop on "Error opening file for writing … zwork-backend.exe" because zWork's background process kept running while the installer tried to replace it. The installer now closes it first, and zWork clears a leftover one when it starts.
+
 ## v0.6.0
 
 **The agent engine, rebuilt.** zWork now runs a Rust port of pi's agent core, speaks to 200+ model providers, and works with the skills, commands, instructions and MCP servers you already set up for other agents.
