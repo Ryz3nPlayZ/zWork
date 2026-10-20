@@ -14,6 +14,12 @@ export function isWindows(): boolean {
   return /^Win/i.test(platform) || /Windows/i.test(ua);
 }
 
+/** A Cmd/Ctrl shortcut as this platform writes it: "⌘N" on macOS, "Ctrl+N"
+ *  elsewhere. The key handlers accept either modifier (App.tsx). */
+export function modShortcut(key: string): string {
+  return isMacOS() ? `⌘${key}` : `Ctrl+${key}`;
+}
+
 /**
  * True on the Tauri desktop app running on Windows — the platform where the
  * main window ships without native decorations and the integrated TitleBar

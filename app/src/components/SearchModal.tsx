@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { modShortcut } from "../lib/platform";
 import {
   X,
   MessageCircle,
@@ -69,7 +70,7 @@ export function SearchModal() {
     {
       id: "new-chat",
       label: "New Chat",
-      hint: "⌘N",
+      hint: modShortcut("N"),
       icon: <SquarePen className="h-4 w-4" />,
       run: () => { openLanding(); setOpen(false); },
       keywords: "new chat start fresh",
@@ -77,7 +78,7 @@ export function SearchModal() {
     {
       id: "settings-general",
       label: "Open Settings",
-      hint: "⌘,",
+      hint: modShortcut(","),
       icon: <Settings className="h-4 w-4" />,
       run: () => { openSettings("general"); setOpen(false); },
       keywords: "settings preferences config",
@@ -309,7 +310,7 @@ export function SearchModal() {
           </span>
           <div className="flex-1" />
           <span className="text-[11px] text-ink-faint">
-            <kbd className="rounded border border-line bg-paper px-1 py-0.5 text-[10px]">⌘K</kbd>{" "}
+            <kbd className="rounded border border-line bg-paper px-1 py-0.5 text-[10px]">{modShortcut("K")}</kbd>{" "}
             to open
           </span>
         </div>

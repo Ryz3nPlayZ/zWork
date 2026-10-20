@@ -3,6 +3,9 @@ import { AnimatePresence, motion } from "framer-motion";
 import { X } from "lucide-react";
 import { useApp } from "../lib/store";
 import { IconButton } from "./IconButton";
+import { CAPTION_CLEARANCE } from "./TitleBar";
+import { cn } from "../lib/cn";
+import { usesIntegratedTitleBar } from "../lib/platform";
 import { ArtifactCodeViewer } from "./artifacts/ArtifactCodeViewer";
 import { ArtifactDocViewer } from "./artifacts/ArtifactDocViewer";
 import { ArtifactGraphViewer } from "./artifacts/ArtifactGraphViewer";
@@ -39,7 +42,13 @@ export function ArtifactPanel() {
           className="h-full shrink-0 overflow-hidden border-l border-edge bg-paper"
         >
           <div className="flex h-full flex-col">
-            <div className="flex h-12 shrink-0 items-center justify-between border-b border-edge px-3">
+            {/* On Windows the caption buttons sit over this header's right end. */}
+            <div
+              className={cn(
+                "flex h-12 shrink-0 items-center justify-between border-b border-edge pl-3",
+                usesIntegratedTitleBar() ? CAPTION_CLEARANCE : "pr-3",
+              )}
+            >
               <div className="min-w-0 flex-1" data-no-drag>
                 <input
                   value={draftTitle}

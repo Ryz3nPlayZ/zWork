@@ -7,7 +7,7 @@ import { useApp } from "./lib/store";
 import { consumeInstalledUpdateNotice, detectUpdate, installUpdate, openReleaseUrl, type UpdateCardState, type UpdateProgress } from "./lib/update";
 import { cn } from "./lib/cn";
 import { dragRegionAttrs, onDragMouseDown } from "./lib/drag";
-import { isMacOS, usesIntegratedTitleBar } from "./lib/platform";
+import { isMacOS, modShortcut, usesIntegratedTitleBar } from "./lib/platform";
 import { loadZoom, applyZoom, zoomIn, zoomOut, zoomReset } from "./lib/zoom";
 import { useTranslucencyPref, nativeVibrancySupported } from "./lib/translucency";
 import { recordTelemetry, setTelemetryEnabled, startTelemetrySession, stopTelemetrySession } from "./lib/telemetry";
@@ -37,7 +37,7 @@ const ShareWindowApp = lazy(() => import("./components/ShareWindowApp").then((m)
 import { KeybindingsModal } from "./components/KeybindingsModal";
 import { PermissionPrompt } from "./components/PermissionPrompt";
 import { BootProgress } from "./components/BootProgress";
-import { EarlyScreenChrome, TitleBar } from "./components/TitleBar";
+import { EarlyScreenChrome, WindowControls } from "./components/TitleBar";
 
 
 function OfflineBanner() {
@@ -171,9 +171,8 @@ export default function App() {
   const translucentOn = translucency === "on";
   const useNativeGlass = translucentOn && nativeVibrancySupported();
   const isMac = isMacOS();
-  // Windows: the integrated TitleBar owns the top chrome — the pane starts
-  // below it and ChatView's in-pane header is replaced by the title bar's
-  // chat cluster (see components/TitleBar.tsx).
+  // Windows: no native decorations, so the app draws its caption buttons in
+  // the pane's top-right corner (see components/TitleBar.tsx).
   const isWin = usesIntegratedTitleBar();
   const sidebarOpen = useApp((s) => s.sidebarOpen);
 
@@ -593,7 +592,6 @@ export default function App() {
         )}
       >
         <Sidebar />
-        {isWin && <TitleBar />}
       </div>
 
       {/*
@@ -608,10 +606,7 @@ export default function App() {
         className={cn(
           "absolute flex flex-col overflow-hidden rounded-[14px] bg-paper shadow-float",
           "transition-[left] duration-200 ease-out",
-          // Windows: start below the integrated title bar (40px strip + 5px
-          // seam); everywhere else the pane floats at the window's top edge.
-          isWin ? "top-[45px]" : "top-[5px]",
-          "right-[5px] bottom-[5px]",
+          "top-[5px] right-[5px] bottom-[5px]",
           sidebarOpen ? "left-[253px]" : "left-[5px]",
         )}
       >
@@ -624,11 +619,9 @@ export default function App() {
           header sits at the true top with no empty band above it.
           macOS indents it from the left so it doesn't sit under the
           traffic lights when the sidebar is collapsed.
-          Windows skips it entirely: the TitleBar above the pane is the
-          drag region, and ChatView renders a slim gradient spacer instead
-          of its header (the title bar carries the chat title + metadata).
+          On Windows the caption buttons sit over its right end.
         */}
-        {!isWin && !(view === "chat" && active) && (
+        {!(view === "chat" && active) && (
           <div
             {...dragRegionAttrs()}
             onMouseDown={onDragMouseDown}
@@ -742,10 +735,8 @@ export default function App() {
         top-left of the WINDOW (not the pane), so they never slide when
         the pane expands/contracts on sidebar toggle. On macOS they sit
         just to the right of the traffic lights; off-mac they hug the
-        top-left corner. On Windows they live INSIDE the TitleBar strip
-        instead, so this floating cluster isn't rendered there.
+        top-left corner.
       */}
-      {!isWin && (
       <div
         data-no-drag
         className={cn(
@@ -756,7 +747,7 @@ export default function App() {
         <IconButton
           icon={<Search />}
           label="Search"
-          shortcut="⌘K"
+          shortcut={modShortcut("K")}
           tooltipSide="bottom"
           showTooltip={false}
           onClick={() => setSearchOpen(true)}
@@ -765,13 +756,18 @@ export default function App() {
         <IconButton
           icon={<PanelLeft />}
           label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
-          shortcut="⌘\\"
+          shortcut={modShortcut("\\")}
           tooltipSide="bottom"
           showTooltip={false}
           onClick={toggleSidebar}
           size="sm"
         />
       </div>
+
+      {isWin && (
+        <div className="absolute right-0 top-0 z-50">
+          <WindowControls inset />
+        </div>
       )}
 
       {/*

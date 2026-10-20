@@ -18,7 +18,7 @@ import {
   Clock,
 } from "lucide-react";
 import { cn } from "../lib/cn";
-import { isMacOS, usesIntegratedTitleBar } from "../lib/platform";
+import { isMacOS, modShortcut, usesIntegratedTitleBar } from "../lib/platform";
 import { IS_WEB } from "../lib/api";
 import { nativeVibrancySupported, useTranslucencyPref } from "../lib/translucency";
 import { Logo } from "./Logo";
@@ -98,13 +98,13 @@ export function Sidebar() {
           window-level controls (see App.tsx) pinned at the top-left so
           they don't slide with the pane. On macOS this row is pushed
           below the traffic lights (≈28px) and the floating control row
-          (≈35px) so the logo clears both. On Windows it clears the
-          integrated title bar strip (40px + 6px breathing room).
+          (≈35px) so the logo clears both. Windows has no traffic lights
+          but the same floating control row, so it gets the same clearance.
         */}
         <div
           className={cn(
             "flex shrink-0 items-center px-2 pb-1",
-            isMac ? "pt-[40px]" : usesIntegratedTitleBar() ? "pt-[46px]" : "pt-3",
+            isMac || usesIntegratedTitleBar() ? "pt-[40px]" : "pt-3",
           )}
         >
           <button
@@ -130,7 +130,7 @@ export function Sidebar() {
           <SidebarButton
             icon={<SquarePen />}
             label="New chat"
-            shortcut="⌘N"
+            shortcut={modShortcut("N")}
             onClick={() => openLanding()}
             active={view === "chat" && active === null}
           />
@@ -247,7 +247,7 @@ export function Sidebar() {
               <div className="mt-6 px-2 text-[12px] text-ink-faint">
                 No chats yet. Press{" "}
                 <kbd className="rounded border border-line bg-paper-raised px-1 py-[1px] font-mono text-[10.5px] text-ink-muted">
-                  ⌘N
+                  {modShortcut("N")}
                 </kbd>{" "}
                 to start.
               </div>
@@ -261,7 +261,7 @@ export function Sidebar() {
             <SidebarButton
               icon={<Settings />}
               label="Settings"
-              shortcut="⌘,"
+              shortcut={modShortcut(",")}
               active={view === "settings"}
               onClick={() => setView("settings")}
             />

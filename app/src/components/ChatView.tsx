@@ -23,6 +23,7 @@ function chatUsageSummary(messages: { usage?: { input: number; output: number; t
 }
 
 import { isMacOS, usesIntegratedTitleBar } from "../lib/platform";
+import { CAPTION_CLEARANCE } from "./TitleBar";
 import { downloadChatJson, downloadChatMarkdown } from "../lib/chatExport";
 import { cn } from "../lib/cn";
 
@@ -180,23 +181,15 @@ export function ChatView() {
           onDragMouseDown's closest() walk. A paper→transparent gradient lets
           messages scroll under the title gracefully.
 
-          Windows replaces this header with the slim spacer below — the
-          integrated title bar (TitleBar.tsx) owns the title + metadata up in
-          the window chrome, so the pane doesn't repeat it.
+          On Windows the app's caption buttons sit over the header's right
+          end, so it keeps clear of them (CAPTION_CLEARANCE).
         */}
-        {usesIntegratedTitleBar() ? (
-          <div
-            {...dragRegionAttrs()}
-            onMouseDown={onDragMouseDown}
-            className="absolute inset-x-0 top-0 z-20 h-[38px] bg-gradient-to-b from-paper via-paper/95 to-transparent"
-            aria-hidden="true"
-          />
-        ) : (
         <div
           {...dragRegionAttrs()}
           onMouseDown={onDragMouseDown}
           className={cn(
-            "absolute inset-x-0 top-0 z-20 flex items-center justify-between py-2.5 pr-5 bg-gradient-to-b from-paper via-paper/95 to-transparent",
+            "absolute inset-x-0 top-0 z-20 flex items-center justify-between py-2.5 bg-gradient-to-b from-paper via-paper/95 to-transparent",
+            usesIntegratedTitleBar() ? CAPTION_CLEARANCE : "pr-5",
             // When the sidebar is collapsed, the main pane slides left and the
             // chat title would slide under the window-level controls (search +
             // sidebar toggle). Reserve a left gutter matching those controls
@@ -367,7 +360,6 @@ export function ChatView() {
             </div>
           </div>
         </div>
-        )}
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto pb-44">
