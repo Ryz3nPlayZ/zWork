@@ -35,6 +35,11 @@ struct AppState {
     stripe_webhook_secret: String,
     db: PgPool,
     http_client: Client,
+    /// Never follows redirects. The Google callback forward has to hand Better
+    /// Auth's 302 (and the session cookie on it) back to the browser; a client
+    /// that follows it fetches the app page itself and serves it from the API
+    /// host, where none of the page's scripts resolve.
+    auth_forward_client: Client,
     auth_session_url: Url,
     auth_internal_base: Url,
     auth_public_base: String,
@@ -3464,6 +3469,7 @@ fn cors_allowed_origins() -> Vec<HeaderValue> {
             "https://tryzwork.app",
             "https://www.tryzwork.app",
             "https://api.tryzwork.app",
+            "https://app.tryzwork.app",
         ]
         .join(",")
     });
@@ -6555,7 +6561,7 @@ async fn forward_callback_to_better_auth(
         }
     }
 
-    let mut req = state.http_client.get(forward_url.as_str());
+    let mut req = state.auth_forward_client.get(forward_url.as_str());
     // The state cookie is what lets Better Auth correlate this callback with
     // the sign-in request it minted — it MUST travel with the forward.
     let cookie_present = headers.get(header::COOKIE).is_some();
@@ -7435,6 +7441,10 @@ async fn main() {
         stripe_webhook_secret: std::env::var("STRIPE_WEBHOOK_SECRET").unwrap_or_default(),
         db: pool,
         http_client: Client::new(),
+        auth_forward_client: Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("failed to build auth forward client"),
         auth_session_url,
         auth_internal_base,
         auth_public_base: std::env::var("AUTH_PUBLIC_BASE")

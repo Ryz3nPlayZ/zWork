@@ -286,16 +286,11 @@ export async function startDesktopEmailSignUp(name: string, email: string, passw
 export async function fetchCloudSession(): Promise<CloudUser | null> {
   const token = getToken();
   // On the web (non-Tauri), the session may be a Better Auth cookie set after
-  // OAuth. There's no Bearer token in localStorage in that case, but we can
-  // detect the session cookie and still hit /api/session (which authenticates
-  // via the cookie through credentials: "include"). Without this, a signed-in
-  // web user with no localStorage token would never be recognized.
-  const hasSessionCookie =
-    !IS_TAURI &&
-    typeof document !== "undefined" &&
-    document.cookie.split(";").some((c) => c.trim().startsWith("better-auth.session_token="));
-
-  if (!token && !hasSessionCookie) return null;
+  // OAuth. There's no Bearer token in localStorage in that case, so ask
+  // /api/session anyway: it authenticates via the cookie through
+  // credentials: "include". The cookie is HttpOnly (and __Secure- prefixed in
+  // production), so document.cookie can't tell us whether it's there.
+  if (!token && IS_TAURI) return null;
   try {
     return await cloudFetch<CloudUser>("/api/session", undefined, token || "");
   } catch (error) {
