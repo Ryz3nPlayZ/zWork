@@ -18,7 +18,7 @@ import {
   Clock,
 } from "lucide-react";
 import { cn } from "../lib/cn";
-import { isMacOS, modShortcut, usesIntegratedTitleBar } from "../lib/platform";
+import { hasTrafficLights, modShortcut } from "../lib/platform";
 import { IS_WEB } from "../lib/api";
 import { nativeVibrancySupported, useTranslucencyPref } from "../lib/translucency";
 import { Logo } from "./Logo";
@@ -26,7 +26,6 @@ import { IconButton } from "./IconButton";
 import { useApp, bucketFor, type ChatBucket, type View } from "../lib/store";
 
 export function Sidebar() {
-  const isMac = isMacOS();
   // The web app is chat only; everything else lives in the desktop app.
   const demo = IS_WEB;
   const translucency = useTranslucencyPref();
@@ -96,15 +95,15 @@ export function Sidebar() {
         {/*
           Logo header — brand row only. Search + sidebar toggle are
           window-level controls (see App.tsx) pinned at the top-left so
-          they don't slide with the pane. On macOS this row is pushed
-          below the traffic lights (≈28px) and the floating control row
-          (≈35px) so the logo clears both. Windows has no traffic lights
-          but the same floating control row, so it gets the same clearance.
+          they don't slide with the pane. With macOS traffic lights this
+          row is pushed below them and the control row so the logo clears
+          both; elsewhere the logo takes the top row and the controls sit at
+          its right end.
         */}
         <div
           className={cn(
             "flex shrink-0 items-center px-2 pb-1",
-            isMac || usesIntegratedTitleBar() ? "pt-[40px]" : "pt-3",
+            hasTrafficLights() ? "pt-[40px]" : "pt-2",
           )}
         >
           <button
@@ -265,7 +264,26 @@ export function Sidebar() {
               active={view === "settings"}
               onClick={() => setView("settings")}
             />
-            {!demo && <MoreMenuButton view={view} setView={setView} />}
+            {demo ? (
+              // The web app is where accounts are managed, so plan and usage
+              // sit in the open rather than under More.
+              <>
+                <SidebarButton
+                  icon={<CreditCard />}
+                  label="Plan & billing"
+                  active={view === "plan"}
+                  onClick={() => setView("plan")}
+                />
+                <SidebarButton
+                  icon={<BarChart3 />}
+                  label="Usage"
+                  active={view === "analytics"}
+                  onClick={() => setView("analytics")}
+                />
+              </>
+            ) : (
+              <MoreMenuButton view={view} setView={setView} />
+            )}
           </div>
         </div>
       </div>

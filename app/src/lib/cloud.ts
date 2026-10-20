@@ -2,6 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { IS_WEB } from "./api";
 
 const CLOUD_BASE = "https://api.tryzwork.app";
+/** Where Stripe sends a desktop user's browser back to once they're done:
+ *  the web app shows a "return to zWork" page for these (App.tsx). */
+const WEB_APP_BASE = "https://app.tryzwork.app";
 const IS_TAURI = typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
 const TOKEN_KEY = "zwork:cloud-token";
 const AUTH_CHANGED_EVENT = "zwork:cloud-auth-changed";
@@ -327,10 +330,10 @@ export async function fetchAnalyticsSummary() {
 
 export async function createBillingCheckoutSession(annual = false, tier = "pro") {
   const successUrl = IS_TAURI
-    ? `${CLOUD_BASE}/billing/success`
+    ? `${WEB_APP_BASE}/billing/success?from=desktop`
     : `${window.location.origin}/billing/success`;
   const cancelUrl = IS_TAURI
-    ? `${CLOUD_BASE}/billing/cancel`
+    ? `${WEB_APP_BASE}/billing/cancel?from=desktop`
     : `${window.location.origin}/billing/cancel`;
   return cloudFetch<BillingSession>("/api/billing/checkout", {
     method: "POST",
@@ -345,8 +348,8 @@ export async function createBillingCheckoutSession(annual = false, tier = "pro")
 
 export async function createBillingPortalSession() {
   const returnUrl = IS_TAURI
-    ? `${CLOUD_BASE}/billing/portal-return`
-    : `${window.location.origin}/settings/billing`;
+    ? `${WEB_APP_BASE}/billing/portal-return?from=desktop`
+    : `${window.location.origin}/billing/portal-return`;
   return cloudFetch<BillingSession>("/api/billing/portal", {
     method: "POST",
     body: JSON.stringify({

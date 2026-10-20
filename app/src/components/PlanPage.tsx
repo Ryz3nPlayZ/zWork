@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { Check, ArrowUpRight } from "lucide-react";
 import { type CloudUser, createBillingCheckoutSession, createBillingPortalSession, redeemAccessCode, pollForPlanChange } from "../lib/cloud";
 import { cn } from "../lib/cn";
+import type { BillingReturn } from "../lib/billingReturn";
 
 const IS_TAURI = typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
 
@@ -10,7 +11,9 @@ async function openUrl(url: string) {
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke("open_external", { url });
   } else {
-    window.open(url, "_blank");
+    // Same tab: Stripe sends the browser back to the app when it's done, and a
+    // new tab opened after an await is often blocked as a popup.
+    window.location.assign(url);
   }
 }
 
@@ -79,7 +82,21 @@ const TIERS: PricingTier[] = [
   },
 ];
 
-export function PlanPage({ cloudUser, onUserChanged }: { cloudUser: CloudUser; onUserChanged?: (user: CloudUser | null) => void }) {
+const RETURN_NOTICE: Record<BillingReturn, { tone: "success" | "muted"; text: string }> = {
+  success: { tone: "success", text: "Payment received. Thanks for upgrading." },
+  cancel: { tone: "muted", text: "Checkout cancelled. Nothing was charged." },
+  portal: { tone: "muted", text: "Your billing changes are saved." },
+};
+
+export function PlanPage({
+  cloudUser,
+  onUserChanged,
+  billingReturn,
+}: {
+  cloudUser: CloudUser;
+  onUserChanged?: (user: CloudUser | null) => void;
+  billingReturn?: BillingReturn | null;
+}) {
   const currentTier = cloudUser.tier as "free" | "pro" | "max";
   const [isAnnual, setIsAnnual] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -158,6 +175,14 @@ export function PlanPage({ cloudUser, onUserChanged }: { cloudUser: CloudUser; o
 
   const isPaid = currentTier !== "free";
 
+  // Back from Stripe on the web: the plan changes once Stripe's webhook lands,
+  // which can trail the redirect by a few seconds.
+  useEffect(() => {
+    if (billingReturn !== "success" && billingReturn !== "portal") return;
+    stopPollRef.current = pollForPlanChange(currentTier, (user) => onUserChanged?.(user), 60_000);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Clean up polling on unmount
   useEffect(() => {
     return () => { stopPollRef.current?.(); };
@@ -173,6 +198,19 @@ export function PlanPage({ cloudUser, onUserChanged }: { cloudUser: CloudUser; o
             Upgrade for faster models, more tasks at once, and higher limits.
           </p>
         </header>
+
+        {billingReturn && (
+          <div
+            className={cn(
+              "mb-8 rounded-2xl border px-4 py-3 text-[13px]",
+              RETURN_NOTICE[billingReturn].tone === "success"
+                ? "border-success/20 bg-success/10 text-success"
+                : "border-line bg-paper-raised text-ink-soft",
+            )}
+          >
+            {RETURN_NOTICE[billingReturn].text}
+          </div>
+        )}
 
         {error && (
           <div className="mb-8 rounded-2xl border border-error/20 bg-error/10 px-4 py-3 text-[13px] text-error">

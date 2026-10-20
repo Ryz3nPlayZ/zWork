@@ -7,7 +7,7 @@ import { useApp } from "./lib/store";
 import { consumeInstalledUpdateNotice, detectUpdate, installUpdate, openReleaseUrl, type UpdateCardState, type UpdateProgress } from "./lib/update";
 import { cn } from "./lib/cn";
 import { dragRegionAttrs, onDragMouseDown } from "./lib/drag";
-import { isMacOS, modShortcut, usesIntegratedTitleBar } from "./lib/platform";
+import { hasTrafficLights, modShortcut, usesIntegratedTitleBar } from "./lib/platform";
 import { loadZoom, applyZoom, zoomIn, zoomOut, zoomReset } from "./lib/zoom";
 import { useTranslucencyPref, nativeVibrancySupported } from "./lib/translucency";
 import { recordTelemetry, setTelemetryEnabled, startTelemetrySession, stopTelemetrySession } from "./lib/telemetry";
@@ -34,6 +34,8 @@ const InboxPage = lazy(() => import("./components/InboxPage").then((m) => ({ def
 const ScheduledTasksPage = lazy(() => import("./components/scheduled/ScheduledTasksPage").then((m) => ({ default: m.ScheduledTasksPage })));
 const OverlayChatView = lazy(() => import("./components/OverlayChatView").then((m) => ({ default: m.OverlayChatView })));
 const ShareWindowApp = lazy(() => import("./components/ShareWindowApp").then((m) => ({ default: m.ShareWindowApp })));
+const DesktopBillingReturn = lazy(() => import("./components/DesktopBillingReturn").then((m) => ({ default: m.DesktopBillingReturn })));
+import { isDesktopBillingReturn, opensPlanPage, readBillingReturn, type BillingReturn } from "./lib/billingReturn";
 import { KeybindingsModal } from "./components/KeybindingsModal";
 import { PermissionPrompt } from "./components/PermissionPrompt";
 import { BootProgress } from "./components/BootProgress";
@@ -135,6 +137,15 @@ export default function App() {
       </Suspense>
     );
   }
+  // A desktop user's browser coming back from Stripe. The path is fixed for
+  // the page load, so this early return keeps the hook count stable too.
+  if (isDesktopBillingReturn()) {
+    return (
+      <Suspense fallback={<div className="h-screen w-screen bg-paper" />}>
+        <DesktopBillingReturn kind={readBillingReturn()!} />
+      </Suspense>
+    );
+  }
 
   const previewMode = getPreviewMode();
   // Handle OAuth token callback from web sign-in (must run before any auth logic)
@@ -145,9 +156,13 @@ export default function App() {
   const [initialView] = useState(() => {
     if (typeof window !== "undefined" && !(window as any).__TAURI_INTERNALS__) {
       if (window.location.pathname === "/admin") return "admin" as const;
+      if (opensPlanPage()) return "plan" as const;
     }
     return null;
   });
+  // Set when the web app opens on a Stripe return path; the Plan page says
+  // how checkout or the portal went.
+  const [billingReturn] = useState<BillingReturn | null>(() => readBillingReturn());
   const view = useApp((s) => s.view);
   const settings = useApp((s) => s.settings);
   const active = useApp((s) => s.activeChatId);
@@ -170,7 +185,7 @@ export default function App() {
   const translucency = useTranslucencyPref();
   const translucentOn = translucency === "on";
   const useNativeGlass = translucentOn && nativeVibrancySupported();
-  const isMac = isMacOS();
+  const trafficLights = hasTrafficLights();
   // Windows: no native decorations, so the app draws its caption buttons in
   // the pane's top-right corner (see components/TitleBar.tsx).
   const isWin = usesIntegratedTitleBar();
@@ -273,6 +288,11 @@ export default function App() {
   useEffect(() => {
     if (initialView === "admin") {
       useApp.getState().setView("admin");
+    }
+    if (initialView === "plan") {
+      useApp.getState().setView("plan");
+      // Drop the return path so a reload doesn't repeat its notice.
+      window.history.replaceState({}, "", "/");
     }
   }, [initialView]);
 
@@ -627,7 +647,7 @@ export default function App() {
             onMouseDown={onDragMouseDown}
             className={cn(
               "h-[38px] shrink-0",
-              isMac && !sidebarOpen && "ml-[78px]",
+              trafficLights && !sidebarOpen && "ml-[78px]",
             )}
             aria-hidden="true"
           />
@@ -644,7 +664,7 @@ export default function App() {
             </Suspense>
           ) : view === "plan" ? (
             <Suspense fallback={panelFallback}>
-              <PlanPage cloudUser={cloudUser!} onUserChanged={setCloudUser} />
+              <PlanPage cloudUser={cloudUser!} onUserChanged={setCloudUser} billingReturn={billingReturn} />
             </Suspense>
           ) : view === "projects" ? (
             <Suspense fallback={panelFallback}>
@@ -733,15 +753,21 @@ export default function App() {
       {/*
         WINDOW-LEVEL CONTROLS — search + sidebar toggle. Pinned to the
         top-left of the WINDOW (not the pane), so they never slide when
-        the pane expands/contracts on sidebar toggle. On macOS they sit
-        just to the right of the traffic lights; off-mac they hug the
-        top-left corner.
+        the pane expands/contracts on sidebar toggle. With macOS traffic
+        lights they sit just to their right, above the logo. Elsewhere they
+        share the logo's row: at the sidebar's right end while it's open,
+        in the window's corner (beside the chat title) while it's closed.
       */}
       <div
         data-no-drag
         className={cn(
-          "absolute top-[7px] z-50 flex items-center gap-0.5",
-          isMac ? "left-[84px]" : "left-[10px]",
+          "absolute z-50 flex items-center gap-0.5",
+          trafficLights
+            ? "left-[84px] top-[7px]"
+            : cn(
+                "top-[14px] transition-[left] duration-200 ease-out",
+                sidebarOpen ? "left-[182px]" : "left-[12px]",
+              ),
         )}
       >
         <IconButton
