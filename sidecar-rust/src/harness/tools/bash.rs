@@ -92,15 +92,16 @@ fn shell_command(command: &str) -> Command {
 
 /// PowerShell ships with every Windows. The script goes in as
 /// -EncodedCommand (UTF-16LE base64) so no quoting can mangle it, and output
-/// is switched to UTF-8 (the default OEM code page garbles non-ASCII).
+/// is switched to UTF-8 (the default OEM code page garbles non-ASCII). Text
+/// output and no progress bars, or piped stderr comes back as CLIXML.
 #[cfg(windows)]
 fn shell_command(command: &str) -> Command {
     use base64::Engine;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let script = format!("[Console]::OutputEncoding = [Text.Encoding]::UTF8\n{command}");
+    let script = format!("[Console]::OutputEncoding = [Text.Encoding]::UTF8\n$ProgressPreference = 'SilentlyContinue'\n{command}");
     let utf16: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
     let mut c = Command::new("powershell.exe");
-    c.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand"])
+    c.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-OutputFormat", "Text", "-EncodedCommand"])
         .arg(base64::engine::general_purpose::STANDARD.encode(utf16))
         .creation_flags(CREATE_NO_WINDOW);
     c
@@ -456,6 +457,8 @@ mod tests {
         assert!(r.text_content().contains("héllo 'quoted'"), "{}", r.text_content());
         let err = tool.execute("2", json!({"command": "Write-Output boom; exit 3"}), None, noop()).await.unwrap_err();
         assert!(err.starts_with("boom") && err.ends_with("Command exited with code 3"), "{err}");
+        let err = tool.execute("2b", json!({"command": "Write-Error nope; exit 1"}), None, noop()).await.unwrap_err();
+        assert!(err.contains("nope") && !err.contains("CLIXML"), "{err}");
         let start = Instant::now();
         let err = tool.execute("3", json!({"command": "Start-Sleep 5", "timeout": 1}), None, noop()).await.unwrap_err();
         assert_eq!(err, "Command timed out after 1 seconds");
