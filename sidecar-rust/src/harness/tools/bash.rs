@@ -90,19 +90,21 @@ fn shell_command(command: &str) -> Command {
     c
 }
 
-/// PowerShell ships with every Windows. The script goes in as
-/// -EncodedCommand (UTF-16LE base64) so no quoting can mangle it, and output
-/// is switched to UTF-8 (the default OEM code page garbles non-ASCII). Text
-/// output and no progress bars, or piped stderr comes back as CLIXML.
+/// PowerShell ships with every Windows. The script travels base64-encoded so
+/// no quoting can mangle it, but as a plain -Command that decodes it:
+/// -EncodedCommand makes PowerShell write errors to stderr as CLIXML. Output is
+/// UTF-8 (the default OEM code page garbles non-ASCII) with no progress bars.
 #[cfg(windows)]
 fn shell_command(command: &str) -> Command {
     use base64::Engine;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let script = format!("[Console]::OutputEncoding = [Text.Encoding]::UTF8\n$ProgressPreference = 'SilentlyContinue'\n{command}");
-    let utf16: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let b64 = base64::engine::general_purpose::STANDARD.encode(command);
     let mut c = Command::new("powershell.exe");
-    c.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-OutputFormat", "Text", "-EncodedCommand"])
-        .arg(base64::engine::general_purpose::STANDARD.encode(utf16))
+    c.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"])
+        .arg(format!(
+            "[Console]::OutputEncoding = [Text.Encoding]::UTF8; $ProgressPreference = 'SilentlyContinue'; \
+             Invoke-Expression ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{b64}')))"
+        ))
         .creation_flags(CREATE_NO_WINDOW);
     c
 }
@@ -452,7 +454,7 @@ mod tests {
     #[tokio::test]
     async fn runs_powershell() {
         let tool = BashTool::new(std::env::temp_dir());
-        // Quotes and non-ASCII survive the -EncodedCommand round trip.
+        // Quotes and non-ASCII survive the base64 round trip.
         let r = tool.execute("1", json!({"command": "Write-Output \"héllo 'quoted'\""}), None, noop()).await.unwrap();
         assert!(r.text_content().contains("héllo 'quoted'"), "{}", r.text_content());
         let err = tool.execute("2", json!({"command": "Write-Output boom; exit 3"}), None, noop()).await.unwrap_err();
