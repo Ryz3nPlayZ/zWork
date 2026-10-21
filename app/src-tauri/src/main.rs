@@ -1050,7 +1050,7 @@ fn ensure_cuadriver_installed(_app: &tauri::AppHandle) {}
 /// 0.5.5) until reboot. Best-effort — the backend's own idle teardown handles
 /// the in-app-idle case; this covers "user closed zWork".
 #[cfg(target_os = "macos")]
-fn stop_cua_driver_on_quit() {
+fn stop_cua_driver_on_quit(_app: &tauri::AppHandle) {
     for bin in [
         "/Applications/CuaDriver.app/Contents/MacOS/cua-driver",
         "cua-driver",
@@ -1068,8 +1068,23 @@ fn stop_cua_driver_on_quit() {
     }
 }
 
+/// Windows/Linux: the backend runs the driver bundled in resources/binaries,
+/// whose daemon likewise outlives the backend being stopped.
 #[cfg(not(target_os = "macos"))]
-fn stop_cua_driver_on_quit() {}
+fn stop_cua_driver_on_quit(app: &tauri::AppHandle) {
+    let Ok(res) = app.path().resource_dir() else { return };
+    let bin = res.join("binaries").join(format!("cua-driver{}", std::env::consts::EXE_SUFFIX));
+    if !bin.exists() {
+        return;
+    }
+    let mut c = Command::new(bin);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let _ = c.arg("stop").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
+}
 
 fn main() {
     // Install a panic hook so a crash in the Tauri host process (the GUI
@@ -1264,7 +1279,7 @@ fn main() {
                 }
             }
             // Stop the CuaDriver daemon so it doesn't keep burning CPU after quit.
-            stop_cua_driver_on_quit();
+            stop_cua_driver_on_quit(app_handle);
         }
     });
 }
