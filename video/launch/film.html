@@ -1,0 +1,738 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>zWork intro film</title>
+<style>
+  @font-face { font-family: 'IS'; src: url(fonts/instrument-serif-regular.woff2) format('woff2'); font-style: normal; }
+  @font-face { font-family: 'IS'; src: url(fonts/instrument-serif-italic.woff2) format('woff2'); font-style: italic; }
+  @font-face { font-family: 'Inter'; src: url(fonts/inter-latin-wght-normal.woff2) format('woff2'); font-weight: 100 900; }
+
+  html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: #F2F0E8; }
+  body { font-family: 'Inter', system-ui, sans-serif; color: #302E28; -webkit-font-smoothing: antialiased; font-feature-settings: 'cv11', 'ss01'; }
+  .grain { position: absolute; inset: -44px; background-size: 22px 22px; }
+  #grainL { background-image: radial-gradient(rgba(48,46,40,0.05) 1px, transparent 1.3px); }
+  #grainD { background-image: radial-gradient(rgba(238,238,236,0.035) 1px, transparent 1.3px); opacity: 0; }
+  #world { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; }
+  #hud { position: absolute; inset: 0; pointer-events: none; }
+  .a { position: absolute; }
+  .c { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; }
+  .serif { font-family: 'IS', serif; font-weight: 400; letter-spacing: -0.02em; line-height: 0.98; }
+  .tn { font-feature-settings: 'tnum', 'cv11'; }
+  #card { position: absolute; overflow: hidden; box-sizing: border-box; border-style: solid; }
+  .layer { position: absolute; left: 50%; top: 50%; }
+  .ink { color: #302E28; } .soft { color: #504C44; } .muted { color: #6E6A60; } .faint { color: #9B968A; }
+  .btn { position: absolute; box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-weight: 560; }
+  .line { position: absolute; background: #DAD6CA; }
+  .cursor { position: absolute; left: 0; top: 0; }
+  .pill { position: absolute; left: 22px; top: 30px; height: 34px; border-radius: 17px; display: flex; align-items: center; gap: 7px; padding: 0 13px; font-size: 17px; font-weight: 600; white-space: nowrap; box-sizing: border-box; }
+  .ripple { position: absolute; border-radius: 50%; border: 2px solid #302E28; box-sizing: border-box; }
+  .tile { position: absolute; box-sizing: border-box; border: 1.5px solid #DAD6CA; background: #F6F4EC; border-radius: 24px; overflow: hidden; }
+  .odo { display: inline-block; overflow: hidden; vertical-align: top; height: 92px; clip-path: inset(0 -80px); }
+  .strip { display: block; }
+  .strip span { display: block; height: 92px; line-height: 92px; text-align: center; }
+</style>
+</head>
+<body>
+<div id="bg" class="a" style="inset:0"><div id="grainL" class="grain"></div><div id="grainD" class="grain"></div></div>
+
+<div id="world">
+  <!-- HOOK serif lines -->
+  <div id="hookA" class="c serif ink" style="font-size:168px">Your weekly</div>
+  <div id="hookWords"></div>
+  <div id="caption" class="c serif ink" style="font-size:78px">The same mess. Every week.</div>
+
+  <!-- wall of Fridays (tile 0 is the card itself) -->
+  <div id="tiles"></div>
+
+  <!-- THE card: one shape, never cut -->
+  <div id="card">
+    <!-- clock pill -->
+    <div id="Lpill" class="layer" style="width:400px;height:84px">
+      <svg class="a" style="left:34px;top:21px" width="42" height="42" viewBox="0 0 42 42">
+        <circle cx="21" cy="21" r="17" fill="none" stroke="#F2F0E8" stroke-width="2.6"/>
+        <line id="clkH" x1="21" y1="21" x2="21" y2="12" stroke="#F2F0E8" stroke-width="2.8" stroke-linecap="round"/>
+        <line id="clkM" x1="21" y1="21" x2="21" y2="8" stroke="#F2F0E8" stroke-width="2.2" stroke-linecap="round"/>
+      </svg>
+      <div class="a" style="left:94px;top:0;line-height:84px;font-size:31px;font-weight:540;color:#F2F0E8;white-space:nowrap">Friday · 4:47 PM</div>
+    </div>
+
+    <!-- raw CSV -->
+    <div id="Ltable" class="layer" style="width:1320px;height:640px">
+      <div class="line" style="left:0;top:96px;width:1320px;height:1.5px"></div>
+      <div class="a muted" style="left:48px;top:112px;font-size:21px;font-weight:560;letter-spacing:.06em">DATE</div>
+      <div class="a muted" style="left:380px;top:112px;font-size:21px;font-weight:560;letter-spacing:.06em">DESCRIPTION</div>
+      <div class="a muted" style="right:48px;top:112px;font-size:21px;font-weight:560;letter-spacing:.06em">AMOUNT</div>
+      <div id="rows"></div>
+    </div>
+
+    <!-- composer -->
+    <div id="Lcomp" class="layer" style="width:1180px;height:250px">
+      <div id="ph" class="a faint" style="left:48px;top:104px;font-size:34px;line-height:44px;white-space:nowrap">Ask zWork to do something on your computer…</div>
+      <div id="typed" class="a ink" style="left:48px;top:104px;font-size:34px;line-height:44px;white-space:pre;font-weight:450"></div>
+      <div id="caret" class="a" style="top:108px;width:2.5px;height:36px;background:#302E28"></div>
+      <svg class="a" style="left:40px;top:176px" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#6E6A60" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5 12.6 19.9a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg>
+      <div id="send" class="btn" style="left:1076px;top:150px;width:64px;height:64px;border-radius:32px;background:#302E28">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#F2F0E8" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/></svg>
+      </div>
+    </div>
+
+    <!-- run card -->
+    <div id="Lrun" class="layer" style="width:1080px;height:760px">
+      <svg class="a" style="left:44px;top:34px" width="44" height="44" viewBox="0 0 40 40"><g transform="translate(20 20)" fill="#302E28" class="slats"></g></svg>
+      <div class="a ink" style="left:104px;top:34px;line-height:44px;font-size:32px;font-weight:620;letter-spacing:-0.01em">Q3 expense report</div>
+      <div id="status" class="a" style="right:44px;top:30px;height:52px;width:172px;border-radius:26px;background:#EAE8E0">
+        <div id="stWork" class="a muted" style="left:0;top:0;width:172px;height:52px">
+          <svg class="a" style="left:20px;top:14px" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#DAD6CA" stroke-width="2.6"/><path id="stSpin" d="M12 3a9 9 0 0 1 9 9" fill="none" stroke="#302E28" stroke-width="2.6" stroke-linecap="round"/></svg>
+          <div class="a" style="left:54px;top:0;line-height:52px;font-size:22px;font-weight:560">Working</div>
+        </div>
+        <div id="stDone" class="a" style="left:0;top:0;width:172px;height:52px">
+          <svg class="a" style="left:28px;top:14px" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#10B981"/><path d="M7 12.4l3.3 3.2L17 9" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <div class="a ink" style="left:62px;top:0;line-height:52px;font-size:22px;font-weight:600">Done</div>
+        </div>
+      </div>
+      <div class="line" style="left:0;top:112px;width:1080px;height:1.5px"></div>
+      <div id="steps"></div>
+      <div class="line" style="left:44px;top:512px;width:992px;height:1.5px"></div>
+      <div class="a muted" style="left:48px;top:548px;font-size:25px;font-weight:540">Total expenses, Q3</div>
+      <div class="a muted" style="left:48px;top:584px;font-size:20px">86 lines · 5 categories</div>
+      <div id="odoWrap" class="a tn ink" style="right:44px;top:530px;height:92px;font-size:78px;font-weight:640;letter-spacing:-0.025em;white-space:nowrap;display:flex"></div>
+      <div id="outFile" class="a" style="left:44px;top:646px;width:520px;height:80px;border-radius:18px;background:#EAE8E0;border:1.5px solid #DAD6CA;box-sizing:border-box">
+        <div class="a xls" style="left:18px;top:13px"></div>
+        <div class="a ink" style="left:78px;top:12px;font-size:25px;font-weight:600">q3_expenses.xlsx</div>
+        <div class="a muted" style="left:78px;top:44px;font-size:19px">Excel spreadsheet · ready</div>
+        <svg class="a" style="right:22px;top:26px" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#504C44" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg>
+      </div>
+    </div>
+
+    <!-- spreadsheet -->
+    <div id="Lsheet" class="layer" style="width:1500px;height:820px">
+      <div class="a" style="left:0;top:0;width:1500px;height:76px;background:#EAE8E0"></div>
+      <div class="a xls" style="left:28px;top:11px"></div>
+      <div class="a ink" style="left:88px;top:0;line-height:76px;font-size:26px;font-weight:620">q3_expenses.xlsx</div>
+      <div class="btn soft" style="left:1094px;top:14px;width:210px;height:48px;border-radius:24px;border:1.5px solid #C9C4B6;font-size:21px">Open in Excel</div>
+      <div id="sendBtn" class="btn" style="left:1318px;top:14px;width:150px;height:48px;border-radius:24px;background:#302E28;color:#F2F0E8;font-size:21px;gap:8px">Send
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F2F0E8" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></svg></div>
+      <div class="line" style="left:0;top:76px;width:1500px;height:1.5px"></div>
+      <div id="grid"></div>
+      <div id="chart"></div>
+    </div>
+
+    <!-- permission sheet -->
+    <div id="Lperm" class="layer" style="width:820px;height:400px">
+      <svg class="a" style="left:44px;top:40px" width="30" height="30" viewBox="0 0 40 40"><g transform="translate(20 20)" fill="#6E6A60" class="slats"></g></svg>
+      <div class="a muted" style="left:84px;top:40px;line-height:30px;font-size:22px;font-weight:520">zWork asks first</div>
+      <div class="a ink" style="left:44px;top:92px;font-size:48px;font-weight:640;letter-spacing:-0.02em">Send to Priya?</div>
+      <div class="a soft" style="left:44px;top:164px;font-size:27px">Q3 expense report · 1 attachment</div>
+      <div class="a" style="left:44px;top:220px;height:58px;width:300px;border-radius:14px;background:#EAE8E0;border:1.5px solid #DAD6CA;box-sizing:border-box">
+        <div class="a xls" style="left:12px;top:6px;transform:scale(.8);transform-origin:0 0"></div>
+        <div class="a ink" style="left:62px;top:0;line-height:55px;font-size:22px;font-weight:560">q3_expenses.xlsx</div>
+      </div>
+      <div id="deny" class="btn soft" style="left:430px;top:304px;width:150px;height:64px;border-radius:32px;border:1.5px solid #C9C4B6;font-size:25px">Deny</div>
+      <div id="allow" class="btn" style="left:596px;top:304px;width:180px;height:64px;border-radius:32px;background:#302E28;color:#F2F0E8;font-size:25px">Allow</div>
+    </div>
+
+    <!-- toast -->
+    <div id="Ltoast" class="layer" style="width:560px;height:104px">
+      <svg class="a" style="left:32px;top:30px" width="44" height="44" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#10B981"/><path d="M7 12.4l3.3 3.2L17 9" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div class="a" style="left:96px;top:0;line-height:104px;font-size:34px;font-weight:600;color:#F2F0E8">Sent to Priya</div>
+      <div class="a" style="right:40px;top:0;line-height:104px;font-size:22px;color:#9B968A">just now</div>
+    </div>
+
+    <!-- schedule row -->
+    <div id="Lsched" class="layer" style="width:1040px;height:160px">
+      <div class="a" style="left:40px;top:40px;width:80px;height:80px;border-radius:40px;background:#EAE8E0">
+        <svg class="a" style="left:20px;top:20px" width="40" height="40" viewBox="0 0 42 42"><circle cx="21" cy="21" r="17" fill="none" stroke="#302E28" stroke-width="2.6"/><path d="M21 11v10l7 4" fill="none" stroke="#302E28" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <div class="a ink" style="left:150px;top:36px;font-size:40px;font-weight:640;letter-spacing:-0.015em">Every Friday at 4:00 PM</div>
+      <div class="a muted" style="left:150px;top:90px;font-size:25px">Expense report, sent to Priya</div>
+      <div id="tog" class="a" style="left:880px;top:48px;width:112px;height:64px;border-radius:32px">
+        <div id="knob" class="a" style="top:6px;height:52px;border-radius:26px;background:#FBFAF6;box-shadow:0 2px 6px rgba(48,46,40,.25)"></div>
+      </div>
+    </div>
+
+    <!-- tile 0 -->
+    <div id="Ltile" class="layer" style="width:400px;height:230px"></div>
+  </div>
+
+  <!-- the CSV chip label: rides from chip → table header → composer attachment -->
+  <div id="att" class="a" style="border-radius:16px;background:#EAE8E0;border:1.5px solid #DAD6CA;box-sizing:border-box"></div>
+  <div id="chipL" class="a" style="height:60px;transform-origin:0 0">
+    <svg class="a" style="left:0;top:4px" width="44" height="52" viewBox="0 0 44 52"><path d="M4 4.5A3.5 3.5 0 0 1 7.5 1H28l12 12v34.5a3.5 3.5 0 0 1-3.5 3.5h-29A3.5 3.5 0 0 1 4 47.5z" fill="#F6F4EC" stroke="#504C44" stroke-width="2"/><path d="M28 1v12h12" fill="none" stroke="#504C44" stroke-width="2"/><text x="22" y="38" text-anchor="middle" font-family="Inter" font-size="11" font-weight="700" fill="#504C44">CSV</text></svg>
+    <div id="chipName" class="a ink" style="left:58px;top:0;line-height:60px;font-size:30px;font-weight:580;white-space:nowrap">bank_export_q3.csv</div>
+    <div id="chipRows" class="a muted" style="top:0;line-height:60px;font-size:24px;white-space:nowrap">87 rows</div>
+  </div>
+</div>
+
+<div id="hud">
+  <div id="ripples"></div>
+  <div id="curU" class="cursor"></div>
+  <div id="curZ" class="cursor"></div>
+  <svg id="logo" class="a" width="300" height="300" viewBox="-20 -20 40 40" style="left:0;top:0;overflow:visible"><g id="logoG" fill="#EEEEEC"></g></svg>
+  <div id="wordmark" class="c serif" style="font-size:190px;color:#EEEEEC;letter-spacing:-0.025em">zWork</div>
+  <div id="tag" class="c serif" style="font-size:96px;color:#EEEEEC">Your weekly paperwork, <i>done.</i></div>
+  <div id="fine" class="c" style="font-size:29px;color:rgba(238,238,236,.62);font-weight:450;letter-spacing:.005em">$12 a month · free with your own key · Mac, Windows, Linux</div>
+</div>
+
+<script>
+// ───────────────────────── core: pure functions of time ─────────────────────────
+const $ = id => document.getElementById(id);
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const lerp = (a, b, u) => a + (b - a) * u;
+function stepR(tau, { w, z }) {
+  if (tau <= 0) return 0;
+  if (z >= 1) { const x = w * tau; return 1 - Math.exp(-x) * (1 + x); }
+  const wd = w * Math.sqrt(1 - z * z);
+  return 1 - Math.exp(-z * w * tau) * (Math.cos(wd * tau) + (z * w / wd) * Math.sin(wd * tau));
+}
+class Track {
+  constructor(v0) { this.v0 = v0; this.cur = v0; this.ev = []; }
+  to(t, v, sp) { if (v !== this.cur) { this.ev.push([t, v - this.cur, sp]); this.cur = v; } return this; }
+  at(t) { let v = this.v0; for (const [ti, d, sp] of this.ev) v += d * stepR(t - ti, sp); return v; }
+}
+function vis(t, tin, tout, dOut = 0.12) {
+  const e = stepR(t - tin, { w: 26, z: 1 }), x = tout == null ? 0 : clamp((t - tout) / dOut), xo = x * x;
+  return { o: e * (1 - xo), b: (1 - e) * 10 + xo * 10, dy: (1 - e) * 16 - xo * 10, e };
+}
+function applyVis(el, v, extra = '') {
+  el.style.opacity = v.o.toFixed(4);
+  el.style.filter = v.b > 0.05 ? `blur(${v.b.toFixed(2)}px)` : 'none';
+  el.style.transform = `${extra} translateY(${v.dy.toFixed(2)}px)`;
+  el.style.visibility = v.o < 0.002 ? 'hidden' : 'visible';
+}
+const press = (t, tc) => 1 - 0.16 * Math.exp(-(((t - tc) / 0.045) ** 2));
+const hex = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const rgb = (a, al = 1) => `rgba(${a.map(v => Math.round(clamp(v, 0, 255))).join(',')},${al})`;
+const mix = (a, b, u) => a.map((v, i) => lerp(v, b[i], u));
+
+const INK = '#302E28', RAISED = '#EAE8E0', SUNKEN = '#F6F4EC', PAPER = '#F2F0E8', LINE = '#DAD6CA';
+const SP = {
+  ui: { w: 15, z: 0.82 }, fast: { w: 24, z: 0.85 }, cam: { w: 6, z: 1 }, camP: { w: 9, z: 0.86 },
+  drift: { w: 1.6, z: 1 }, cur: { w: 9, z: 0.92 }, curS: { w: 4.5, z: 1 }, pop: { w: 18, z: 0.78 },
+};
+const M = { cues: [], DUR: 37.0 };
+const cue = (t, k, v = 0) => M.cues.push({ t: +t.toFixed(4), k, v });
+
+// slats helper
+function slatsSVG(fill) {
+  let s = '';
+  for (let i = 0; i < 6; i++) s += `<g transform="rotate(${i * 60}) translate(0 -12.5)"><rect x="-2.1" y="-5.5" width="4.2" height="11" rx="1.6" transform="skewX(-18)" ${fill ? `fill="${fill}"` : ''}/></g>`;
+  return s;
+}
+document.querySelectorAll('.slats').forEach(g => g.innerHTML = slatsSVG());
+const XLS = `<svg width="44" height="52" viewBox="0 0 44 52"><path d="M4 4.5A3.5 3.5 0 0 1 7.5 1H28l12 12v34.5a3.5 3.5 0 0 1-3.5 3.5h-29A3.5 3.5 0 0 1 4 47.5z" fill="#F6F4EC" stroke="#302E28" stroke-width="2"/><path d="M28 1v12h12" fill="none" stroke="#302E28" stroke-width="2"/><rect x="11" y="24" width="22" height="17" rx="1.5" fill="none" stroke="#302E28" stroke-width="1.8"/><path d="M11 32.5h22M19 24v17" stroke="#302E28" stroke-width="1.8"/></svg>`;
+document.querySelectorAll('.xls').forEach(d => d.innerHTML = XLS);
+
+// ───────────────────────── the card ─────────────────────────
+const card = $('card');
+const C = {
+  x: new Track(0), y: new Track(-250), w: new Track(400), h: new Track(84), r: new Track(42),
+  f: [new Track(48), new Track(46), new Track(40)], bd: new Track(0), sh: new Track(0.55), s: new Track(0),
+};
+C.s.to(0.04, 1, { w: 16, z: 0.78 }); cue(0.1, 'pop');
+function morph(t, st, sp = SP.ui, k = 'whoosh', kv = 0.5) {
+  for (const n of ['x', 'y', 'w', 'h', 'r']) if (st[n] != null) C[n].to(t, st[n], sp);
+  if (st.fill) hex(st.fill).forEach((v, i) => C.f[i].to(t, v, sp));
+  if (st.bd != null) C.bd.to(t, st.bd, sp);
+  if (st.sh != null) C.sh.to(t, st.sh, sp);
+  if (k) cue(t + 0.06, k, kv);
+}
+// tile grid
+const TW = 400, TH = 230, GX = 436, GY = 266, T0X = -654, T0Y = -266;
+const tilePos = i => [T0X + (i % 4) * GX, T0Y + Math.floor(i / 4) * GY];
+
+morph(3.68, { x: 0, y: -250, w: 600, h: 96, r: 22, fill: RAISED, bd: 1, sh: 0.25 }, SP.ui, 'whoosh', 0.35);
+morph(4.32, { x: 0, y: -10, w: 1320, h: 640, r: 26, fill: SUNKEN, bd: 1, sh: 0.45 }, SP.ui, 'whoosh', 0.7);
+morph(7.62, { x: 0, y: -10, w: 600, h: 96, r: 22, fill: RAISED, sh: 0.25 }, SP.fast, 'whoosh', 0.4);
+morph(7.95, { x: 0, y: 0, w: 1180, h: 250, r: 30, fill: SUNKEN, sh: 0.7 }, SP.ui, 'whoosh', 0.6);
+morph(13.92, { x: 0, y: 0, w: 1080, h: 760, r: 30, sh: 0.6 }, { w: 13, z: 0.8 }, 'drop', 1);
+morph(19.9, { x: 0, y: 0, w: 1500, h: 820, r: 22, sh: 0.55 }, SP.ui, 'whoosh', 0.8);
+morph(23.9, { x: 0, y: 0, w: 820, h: 400, r: 30, sh: 0.85 }, SP.ui, 'whoosh', 0.6);
+morph(26.86, { w: 560, h: 104, r: 52, fill: INK, bd: 0, sh: 0.7 }, SP.ui, 'whoosh', 0.4);
+morph(27.9, { w: 1040, h: 160, r: 30, fill: SUNKEN, bd: 1, sh: 0.55 }, SP.ui, 'whoosh', 0.5);
+morph(29.9, { x: T0X, y: T0Y, w: TW, h: TH, r: 24, sh: 0.15 }, { w: 11, z: 0.9 }, 'whoosh', 0.9);
+
+// layers (each with its own in/out window)
+const LAY = [
+  ['Lpill', 0.2, 3.52], ['Ltable', 4.5, 7.5], ['Lcomp', 8.1, 13.86], ['Lrun', 14.1, 19.82],
+  ['Lsheet', 20.06, 23.82], ['Lperm', 24.06, 26.78], ['Ltoast', 27.0, 27.8], ['Lsched', 28.04, 29.82], ['Ltile', 30.02, null],
+].map(([id, a, b]) => ({ el: $(id), a, b }));
+
+// ───────────────────────── hook ─────────────────────────
+const WORDS = [['invoices', 1.0], ['reports', 1.5], ['payroll', 2.0], ['timesheets', 2.5], ['expenses', 3.0]];
+const wordEls = WORDS.map(([w]) => { const d = document.createElement('div'); d.className = 'c serif ink'; d.style.fontSize = '168px'; d.textContent = w; $('hookWords').appendChild(d); return d; });
+WORDS.forEach(([, t]) => cue(t, 'word'));
+const TICKS = [0.5, 1, 1.5, 2, 2.5, 3, 3.5];
+TICKS.forEach(t => cue(t, 'tick'));
+
+// ───────────────────────── mess ─────────────────────────
+const RAW = [
+  ['07/02/2025', 'AMZN MKTP US*2K4', '38.12'],
+  ['2025-07-03', 'Blue Bottle Coffee', '51.38'],
+  ['Jul 3, 2025', 'Amazon.com', '112.40'],
+  ['07/05/2025', 'UBER   *TRIP', '23.75'],
+  ['2025-07-03', 'Blue Bottle Coffee', '51.38'],
+  ['07/08/2025', 'ADOBE *CREATIVE CLD', '59.99'],
+  ['07/09/2025', 'amazon mktplace', '16.04'],
+];
+const HL = { date: [1, 2, 4], vend: [0, 2, 6], dup: [1, 4] };
+const SWEEP = { date: 5.5, vend: 5.75, dup: 6.0 };
+const rowEls = RAW.map((r, i) => {
+  const top = 150 + i * 64, d = document.createElement('div');
+  d.className = 'a'; d.style.cssText = `left:0;top:${top}px;width:1320px;height:64px`;
+  d.innerHTML = `
+    <div class="line" style="left:48px;top:63px;width:1224px;height:1px;opacity:.7"></div>
+    <div class="a hlD" style="left:38px;top:12px;height:40px;border-radius:8px;background:#E3DAC0"></div>
+    <div class="a hlV" style="left:370px;top:12px;height:40px;border-radius:8px;background:#E3DAC0"></div>
+    <div class="a tn soft" style="left:48px;top:0;line-height:64px;font-size:28px">${r[0]}</div>
+    <div class="a ink" style="left:380px;top:0;line-height:64px;font-size:28px;white-space:pre;font-weight:450">${r[1]}</div>
+    <div class="a dupP" style="left:${380 + 262}px;top:15px;height:34px;line-height:34px;padding:0 12px;border-radius:17px;background:#302E28;color:#F2F0E8;font-size:19px;font-weight:600">×2</div>
+    <div class="a tn ink" style="right:48px;top:0;line-height:64px;font-size:28px">${r[2]}</div>`;
+  $('rows').appendChild(d); cue(4.6 + i * 0.125, 'row');
+  return d;
+});
+Object.values(SWEEP).forEach(t => cue(t, 'sweep'));
+
+// ───────────────────────── ask ─────────────────────────
+const PROMPT = 'Turn this into the Q3 expense report.';
+const keyT = i => i < 16 ? 9.0 + i * 0.125 : 11.0 + (i - 16) * 0.0625;
+for (let i = 0; i < PROMPT.length; i++) if (PROMPT[i] !== ' ') cue(keyT(i), 'key', i);
+const SEND_T = 13.75;
+
+// ───────────────────────── run card ─────────────────────────
+const STEPS = ['Read 87 transactions', 'Fixed 3 date formats', 'Merged 17 vendor names', 'Removed 1 duplicate', 'Sorted every line into a category'];
+const stepIn = k => 14.5 + 0.5 * k, stepChk = k => 15.0 + 0.5 * k;
+const stepEls = STEPS.map((s, k) => {
+  const d = document.createElement('div'); d.className = 'a'; d.style.cssText = `left:0;top:${150 + 66 * k}px;width:1080px;height:66px`;
+  d.innerHTML = `
+    <svg class="a sp" style="left:48px;top:16px" width="34" height="34" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#DAD6CA" stroke-width="2.4"/><path d="M12 3a9 9 0 0 1 9 9" fill="none" stroke="#302E28" stroke-width="2.4" stroke-linecap="round"/></svg>
+    <svg class="a ck" style="left:48px;top:16px" width="34" height="34" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#10B981"/><path class="ckp" d="M7 12.4l3.3 3.2L17 9" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" pathLength="1" stroke-dasharray="1"/></svg>
+    <div class="a txt ink" style="left:104px;top:0;line-height:66px;font-size:30px;font-weight:480;white-space:nowrap">${s}</div>`;
+  $('steps').appendChild(d); cue(stepIn(k), 'tick2', k); cue(stepChk(k), 'check', k);
+  return d;
+});
+cue(17.0, 'done');
+// odometer: $43,687.78 in cents
+const ODO_V = 4368778, ODO_A = 15.0, ODO_D = 3.0;
+const odoV = t => { const u = clamp((t - ODO_A) / ODO_D); return ODO_V * (1 - (1 - u) ** 3); };
+const odo = { slots: [] };
+(() => {
+  const w = $('odoWrap');
+  const mk = (txt, cls) => { const s = document.createElement('span'); s.className = cls; s.textContent = txt; w.appendChild(s); return s; };
+  mk('$', 'odoSym');
+  const order = [6, 5, ',', 4, 3, 2, '.', 1, 0];
+  for (const p of order) {
+    if (typeof p === 'string') { const s = mk(p, 'odoSep'); odo.slots.push({ sep: p, el: s }); continue; }
+    const s = document.createElement('span'); s.className = 'odo';
+    s.innerHTML = `<span class="strip">${[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0].map(n => `<span>${n}</span>`).join('')}</span>`;
+    w.appendChild(s); odo.slots.push({ p, el: s, strip: s.firstChild });
+  }
+})();
+// odometer ticks: one per $1,000 crossed
+{ let last = 0; for (let t = ODO_A; t <= ODO_A + ODO_D + 0.001; t += 1 / 240) { const k = Math.floor(odoV(t) / 100000); if (k > last) { cue(t, 'odo', k); last = k; } } }
+cue(17.5, 'pop2');
+
+// ───────────────────────── spreadsheet ─────────────────────────
+const CLEAN = [
+  ['2025-07-02', 'Amazon', 'Office supplies', '38.12'],
+  ['2025-07-03', 'Blue Bottle Coffee', 'Meals', '51.38'],
+  ['2025-07-03', 'Amazon', 'Office supplies', '112.40'],
+  ['2025-07-05', 'Uber', 'Travel', '23.75'],
+  ['2025-07-08', 'Adobe', 'Software', '59.99'],
+  ['2025-07-09', 'Amazon', 'Office supplies', '16.04'],
+  ['2025-07-11', 'Delta Air Lines', 'Travel', '486.20'],
+];
+const COLS = [[64, 210], [274, 320], [594, 250], [844, 196]];
+const rowT = i => 20.3 + i * 0.125;
+const sheetRows = [];
+(() => {
+  const g = $('grid'); let h = '';
+  // column letters
+  h += `<div class="a" style="left:0;top:78px;width:1040px;height:40px;background:#EFEDE5"></div>`;
+  ['A', 'B', 'C', 'D'].forEach((L, i) => h += `<div class="a muted" style="left:${COLS[i][0]}px;top:78px;width:${COLS[i][1]}px;line-height:40px;text-align:center;font-size:18px;font-weight:560">${L}</div>`);
+  // header row
+  h += `<div class="a" style="left:0;top:118px;width:1040px;height:58px;background:#EAE8E0"></div>`;
+  ['Date', 'Vendor', 'Category', 'Amount'].forEach((L, i) => h += `<div class="a ink" style="left:${COLS[i][0] + 18}px;top:118px;width:${COLS[i][1] - 36}px;line-height:58px;font-size:24px;font-weight:640;${i === 3 ? 'text-align:right' : ''}">${L}</div>`);
+  // row numbers + horizontal lines
+  for (let r = 0; r < 12; r++) {
+    const y = 118 + r * 58;
+    h += `<div class="a faint tn" style="left:0;top:${y}px;width:64px;line-height:58px;text-align:center;font-size:18px">${r + 1}</div>`;
+    h += `<div class="line" style="left:0;top:${y + 58}px;width:1040px;height:1px"></div>`;
+  }
+  h += `<div class="a" style="left:0;top:175px;width:1040px;height:3px;background:#504C44"></div>`; // frozen pane
+  h += `<div class="a" style="left:0;top:178px;width:1040px;height:10px;background:linear-gradient(rgba(48,46,40,.10),rgba(48,46,40,0))"></div>`;
+  [64, 274, 594, 844, 1040].forEach(x => h += `<div class="line" style="left:${x}px;top:78px;width:1px;height:742px"></div>`);
+  g.innerHTML = h;
+  const mkRow = (cells, i, opts = {}) => {
+    const d = document.createElement('div'); d.className = 'a'; d.style.cssText = `left:0;top:${176 + i * 58}px;width:1040px;height:58px`;
+    d.innerHTML = cells.map((c, j) => c == null ? '' : `<div class="a ${opts.cls || 'ink'} ${j === 0 || j === 3 ? 'tn' : ''}" style="left:${COLS[j][0] + 18}px;top:0;width:${COLS[j][1] - 36}px;line-height:58px;font-size:23px;${opts.w ? `font-weight:${opts.w};` : ''}${j === 3 ? 'text-align:right' : ''}">${c}</div>`).join('');
+    g.appendChild(d); return d;
+  };
+  CLEAN.forEach((r, i) => { sheetRows.push(mkRow(r, i)); cue(rowT(i), 'row2', i); });
+  sheetRows.push(mkRow([null, '+ 79 more rows', null, null], 7, { cls: 'muted' }));
+  sheetRows.push(mkRow(['Total', null, null, '43,687.78'], 8, { w: 680 }));
+  cue(rowT(7), 'row2', 7); cue(rowT(8), 'row2', 8);
+  const sel = document.createElement('div'); sel.id = 'sel'; sel.className = 'a';
+  sel.style.cssText = `left:${844}px;top:${176 + 8 * 58}px;width:196px;height:58px;border:3px solid #302E28;box-sizing:border-box;border-radius:3px`;
+  g.appendChild(sel);
+  // chart
+  const CATS = [['Travel', 16412.30], ['Software', 9836.45], ['Office supplies', 7204.18], ['Meals', 5918.62], ['Other', 4316.23]];
+  const ch = $('chart');
+  ch.innerHTML = `<div class="a ink" style="left:1078px;top:110px;font-size:25px;font-weight:640">By category</div>`;
+  M.bars = CATS.map(([n, v], k) => {
+    const y = 172 + k * 104, d = document.createElement('div'); d.className = 'a'; d.style.cssText = `left:1078px;top:${y}px;width:390px;height:100px`;
+    const fmt = v.toLocaleString('en-US', { minimumFractionDigits: 2 });
+    d.innerHTML = `<div class="a soft" style="left:0;top:0;font-size:22px">${n}</div><div class="a muted tn" style="right:0;top:2px;font-size:20px">${fmt}</div>
+      <div class="a" style="left:0;top:40px;width:390px;height:22px;border-radius:6px;background:#E9E6DC"></div>
+      <div class="a bar" style="left:0;top:40px;height:22px;border-radius:6px;background:#302E28"></div>`;
+    ch.appendChild(d); return { el: d, bar: d.querySelector('.bar'), f: v / CATS[0][1], t: 21.9 + k * 0.125 };
+  });
+  M.bars.forEach((b, k) => cue(b.t, 'bar', k));
+})();
+const SEL_T = 21.75, SENDB_T = 23.6;
+
+// ───────────────────────── permission / toast / schedule ─────────────────────────
+const ALLOW_T = 26.5, TOG_T = 28.75;
+cue(27.0, 'toast');
+const kL = new Track(6).to(TOG_T + 0.03, 54, { w: 19, z: 0.9 });
+const kR = new Track(58).to(TOG_T + 0.03, 106, { w: 34, z: 0.9 });
+const togOn = new Track(0).to(TOG_T + 0.05, 1, { w: 22, z: 1 });
+cue(TOG_T + 0.03, 'toggle');
+
+// ───────────────────────── wall of Fridays ─────────────────────────
+const FRIDAYS = ['Oct 23', 'Oct 30', 'Nov 6', 'Nov 13', 'Nov 20', 'Nov 27', 'Dec 4', 'Dec 11', 'Dec 18', 'Dec 25', 'Jan 1', 'Jan 8'];
+const tileHTML = d => `
+  <div class="a ink" style="left:30px;top:28px;font-size:34px;font-weight:640;letter-spacing:-0.015em">Fri · ${d}</div>
+  <div class="a muted" style="left:30px;top:80px;font-size:24px">Expense report</div>
+  <svg class="a pend" style="left:28px;top:154px" width="38" height="38" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="#DAD6CA" stroke-width="2.2"/></svg>
+  <svg class="a ck" style="left:28px;top:154px" width="38" height="38" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#10B981"/><path d="M7 12.4l3.3 3.2L17 9" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  <div class="a muted lbl" style="left:80px;top:154px;line-height:38px;font-size:22px">Sent to Priya</div>`;
+$('Ltile').innerHTML = tileHTML(FRIDAYS[0]);
+const tilePop = i => 30.25 + (i - 1) * 0.0625, tileChk = i => 30.5 + i * 0.0833;
+const tiles = FRIDAYS.map((d, i) => {
+  if (i === 0) return { el: $('Ltile'), i };
+  const el = document.createElement('div'); el.className = 'tile'; el.style.width = TW + 'px'; el.style.height = TH + 'px';
+  el.innerHTML = tileHTML(d); $('tiles').appendChild(el); cue(tilePop(i), 'tpop', i);
+  return { el, i };
+});
+FRIDAYS.forEach((_, i) => cue(tileChk(i), 'tchk', i));
+const COLLAPSE = 32.0;
+cue(31.5, 'cut');
+cue(COLLAPSE, 'slam0');
+
+// ───────────────────────── logo ─────────────────────────
+const SLAM = k => 32.5 + 0.25 * k;
+for (let k = 0; k < 6; k++) cue(SLAM(k), 'slam', k);
+cue(34.0, 'mark'); cue(34.5, 'tagline');
+$('logoG').innerHTML = slatsSVG();
+const logoSlats = [...$('logoG').children];
+const logoRot = new Track(0);
+for (let k = 0; k < 6; k++) logoRot.to(SLAM(k) - 0.01, 10 * (k + 1), { w: 17, z: 0.78 });
+
+// ───────────────────────── camera ─────────────────────────
+const CAM = { x: new Track(0), y: new Track(-40), lz: new Track(Math.log(0.93)) };
+CAM.lz.to(0.0, Math.log(1.0), { w: 1.1, z: 1 });
+CAM.y.to(4.3, 50, SP.cam); CAM.lz.to(4.3, Math.log(0.98), SP.cam);
+CAM.x.to(4.4, -28, SP.drift).to(5.8, 26, { w: 1.2, z: 1 });
+CAM.x.to(7.85, 0, SP.cam); CAM.y.to(7.85, 0, SP.cam); CAM.lz.to(7.85, Math.log(1.3), SP.cam);
+CAM.lz.to(11.0, Math.log(1.36), { w: 1.0, z: 1 });          // creep in under the build
+CAM.lz.to(13.92, Math.log(0.99), SP.camP);                   // punch out on the drop
+CAM.lz.to(17.2, Math.log(1.03), { w: 1.0, z: 1 });
+CAM.lz.to(19.9, Math.log(1.0), SP.cam);
+CAM.lz.to(23.9, Math.log(1.36), SP.cam);
+CAM.lz.to(26.9, Math.log(1.5), SP.cam);
+CAM.lz.to(27.92, Math.log(1.45), SP.cam);
+CAM.x.to(29.9, T0X, { w: 11, z: 0.9 }); CAM.y.to(29.9, T0Y, { w: 11, z: 0.9 }); CAM.lz.to(29.9, Math.log(1.75), { w: 11, z: 0.9 });
+CAM.x.to(30.35, 0, { w: 4.2, z: 1 }); CAM.y.to(30.35, 0, { w: 4.2, z: 1 }); CAM.lz.to(30.35, Math.log(1.0), { w: 4.2, z: 1 });
+CAM.lz.to(31.0, Math.log(0.95), { w: 1.2, z: 1 });
+cue(30.35, 'whooshBig');
+const cam = t => ({ x: CAM.x.at(t), y: CAM.y.at(t), z: Math.exp(CAM.lz.at(t)) });
+const toScreen = (t, wx, wy) => { const c = cam(t); return [960 + (wx - c.x) * c.z, 540 + (wy - c.y) * c.z]; };
+
+// ───────────────────────── cursors ─────────────────────────
+const ARROW = (fill, stroke) => `<svg width="34" height="40" viewBox="0 0 34 40" style="position:absolute;left:-3px;top:-2px;overflow:visible"><path d="M3 2.5v29.2l7.6-6.9 5 11.4 5.4-2.4-5-11.1 10.3-.6z" fill="${fill}" stroke="${stroke}" stroke-width="2.4" stroke-linejoin="round"/></svg>`;
+$('curU').innerHTML = `<div class="body" style="position:absolute;transform-origin:3px 2px">${ARROW('#302E28', '#FBFAF6')}</div><div class="pill" style="background:#FBFAF6;color:#302E28;border:1.5px solid #DAD6CA;box-shadow:0 4px 12px -4px rgba(48,46,40,.3)">You</div>`;
+$('curZ').innerHTML = `<div class="body" style="position:absolute;transform-origin:3px 2px">${ARROW('#302E28', '#FBFAF6')}</div><div class="pill" style="background:#302E28;color:#F2F0E8;box-shadow:0 4px 12px -4px rgba(48,46,40,.45)"><svg class="pm" width="20" height="20" viewBox="-20 -20 40 40"><g fill="#F2F0E8">${slatsSVG()}</g></svg>zWork</div>`;
+
+const U = { x: new Track(760), y: new Track(470), clicks: [], win: [[8.2, 14.45], [24.7, 30.15]] };
+const Z = { x: new Track(330), y: new Track(260), clicks: [], win: [[14.0, COLLAPSE]] };
+function go(c, t, x, y, sp = SP.cur) { c.x.to(t, x, sp); c.y.to(t, y, sp); }
+function click(c, t, k = 'click') { c.clicks.push(t); cue(t, k); }
+// You: focus, wait, send
+go(U, 8.22, -470, 34); click(U, 8.75);
+go(U, 9.3, -300, 170, SP.curS);
+go(U, 12.85, 518 + 6, 57 + 8, { w: 8, z: 0.95 }); click(U, SEND_T, 'clickBig');
+go(U, 14.15, 1150, 720, { w: 5, z: 1 });
+// You: back for Allow and the schedule
+go(U, 24.72, 276 + 8, 132 + 12, { w: 6.2, z: 0.95 }); click(U, ALLOW_T, 'clickBig');
+go(U, 27.2, 230, 120, SP.curS);
+go(U, 28.12, 416 + 6, 8, { w: 8.5, z: 0.94 }); click(U, TOG_T);
+go(U, 29.3, 600, 160, SP.curS);
+// zWork: steps, file, rows, total, send
+const ZS = { s: new Track(0).to(14.0, 1, SP.pop) };
+cue(14.02, 'born');
+const stepEnd = [];
+function measureSteps() {
+  stepEls.forEach((d, k) => stepEnd[k] = d.querySelector('.txt').offsetWidth);
+}
+function planZ() {
+  measureSteps();
+  STEPS.forEach((_, k) => { go(Z, stepChk(k) - 0.42, -540 + 104 + stepEnd[k] + 22, -380 + 150 + 66 * k + 40, { w: 13, z: 0.92 }); Z.clicks.push(stepChk(k)); });
+  go(Z, 17.45, 60, 230, SP.curS);
+  go(Z, 19.1, -272 + 150, 298 + 12, { w: 9, z: 0.93 }); click(Z, 19.75);
+  for (let i = 0; i < 9; i++) go(Z, rowT(i) - 0.08, 192 + 92, -204 + 58 * i + 16 + 10, { w: 16, z: 0.95 });
+  go(Z, SEL_T - 0.4, 192 + 66, 276 + 14 - 10, { w: 12, z: 0.92 }); click(Z, SEL_T);
+  go(Z, 22.0, 560, 150, { w: 3.2, z: 1 });
+  go(Z, 22.95, 643 + 8, -372 + 12, { w: 8, z: 0.94 }); click(Z, SENDB_T);
+  go(Z, 23.72, 600, 260, { w: 10, z: 1 }); go(Z, 24.05, -540, 260, { w: 6.5, z: 1 }); go(Z, 24.7, -540, 110, SP.curS);
+  go(Z, 26.9, -420, 70, SP.curS);
+  go(Z, 27.95, -660, 40, SP.curS);
+  go(Z, 30.3, 740, 360, { w: 3.0, z: 1 });
+}
+
+// ───────────────────────── layout measured after fonts ─────────────────────────
+let CHIPW = 0, ROWSX = 0;
+function layout() {
+  const nm = $('chipName'); ROWSX = 58 + nm.offsetWidth + 18; $('chipRows').style.left = ROWSX + 'px';
+  CHIPW = ROWSX + $('chipRows').offsetWidth;
+  // highlight widths
+  rowEls.forEach((d, i) => {
+    const kids = d.querySelectorAll('.a'); // hlD hlV date desc dup amount
+    d._hlDW = d.children[3].offsetWidth + 20; d._hlVW = d.children[4].offsetWidth + 20;
+    d.children[5].style.left = (380 + d.children[4].offsetWidth + 16) + 'px';
+  });
+  planZ();
+}
+
+// chip label positions (world, left-top) + scale
+const CH = { x: new Track(0), y: new Track(0), s: new Track(1) };
+function planChip() {
+  const s0 = 1, w = CHIPW;
+  CH.x.v0 = CH.x.cur = -w / 2; CH.y.v0 = CH.y.cur = -250 - 30;
+  CH.x.to(4.32, -660 + 40, SP.ui); CH.y.to(4.32, -10 - 320 + 18, SP.ui);
+  CH.x.to(7.62, -w / 2, SP.fast); CH.y.to(7.62, -10 - 30, SP.fast);
+  CH.x.to(7.95, -590 + 32 + 16, SP.ui); CH.y.to(7.95, -125 + 26 + 4 * 0.78, SP.ui); CH.s.to(7.95, 0.78, SP.ui);
+}
+
+// ───────────────────────── seek(t) ─────────────────────────
+function seek(t) {
+  const c = cam(t);
+  const dark = stepR(t - COLLAPSE + 0.02, { w: 17, z: 1 });
+  document.body.style.background = rgb(mix(hex(PAPER), [20, 20, 22], dark));
+  $('grainL').style.opacity = 1 - dark; $('grainD').style.opacity = dark;
+  const gx = (-c.x * c.z * 0.35) % 22, gy = (-c.y * c.z * 0.35) % 22;
+  $('grainL').style.transform = $('grainD').style.transform = `translate(${gx}px,${gy}px)`;
+  $('world').style.transform = `translate(960px,540px) scale(${c.z}) translate(${-c.x}px,${-c.y}px)`;
+
+  // collapse at the end
+  const col = stepR(t - COLLAPSE, { w: 16, z: 1 });
+
+  // card
+  let cx = C.x.at(t), cy = C.y.at(t), w = Math.max(1, C.w.at(t)), h = Math.max(1, C.h.at(t)), r = C.r.at(t);
+  const f = C.f.map(k => k.at(t)), bd = clamp(C.bd.at(t)), sh = Math.max(0, C.sh.at(t));
+  const cs = C.s.at(t) * (1 - 0.82 * col);
+  cx = lerp(cx, 0, col); cy = lerp(cy, 0, col);
+  card.style.left = (cx - w / 2) + 'px'; card.style.top = (cy - h / 2) + 'px';
+  card.style.width = w + 'px'; card.style.height = h + 'px';
+  card.style.borderRadius = Math.min(r, h / 2, w / 2) + 'px';
+  card.style.background = rgb(f);
+  card.style.borderWidth = '1.5px'; card.style.borderColor = rgb(mix(f, hex(LINE), bd));
+  card.style.boxShadow = `0 1px 0 rgba(48,46,40,${0.05 * sh}), 0 30px 70px -28px rgba(48,46,40,${0.38 * sh})`;
+  card.style.transform = `scale(${cs})`;
+  card.style.opacity = 1 - col;
+  card.style.visibility = cs < 0.002 || col > 0.995 ? 'hidden' : 'visible';
+
+  for (const L of LAY) {
+    const v = vis(t, L.a, L.b);
+    applyVis(L.el, v, `translate(-50%,-50%)`);
+  }
+
+  // hook
+  { const v = vis(t, 0.5, 3.55); applyVis($('hookA'), v, 'translate(-50%,-50%)'); $('hookA').style.left = '0px'; $('hookA').style.top = '-40px'; }
+  WORDS.forEach(([, tw], i) => {
+    const tn = i < WORDS.length - 1 ? WORDS[i + 1][1] - 0.1 : 3.55;
+    const v = vis(t, tw, tn, 0.1); const el = wordEls[i];
+    el.style.left = '0px'; el.style.top = '132px'; applyVis(el, v, 'translate(-50%,-50%)');
+  });
+  // clock hands tick per beat
+  { let m = 0; for (const b of TICKS) m += stepR(t - b, { w: 40, z: 0.55 }); $('clkM').setAttribute('transform', `rotate(${282 + 6 * m} 21 21)`); $('clkH').setAttribute('transform', `rotate(${143 + 0.5 * m} 21 21)`); }
+
+  // caption
+  { const v = vis(t, 6.25, 7.5); applyVis($('caption'), v, 'translate(-50%,-50%)'); $('caption').style.left = '0px'; $('caption').style.top = '410px'; }
+
+  // raw rows + highlighter sweeps
+  rowEls.forEach((d, i) => {
+    const v = vis(t, 4.6 + i * 0.125, 7.45 + (6 - i) * 0.0, 0.12); applyVis(d, v);
+    const sD = HL.date.includes(i) ? stepR(t - SWEEP.date, { w: 16, z: 1 }) : 0;
+    const sV = HL.vend.includes(i) ? stepR(t - SWEEP.vend, { w: 16, z: 1 }) : 0;
+    d.children[1].style.width = (d._hlDW * sD) + 'px';
+    d.children[2].style.width = (d._hlVW * sV) + 'px';
+    const dp = HL.dup.includes(i) ? stepR(t - SWEEP.dup, SP.pop) : 0;
+    d.children[5].style.opacity = clamp(dp * 1.4); d.children[5].style.transform = `scale(${0.6 + 0.4 * dp})`;
+  });
+
+  // chip label
+  { const v = vis(t, 3.82, 13.84, 0.12); const s = CH.s.at(t); const el = $('chipL');
+    el.style.left = CH.x.at(t) + 'px'; el.style.top = CH.y.at(t) + 'px';
+    el.style.opacity = v.o; el.style.filter = v.b > 0.05 ? `blur(${v.b}px)` : 'none';
+    el.style.transform = `translateY(${v.dy}px) scale(${s})`; el.style.visibility = v.o < 0.002 ? 'hidden' : 'visible';
+    const a = vis(t, 8.12, 13.84, 0.12), att = $('att');
+    att.style.left = (CH.x.at(t) - 14) + 'px'; att.style.top = (CH.y.at(t) - 6) + 'px';
+    att.style.width = (CHIPW * s + 28) + 'px'; att.style.height = (60 * s + 12) + 'px';
+    att.style.opacity = a.o; att.style.visibility = a.o < 0.002 ? 'hidden' : 'visible';
+    att.style.transform = `scale(${0.9 + 0.1 * a.e})`;
+  }
+
+  // composer typing
+  { let n = 0; for (let i = 0; i < PROMPT.length; i++) if (t >= keyT(i)) n = i + 1;
+    $('typed').textContent = PROMPT.slice(0, n);
+    $('ph').style.opacity = n > 0 ? 0 : 1;
+    const tw = $('typed').offsetWidth;
+    $('caret').style.left = (48 + tw + 3) + 'px';
+    const typing = t >= 8.75 && t < keyT(PROMPT.length - 1) + 0.3;
+    const blink = typing ? 1 : (Math.floor((t - 8.75) / 0.5) % 2 === 0 ? 1 : 0.15);
+    $('caret').style.opacity = t < 8.78 ? 0 : (t > SEND_T ? 0 : blink);
+    $('send').style.transform = `scale(${press(t, SEND_T)})`;
+    const ready = clamp((t - 12.3) / 0.2); $('send').style.background = rgb(mix(hex('#9B968A'), hex(INK), ready));
+  }
+
+  // run card
+  STEPS.forEach((_, k) => {
+    const d = stepEls[k], v = vis(t, stepIn(k), null); applyVis(d, v);
+    const ck = stepR(t - stepChk(k), SP.pop), sp = d.querySelector('.sp'), cke = d.querySelector('.ck');
+    sp.style.opacity = 1 - clamp(ck * 2); sp.style.transform = `rotate(${(t - stepIn(k)) * 420}deg)`; sp.style.transformOrigin = '17px 17px';
+    cke.style.opacity = clamp(ck * 2); cke.style.transform = `scale(${0.4 + 0.6 * ck})`; cke.style.transformOrigin = '17px 17px';
+    d.querySelector('.ckp').style.strokeDashoffset = 1 - clamp((t - stepChk(k) - 0.04) / 0.16);
+    d.querySelector('.txt').style.color = t < stepChk(k) ? '#6E6A60' : INK;
+  });
+  { const dn = stepR(t - 17.0, SP.pop); $('stWork').style.opacity = 1 - clamp(dn * 2); $('stDone').style.opacity = clamp(dn * 1.5);
+    $('stDone').style.transform = `scale(${0.7 + 0.3 * dn})`; $('stSpin').setAttribute('transform', `rotate(${t * 400} 12 12)`); }
+  // odometer
+  { const V = odoV(t), vis0 = vis(t, 14.6, null); $('odoWrap').style.opacity = vis0.o;
+    for (const s of odo.slots) {
+      if (s.sep) { const on = s.sep === ',' ? (V >= 1e5 ? 1 : 0) : 1; s.el.style.opacity = on; s.el.style.display = on ? 'inline-block' : 'none'; continue; }
+      const P = 10 ** s.p; const d = Math.floor(V / P) % 10 + Math.max(0, (V % P) - (P - 1));
+      s.strip.style.transform = `translateY(${-d * 92}px)`;
+      const show = s.p <= 2 || V >= P; s.el.style.display = show ? 'inline-block' : 'none';
+    }
+  }
+  { const v = vis(t, 17.5, null); const el = $('outFile'); applyVis(el, v, `scale(${press(t, 19.75) * (0.94 + 0.06 * v.e)})`); }
+
+  // spreadsheet
+  sheetRows.forEach((d, i) => applyVis(d, vis(t, rowT(i), null)));
+  { const s = stepR(t - SEL_T, SP.pop); const el = $('sel'); el.style.opacity = clamp(s * 2); el.style.transform = `scale(${1.15 - 0.15 * s})`; }
+  M.bars.forEach(b => { const g = stepR(t - b.t, { w: 13, z: 0.9 }); b.bar.style.width = (390 * b.f * g) + 'px'; applyVis(b.el, vis(t, b.t - 0.12, null)); });
+  $('sendBtn').style.transform = `scale(${press(t, SENDB_T)})`;
+
+  // permission
+  { const hov = clamp((t - 25.9) / 0.15); $('allow').style.background = rgb(mix(hex(INK), [24, 23, 20], hov)); $('allow').style.transform = `scale(${press(t, ALLOW_T)})`; }
+
+  // schedule toggle (edge-split stretch)
+  { const L = kL.at(t), R = kR.at(t), on = clamp(togOn.at(t));
+    $('knob').style.left = L + 'px'; $('knob').style.width = (R - L) + 'px';
+    $('tog').style.background = rgb(mix(hex(LINE), hex(INK), on)); $('tog').style.transform = `scale(${press(t, TOG_T) * 0.5 + 0.5})`; }
+
+  // tiles
+  tiles.forEach(T => {
+    const [x, y] = tilePos(T.i);
+    if (T.i > 0) {
+      const p = stepR(t - tilePop(T.i), SP.pop), v = vis(t, tilePop(T.i), null);
+      const s = (0.86 + 0.14 * p) * (1 - 0.82 * col);
+      const X = lerp(x, 0, col), Y = lerp(y, 0, col);
+      T.el.style.left = (X - TW / 2) + 'px'; T.el.style.top = (Y - TH / 2) + 'px';
+      T.el.style.opacity = v.o * (1 - col); T.el.style.transform = `scale(${s})`;
+      T.el.style.filter = v.b > 0.05 ? `blur(${v.b}px)` : 'none';
+      T.el.style.visibility = v.o * (1 - col) < 0.002 ? 'hidden' : 'visible';
+    }
+    const k = stepR(t - tileChk(T.i), SP.pop), ck = T.el.querySelector('.ck');
+    ck.style.opacity = clamp(k * 2); ck.style.transform = `scale(${0.4 + 0.6 * k})`; ck.style.transformOrigin = '19px 19px';
+    T.el.querySelector('.pend').style.opacity = 1 - clamp(k * 2);
+    T.el.querySelector('.lbl').style.color = k > 0.5 ? INK : '#9B968A';
+  });
+
+  // cursors
+  drawCursor($('curU'), U, t, null);
+  const zs = ZS.s.at(t);
+  drawCursor($('curZ'), Z, t, zs);
+  drawRipples(t);
+
+  // logo, wordmark, lines
+  drawLogo(t);
+}
+
+function curScreen(c, t) { return toScreen(t, c.x.at(t), c.y.at(t)); }
+function drawCursor(el, c, t, born) {
+  let o = 0; for (const [a, b] of c.win) { const v = vis(t, a, b, 0.14); o = Math.max(o, v.o); }
+  if (c === Z) o = Math.min(o, 1 - clamp((t - COLLAPSE) / 0.12));
+  el.style.opacity = o; el.style.visibility = o < 0.002 ? 'hidden' : 'visible';
+  if (o < 0.002) return;
+  const [sx, sy] = curScreen(c, t), [px] = curScreen(c, t - 1 / 120);
+  const vx = (sx - px) * 120;
+  const lean = clamp(-vx * 0.0045, -14, 14);
+  let pr = 1; for (const tc of c.clicks) pr = Math.min(pr, press(t, tc));
+  const s = (born == null ? 1 : born) * pr;
+  el.style.transform = `translate(${sx}px,${sy}px) scale(1.32)`;
+  el.querySelector('.body').style.transform = `rotate(${lean}deg) scale(${s})`;
+  const lag = clamp(-vx * 0.012, -12, 12);
+  el.querySelector('.pill').style.transform = `translateX(${lag}px) scale(${born == null ? 1 : born})`;
+  el.querySelector('.pill').style.transformOrigin = '0 0';
+}
+const ripplePool = [];
+for (let i = 0; i < 4; i++) { const d = document.createElement('div'); d.className = 'ripple'; $('ripples').appendChild(d); ripplePool.push(d); }
+function drawRipples(t) {
+  let n = 0;
+  for (const c of [U, Z]) for (const tc of c.clicks) {
+    const u = (t - tc) / 0.4; if (u < 0 || u > 1 || n >= ripplePool.length) continue;
+    const [sx, sy] = toScreen(t, c.x.at(tc), c.y.at(tc)); const R = 10 + 44 * (1 - (1 - u) ** 3);
+    const d = ripplePool[n++]; d.style.display = 'block';
+    d.style.left = (sx - R) + 'px'; d.style.top = (sy - R) + 'px'; d.style.width = d.style.height = 2 * R + 'px';
+    d.style.opacity = 0.45 * (1 - u); d.style.borderColor = c === Z ? INK : '#504C44';
+  }
+  for (; n < ripplePool.length; n++) ripplePool[n].style.display = 'none';
+}
+
+let P0 = [0, 0], WMW = 0;
+function drawLogo(t) {
+  const L = $('logo'), on = t >= COLLAPSE - 0.001;
+  L.style.visibility = on ? 'visible' : 'hidden';
+  const hideText = el => { el.style.visibility = 'hidden'; };
+  if (!on) { ['wordmark', 'tag', 'fine'].forEach(id => hideText($(id))); return; }
+  const f = stepR(t - COLLAPSE, { w: 9.5, z: 0.9 }), g = stepR(t - 34.0, { w: 10, z: 0.92 });
+  // flight: from the cursor pill mark to centre, then left to make room for the wordmark
+  const size0 = 20, size1 = 300, size2 = 170;
+  const size = lerp(lerp(size0, size1, f), size2, g);
+  const gap = 40, total = size2 + gap + WMW;
+  const fx = 960 - total / 2 + size2 / 2;
+  const cxy = [lerp(lerp(P0[0], 960, f), fx, g), lerp(lerp(P0[1], 470, f), 410, g)];
+  L.style.width = L.style.height = size + 'px';
+  L.style.left = (cxy[0] - size / 2) + 'px'; L.style.top = (cxy[1] - size / 2) + 'px';
+  $('logoG').setAttribute('transform', `rotate(${logoRot.at(t)})`);
+  logoSlats.forEach((s, k) => {
+    const ghost = 1 - clamp((t - 32.28) / 0.14) * 0.86;              // the flying mark fades to a ghost…
+    const hit = stepR(t - SLAM(k), { w: 40, z: 1 });                  // …then each slat slams in
+    const sc = 1 + 0.45 * (1 - stepR(t - SLAM(k), { w: 21, z: 0.72 })) * (t >= SLAM(k) ? 1 : 0);
+    s.setAttribute('opacity', Math.max(ghost, hit).toFixed(3));
+    s.firstChild.setAttribute('transform', `skewX(-18) scale(${sc.toFixed(4)})`);
+  });
+  // flying mark colour: paper (on ink pill) → cream
+  $('logoG').setAttribute('fill', '#EEEEEC');
+  const wv = vis(t, 34.08, null), tv = vis(t, 34.5, null), fv = vis(t, 35.0, null);
+  const wm = $('wordmark'); wm.style.left = (fx + size2 / 2 + gap + WMW / 2) + 'px'; wm.style.top = '418px'; applyVis(wm, wv, 'translate(-50%,-50%)');
+  const tg = $('tag'); tg.style.left = '960px'; tg.style.top = '640px'; applyVis(tg, tv, 'translate(-50%,-50%)');
+  const fn = $('fine'); fn.style.left = '960px'; fn.style.top = '772px'; applyVis(fn, fv, 'translate(-50%,-50%)');
+}
+
+window.seek = seek; window.M = M;
+document.fonts.ready.then(() => {
+  layout(); planChip();
+  // where the mark sits in the zWork pill at the collapse (screen px)
+  const [sx, sy] = curScreen(Z, COLLAPSE); P0 = [sx + 1.32 * (22 + 13 + 10), sy + 1.32 * (30 + 17)];
+  WMW = $('wordmark').offsetWidth;
+  M.cues.sort((a, b) => a.t - b.t);
+  const q = new URLSearchParams(location.search);
+  seek(q.has('t') ? +q.get('t') : 0);
+  window.READY = true;
+});
+</script>
+</body>
+</html>
