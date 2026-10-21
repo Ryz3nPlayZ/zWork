@@ -91,7 +91,16 @@ jobs:
       # plain `cargo test` once the Unix-only tests are gated.
       - name: Run Windows-relevant tests
         working-directory: ./sidecar-rust
-        run: cargo test -- harness::tools::bash catches_powershell
+        run: cargo test -- harness::tools::bash catches_powershell blocks_this_platforms
+      # Same driver version and layout the release bundles (release.yml).
+      - name: Desktop control against the real driver
+        working-directory: ./sidecar-rust
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/res/binaries"
+          curl -fsSL https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.5.7/cua-driver-rs-0.5.7-windows-x86_64-binary.zip -o "$RUNNER_TEMP/cua.zip"
+          unzip -o "$RUNNER_TEMP/cua.zip" -d "$RUNNER_TEMP/res/binaries"
+          ZWORK_RESOURCES="$RUNNER_TEMP/res" cargo test -- --ignored --nocapture real_driver
 
   cloud-api-check:
     name: Cloud API tests

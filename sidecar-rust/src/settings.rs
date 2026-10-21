@@ -725,7 +725,7 @@ pub fn build_system_prompt(
         idx += 1;
 
         if include_desktop {
-            priority.push(format!("{}. **Desktop UI interaction → `desktop_*` tools.** For clicking, typing, screenshots, window management, or interacting with any macOS app.", idx));
+            priority.push(format!("{}. **Desktop UI interaction → `desktop_*` tools.** For clicking, typing, screenshots, window management, or interacting with any desktop app.", idx));
             idx += 1;
             priority.push(format!("{}. **Browser interaction → `browser_*` tools.** For reading web pages, clicking page elements, running JavaScript on pages.", idx));
             idx += 1;
@@ -771,7 +771,7 @@ pub fn build_system_prompt(
            control plane per app and stick with it for the whole task.\n\
          - Prefer `browser_*` when the extension is connected (faster); fall back to \
            `desktop_*` when it isn't.\n\n\
-         ## Desktop control (macOS)\n\n\
+         ## Desktop control\n\n\
          You can see and control any app through the accessibility tree. But here is \
          the most important rule — violations cause real damage:\n\n\
          **NEVER act blind. Capture first. ALWAYS.**\n\n\

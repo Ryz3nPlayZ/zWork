@@ -167,8 +167,8 @@ jobs:
               ;;
             windows)
               curl -fsSL "https://github.com/trycua/cua/releases/download/cua-driver-rs-v${CUA_VERSION}/cua-driver-rs-${CUA_VERSION}-windows-x86_64-binary.zip" -o /tmp/cua.zip
-              unzip -o /tmp/cua.zip -d /tmp/
-              cp /tmp/cua-driver.exe app/src-tauri/binaries/cua-driver.exe 2>/dev/null || cp /tmp/cua-driver app/src-tauri/binaries/cua-driver.exe
+              # cua-driver.exe drives UI Automation through cua-driver-uia.exe beside it.
+              unzip -o /tmp/cua.zip cua-driver.exe cua-driver-uia.exe -d app/src-tauri/binaries/
               ;;
           esac
 

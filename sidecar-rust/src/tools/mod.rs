@@ -360,14 +360,11 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
                 "required": ["project_path"]
             }
         }));
-        // ─── Desktop control (cua-driver) — macOS only ───
-        // The cua-driver is a notarized macOS .app that drives apps through the
-        // accessibility tree; it has no Windows/Linux build. Advertising these
-        // tools on other platforms made the model attempt them, fail to find
-        // the driver, and burn turn after turn retrying. Gate the whole toolset
-        // to macOS so the model routes to bash / browser_* elsewhere.
-        // (`desktop_office`, below, is platform-independent document editing.)
-        if cfg!(target_os = "macos") {
+        // ─── Desktop control (cua-driver) ───
+        // Advertised only where the driver exists: offering these tools without
+        // it made the model fail to find the driver and burn turn after turn
+        // retrying. (`desktop_office`, below, is platform-independent.)
+        if crate::cua::driver_available() {
             schemas.push(json!({
                 "name": "desktop_capture",
                 "description": "Capture the accessibility tree of an app window as Markdown with [element_index N] tags on every actionable element. MUST be called before desktop_click/desktop_type/desktop_set_value/desktop_scroll — element indices are only valid from the most recent capture. Verify the returned window_title is the app you intended before acting. The tree is capped at ~100 elements; if `truncated` is true, indices beyond the cap are unavailable — scroll or narrow the target to see more.",
@@ -432,11 +429,15 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
             }));
             schemas.push(json!({
                 "name": "desktop_key",
-                "description": "Press a key or keyboard shortcut. Navigation: cmd+l (address bar), cmd+t (new tab), cmd+w (close tab), return, escape, tab, space, arrows. Format combos with + : \"cmd+l\", \"cmd+shift+g\", \"return\". Catastrophic combos are blocked: empty Trash (cmd+shift+backspace), log out (cmd+shift+q), force log out (cmd+option+shift+q), lock screen (cmd+ctrl+q).",
+                "description": if cfg!(target_os = "macos") {
+                    "Press a key or keyboard shortcut. Navigation: cmd+l (address bar), cmd+t (new tab), cmd+w (close tab), return, escape, tab, space, arrows. Format combos with + : \"cmd+l\", \"cmd+shift+g\", \"return\". Catastrophic combos are blocked: empty Trash (cmd+shift+backspace), log out (cmd+shift+q), force log out (cmd+option+shift+q), lock screen (cmd+ctrl+q)."
+                } else {
+                    "Press a key or keyboard shortcut. Navigation: ctrl+l (address bar), ctrl+t (new tab), ctrl+w (close tab), return, escape, tab, space, arrows. Format combos with + : \"ctrl+l\", \"ctrl+shift+t\", \"return\". Catastrophic combos are blocked: permanent delete (shift+delete), ctrl+alt+delete."
+                },
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "keys": { "type": "string", "description": "Key combo with + separators: \"cmd+l\", \"cmd+t\", \"return\", \"escape\", \"tab\", \"cmd+shift+g\", \"up\", \"down\"" },
+                        "keys": { "type": "string", "description": "Key combo with + separators, e.g. \"return\", \"escape\", \"tab\", \"up\", \"down\", or a shortcut as above" },
                         "app": { "type": "string", "description": "App to send keys to (optional)" }
                     },
                     "required": ["keys"]

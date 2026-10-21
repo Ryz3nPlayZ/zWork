@@ -120,24 +120,6 @@ pub async fn browser_bridge_status() -> impl IntoResponse {
 /// doubles as a driver-health check (`driver_ok` is false if the driver can't
 /// be reached). This is what the Settings permission rows should read.
 pub async fn desktop_status() -> impl IntoResponse {
-    // Desktop control is macOS-only (the CuaDriver accessibility daemon is a
-    // notarized .app with no Windows/Linux build). On other platforms return
-    // an honest status instead of trying to reach a driver that can't exist —
-    // the Settings UI surfaces this `error` to the user.
-    if !cfg!(target_os = "macos") {
-        return Json(crate::cua::PermissionStatus {
-            driver_ok: false,
-            accessibility: false,
-            screen_recording: false,
-            source: String::new(),
-            error: "Desktop control is only available on macOS (it requires the \
-                    CuaDriver accessibility daemon). On this platform, use the \
-                    browser_* tools or bash instead."
-                .to_string(),
-            wrong_identity_hint: None,
-            zwork_self_trusted: None,
-        });
-    }
     Json(crate::cua::check_permissions(false).await.unwrap_or_else(|e| {
         crate::cua::PermissionStatus {
             driver_ok: false,
@@ -156,18 +138,6 @@ pub async fn desktop_status() -> impl IntoResponse {
 /// This is the correct grant path — prompting from zWork's own identity would
 /// leave the driver (the process that actually does AX + CGEvents) blocked.
 pub async fn desktop_grant() -> impl IntoResponse {
-    // No driver to grant permissions for off macOS — see desktop_status.
-    if !cfg!(target_os = "macos") {
-        return Json(crate::cua::PermissionStatus {
-            driver_ok: false,
-            accessibility: false,
-            screen_recording: false,
-            source: String::new(),
-            error: "Desktop control is only available on macOS.".to_string(),
-            wrong_identity_hint: None,
-            zwork_self_trusted: None,
-        });
-    }
     Json(crate::cua::check_permissions(true).await.unwrap_or_else(|e| {
         crate::cua::PermissionStatus {
             driver_ok: false,
@@ -181,11 +151,8 @@ pub async fn desktop_grant() -> impl IntoResponse {
     }))
 }
 
-/// List on-screen windows for the "Share Window" picker. macOS-only.
+/// List on-screen windows for the "Share Window" picker.
 pub async fn list_windows() -> impl IntoResponse {
-    if !cfg!(target_os = "macos") {
-        return Json(json!({ "windows": [] }));
-    }
     match crate::cua::list_on_screen_windows().await {
         Ok(wins) => Json(json!({ "windows": wins })),
         Err(e) => {
@@ -197,13 +164,10 @@ pub async fn list_windows() -> impl IntoResponse {
 
 /// Capture a screenshot of a specific window for the "Share Window" feature.
 /// Returns the PNG as base64 so the frontend can inject it as an image
-/// attachment. macOS-only; requires Screen Recording permission.
+/// attachment. On macOS this needs CuaDriver's Screen Recording grant.
 pub async fn capture_window(
     axum::extract::Path(window_id): axum::extract::Path<i64>,
 ) -> impl IntoResponse {
-    if !cfg!(target_os = "macos") {
-        return Json(json!({ "error": "Desktop capture is only available on macOS." }));
-    }
     match crate::cua::capture_window_screenshot(window_id).await {
         Ok(path) => {
             // Read the PNG and base64-encode it.

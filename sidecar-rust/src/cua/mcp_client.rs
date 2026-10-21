@@ -41,10 +41,19 @@ impl McpClient {
             return canonical.to_string_lossy().to_string();
         }
 
-        // 2/3. Relative to our own executable (dev: next-to-exe; bundled: resource).
+        let name = format!("cua-driver{}", std::env::consts::EXE_SUFFIX);
+        // 2. The copy the app bundles on Windows/Linux (Tauri passes its resource dir).
+        if let Some(res) = std::env::var_os("ZWORK_RESOURCES") {
+            let bundled = std::path::Path::new(&res).join("binaries").join(&name);
+            if bundled.exists() {
+                return bundled.to_string_lossy().to_string();
+            }
+        }
+
+        // 3/4. Relative to our own executable (dev: next-to-exe; bundled: resource).
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
-                let next_to_exe = dir.join("cua-driver");
+                let next_to_exe = dir.join(&name);
                 if next_to_exe.exists() {
                     return next_to_exe.to_string_lossy().to_string();
                 }
@@ -53,7 +62,7 @@ impl McpClient {
                     let resource = contents
                         .join("Resources")
                         .join("binaries")
-                        .join("cua-driver");
+                        .join(&name);
                     if resource.exists() {
                         return resource.to_string_lossy().to_string();
                     }
@@ -61,7 +70,7 @@ impl McpClient {
             }
         }
 
-        // 4. User install (e.g. ~/.local/bin/cua-driver → CuaDriver.app) on PATH.
+        // 5. User install (e.g. ~/.local/bin/cua-driver → CuaDriver.app) on PATH.
         // NOTE: a dangling symlink (target uninstalled) returns `exists() ==
         // false`, which is correct — but we check `symlink_metadata` first so a
         // broken link is reported clearly instead of silently falling through
@@ -92,7 +101,11 @@ impl McpClient {
         // Resolve cua-driver binary — check bundled locations first, then PATH
         let bin = Self::find_cua_binary();
 
-        let mut child = Command::new(&bin)
+        let mut cmd = Command::new(&bin);
+        // No console window flashing up beside the app on Windows.
+        #[cfg(windows)]
+        cmd.creation_flags(0x0800_0000);
+        let mut child = cmd
             .arg("mcp")
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())

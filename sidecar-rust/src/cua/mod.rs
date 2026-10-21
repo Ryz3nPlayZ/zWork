@@ -39,6 +39,14 @@ fn last_desktop_use() -> &'static std::sync::Mutex<Instant> {
     V.get_or_init(|| std::sync::Mutex::new(Instant::now()))
 }
 
+/// Whether desktop control can run here. macOS installs CuaDriver.app on first
+/// run; Windows and Linux builds bundle the driver binary, so a build without
+/// one doesn't advertise tools the model would only fail at.
+/// shortcut: a driver found only on PATH counts as missing off macOS; resolve PATH if anyone installs it that way.
+pub fn driver_available() -> bool {
+    cfg!(target_os = "macos") || std::path::Path::new(&McpClient::find_cua_binary()).is_absolute()
+}
+
 /// Mark that a desktop control operation just happened, extending the idle
 /// window before the daemon is torn down.
 pub fn mark_desktop_use() {
@@ -53,7 +61,10 @@ pub fn mark_desktop_use() {
 /// client) does NOT stop it — this command does. Idempotent and best-effort.
 async fn stop_driver_process() {
     let bin = McpClient::find_cua_binary();
-    let _ = tokio::process::Command::new(&bin)
+    let mut cmd = tokio::process::Command::new(&bin);
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000); // no console window
+    let _ = cmd
         .arg("stop")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -353,6 +364,13 @@ pub async fn capture(app: Option<&str>) -> Result<CaptureResult, String> {
     // navigation that never happened. (Cache stays populated — the (pid,
     // window_id) resolved fine; only the element tree was empty. Re-capturing
     // after granting permission overwrites it.)
+    if element_count == 0 && !cfg!(target_os = "macos") {
+        return Err(format!(
+            "Captured \"{app_name}\" but its accessibility tree came back empty \
+             (0 elements): the app exposes no controls to automation. Try another \
+             route (keyboard shortcuts, the browser_* tools, or bash)."
+        ));
+    }
     if element_count == 0 {
         return Err(format!(
             "Captured \"{app_name}\" but the accessibility tree came back empty \
@@ -527,6 +545,12 @@ fn blocked_key_combo(parts: &[&str]) -> Option<&'static str> {
         // Lock screen — harmless alone but commonly mis-fired mid-automation.
         (&["cmd", "ctrl", "q"], "blocked: lock-screen combo (cmd+ctrl+q)"),
     ];
+    // Windows / Linux: Shift+Delete skips the Recycle Bin / Trash entirely.
+    let elsewhere: &[(&[&str], &str)] = &[
+        (&["shift", "delete"], "blocked: permanent-delete combo (shift+delete)"),
+        (&["ctrl", "alt", "delete"], "blocked: security-screen combo (ctrl+alt+delete)"),
+    ];
+    let blocklist = if cfg!(target_os = "macos") { blocklist } else { elsewhere };
     for (combo, reason) in blocklist {
         if matches(combo) {
             return Some(reason);
@@ -753,11 +777,10 @@ pub async fn capture_window_screenshot(window_id: i64) -> Result<String, String>
         .ok_or_else(|| format!("window_id {} not found among on-screen windows", window_id))?;
 
     // Write the screenshot to a temp file.
-    let out_path = format!(
-        "{}/zwork-share-{}.png",
-        std::env::temp_dir().to_string_lossy(),
-        uuid::Uuid::new_v4().simple()
-    );
+    let out_path = std::env::temp_dir()
+        .join(format!("zwork-share-{}.png", uuid::Uuid::new_v4().simple()))
+        .to_string_lossy()
+        .to_string();
     // Call get_window_state with vision capture mode to produce the screenshot.
     // IMPORTANT: capture the result — the driver returns "No content produced
     // (neither AX tree nor screenshot succeeded)" as a *successful* result (not
@@ -795,7 +818,7 @@ pub async fn capture_window_screenshot(window_id: i64) -> Result<String, String>
                 .unwrap_or("")
                 .to_string(),
         };
-        return Err(if result_text.contains("No content produced") {
+        return Err(if result_text.contains("No content produced") && cfg!(target_os = "macos") {
             "CuaDriver couldn't capture this window (\"No content produced\"). \
              This almost always means CuaDriver is missing the macOS Screen \
              Recording permission — grant CuaDriver (not zWork) Screen Recording \
@@ -1043,4 +1066,44 @@ fn app_name_of(a: &Value) -> String {
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blocks_this_platforms_destructive_combos() {
+        let (bad, ok): (&[&str], &[&str]) = if cfg!(target_os = "macos") {
+            (&["Shift", "cmd", "backspace"], &["cmd", "l"])
+        } else {
+            (&["Delete", "shift"], &["ctrl", "l"])
+        };
+        assert!(blocked_key_combo(bad).is_some());
+        assert!(blocked_key_combo(ok).is_none());
+    }
+
+    /// Drives the real driver end to end. CI runs it on Windows with
+    /// ZWORK_RESOURCES pointing at the driver the release bundles.
+    #[cfg(windows)]
+    #[tokio::test]
+    #[ignore]
+    async fn real_driver_drives_notepad() {
+        assert!(driver_available(), "driver not found: {}", McpClient::find_cua_binary());
+        let perms = check_permissions(true).await.unwrap();
+        assert!(perms.driver_ok, "{}", perms.error);
+        launch_app("notepad").await.unwrap();
+        wait(2.0).await.unwrap();
+        let cap = capture(Some("notepad")).await.unwrap();
+        assert!(cap.element_count > 0, "{}", cap.tree_markdown);
+        type_text("hello from zWork", None, Some("notepad")).await.unwrap();
+        let wins = list_on_screen_windows().await.unwrap();
+        let id = wins
+            .iter()
+            .find_map(|w| w.get("window_id").or_else(|| w.get("id")).and_then(|v| v.as_i64()))
+            .expect("no on-screen windows");
+        let png = capture_window_screenshot(id).await.unwrap();
+        assert!(std::fs::metadata(&png).unwrap().len() > 0);
+        teardown_driver().await;
+    }
 }
