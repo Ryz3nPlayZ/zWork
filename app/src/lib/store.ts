@@ -19,6 +19,7 @@ import {
 } from "./api";
 import { fetchCloudSession, getCloudToken, logoutCloudSession, startDesktopGoogleSignIn } from "./cloud";
 import { isDemoMode } from "./preview";
+import { isMacOS } from "./platform";
 import { invoke } from "@tauri-apps/api/core";
 import { setTelemetryEnabled, trackError, trackArtifactCreated, recordTelemetry } from "./telemetry";
 import {
@@ -1258,7 +1259,7 @@ export const useApp = create<AppState>((set, get) => ({
   clearSubagents: () => set({ subagents: [] }),
 
   checkMacOSPermissions: async () => {
-    if (IS_WEB) return;
+    if (IS_WEB || !isMacOS()) return;
     try {
       // Source of truth = the cua-driver daemon's identity (com.trycua.driver),
       // not zWork's own — the driver is what actually performs the AX work.

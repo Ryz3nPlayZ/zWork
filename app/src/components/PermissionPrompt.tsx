@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Check, ChevronRight, Keyboard, Camera, RotateCw, AlertTriangle } from "lucide-react";
 import { api } from "../lib/api";
 import { invoke } from "@tauri-apps/api/core";
+import { isMacOS } from "../lib/platform";
 
 const IS_TAURI = typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
 const DISMISS_KEY = "zwork:permission-prompt-dismissed";
@@ -24,7 +25,7 @@ export function PermissionPrompt() {
   const [busy, setBusy] = useState<"a11y" | "screen" | null>(null);
 
   const refresh = async () => {
-    if (!IS_TAURI) return;
+    if (!IS_TAURI || !isMacOS()) return;
     try {
       // Source of truth = cua-driver daemon identity (com.trycua.driver),
       // the process that actually performs Accessibility + CGEvent work.
@@ -69,7 +70,8 @@ export function PermissionPrompt() {
     return () => window.clearInterval(id);
   }, [IS_TAURI, dismissed, a11y, screen]);
 
-  if (!IS_TAURI || dismissed) return null;
+  // Only macOS gates the driver behind privacy grants.
+  if (!IS_TAURI || dismissed || !isMacOS()) return null;
   if (a11y === "checking" && screen === "checking") return null;
   if (a11y !== "missing" && screen !== "missing") return null;
 

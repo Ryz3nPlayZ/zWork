@@ -30,7 +30,7 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
-import { IS_TAURI } from "../lib/platform";
+import { IS_TAURI, isMacOS } from "../lib/platform";
 import { isWebAuthClient, startWebGoogleSignIn } from "../lib/cloud";
 import { dragRegionAttrs, onDragMouseDown } from "../lib/drag";
 import {
@@ -1267,6 +1267,8 @@ function GeneralPanel({
       {/* System Permissions Section */}
       {!IS_WEB && (
         <section className="rounded-xl border border-line bg-paper-raised p-5 space-y-4 select-none">
+          {/* CuaDriver needs macOS privacy grants; Windows and Linux ask for none. */}
+          {isMacOS() && (<>
           <div>
             <h3 className="text-[14px] font-semibold text-ink flex items-center gap-1.5">
               <ShieldAlert className="h-4 w-4 text-accent" />
@@ -1377,6 +1379,7 @@ function GeneralPanel({
           </div>
 
           <div className="border-t border-line-soft" />
+          </>)}
 
           {/* Perm 3: Browser Bridge (zbctl Chrome extension) */}
           <div className="flex items-center justify-between gap-4">

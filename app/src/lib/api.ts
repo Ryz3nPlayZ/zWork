@@ -11,6 +11,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import packageJson from "../../package.json";
 import { isDemoMode } from "./preview";
+import { isMacOS } from "./platform";
 
 const IS_TAURI =
   typeof window !== "undefined" &&
@@ -934,12 +935,17 @@ export const api = {
       j<DesktopStatus>(r),
     ),
 
-  /** List on-screen windows for the "Share Window" picker (macOS only).
-   *  Routes through the Tauri host (CoreGraphics FFI) so zWork uses its OWN
-   *  Screen Recording grant — no cua-driver dependency. Returns empty list off
-   *  Tauri / non-macOS. */
+  /** List on-screen windows for the "Share Window" picker. On macOS this
+   *  routes through the Tauri host (CoreGraphics FFI) so zWork uses its OWN
+   *  Screen Recording grant; Windows and Linux need no grant and go through the
+   *  backend's cua-driver. Returns an empty list off Tauri. */
   listWindows: async () => {
     if (!IS_TAURI) return { windows: [] };
+    if (!isMacOS()) {
+      return localFetch("/api/desktop/windows").then((r) =>
+        j<{ windows: Array<{ window_id: number; pid: number; app_name: string; title: string }>; error?: string }>(r),
+      );
+    }
     try {
       const windows = await invoke<Array<{ window_id: number; pid: number; app_name: string; title: string }>>(
         "list_windows_native",
@@ -954,7 +960,9 @@ export const api = {
    *  the Share Window picker to decide whether to prompt for the grant. */
   screenCapturePreflight: () =>
     IS_TAURI
-      ? invoke<boolean>("screen_capture_preflight").catch(() => false)
+      ? isMacOS()
+        ? invoke<boolean>("screen_capture_preflight").catch(() => false)
+        : Promise.resolve(true)
       : Promise.resolve(false),
 
   /** Trigger the native macOS "allow Screen Recording" prompt (prompting). macOS
@@ -976,6 +984,11 @@ export const api = {
    *  Recording granted to zWork). Returns `{ data_url, mime }` or `{ error }`. */
   captureWindow: async (windowId: number) => {
     if (!IS_TAURI) return { error: "Desktop capture is only available in the app." };
+    if (!isMacOS()) {
+      return localFetch(`/api/desktop/windows/${windowId}/screenshot`, { method: "POST" }).then((r) =>
+        j<{ data_url?: string; mime?: string; error?: string }>(r),
+      );
+    }
     try {
       const result = await invoke<{ data_url: string; mime?: string }>(
         "capture_window_native",

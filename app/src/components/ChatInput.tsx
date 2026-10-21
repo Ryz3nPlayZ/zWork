@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { BorderBeam } from "border-beam";
 import { cn } from "../lib/cn";
-import { needsLightweightRendering, isMacOS } from "../lib/platform";
+import { needsLightweightRendering } from "../lib/platform";
 import { useResolvedTheme } from "../lib/theme";
 import { useApp } from "../lib/store";
 import type { SecurityPreset } from "../lib/store";
@@ -1376,16 +1376,14 @@ export function ChatInput({
               fileInputRef.current?.click();
             }}
           />
-          {isMacOS() && (
-            <OverlayToolItem
-              icon={<Monitor className="h-4 w-4" />}
-              label="Share window"
-              onClick={() => {
-                setToolsOpen(false);
-                void openShareWindow();
-              }}
-            />
-          )}
+          <OverlayToolItem
+            icon={<Monitor className="h-4 w-4" />}
+            label="Share window"
+            onClick={() => {
+              setToolsOpen(false);
+              void openShareWindow();
+            }}
+          />
           <OverlayToolItem
             icon={<FileText className="h-4 w-4" />}
             label={artifactMode ? "Make a document: on" : "Make a document"}
