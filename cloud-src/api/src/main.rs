@@ -299,6 +299,7 @@ fn plan_rank(plan: &str) -> u8 {
 }
 
 const DEEPSEEK_FLASH: &str = "deepseek/deepseek-v4.1-flash:floor";
+const DEEPSEEK_1017: &str = "deepseek/deepseek-v4.1-flash-1017:floor";
 const MIMO_PRO: &str = "xiaomi/mimo-v2.6-pro:floor";
 const GEMINI_FLASH: &str = "google/gemini-3.8-flash:floor";
 const GPT_SOL: &str = "openai/gpt-6.1-sol:floor";
@@ -311,7 +312,7 @@ const GLM_FLASH: &str = "z-ai/glm-5.3-flash:floor";
 /// show up, to `Escalated` when the run struggles).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Route {
-    /// DeepSeek Flash: the default for everything.
+    /// GLM Flash, then DeepSeek Flash 1017: the default for everything.
     Flash,
     /// Gemini Flash: runs with images in them.
     Vision,
@@ -351,7 +352,7 @@ impl Route {
     /// OpenRouter ids to try, preferred first; later ones are failover.
     fn candidates(self) -> &'static [&'static str] {
         match self {
-            Route::Flash => &[DEEPSEEK_FLASH, GPT_LUNA, GLM_FLASH],
+            Route::Flash => &[GLM_FLASH, DEEPSEEK_1017, GPT_LUNA],
             Route::Vision => &[GEMINI_FLASH, MIMO_PRO],
             Route::Escalated => &[MIMO_PRO, DEEPSEEK_FLASH],
             Route::AbLuna => &[GPT_LUNA, DEEPSEEK_FLASH],
@@ -2344,6 +2345,7 @@ fn estimate_cost(model: &str, input: Option<i64>, output: Option<i64>) -> Option
         "openai/gpt-6-luna" => (0.05, 0.25),
         "z-ai/glm-5.3-flash" => (0.075, 0.25),
         "deepseek/deepseek-v4.1-flash" => (0.0348, 0.1392),
+        "deepseek/deepseek-v4.1-flash-1017" => (0.15, 0.6),
         "xiaomi/mimo-v2.6-pro" => (0.435, 0.87),
         "z-ai/glm-5.3" => (0.5625, 2.5),
         "google/gemini-3.8-flash" => (0.375, 1.875),
@@ -7748,7 +7750,7 @@ mod router_tests {
             assert_eq!(Route::parse(route.as_str()), Some(route));
             assert!(route.candidates().iter().all(|m| m.ends_with(":floor")));
         }
-        assert_eq!(Route::Flash.candidates()[0], DEEPSEEK_FLASH);
+        assert_eq!(Route::Flash.candidates()[..2], [GLM_FLASH, DEEPSEEK_1017]);
         assert_eq!(Route::Escalated.candidates()[0], MIMO_PRO);
         assert_eq!(Route::Vision.candidates()[0], GEMINI_FLASH);
     }

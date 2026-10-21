@@ -74,7 +74,7 @@ only ever moves up.
 
 | Route | Model | When |
 |---|---|---|
-| `flash` | `deepseek/deepseek-v4.1-flash` | the default |
+| `flash` | `z-ai/glm-5.3-flash`, then `deepseek/deepseek-v4.1-flash-1017` | the default |
 | `vision` | `google/gemini-3.8-flash` | the run has images and isn't escalated |
 | `escalated` | `xiaomi/mimo-v2.6-pro` | see below |
 | `ab-luna`, `ab-glm` | `openai/gpt-6-luna`, `z-ai/glm-5.3-flash` | `ROUTER_AB_PERCENT` of paid runs, by run id, to compare cost and completion with `flash` |
@@ -105,7 +105,7 @@ there is no anonymous demo on that origin any more. Caddy serves it from
 `/var/www/app.tryzwork.app`.
 
 - **What the web build does:** plain chat on `zwork-auto` only (no tools, so
-  the router keeps it on DeepSeek Flash). `streamChatWeb`
+  the router keeps it on the flash route). `streamChatWeb`
   posts to `/api/v1/chat/completions` with a short system prompt (date, local
   time, "the desktop app can use tools, this can't") plus the last 20 turns of
   the thread, and the effort picker's value as `reasoning.effort`. No tool
