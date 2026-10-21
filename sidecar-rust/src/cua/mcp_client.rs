@@ -228,7 +228,15 @@ impl McpClient {
 
         // Prefer structuredContent (machine-readable payload).
         if let Some(sc) = result.get("structuredContent") {
-            return Ok(sc.clone());
+            let mut sc = sc.clone();
+            // cua-driver-rs returns screenshots only as an inline image block.
+            let png = result.get("content").and_then(|c| c.as_array()).and_then(|c| {
+                c.iter().find(|i| i.get("type").and_then(|t| t.as_str()) == Some("image"))?.get("data")?.as_str()
+            });
+            if let (Some(obj), Some(png)) = (sc.as_object_mut(), png) {
+                obj.insert("screenshot_png_base64".into(), png.into());
+            }
+            return Ok(sc);
         }
         // Fall back to content[].text, parsing as JSON if it looks structural.
         if let Some(text) = result

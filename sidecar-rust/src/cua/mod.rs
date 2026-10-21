@@ -758,7 +758,7 @@ pub async fn list_on_screen_windows() -> Result<Vec<Value>, String> {
 
 /// Capture a screenshot of a specific window (by window_id) as a PNG file.
 /// Uses cua-driver's `get_window_state` with `capture_mode: "vision"` (screenshot
-/// only, no AX walk) and `screenshot_out_file` to write the PNG to disk. Returns
+/// only, no AX walk) and `screenshot_out_file` (or the inline image) to write the PNG to disk. Returns
 /// the path to the written file. The caller reads + base64-encodes it for the
 /// vision model.
 pub async fn capture_window_screenshot(window_id: i64) -> Result<String, String> {
@@ -812,6 +812,14 @@ pub async fn capture_window_screenshot(window_id: i64) -> Result<String, String>
             }),
         )
         .await?;
+    // cua-driver-rs (Windows/Linux) ignores screenshot_out_file and returns the PNG inline.
+    if let Some(b64) = call_result.get("screenshot_png_base64").and_then(|v| v.as_str()) {
+        use base64::Engine as _;
+        if !std::path::Path::new(&out_path).exists() {
+            let png = base64::engine::general_purpose::STANDARD.decode(b64).map_err(|e| e.to_string())?;
+            std::fs::write(&out_path, png).map_err(|e| e.to_string())?;
+        }
+    }
 
     // Verify the file exists. If it doesn't, the vision capture failed —
     // surface the driver's own message (plus the Screen Recording hint) instead
