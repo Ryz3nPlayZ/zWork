@@ -23,6 +23,13 @@ api.tryzwork.app {
         reverse_proxy axum_api:8080
     }
 
+    # Older desktop builds send Stripe's checkout and portal returns here.
+    # The web app shows those users a "head back to zWork" page.
+    @billing_return path /billing/success /billing/cancel /billing/portal-return
+    handle @billing_return {
+        redir https://app.tryzwork.app{path}?from=desktop 302
+    }
+
     # Axum API & AI Proxy
     handle /api/* {
         reverse_proxy axum_api:8080
