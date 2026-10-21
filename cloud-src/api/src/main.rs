@@ -689,6 +689,14 @@ fn prepare_upstream_body(body: &mut Value, model: &str) {
             obj.insert("reasoning".to_string(), serde_json::json!({ "effort": effort }));
         }
     }
+    // Clients turn reasoning off for side calls (summaries, titles); Sol
+    // rejects that with a 400, so let it reason at its default.
+    if model == GPT_SOL {
+        let off = obj.get("reasoning").is_some_and(|r| r["effort"] == "none" || r["enabled"] == false);
+        if off {
+            obj.remove("reasoning");
+        }
+    }
 }
 
 fn is_effort(effort: &str) -> bool {
@@ -7801,6 +7809,16 @@ mod router_tests {
         assert_eq!(body["usage"]["include"], true);
         assert_eq!(body["reasoning"]["effort"], "high");
         assert!(body.get("reasoning_effort").is_none());
+
+        // Sol can't run with reasoning off; drop the request to disable it.
+        for off in [serde_json::json!({ "effort": "none" }), serde_json::json!({ "enabled": false })] {
+            let mut body = serde_json::json!({ "model": "zwork-apex", "reasoning": off });
+            prepare_upstream_body(&mut body, GPT_SOL);
+            assert!(body.get("reasoning").is_none());
+        }
+        let mut body = serde_json::json!({ "model": "zwork-auto", "reasoning": { "effort": "none" } });
+        prepare_upstream_body(&mut body, DEEPSEEK_FLASH);
+        assert_eq!(body["reasoning"]["effort"], "none");
     }
 
     #[test]
