@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -73,8 +74,27 @@ jobs:
         working-directory: ./sidecar-rust
         run: cargo test
 
+  sidecar-windows:
+    # The sidecar runs PowerShell, taskkill and Windows paths there; the
+    # ubuntu job above can't compile or exercise any of that.
+    name: Sidecar Windows tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: sidecar-rust -> target
+      # shortcut: only the shell tool and the approval gate run here; widen to
+      # plain `cargo test` once the Unix-only tests are gated.
+      - name: Run Windows-relevant tests
+        working-directory: ./sidecar-rust
+        run: cargo test -- harness::tools::bash catches_powershell
+
   cloud-api-check:
-    name: Cloud API cargo check
+    name: Cloud API tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -88,9 +108,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libssl-dev pkg-config
-      - name: cargo check
+      - name: cargo test
         working-directory: ./cloud-src/api
-        run: cargo check
+        run: cargo test
 
   tauri-check:
     name: Tauri app cargo check

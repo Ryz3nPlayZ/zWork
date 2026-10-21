@@ -1,7 +1,8 @@
-//! Port of pi `core/tools/bash.ts` + `utils/shell.ts` (Unix only).
+//! Port of pi `core/tools/bash.ts` + `utils/shell.ts`.
 //!
 //! The command runs in its own process group via `bash -c`; on abort or
-//! timeout the whole group is killed with SIGKILL. stdout and stderr are
+//! timeout the whole group is killed with SIGKILL. On Windows, where `bash`
+//! is missing or WSL's launcher, it runs in PowerShell (see `shell_command`). stdout and stderr are
 //! merged into an [`OutputAccumulator`], and `on_update` is throttled to
 //! one snapshot per 100ms.
 
@@ -20,7 +21,14 @@ use crate::harness::types::{AbortSignal, UserContent};
 use super::output_accumulator::{OutputAccumulator, OutputAccumulatorOptions, OutputSnapshot};
 use super::truncate::{format_size, TruncatedBy, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES};
 
+#[cfg(not(windows))]
 pub const BASH_SNIPPET: &str = "Execute bash commands (ls, grep, find, etc.)";
+#[cfg(windows)]
+pub const BASH_SNIPPET: &str = "Execute PowerShell commands (Get-ChildItem, Select-String, etc.); this computer runs Windows";
+#[cfg(not(windows))]
+const SHELL_NAME: &str = "a bash command";
+#[cfg(windows)]
+const SHELL_NAME: &str = "a PowerShell command (this computer runs Windows; use PowerShell syntax, not bash)";
 pub const BASH_UPDATE_THROTTLE_MS: u64 = 100;
 
 pub struct BashTool {
@@ -39,7 +47,8 @@ impl BashTool {
             command_prefix: None,
             env: Vec::new(),
             description: format!(
-                "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last {} lines or {}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+                "Execute {} in the current working directory. Returns stdout and stderr. Output is truncated to last {} lines or {}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+                SHELL_NAME,
                 DEFAULT_MAX_LINES,
                 DEFAULT_MAX_BYTES / 1024
             ),
@@ -72,6 +81,29 @@ fn kill_process_group(pid: u32) {
     if killpg(pgid, Signal::SIGKILL).is_err() {
         let _ = nix::sys::signal::kill(pgid, Signal::SIGKILL);
     }
+}
+
+#[cfg(not(windows))]
+fn shell_command(command: &str) -> Command {
+    let mut c = Command::new("bash");
+    c.arg("-c").arg(command);
+    c
+}
+
+/// PowerShell ships with every Windows. The script goes in as
+/// -EncodedCommand (UTF-16LE base64) so no quoting can mangle it, and output
+/// is switched to UTF-8 (the default OEM code page garbles non-ASCII).
+#[cfg(windows)]
+fn shell_command(command: &str) -> Command {
+    use base64::Engine;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let script = format!("[Console]::OutputEncoding = [Text.Encoding]::UTF8\n{command}");
+    let utf16: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let mut c = Command::new("powershell.exe");
+    c.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand"])
+        .arg(base64::engine::general_purpose::STANDARD.encode(utf16))
+        .creation_flags(CREATE_NO_WINDOW);
+    c
 }
 
 /// Windows has no process groups to signal; `taskkill /T` takes down the
@@ -219,8 +251,8 @@ impl AgentTool for BashTool {
             let updater = Arc::new(Mutex::new(Updater { on_update: on_update.clone(), last_update_at: None, dirty: false }));
             on_update(AgentToolResult { content: vec![], details: Value::Null, usage: None, terminate: None });
 
-            let mut cmd = Command::new("bash");
-            cmd.arg("-c").arg(&command).current_dir(&self.cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+            let mut cmd = shell_command(&command);
+            cmd.current_dir(&self.cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
             #[cfg(unix)]
             cmd.process_group(0);
             cmd.kill_on_drop(true);
@@ -354,6 +386,7 @@ mod tests {
         Arc::new(|_| {})
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn runs_and_reports_exit_codes() {
         let tool = BashTool::new(std::env::temp_dir());
@@ -367,6 +400,7 @@ mod tests {
         assert_eq!(err, "boom\n\n\nCommand exited with code 3");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn timeout_and_abort_kill_the_group() {
         let tool = BashTool::new(std::env::temp_dir());
@@ -385,6 +419,7 @@ mod tests {
         assert_eq!(err, "partial\n\n\nCommand aborted");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn dropping_the_run_kills_grandchildren() {
         // Stop aborts the turn task, which drops this future mid-command.
@@ -399,6 +434,7 @@ mod tests {
         assert!(!alive, "grandchild {pid} survived the dropped run");
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn streams_updates() {
         let tool = BashTool::new(std::env::temp_dir());
@@ -409,5 +445,20 @@ mod tests {
         let seen = seen.lock().unwrap();
         assert!(seen.iter().any(|t| t == "a\n" || t == "a"), "{seen:?}");
         assert!(seen.last().unwrap().contains("b"));
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn runs_powershell() {
+        let tool = BashTool::new(std::env::temp_dir());
+        // Quotes and non-ASCII survive the -EncodedCommand round trip.
+        let r = tool.execute("1", json!({"command": "Write-Output \"héllo 'quoted'\""}), None, noop()).await.unwrap();
+        assert!(r.text_content().contains("héllo 'quoted'"), "{}", r.text_content());
+        let err = tool.execute("2", json!({"command": "Write-Output boom; exit 3"}), None, noop()).await.unwrap_err();
+        assert!(err.starts_with("boom") && err.ends_with("Command exited with code 3"), "{err}");
+        let start = Instant::now();
+        let err = tool.execute("3", json!({"command": "Start-Sleep 5", "timeout": 1}), None, noop()).await.unwrap_err();
+        assert_eq!(err, "Command timed out after 1 seconds");
+        assert!(start.elapsed() < Duration::from_secs(4));
     }
 }
