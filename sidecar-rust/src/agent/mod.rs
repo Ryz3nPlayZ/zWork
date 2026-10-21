@@ -372,25 +372,6 @@ fn artifact_hint(message: &str) -> String {
     hint.to_string()
 }
 
-/// Run a quick web search on the message and format the results as grounding
-/// context for the system prompt. Returns None on any failure so the turn
-/// proceeds without grounding rather than erroring.
-async fn web_search_grounding(message: &str) -> Option<String> {
-    let query = message.split_whitespace().take(80).collect::<Vec<_>>().join(" ");
-    if query.trim().is_empty() {
-        return None;
-    }
-    // Reuse the existing web_search tool so the query/parse logic stays in one place.
-    let params = json!({ "query": query, "max_results": 5 });
-    let results = crate::tools::search::execute_web_search(&params).await.ok()?;
-    // The tool returns a formatted string; surface it verbatim as grounding.
-    if results.trim().is_empty() {
-        None
-    } else {
-        Some(results)
-    }
-}
-
 pub fn approve_gate(gate_id: &str) -> bool {
     run_state::resolve_gate(gate_id, true)
 }

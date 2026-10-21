@@ -49,7 +49,7 @@ pub fn create_coding_tools(cwd: &Path, supports_images: Option<SupportsImagesFn>
 }
 
 /// Collect `prompt_snippet` / `prompt_guidelines` from tools for
-/// [`crate::harness::system_prompt::BuildSystemPromptOptions`].
+/// the system prompt.
 pub fn collect_prompt_contributions(tools: &[DynTool]) -> (HashMap<String, String>, HashMap<String, Vec<String>>) {
     let mut snippets = HashMap::new();
     let mut guidelines = HashMap::new();

@@ -439,15 +439,6 @@ pub fn escape_xml(s: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-/// Which tool the prompt tells the model to load skill files with.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SkillFileReadTool {
-    Read,
-    Bash,
-}
-
-/// `formatSkillsForPrompt`: `<available_skills>` block per the Agent Skills
-/// integration guide. Skills with `disable-model-invocation` are omitted.
 /// One skill invocation as sent to the model (pi `formatSkillInvocation`).
 /// `content` is the SKILL.md body; callers read it from disk at invocation.
 pub fn format_skill_invocation(skill: &Skill, content: &str, additional_instructions: Option<&str>) -> String {
@@ -462,32 +453,6 @@ pub fn format_skill_invocation(skill: &Skill, content: &str, additional_instruct
         Some(extra) => format!("{skill_block}\n\n{extra}"),
         None => skill_block,
     }
-}
-
-pub fn format_skills_for_prompt(skills: &[Skill], file_read_tool: SkillFileReadTool) -> String {
-    let visible: Vec<&Skill> = skills.iter().filter(|s| !s.disable_model_invocation).collect();
-    if visible.is_empty() {
-        return String::new();
-    }
-    let mut lines: Vec<String> = vec![
-        "\n\nThe following skills provide specialized instructions for specific tasks.".into(),
-        match file_read_tool {
-            SkillFileReadTool::Read => "Use the read tool to load a skill's file when the task matches its description.".into(),
-            SkillFileReadTool::Bash => "Use bash to load a skill's file when the task matches its description.".into(),
-        },
-        "When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.".into(),
-        String::new(),
-        "<available_skills>".into(),
-    ];
-    for skill in visible {
-        lines.push("  <skill>".into());
-        lines.push(format!("    <name>{}</name>", escape_xml(&skill.name)));
-        lines.push(format!("    <description>{}</description>", escape_xml(&skill.description)));
-        lines.push(format!("    <location>{}</location>", escape_xml(&skill.file_path.to_string_lossy())));
-        lines.push("  </skill>".into());
-    }
-    lines.push("</available_skills>".into());
-    lines.join("\n")
 }
 
 #[cfg(test)]
@@ -603,33 +568,5 @@ mod tests {
         for d in [agent, cwd, extra] {
             fs::remove_dir_all(d).ok();
         }
-    }
-
-    #[test]
-    fn prompt_format_escapes_and_hides_disabled() {
-        let skills = vec![
-            Skill {
-                name: "a".into(),
-                description: "x < y & \"z\"".into(),
-                file_path: PathBuf::from("/s/a/SKILL.md"),
-                base_dir: PathBuf::from("/s/a"),
-                source: "user".into(),
-                disable_model_invocation: false,
-            },
-            Skill {
-                name: "hidden".into(),
-                description: "no".into(),
-                file_path: PathBuf::from("/s/h/SKILL.md"),
-                base_dir: PathBuf::from("/s/h"),
-                source: "user".into(),
-                disable_model_invocation: true,
-            },
-        ];
-        let out = format_skills_for_prompt(&skills, SkillFileReadTool::Read);
-        assert!(out.contains("Use the read tool to load"));
-        assert!(out.contains("<description>x &lt; y &amp; &quot;z&quot;</description>"));
-        assert!(out.contains("<location>/s/a/SKILL.md</location>"));
-        assert!(!out.contains("hidden"));
-        assert_eq!(format_skills_for_prompt(&skills[1..], SkillFileReadTool::Bash), "");
     }
 }

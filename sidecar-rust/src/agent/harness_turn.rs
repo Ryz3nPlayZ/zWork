@@ -39,7 +39,7 @@ use crate::{chatstore, settings};
 use super::{
     artifact_hint, classify_provider_error_with_raw, friendly_upstream_error, is_command_approved, llm_trace,
     log_agent_event, orientation, prompts, router_real_model,
-    run_state, web_search_grounding, DoomLoopDetector, ErrorClass, RunGuard,
+    run_state, DoomLoopDetector, ErrorClass, RunGuard,
 };
 
 const DEFAULT_MAX_TURNS: u32 = 80;
@@ -1565,7 +1565,7 @@ pub fn run_agent_turn(
     plan_mode: bool,
     auto_approve: bool,
     artifact_mode: bool,
-    web_search_enabled: bool,
+    _web_search_enabled: bool,
     extra_system_prompt: Option<String>,
     effort: Option<String>,
 ) -> impl futures_util::Stream<Item = Result<Value, Infallible>> {
@@ -1709,18 +1709,6 @@ pub fn run_agent_turn(
         let mut turn_extras: Vec<String> = Vec::new();
         if artifact_mode {
             turn_extras.push(format!("## Artifact mode\n{}", artifact_hint(&user_message)));
-        }
-        if web_search_enabled {
-            if let Some(grounding) = web_search_grounding(&user_message).await {
-                turn_extras.push(format!(
-                    "## News headlines (recent, may be incomplete)\n{}\n\n\
-                     These are Google News headlines only — not verified facts, and possibly \
-                     incomplete. For factual detail or page content, fetch the actual page \
-                     (browser_navigate / browser_snapshot) instead of relying on the headlines; \
-                     if you can't, say so rather than guessing.",
-                    grounding
-                ));
-            }
         }
         if !attachments.is_empty() {
             let listing =
