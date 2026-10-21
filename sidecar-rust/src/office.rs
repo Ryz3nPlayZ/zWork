@@ -10,7 +10,7 @@ use std::time::Duration;
 async fn run_python(script: &str) -> (String, String, bool) {
     let out = tokio::time::timeout(
         Duration::from_secs(30),
-        tokio::process::Command::new("python3").arg("-c").arg(script).output(),
+        crate::runtime::python().arg("-c").arg(script).output(),
     )
     .await;
     match out {

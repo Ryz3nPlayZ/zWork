@@ -63,10 +63,19 @@ fn bin(d: PathBuf) -> PathBuf {
     }
 }
 
+/// The Windows Node zip keeps `node.exe` / `npx.cmd` at its root, not in `bin`.
+fn node_bin_dir() -> PathBuf {
+    if cfg!(windows) {
+        node_dir()
+    } else {
+        node_dir().join("bin")
+    }
+}
+
 /// `(ahead of the user's PATH, behind it)`. Listed whether or not installed
 /// yet: PATH is fixed at startup and the shell skips missing directories.
 pub fn path_dirs() -> (Vec<PathBuf>, Vec<PathBuf>) {
-    (vec![bin(venv_dir())], vec![bin(node_dir()), uv_dir()])
+    (vec![bin(venv_dir())], vec![node_bin_dir(), uv_dir()])
 }
 
 /// Environment for every child process, so `uv` / `uvx` (MCP servers, the
@@ -108,6 +117,26 @@ pub fn status() -> Status {
 
 pub fn venv_python() -> PathBuf {
     bin(venv_dir()).join(if cfg!(windows) { "python.exe" } else { "python3" })
+}
+
+/// A Python with the document libraries: the managed venv once installed,
+/// else whatever is on PATH. UTF-8 mode so Windows doesn't read and print
+/// in the ANSI code page.
+pub fn python() -> tokio::process::Command {
+    let venv = venv_python();
+    let program = if venv.exists() { venv.into_os_string() } else { (if cfg!(windows) { "python" } else { "python3" }).into() };
+    let mut c = command(program);
+    c.env("PYTHONUTF8", "1");
+    c
+}
+
+/// A child process that doesn't flash a console window on Windows.
+fn command(program: impl AsRef<std::ffi::OsStr>) -> tokio::process::Command {
+    #[allow(unused_mut)]
+    let mut c = tokio::process::Command::new(program);
+    #[cfg(windows)]
+    c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    c
 }
 
 #[derive(Serialize, serde::Deserialize)]
@@ -153,6 +182,8 @@ fn target() -> Option<(&'static str, &'static str)> {
         ("macos", "x86_64") => Some(("x86_64-apple-darwin", "darwin-x64")),
         ("linux", "aarch64") => Some(("aarch64-unknown-linux-gnu", "linux-arm64")),
         ("linux", "x86_64") => Some(("x86_64-unknown-linux-gnu", "linux-x64")),
+        ("windows", "aarch64") => Some(("aarch64-pc-windows-msvc", "win-arm64")),
+        ("windows", "x86_64") => Some(("x86_64-pc-windows-msvc", "win-x64")),
         _ => None,
     }
 }
@@ -167,25 +198,30 @@ async fn install() -> Result<(), String> {
         .map_err(|e| e.to_string())?;
 
     // 1. uv — installs Python and packages, and runs `uvx` MCP servers.
-    let uv = uv_dir().join("uv");
+    let exe = std::env::consts::EXE_SUFFIX;
+    let archive = if cfg!(windows) { "zip" } else { "tar.gz" };
+    let uv = uv_dir().join(format!("uv{exe}"));
     if !uv.exists() {
         set(Status::Installing { step: "Downloading uv".into() });
-        let base = format!("https://github.com/astral-sh/uv/releases/latest/download/uv-{uv_target}.tar.gz");
+        let base = format!("https://github.com/astral-sh/uv/releases/latest/download/uv-{uv_target}.{archive}");
         let sum = fetch_text(&http, &format!("{base}.sha256")).await?;
         let expected = sum.split_whitespace().next().ok_or("empty uv checksum")?.to_string();
         let staged = download_verified(&http, &base, &expected, "uv").await?;
         let unpacked = untar(&staged).await?;
-        let src = unpacked.join(format!("uv-{uv_target}"));
+        // The tarballs nest a `uv-<target>` folder; the Windows zip is flat.
+        let nested = unpacked.join(format!("uv-{uv_target}"));
+        let src = if nested.is_dir() { nested } else { unpacked.clone() };
         std::fs::create_dir_all(uv_dir()).map_err(|e| e.to_string())?;
-        for exe in ["uv", "uvx"] {
-            std::fs::rename(src.join(exe), uv_dir().join(exe)).map_err(|e| format!("installing {exe}: {e}"))?;
+        for name in ["uv", "uvx"] {
+            let name = format!("{name}{exe}");
+            std::fs::rename(src.join(&name), uv_dir().join(&name)).map_err(|e| format!("installing {name}: {e}"))?;
         }
         let _ = std::fs::remove_dir_all(unpacked);
     }
 
     // 2. Python + libraries, in a venv of their own.
     let uv_cmd = |args: &[&str]| {
-        let mut c = tokio::process::Command::new(&uv);
+        let mut c = command(&uv);
         c.args(args).envs(process_env()).env("UV_PYTHON_PREFERENCE", "only-managed").kill_on_drop(true);
         c
     };
@@ -198,15 +234,15 @@ async fn install() -> Result<(), String> {
     let mut args = vec!["pip", "install", "--python", py.to_str().unwrap_or_default()];
     args.extend(PYTHON_PACKAGES);
     run(uv_cmd(&args), "installing Python libraries").await?;
-    let python = capture(tokio::process::Command::new(&py).arg("--version")).await.unwrap_or_default();
+    let python = capture(command(&py).arg("--version")).await.unwrap_or_default();
 
     // 3. Node — `npx` MCP servers and JavaScript skills.
-    let node_bin = bin(node_dir()).join("node");
+    let node_bin = node_bin_dir().join(format!("node{exe}"));
     if !node_bin.exists() {
         set(Status::Installing { step: "Downloading Node.js".into() });
         let index = format!("https://nodejs.org/dist/{NODE_CHANNEL}");
         let sums = fetch_text(&http, &format!("{index}/SHASUMS256.txt")).await?;
-        let suffix = format!("-{node_platform}.tar.gz");
+        let suffix = format!("-{node_platform}.{archive}");
         let (expected, file) = sums
             .lines()
             .filter_map(|l| l.split_once("  "))
@@ -215,10 +251,10 @@ async fn install() -> Result<(), String> {
         let staged = download_verified(&http, &format!("{index}/{file}"), expected, "Node.js").await?;
         let unpacked = untar(&staged).await?;
         let _ = std::fs::remove_dir_all(node_dir());
-        std::fs::rename(unpacked.join(file.trim_end_matches(".tar.gz")), node_dir()).map_err(|e| format!("installing Node.js: {e}"))?;
+        std::fs::rename(unpacked.join(file.trim_end_matches(&format!(".{archive}"))), node_dir()).map_err(|e| format!("installing Node.js: {e}"))?;
         let _ = std::fs::remove_dir_all(unpacked);
     }
-    let node = capture(tokio::process::Command::new(&node_bin).arg("--version")).await.unwrap_or_default();
+    let node = capture(command(&node_bin).arg("--version")).await.unwrap_or_default();
 
     let m = Marker { layout: LAYOUT_VERSION, python: python.trim().trim_start_matches("Python ").to_string(), node: node.trim().to_string() };
     std::fs::write(marker(), serde_json::to_string_pretty(&m).unwrap_or_default()).map_err(|e| e.to_string())?;
@@ -242,7 +278,7 @@ async fn download_verified(http: &reqwest::Client, url: &str, sha256: &str, what
         return Err(format!("downloading {what}: HTTP {}", resp.status()));
     }
     let total = resp.content_length().unwrap_or(0);
-    let path = dir().join(format!("download-{}.tar.gz", uuid::Uuid::new_v4().simple()));
+    let path = dir().join(format!("download-{}.archive", uuid::Uuid::new_v4().simple()));
     let mut file = tokio::fs::File::create(&path).await.map_err(|e| e.to_string())?;
     let mut hasher = Sha256::new();
     let (mut done, mut last_pct) = (0u64, u64::MAX);
@@ -270,12 +306,18 @@ async fn download_verified(http: &reqwest::Client, url: &str, sha256: &str, what
     Ok(path)
 }
 
-/// Unpack a verified archive next to it and delete the archive.
+/// Unpack a verified archive next to it and delete the archive. `tar -xf`
+/// detects gzip itself, and Windows 10+'s bundled tar (bsdtar) also reads zip.
 async fn untar(archive: &Path) -> Result<PathBuf, String> {
     let out = archive.with_extension("d");
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
-    let mut tar = tokio::process::Command::new("tar");
-    tar.arg("-xzf").arg(archive).arg("-C").arg(&out);
+    // Windows: System32's bsdtar, not a Git-for-Windows GNU tar that reads `C:` as a remote host.
+    let tar_exe = match std::env::var_os("SystemRoot") {
+        Some(root) if cfg!(windows) => PathBuf::from(root).join("System32").join("tar.exe"),
+        _ => PathBuf::from("tar"),
+    };
+    let mut tar = command(tar_exe);
+    tar.arg("-xf").arg(archive).arg("-C").arg(&out);
     let result = run(tar, "unpacking").await;
     let _ = std::fs::remove_file(archive);
     result.map(|_| out)
@@ -297,4 +339,31 @@ async fn run(mut cmd: tokio::process::Command, what: &str) -> Result<(), String>
 async fn capture(cmd: &mut tokio::process::Command) -> Option<String> {
     let out = cmd.output().await.ok()?;
     Some(String::from_utf8_lossy(if out.stdout.is_empty() { &out.stderr } else { &out.stdout }).into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::response::IntoResponse;
+    use crate::sync_util::Unpoison;
+
+    /// Downloads uv, Python + libraries and Node (several minutes). CI runs it
+    /// on Windows with a scratch ZWORK_HOME: `cargo test -- --ignored real_runtime`.
+    #[tokio::test]
+    #[ignore]
+    async fn real_runtime_install_then_export() {
+        assert!(std::env::var_os("ZWORK_HOME").is_some(), "set a scratch ZWORK_HOME");
+        super::install().await.expect("install");
+        *super::PROGRESS.lock_unpoisoned() = None; // as ensure_in_background does
+        assert!(matches!(super::status(), super::Status::Ready { .. }), "{:?}", super::status());
+
+        let out = super::python().args(["-c", "import docx, openpyxl, pptx; print('café')"]).output().await.unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "café", "{}", String::from_utf8_lossy(&out.stderr));
+
+        // The export embeds the temp-dir path in a Python literal: `C:\Users\...` must survive it.
+        let body = crate::server::ExportRequest { content: "# Résumé\n- one\n".into(), title: "Résumé".into() };
+        let res = crate::server::export_docx(axum::Json(body)).await.into_response();
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert!(v["data"].as_str().is_some_and(|d| d.contains("base64,")), "{v}");
+    }
 }

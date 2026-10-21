@@ -1844,7 +1844,7 @@ pub async fn run_python(Json(body): Json<PythonRunRequest>) -> impl IntoResponse
 
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        tokio::process::Command::new("python3")
+        crate::runtime::python()
             .arg(&tmp_path)
             .output(),
     ).await;
@@ -1947,7 +1947,7 @@ doc = Document()
 doc.add_heading({}, level=0)
 in_code = False
 code_buf = []
-with open('{}') as f:
+with open({}, encoding='utf-8') as f:
     for line in f:
         line = line.rstrip('\n')
         stripped = line.strip()
@@ -1979,10 +1979,10 @@ if code_buf:
     p = doc.add_paragraph('\n'.join(code_buf))
     for run in p.runs:
         run.font.name = 'Courier New'
-doc.save('{}')
-"#, python_str_lit(&body.title), tmp_md.display(), tmp_docx.display());
+doc.save({})
+"#, python_str_lit(&body.title), python_str_lit(&tmp_md.to_string_lossy()), python_str_lit(&tmp_docx.to_string_lossy()));
 
-    let result = tokio::process::Command::new("python3")
+    let result = crate::runtime::python()
         .arg("-c")
         .arg(&script)
         .output()
@@ -2025,7 +2025,7 @@ pdf.cell(0, 12, {}, ln=True)
 pdf.ln(2)
 in_code = False
 code_buf = []
-with open('{}') as f:
+with open({}, encoding='utf-8') as f:
     for line in f:
         line = line.rstrip('\n')
         stripped = line.strip()
@@ -2056,10 +2056,10 @@ with open('{}') as f:
 if code_buf:
     pdf.set_font('Courier', '', 9)
     pdf.multi_cell(0, 4, '\n'.join(code_buf))
-pdf.output('{}')
-"#, python_str_lit(&body.title), tmp_md.display(), tmp_pdf.display());
+pdf.output({})
+"#, python_str_lit(&body.title), python_str_lit(&tmp_md.to_string_lossy()), python_str_lit(&tmp_pdf.to_string_lossy()));
 
-    let result = tokio::process::Command::new("python3")
+    let result = crate::runtime::python()
         .arg("-c")
         .arg(&script)
         .output()

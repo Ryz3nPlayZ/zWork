@@ -239,6 +239,19 @@ pub fn is_safe_id(id_str: &str) -> bool {
 /// Must run before any threads read the environment.
 pub fn hydrate_path() {
     if cfg!(windows) {
+        // Windows apps inherit the user's full PATH; only add the runtime.
+        let (ahead, behind) = crate::runtime::path_dirs();
+        let current = env::var_os("PATH").unwrap_or_default();
+        let dirs: Vec<PathBuf> = ahead.into_iter().chain(env::split_paths(&current)).chain(behind).collect();
+        if let Ok(merged) = env::join_paths(dirs) {
+            // SAFETY: as below — called before any worker threads exist.
+            unsafe { env::set_var("PATH", merged) };
+        }
+        for (key, value) in crate::runtime::process_env() {
+            if env::var_os(key).is_none() {
+                unsafe { env::set_var(key, value) };
+            }
+        }
         return;
     }
     let current = env::var("PATH").unwrap_or_default();

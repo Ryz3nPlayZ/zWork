@@ -101,6 +101,11 @@ jobs:
           curl -fsSL https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.5.7/cua-driver-rs-0.5.7-windows-x86_64-binary.zip -o "$RUNNER_TEMP/cua.zip"
           unzip -o "$RUNNER_TEMP/cua.zip" -d "$RUNNER_TEMP/res/binaries"
           ZWORK_RESOURCES="$RUNNER_TEMP/res" cargo test -- --ignored --nocapture real_driver
+      # Git Bash puts GNU tar first on PATH, which the installer must not pick up.
+      - name: Managed Python/Node runtime from scratch
+        working-directory: ./sidecar-rust
+        shell: bash
+        run: ZWORK_HOME="$RUNNER_TEMP/zhome" cargo test -- --ignored --nocapture real_runtime
 
   cloud-api-check:
     name: Cloud API tests
