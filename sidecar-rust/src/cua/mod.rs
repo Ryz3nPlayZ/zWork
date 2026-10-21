@@ -396,9 +396,15 @@ pub async fn capture(app: Option<&str>) -> Result<CaptureResult, String> {
 /// 500+ AX nodes, and uncapped a single capture blows the agent's context.
 const MAX_CAPTURE_ELEMENTS: usize = 100;
 
-/// Count `[element_index N]` tags in the tree.
+/// An actionable element's line: the Swift CuaDriver.app (macOS) tags it
+/// `[element_index N]`, cua-driver-rs (Windows/Linux) writes `- [N] role`.
+fn is_element_line(line: &str) -> bool {
+    line.contains("[element_index")
+        || line.trim_start().strip_prefix("- [").and_then(|r| r.split_once(']')).is_some_and(|(n, _)| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
 fn count_elements(tree: &str) -> u32 {
-    tree.matches("[element_index").count() as u32
+    tree.lines().filter(|l| is_element_line(l)).count() as u32
 }
 
 /// Truncate the tree to at most `max_elements` element tags. The cut lands on a
@@ -411,7 +417,7 @@ fn truncate_tree(tree: &str, max_elements: usize) -> (String, bool) {
     let mut seen = 0;
     let mut cut_byte = tree.len();
     for (idx, line) in tree.lines().enumerate() {
-        if line.contains("[element_index") {
+        if is_element_line(line) {
             seen += 1;
             if seen == max_elements {
                 // Keep this line; truncate starts on the next line. Find the
@@ -1077,6 +1083,15 @@ fn app_name_of(a: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn counts_and_caps_both_drivers_tree_formats() {
+        let rust = "- Window \"Untitled - Notepad\"\n  - [0] Document \"Text editor\" [actions=[set_value]]\n  - [1] Button \"Close\"\n  - Text \"[draft] notes\"\n";
+        let swift = "- AXWindow\n  - AXButton [element_index 0]\n  - AXButton [element_index 1]\n";
+        assert_eq!((count_elements(rust), count_elements(swift)), (2, 2));
+        let (head, truncated) = truncate_tree(rust, 1);
+        assert!(truncated && head.contains("[0] Document") && !head.contains("[1] Button") && head.contains("1 more elements"), "{head}");
+    }
 
     #[test]
     fn blocks_this_platforms_destructive_combos() {

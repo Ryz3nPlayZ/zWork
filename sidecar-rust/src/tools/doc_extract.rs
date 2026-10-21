@@ -23,7 +23,7 @@ const SCANNED_HINT: &str = " It is probably a scan or handwriting; if the model 
 const OCR_DEFAULT_PAGES: usize = 20;
 const OCR_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(150);
 
-/// Renders pages with PDFKit and reads them with the Vision framework — both
+/// macOS: renders pages with PDFKit and reads them with the Vision framework — both
 /// ship with macOS, driven through JavaScript for Automation.
 const OCR_SCRIPT: &str = r#"
 ObjC.import('PDFKit'); ObjC.import('Vision'); ObjC.import('AppKit');
@@ -55,33 +55,131 @@ function run(argv) {
 }
 "#;
 
+/// Windows: renders pages with Windows.Data.Pdf and reads them with
+/// Windows.Media.Ocr, both built into Windows 10+, through PowerShell's WinRT
+/// bridge. Arguments come in through env vars (`-Command` has no argv).
+const OCR_SCRIPT_WINDOWS: &str = r#"
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = New-Object Text.UTF8Encoding $false
+try {
+  Add-Type -AssemblyName System.Runtime.WindowsRuntime
+  $null = [Windows.Storage.StorageFile, Windows.Storage, ContentType=WindowsRuntime]
+  $null = [Windows.Data.Pdf.PdfDocument, Windows.Data.Pdf, ContentType=WindowsRuntime]
+  $null = [Windows.Storage.Streams.InMemoryRandomAccessStream, Windows.Storage.Streams, ContentType=WindowsRuntime]
+  $null = [Windows.Graphics.Imaging.BitmapDecoder, Windows.Foundation, ContentType=WindowsRuntime]
+  $null = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType=WindowsRuntime]
+  $ext = [System.WindowsRuntimeSystemExtensions].GetMethods() | ? { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 }
+  $opT = $ext | ? { $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' } | select -First 1
+  $actT = $ext | ? { $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncAction' } | select -First 1
+  function Await($op, [Type]$t) { $task = $opT.MakeGenericMethod($t).Invoke($null, @($op)); $task.Wait(); $task.Result }
+  function AwaitAction($op) { $actT.Invoke($null, @($op)).Wait() }
+  $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+  if ($engine -eq $null) { throw 'no OCR language is installed (Settings > Time & language > Language)' }
+  $file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync([IO.Path]::GetFullPath($env:ZWORK_OCR_PDF))) ([Windows.Storage.StorageFile])
+  $doc = Await ([Windows.Data.Pdf.PdfDocument]::LoadFromFileAsync($file)) ([Windows.Data.Pdf.PdfDocument])
+  $to = [Math]::Min([int]$doc.PageCount, [int]$env:ZWORK_OCR_TO)
+  $pages = New-Object Collections.Generic.List[string]
+  for ($i = [int]$env:ZWORK_OCR_FROM - 1; $i -lt $to; $i++) {
+    $page = $doc.GetPage($i)
+    $k = [Math]::Min(2, 2000 / [Math]::Max($page.Size.Width, $page.Size.Height))
+    $opts = New-Object Windows.Data.Pdf.PdfPageRenderOptions
+    $opts.DestinationWidth = [uint32]($page.Size.Width * $k)
+    $opts.DestinationHeight = [uint32]($page.Size.Height * $k)
+    $stream = New-Object Windows.Storage.Streams.InMemoryRandomAccessStream
+    AwaitAction ($page.RenderToStreamAsync($stream, $opts))
+    $dec = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+    $bmp = Await ($dec.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+    $res = Await ($engine.RecognizeAsync($bmp)) ([Windows.Media.Ocr.OcrResult])
+    $pages.Add((($res.Lines | % { $_.Text }) -join "`n"))
+  }
+  [Console]::Out.Write((ConvertTo-Json -Compress -InputObject @($pages)))
+} catch { [Console]::Error.WriteLine('Error: ' + $_.Exception.Message); exit 1 }
+"#;
+
 fn ocr_pdf(path: &Path, from: usize, to: usize) -> Result<Vec<String>, String> {
-    if !cfg!(target_os = "macos") {
-        return Err("OCR is only available on macOS".into());
+    let deadline = std::time::Instant::now() + OCR_TIMEOUT;
+    let out = if cfg!(target_os = "macos") {
+        let mut c = std::process::Command::new("/usr/bin/osascript");
+        c.args(["-l", "JavaScript", "-e", OCR_SCRIPT]).arg(path).args([from.to_string(), to.to_string()]);
+        run_until(c, deadline)?
+    } else if cfg!(windows) {
+        let mut c = std::process::Command::new("powershell.exe");
+        c.args(["-NoProfile", "-NonInteractive", "-Command", OCR_SCRIPT_WINDOWS])
+            .env("ZWORK_OCR_PDF", path)
+            .env("ZWORK_OCR_FROM", from.to_string())
+            .env("ZWORK_OCR_TO", to.to_string());
+        #[cfg(windows)]
+        std::os::windows::process::CommandExt::creation_flags(&mut c, 0x0800_0000); // CREATE_NO_WINDOW
+        run_until(c, deadline)?
+    } else {
+        return ocr_tesseract(path, from, to, deadline);
+    };
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    serde_json::from_str(stdout.trim()).map_err(|_| {
+        let err = String::from_utf8_lossy(&out.stderr);
+        err.lines().rfind(|l| l.contains("Error")).unwrap_or("no output").trim().to_string()
+    })
+}
+
+/// Linux has no OCR built in; poppler's `pdftoppm` and `tesseract` are one
+/// package install away on every distro.
+fn ocr_tesseract(path: &Path, from: usize, to: usize, deadline: std::time::Instant) -> Result<Vec<String>, String> {
+    let missing = |e: String| if e.contains("No such file") { "install poppler-utils and tesseract-ocr to read scans".to_string() } else { e };
+    let dir = std::env::temp_dir().join(format!("zwork-ocr-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let result = (|| {
+        let mut c = std::process::Command::new("pdftoppm");
+        c.args(["-r", "200", "-gray", "-png", "-f", &from.to_string(), "-l", &to.to_string()]).arg(path).arg(dir.join("p"));
+        let out = run_until(c, deadline).map_err(missing)?;
+        if !out.status.success() {
+            return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+        }
+        // pdftoppm zero-pads page numbers, so names sort in page order.
+        let mut images: Vec<_> = std::fs::read_dir(&dir).map_err(|e| e.to_string())?.filter_map(|e| e.ok().map(|e| e.path())).collect();
+        images.sort();
+        images
+            .iter()
+            .map(|img| {
+                let mut c = std::process::Command::new("tesseract");
+                c.arg(img).arg("stdout");
+                run_until(c, deadline).map_err(missing).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            })
+            .collect()
+    })();
+    let _ = std::fs::remove_dir_all(&dir);
+    result
+}
+
+/// Run to completion or kill at `deadline`. Output is drained on threads so a
+/// child writing more than a pipe buffer can't stall waiting on us.
+fn run_until(mut cmd: std::process::Command, deadline: std::time::Instant) -> Result<std::process::Output, String> {
+    fn drain<R: Read + Send + 'static>(r: Option<R>) -> std::thread::JoinHandle<Vec<u8>> {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut r) = r {
+                let _ = r.read_to_end(&mut buf);
+            }
+            buf
+        })
     }
-    let mut child = std::process::Command::new("/usr/bin/osascript")
-        .args(["-l", "JavaScript", "-e", OCR_SCRIPT])
-        .arg(path)
-        .args([from.to_string(), to.to_string()])
+    let mut child = cmd
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| e.to_string())?;
-    let deadline = std::time::Instant::now() + OCR_TIMEOUT;
-    while child.try_wait().map_err(|e| e.to_string())?.is_none() {
+    let (stdout, stderr) = (drain(child.stdout.take()), drain(child.stderr.take()));
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+            break status;
+        }
         if std::time::Instant::now() > deadline {
             let _ = child.kill();
             let _ = child.wait();
             return Err("timed out — try a smaller page range".into());
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-    let out = child.wait_with_output().map_err(|e| e.to_string())?;
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    serde_json::from_str(stdout.trim()).map_err(|_| {
-        let err = String::from_utf8_lossy(&out.stderr);
-        err.lines().rfind(|l| l.contains("Error")).unwrap_or("no output").trim().to_string()
-    })
+    };
+    Ok(std::process::Output { status, stdout: stdout.join().unwrap_or_default(), stderr: stderr.join().unwrap_or_default() })
 }
 
 /// Rows rendered per sheet before the rest are summarised.
@@ -853,6 +951,14 @@ North\cell \uc1\u8364?4,200\cell\row \u26085\'3f ok \{x\}\par}";
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// The OCR path on whichever platform runs it (CI installs tesseract on Linux).
+    #[tokio::test]
+    async fn scanned_pdf_is_ocrd() {
+        let path = std::env::temp_dir().join(format!("zwork-scan-{}.pdf", uuid::Uuid::new_v4()));
+        std::fs::write(&path, include_bytes!("testdata/scanned.pdf")).unwrap();
+        let out = execute_extract_document(&serde_json::json!({ "path": path })).await.unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert!(out.contains("read with OCR") && out.contains("Invoice 4821") && out.contains("315.40"), "{out}");
+    }
 }
-
-

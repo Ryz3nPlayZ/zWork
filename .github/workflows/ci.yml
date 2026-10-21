@@ -66,10 +66,11 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: sidecar-rust -> target
+      # tesseract + poppler: scanned-PDF OCR on Linux (doc_extract).
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libssl-dev pkg-config
+          sudo apt-get install -y libssl-dev pkg-config tesseract-ocr poppler-utils
       - name: Run cargo test
         working-directory: ./sidecar-rust
         run: cargo test
@@ -91,7 +92,7 @@ jobs:
       # plain `cargo test` once the Unix-only tests are gated.
       - name: Run Windows-relevant tests
         working-directory: ./sidecar-rust
-        run: cargo test -- harness::tools::bash catches_powershell blocks_this_platforms
+        run: cargo test -- harness::tools::bash catches_powershell blocks_this_platforms doc_extract
       # Same driver version and layout the release bundles (release.yml).
       - name: Desktop control against the real driver
         working-directory: ./sidecar-rust

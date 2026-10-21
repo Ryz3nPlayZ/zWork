@@ -367,7 +367,7 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
         if crate::cua::driver_available() {
             schemas.push(json!({
                 "name": "desktop_capture",
-                "description": "Capture the accessibility tree of an app window as Markdown with [element_index N] tags on every actionable element. MUST be called before desktop_click/desktop_type/desktop_set_value/desktop_scroll — element indices are only valid from the most recent capture. Verify the returned window_title is the app you intended before acting. The tree is capped at ~100 elements; if `truncated` is true, indices beyond the cap are unavailable — scroll or narrow the target to see more.",
+                "description": "Capture the accessibility tree of an app window as Markdown with an index tag on every actionable element ([element_index N] on macOS, [N] on Windows/Linux). MUST be called before desktop_click/desktop_type/desktop_set_value/desktop_scroll — element indices are only valid from the most recent capture. Verify the returned window_title is the app you intended before acting. The tree is capped at ~100 elements; if `truncated` is true, indices beyond the cap are unavailable — scroll or narrow the target to see more.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -382,7 +382,7 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "element": { "type": "integer", "description": "Element index from desktop_capture's [element_index N] tags" },
+                        "element": { "type": "integer", "description": "Element index N from desktop_capture's [element_index N] / [N] tags" },
                         "app": { "type": "string", "description": "App to click in (optional, defaults to the last captured app)" }
                     },
                     "required": ["element"]
