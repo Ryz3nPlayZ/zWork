@@ -4,7 +4,7 @@
 //! PDF via `pdf-extract`; Excel / OpenDocument spreadsheets via `calamine`
 //! (rendered as markdown tables); Word, PowerPoint and OpenDocument text or
 //! slides by reading their XML straight out of the zip. Legacy `.doc` /
-//! `.rtf` go through macOS `textutil`.
+//! `.rtf` go through `textutil` on macOS and the readers below elsewhere.
 
 use std::io::{Cursor, Read};
 use std::path::Path;
@@ -123,6 +123,8 @@ fn extract(path: &Path, ext: &str, pages: Option<(usize, usize)>) -> Result<Stri
             let html = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
             Ok(crate::harness::tools::web_fetch::html_to_markdown(&html))
         }
+        "doc" if !cfg!(target_os = "macos") => word97(&std::fs::read(path).map_err(|e| e.to_string())?),
+        "rtf" if !cfg!(target_os = "macos") => Ok(rtf_text(&std::fs::read(path).map_err(|e| e.to_string())?)),
         "doc" | "rtf" | "rtfd" | "wordml" | "webarchive" => textutil(path),
         _ => {
             let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
@@ -494,6 +496,246 @@ fn textutil(path: &Path) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// Text of a Word 97-2003 `.doc`: the main story's pieces, per [MS-DOC] —
+/// the FIB says which table stream holds the piece table (CLX), each piece is
+/// either cp1252 or UTF-16 in the WordDocument stream.
+fn word97(bytes: &[u8]) -> Result<String, String> {
+    let bad = |what: &str| format!("Could not read the .doc file ({what}). Save it as .docx and try again.");
+    let word = ole_stream(bytes, "WordDocument").ok_or_else(|| bad("not a Word 97-2003 document"))?;
+    let u16_at = |b: &[u8], o: usize| b.get(o..o + 2).map(|x| u16::from_le_bytes([x[0], x[1]]));
+    let u32_at = |b: &[u8], o: usize| b.get(o..o + 4).map(|x| u32::from_le_bytes([x[0], x[1], x[2], x[3]]));
+    let flags = u16_at(&word, 0x0A).ok_or_else(|| bad("truncated"))?;
+    if flags & 0x0100 != 0 {
+        return Err("This .doc is password-protected.".into());
+    }
+    // FibBase (32) · csw · fibRgW · cslw · fibRgLw · cbRgFcLcb · fibRgFcLcb
+    let csw = u16_at(&word, 32).ok_or_else(|| bad("truncated"))? as usize;
+    let rg_lw = 34 + csw * 2 + 2;
+    let cslw = u16_at(&word, rg_lw - 2).ok_or_else(|| bad("truncated"))? as usize;
+    let ccp_text = u32_at(&word, rg_lw + 12).ok_or_else(|| bad("truncated"))? as usize;
+    let rg_fc = rg_lw + cslw * 4 + 2;
+    let (fc_clx, lcb_clx) = (u32_at(&word, rg_fc + 33 * 8), u32_at(&word, rg_fc + 33 * 8 + 4));
+    let (fc_clx, lcb_clx) = (fc_clx.ok_or_else(|| bad("truncated"))? as usize, lcb_clx.ok_or_else(|| bad("truncated"))? as usize);
+    let table = ole_stream(bytes, if flags & 0x0200 != 0 { "1Table" } else { "0Table" }).ok_or_else(|| bad("no table stream"))?;
+    let clx = table.get(fc_clx..fc_clx + lcb_clx).ok_or_else(|| bad("bad piece table"))?;
+    // Skip Prc entries (0x01, i16 size, grpprl) to the Pcdt (0x02, u32 size, PlcPcd).
+    let mut i = 0;
+    while clx.get(i) == Some(&0x01) {
+        i += 3 + u16_at(clx, i + 1).ok_or_else(|| bad("bad piece table"))? as usize;
+    }
+    if clx.get(i) != Some(&0x02) {
+        return Err(bad("bad piece table"));
+    }
+    let plc = clx.get(i + 5..i + 5 + u32_at(clx, i + 1).unwrap_or(0) as usize).ok_or_else(|| bad("bad piece table"))?;
+    let n = plc.len().saturating_sub(4) / 12;
+    let mut text = String::new();
+    for k in 0..n {
+        let (start, end) = (u32_at(plc, k * 4).unwrap_or(0) as usize, u32_at(plc, k * 4 + 4).unwrap_or(0) as usize);
+        let (start, end) = (start.min(ccp_text), end.min(ccp_text));
+        if end <= start {
+            continue;
+        }
+        let fc = u32_at(plc, (n + 1) * 4 + k * 8 + 2).unwrap_or(0);
+        if fc & 0x4000_0000 != 0 {
+            let off = (fc & 0x3FFF_FFFF) as usize / 2;
+            let raw = word.get(off..off + (end - start)).ok_or_else(|| bad("truncated text"))?;
+            text += &encoding_rs::WINDOWS_1252.decode_without_bom_handling(raw).0;
+        } else {
+            let off = fc as usize;
+            let raw = word.get(off..off + (end - start) * 2).ok_or_else(|| bad("truncated text"))?;
+            text += &String::from_utf16_lossy(&raw.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect::<Vec<_>>());
+        }
+    }
+    // Field codes (0x13 code 0x14 result 0x15) keep only the result; marks become layout.
+    let (mut out, mut in_code) = (String::new(), 0usize);
+    for c in text.chars() {
+        match c {
+            '\u{13}' => in_code += 1,
+            '\u{14}' => in_code = in_code.saturating_sub(1),
+            '\u{15}' => {}
+            _ if in_code > 0 => {}
+            '\r' | '\u{0b}' | '\u{0c}' => out.push('\n'),
+            '\u{07}' => out.push('\t'),
+            c if (c as u32) < 0x20 && c != '\t' => {}
+            c => out.push(c),
+        }
+    }
+    Ok(out)
+}
+
+/// One stream of an OLE compound file ([MS-CFB]), found by name. Follows the
+/// sector chains without validating the rest of the FAT, which some writers
+/// (TextEdit among them) get subtly wrong.
+fn ole_stream(file: &[u8], name: &str) -> Option<Vec<u8>> {
+    if file.get(..8)? != [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1] {
+        return None;
+    }
+    let le = |b: &[u8], o: usize| b.get(o..o + 4).map(|x| u32::from_le_bytes([x[0], x[1], x[2], x[3]]));
+    let shift = |o: usize| file.get(o..o + 2).map(|x| 1usize << u16::from_le_bytes([x[0], x[1]]).min(16));
+    let (size, mini_size) = (shift(30)?, shift(32)?);
+    let sector = |s: u32| file.get(size * (s as usize + 1)..).map(|r| &r[..size.min(r.len())]);
+    // DIFAT: 109 FAT sector numbers in the header, the rest in a sector chain.
+    let mut fat_sectors: Vec<u32> = (0..109).filter_map(|k| le(file, 76 + k * 4)).filter(|&s| s < 0xFFFF_FFFA).collect();
+    let mut next = le(file, 68)?;
+    for _ in 0..le(file, 72)?.min(10_000) {
+        let Some(s) = sector(next) else { break };
+        fat_sectors.extend((0..size / 4 - 1).filter_map(|k| le(s, k * 4)).filter(|&v| v < 0xFFFF_FFFA));
+        next = le(s, size - 4)?;
+    }
+    let fat: Vec<u32> = fat_sectors.iter().filter_map(|&s| sector(s)).flat_map(|s| s.chunks_exact(4).map(|c| le(c, 0).unwrap_or(0))).collect();
+    let chain = |start: u32, table: &[u32]| {
+        let mut v = Vec::new();
+        let mut s = start;
+        while (s as usize) < table.len() && v.len() <= table.len() {
+            v.push(s);
+            s = table[s as usize];
+        }
+        v
+    };
+    let read = |start: u32| chain(start, &fat).into_iter().filter_map(sector).flatten().copied().collect::<Vec<u8>>();
+    let dir = read(le(file, 48)?);
+    let root = dir.get(..128)?;
+    for entry in dir.chunks_exact(128) {
+        let name_len = (u16::from_le_bytes([entry[64], entry[65]]) as usize).min(64).saturating_sub(2);
+        let entry_name = String::from_utf16_lossy(&entry[..name_len].chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect::<Vec<_>>());
+        if entry[66] != 2 || !entry_name.eq_ignore_ascii_case(name) {
+            continue;
+        }
+        let (start, len) = (le(entry, 116)?, le(entry, 120)? as usize);
+        let mut data = if len < le(file, 56)? as usize {
+            let mini_stream = read(le(root, 116)?);
+            let minifat: Vec<u32> = read(le(file, 60)?).chunks_exact(4).map(|c| le(c, 0).unwrap_or(0)).collect();
+            chain(start, &minifat).into_iter().filter_map(|s| mini_stream.get(s as usize * mini_size..(s as usize + 1) * mini_size)).flatten().copied().collect()
+        } else {
+            read(start)
+        };
+        data.truncate(len);
+        return Some(data);
+    }
+    None
+}
+
+/// Plain text of an RTF document: `\par`/`\tab`/table marks become layout,
+/// `\'hh` and `\uN` are decoded, and destinations (font and colour tables,
+/// styles, pictures, `{\*...}`) are skipped.
+/// shortcut: `\'hh` is read as cp1252 whatever `\ansicpg` says; honour it if non-Western RTFs show up.
+fn rtf_text(rtf: &[u8]) -> String {
+    const SKIP: &[&[u8]] = &[b"fonttbl", b"colortbl", b"stylesheet", b"info", b"pict", b"object", b"header", b"headerl", b"headerr", b"headerf", b"footer", b"footerl", b"footerr", b"footerf", b"listtable", b"listoverridetable", b"rsidtbl", b"themedata", b"colorschememapping", b"datastore", b"latentstyles", b"xmlnstbl", b"filetbl", b"revtbl", b"generator"];
+    let (mut out, mut bytes) = (String::new(), Vec::new());
+    let flush = |out: &mut String, bytes: &mut Vec<u8>| {
+        out.push_str(&encoding_rs::WINDOWS_1252.decode_without_bom_handling(bytes).0);
+        bytes.clear();
+    };
+    let (mut depth, mut skip_at, mut uc, mut pending) = (0usize, None::<usize>, vec![1usize], 0usize);
+    let mut i = 0;
+    while i < rtf.len() {
+        match rtf[i] {
+            b'{' => {
+                depth += 1;
+                uc.push(*uc.last().unwrap_or(&1));
+                i += 1;
+            }
+            b'}' => {
+                if skip_at == Some(depth) {
+                    skip_at = None;
+                }
+                depth = depth.saturating_sub(1);
+                uc.pop();
+                pending = 0;
+                i += 1;
+            }
+            b'\\' if rtf.get(i + 1).is_some_and(u8::is_ascii_alphabetic) => {
+                let start = i + 1;
+                i = start;
+                while rtf.get(i).is_some_and(u8::is_ascii_alphabetic) {
+                    i += 1;
+                }
+                let word = &rtf[start..i];
+                let num_start = i;
+                if rtf.get(i) == Some(&b'-') {
+                    i += 1;
+                }
+                while rtf.get(i).is_some_and(u8::is_ascii_digit) {
+                    i += 1;
+                }
+                let num: Option<i32> = std::str::from_utf8(&rtf[num_start..i]).ok().and_then(|n| n.parse().ok());
+                if rtf.get(i) == Some(&b' ') {
+                    i += 1;
+                }
+                if skip_at.is_some() {
+                    continue;
+                }
+                match word {
+                    b"par" | b"line" | b"row" | b"sect" | b"page" => {
+                        flush(&mut out, &mut bytes);
+                        out.push('\n');
+                    }
+                    b"tab" | b"cell" => {
+                        flush(&mut out, &mut bytes);
+                        out.push('\t');
+                    }
+                    b"uc" => {
+                        if let Some(last) = uc.last_mut() {
+                            *last = num.unwrap_or(1).max(0) as usize;
+                        }
+                    }
+                    b"u" => {
+                        flush(&mut out, &mut bytes);
+                        let n = num.unwrap_or(0);
+                        out.extend(char::from_u32(if n < 0 { (n + 65536) as u32 } else { n as u32 }));
+                        pending = *uc.last().unwrap_or(&1);
+                    }
+                    w if SKIP.contains(&w) => skip_at = Some(depth),
+                    _ => {}
+                }
+            }
+            b'\\' => {
+                let c = rtf.get(i + 1).copied().unwrap_or(b' ');
+                i += 2;
+                if c == b'*' {
+                    skip_at = skip_at.or(Some(depth));
+                }
+                if skip_at.is_some() {
+                    i += if c == b'\'' { 2 } else { 0 };
+                    continue;
+                }
+                match c {
+                    b'\'' => {
+                        let hex = rtf.get(i..i + 2).and_then(|h| std::str::from_utf8(h).ok()).and_then(|h| u8::from_str_radix(h, 16).ok());
+                        i += 2;
+                        if pending > 0 {
+                            pending -= 1;
+                        } else {
+                            bytes.extend(hex);
+                        }
+                    }
+                    b'\\' | b'{' | b'}' => bytes.push(c),
+                    b'~' => bytes.push(b' '),
+                    b'\n' | b'\r' => {
+                        flush(&mut out, &mut bytes);
+                        out.push('\n');
+                    }
+                    _ => {}
+                }
+            }
+            b'\r' | b'\n' => i += 1,
+            b => {
+                i += 1;
+                if skip_at.is_some() {
+                    continue;
+                }
+                if pending > 0 {
+                    pending -= 1;
+                } else {
+                    bytes.push(b);
+                }
+            }
+        }
+    }
+    flush(&mut out, &mut bytes);
+    out
+}
+
 /// pdf-extract keeps the PDF's layout whitespace; squeeze runs of blank lines.
 fn collapse(s: &str) -> String {
     let mut out = String::new();
@@ -568,6 +810,13 @@ mod tests {
         assert!(parse_range("0").is_err() && parse_range("5-2").is_err() && parse_range("x").is_err());
     }
 
+    #[test]
+    fn rtf_text_escapes_tables_and_skipped_groups() {
+        let rtf = br"{\rtf1\ansi{\fonttbl\f0 Times;}{\colortbl;\red0;}{\*\generator Word;}\pard R\'e9sum\'e9 \'96 Q3\par
+North\cell \uc1\u8364?4,200\cell\row \u26085\'3f ok \{x\}\par}";
+        assert_eq!(rtf_text(rtf), "R\u{e9}sum\u{e9} \u{2013} Q3\nNorth\t\u{20ac}4,200\t\n\u{65e5} ok {x}\n");
+    }
+
     /// Round-trips real files produced by macOS (`textutil`) when available.
     #[tokio::test]
     async fn real_files_through_the_tool() {
@@ -589,6 +838,17 @@ mod tests {
             if ok {
                 let out = execute_extract_document(&serde_json::json!({ "path": docx_path })).await.unwrap();
                 assert!(out.contains("Memo") && out.contains("Quarterly numbers are up."), "{out}");
+            }
+            // The readers Windows and Linux use, against what Word-compatible apps write.
+            let html = dir.join("intl.html");
+            std::fs::write(&html, "<meta charset=utf-8><h1>Résumé – Q3</h1><table><tr><td>North</td><td>€4,200</td></tr></table><p>日本語 ok</p>").unwrap();
+            for fmt in ["doc", "rtf"] {
+                let file = dir.join(format!("intl.{fmt}"));
+                let made = std::process::Command::new("/usr/bin/textutil").args(["-convert", fmt, "-output"]).arg(&file).arg(&html).status();
+                assert!(made.is_ok_and(|s| s.success()), "textutil -convert {fmt}");
+                let bytes = std::fs::read(&file).unwrap();
+                let text = if fmt == "doc" { word97(&bytes).unwrap() } else { rtf_text(&bytes) };
+                assert!(text.contains("Résumé – Q3") && text.contains("North\t€4,200") && text.contains("日本語 ok"), "{fmt}: {text:?}");
             }
         }
         let _ = std::fs::remove_dir_all(&dir);

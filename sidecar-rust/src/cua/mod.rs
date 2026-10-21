@@ -620,6 +620,12 @@ pub async fn launch_app(app: &str) -> Result<ActionResult, String> {
             // Best-effort retry; ignore a second miss and let the caller see it.
             c.call("launch_app", json!({ "name": app })).await?
         }
+        // Windows: the Start-menu entry the driver matched was a desktop app
+        // (`{KnownFolder}\notepad.exe`), not a packaged one, so activating it
+        // fails; `path` goes through ShellExecute's PATH / App Paths search.
+        Err(msg) if cfg!(windows) && msg.contains("Failed to activate packaged app") => {
+            c.call("launch_app", json!({ "path": app })).await?
+        }
         Err(e) => return Err(e),
     };
 
@@ -1089,21 +1095,41 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn real_driver_drives_notepad() {
+        // Each stage is bounded and failures return instead of panicking, so the
+        // driver is torn down and a hang names itself instead of eating the CI job.
+        async fn step<T, E: std::fmt::Display>(name: &str, f: impl std::future::Future<Output = Result<T, E>>) -> Result<T, String> {
+            eprintln!("-> {name}");
+            match tokio::time::timeout(std::time::Duration::from_secs(60), f).await {
+                Ok(r) => r.map_err(|e| format!("{name}: {e}")),
+                Err(_) => Err(format!("{name} hung for 60s")),
+            }
+        }
         assert!(driver_available(), "driver not found: {}", McpClient::find_cua_binary());
-        let perms = check_permissions(true).await.unwrap();
-        assert!(perms.driver_ok, "{}", perms.error);
-        launch_app("notepad").await.unwrap();
-        wait(2.0).await.unwrap();
-        let cap = capture(Some("notepad")).await.unwrap();
-        assert!(cap.element_count > 0, "{}", cap.tree_markdown);
-        type_text("hello from zWork", None, Some("notepad")).await.unwrap();
-        let wins = list_on_screen_windows().await.unwrap();
-        let id = wins
-            .iter()
-            .find_map(|w| w.get("window_id").or_else(|| w.get("id")).and_then(|v| v.as_i64()))
-            .expect("no on-screen windows");
-        let png = capture_window_screenshot(id).await.unwrap();
-        assert!(std::fs::metadata(&png).unwrap().len() > 0);
+        let run = async {
+            let perms = step("check_permissions", check_permissions(true)).await?;
+            if !perms.driver_ok {
+                return Err(perms.error);
+            }
+            step("launch_app", launch_app("notepad")).await?;
+            step("wait", wait(2.0)).await?;
+            let cap = step("capture", capture(Some("notepad"))).await?;
+            if cap.element_count == 0 {
+                return Err(format!("empty tree: {}", cap.tree_markdown));
+            }
+            step("type_text", type_text("hello from zWork", None, Some("notepad"))).await?;
+            let wins = step("list_on_screen_windows", list_on_screen_windows()).await?;
+            let id = wins
+                .iter()
+                .find_map(|w| w.get("window_id").or_else(|| w.get("id")).and_then(|v| v.as_i64()))
+                .ok_or("no on-screen windows")?;
+            let png = step("capture_window_screenshot", capture_window_screenshot(id)).await?;
+            match std::fs::metadata(&png) {
+                Ok(m) if m.len() > 0 => Ok(()),
+                other => Err(format!("screenshot {png:?}: {other:?}")),
+            }
+        };
+        let result = run.await;
         teardown_driver().await;
+        result.unwrap();
     }
 }

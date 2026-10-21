@@ -95,6 +95,7 @@ jobs:
       # Same driver version and layout the release bundles (release.yml).
       - name: Desktop control against the real driver
         working-directory: ./sidecar-rust
+        timeout-minutes: 15
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/res/binaries"
@@ -103,7 +104,9 @@ jobs:
           ZWORK_RESOURCES="$RUNNER_TEMP/res" cargo test -- --ignored --nocapture real_driver
       # Git Bash puts GNU tar first on PATH, which the installer must not pick up.
       - name: Managed Python/Node runtime from scratch
+        if: ${{ !cancelled() }}
         working-directory: ./sidecar-rust
+        timeout-minutes: 20
         shell: bash
         run: ZWORK_HOME="$RUNNER_TEMP/zhome" cargo test -- --ignored --nocapture real_runtime
 
