@@ -36,6 +36,11 @@ def add(bus, x, t0, pan=0.0, g=1.0):
     bus[0, i:i + len(x)] += g * l * x
     bus[1, i:i + len(x)] += g * r * x
 
+def mx(*xs):  # sum sounds of different lengths
+    y = np.zeros(max(len(x) for x in xs))
+    for x in xs: y[:len(x)] += x
+    return y
+
 def put(x, t, pan=0.0, g=1.0):  # SFX: align the sound's own peak to t
     pk = int(np.argmax(np.abs(x)))
     add(sfx, x / (np.max(np.abs(x)) + 1e-9), t - pk / SR, pan, g)
@@ -64,8 +69,8 @@ def pad_bar(notes, d, bright, rel=0.6, att=0.3):
 
 def section_gain(t):
     # pad level & brightness by section
-    if t < 4: return 0.55, 2.2
-    if t < 8: return 0.6, 2.6
+    if t < 4: return 1.0, 2.4
+    if t < 8: return 0.85, 2.8
     if t < 14: return 0.55 + 0.25 * (t - 8) / 6, 2.6 + 3.5 * (t - 8) / 6
     if t < 24: return 0.75, 5.0
     if t < 28: return 0.6, 3.2
@@ -93,7 +98,7 @@ for k in range(int(31.5 / 0.25)):
     ch = CHORDS[bar_of(t0) % 4]; notes = [m + 12 for m in ch] + [ch[0] + 24]
     m = notes[PAT[k % 8]] + (12 if t0 >= 28 else 0)
     vel = 0.55 + 0.45 * ((k % 2) == 0)
-    sec = 0.6 if t0 < 8 else 0.85 if t0 < 14 else 1.0 if t0 < 24 else 0.7 if t0 < 28 else 1.0
+    sec = 0.95 if t0 < 4 else 0.8 if t0 < 8 else 0.85 if t0 < 14 else 1.0 if t0 < 24 else 0.7 if t0 < 28 else 1.0
     x = pluck(mtof(m)) * vel * sec
     i = int(t0 * SR); arpL[i:i + len(x)] += x; arpR[i:i + len(x)] += x
 dl = int(0.375 * SR)
@@ -148,11 +153,11 @@ for k in range(int(31.5 / 0.125)):
 # build: accelerating snare roll + riser, then a clean gap before the drop
 roll = list(np.arange(8, 10, 0.5)) + list(np.arange(10, 12, 0.25)) + list(np.arange(12, 13, 0.125)) + list(np.arange(13, 13.75, 0.0625))
 for t0 in roll:
-    add(music, snare(0.12 + 0.38 * ((t0 - 8) / 5.75) ** 1.6), t0, 0.08)
+    add(music, snare(0.08 + 0.2 * ((t0 - 8) / 5.75) ** 1.6), t0, 0.08)
 d = 3.75; t = tt(d); u = t / d
 rz = lp(noise(d), 0.02 + 0.5 * u ** 2.2) * (u ** 2.4) * 2.2
 rz += 0.25 * np.sin(2 * np.pi * np.cumsum(220 + 700 * u ** 2) / SR) * u ** 3
-add(music, rz, 10.0, 0, 0.5)
+add(music, rz, 10.0, 0, 0.2)
 
 # drop & slam booms
 def boom(d=1.4, f0=55):
@@ -205,9 +210,9 @@ def mclick(big=False):
 
 for c in EV['cues']:
     t, k, v = c['t'], c['k'], c['v']
-    if k == 'pop':      put(sine(880, 0.12, 0.001, 0.04) * 0.6 + sine(140, 0.18, 0.002, 0.06), t, 0, 0.45)
-    elif k == 'tick':   put(sine(2600, 0.02, 0.0005, 0.004) + 0.7 * sine(1300, 0.04, 0.0005, 0.012), t, 0.2, 0.22)
-    elif k == 'word':   put(sine(620, 0.08, 0.001, 0.03) + 0.3 * hp(noise(0.02)) * np.exp(-np.arange(int(0.02 * SR)) / 150), t, -0.1, 0.26)
+    if k == 'pop':      put(mx(sine(880, 0.12, 0.001, 0.04) * 0.6, sine(140, 0.18, 0.002, 0.06)), t, 0, 0.45)
+    elif k == 'tick':   put(mx(sine(2600, 0.02, 0.0005, 0.004), 0.7 * sine(1300, 0.04, 0.0005, 0.012)), t, 0.2, 0.22)
+    elif k == 'word':   put(mx(sine(620, 0.08, 0.001, 0.03), 0.3 * hp(noise(0.02)) * np.exp(-np.arange(int(0.02 * SR)) / 150)), t, -0.1, 0.26)
     elif k == 'whoosh': put(whoosh(0.32 + 0.25 * v, 0.18 + 0.2 * v), t, 0, 0.12 + 0.22 * v)
     elif k == 'drop':   put(whoosh(0.5, 0.45), t - 0.02, 0, 0.35)
     elif k == 'whooshBig': put(whoosh(0.9, 0.35), t + 0.25, 0, 0.42)
@@ -223,7 +228,7 @@ for c in EV['cues']:
     elif k == 'check':  put(bell(mtof(PENTA[v + 3]), 0.8, 0.3), t, -0.1 + 0.05 * v, 0.26)
     elif k == 'done':   put(bell(mtof(81), 1.0, 0.4) + 0.8 * np.concatenate([np.zeros(int(0.09 * SR)), bell(mtof(86), 1.0, 0.45)])[: int(SR * 1.0)], t, 0, 0.3)
     elif k == 'odo':    put(sine(3600, 0.006, 0.0003, 0.0015), t, 0.3, 0.06)
-    elif k == 'pop2':   put(sine(700, 0.1, 0.001, 0.035) + 0.4 * sine(1400, 0.06, 0.001, 0.02), t, 0, 0.25)
+    elif k == 'pop2':   put(mx(sine(700, 0.1, 0.001, 0.035), 0.4 * sine(1400, 0.06, 0.001, 0.02)), t, 0, 0.25)
     elif k == 'born':   x = tt(0.12); put(np.sin(2 * np.pi * np.cumsum(500 + 600 * x / 0.12) / SR) * env_ad(x, 0.004, 0.05), t, 0.2, 0.2)
     elif k == 'row2':   put(sine(1700 + 90 * v, 0.04, 0.0005, 0.01), t, 0.2, 0.1)
     elif k == 'bar':    put(sine(mtof(PENTA[v + 2]), 0.25, 0.01, 0.08), t, 0.3, 0.1)
@@ -243,7 +248,10 @@ for c in EV['cues']:
 
 # ───────────────────────── mix ─────────────────────────
 mix = 0.5 * music[:, :N] + 0.62 * sfx[:, :N]
-mix *= 0.93 / np.max(np.abs(mix))
+import sys
+DRIVE = float(sys.argv[1]) if len(sys.argv) > 1 else 1.45
+mix *= DRIVE / np.max(np.abs(mix))   # gentle tanh limiter: louder body, peaks held at 0.93
+mix = 0.88 * np.tanh(mix) / np.tanh(DRIVE)
 pcm = (np.clip(mix.T, -1, 1) * 32767).astype('<i2')
 with wave.open('mix.wav', 'wb') as w:
     w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR); w.writeframes(pcm.tobytes())

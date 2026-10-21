@@ -443,8 +443,8 @@ CAM.lz.to(23.9, Math.log(1.36), SP.cam);
 CAM.lz.to(26.9, Math.log(1.5), SP.cam);
 CAM.lz.to(27.92, Math.log(1.45), SP.cam);
 CAM.x.to(29.9, T0X, { w: 11, z: 0.9 }); CAM.y.to(29.9, T0Y, { w: 11, z: 0.9 }); CAM.lz.to(29.9, Math.log(1.75), { w: 11, z: 0.9 });
-CAM.x.to(30.35, 0, { w: 4.2, z: 1 }); CAM.y.to(30.35, 0, { w: 4.2, z: 1 }); CAM.lz.to(30.35, Math.log(1.0), { w: 4.2, z: 1 });
-CAM.lz.to(31.0, Math.log(0.95), { w: 1.2, z: 1 });
+CAM.x.to(30.35, 0, { w: 6.5, z: 1 }); CAM.y.to(30.35, 0, { w: 6.5, z: 1 }); CAM.lz.to(30.35, Math.log(0.97), { w: 6.5, z: 1 });
+CAM.lz.to(31.0, Math.log(0.93), { w: 1.2, z: 1 });
 cue(30.35, 'whooshBig');
 const cam = t => ({ x: CAM.x.at(t), y: CAM.y.at(t), z: Math.exp(CAM.lz.at(t)) });
 const toScreen = (t, wx, wy) => { const c = cam(t); return [960 + (wx - c.x) * c.z, 540 + (wy - c.y) * c.z]; };
@@ -478,7 +478,7 @@ function measureSteps() {
 function planZ() {
   measureSteps();
   STEPS.forEach((_, k) => { go(Z, stepChk(k) - 0.42, -540 + 104 + stepEnd[k] + 22, -380 + 150 + 66 * k + 40, { w: 13, z: 0.92 }); Z.clicks.push(stepChk(k)); });
-  go(Z, 17.45, 60, 230, SP.curS);
+  go(Z, 17.45, 120, 40, SP.curS);   // park in the empty space right of the steps, clear of the total
   go(Z, 19.1, -272 + 150, 298 + 12, { w: 9, z: 0.93 }); click(Z, 19.75);
   for (let i = 0; i < 9; i++) go(Z, rowT(i) - 0.08, 192 + 92, -204 + 58 * i + 16 + 10, { w: 16, z: 0.95 });
   go(Z, SEL_T - 0.4, 192 + 66, 276 + 14 - 10, { w: 12, z: 0.92 }); click(Z, SEL_T);
@@ -539,8 +539,9 @@ function seek(t) {
   card.style.borderWidth = '1.5px'; card.style.borderColor = rgb(mix(f, hex(LINE), bd));
   card.style.boxShadow = `0 1px 0 rgba(48,46,40,${0.05 * sh}), 0 30px 70px -28px rgba(48,46,40,${0.38 * sh})`;
   card.style.transform = `scale(${cs})`;
-  card.style.opacity = 1 - col;
-  card.style.visibility = cs < 0.002 || col > 0.995 ? 'hidden' : 'visible';
+  card.style.opacity = 1 - clamp(col * 2.6);
+  card.style.filter = col > 0.002 ? `blur(${14 * col}px)` : 'none';
+  card.style.visibility = cs < 0.002 || col > 0.38 ? 'hidden' : 'visible';
 
   for (const L of LAY) {
     const v = vis(t, L.a, L.b);
@@ -640,9 +641,10 @@ function seek(t) {
       const s = (0.86 + 0.14 * p) * (1 - 0.82 * col);
       const X = lerp(x, 0, col), Y = lerp(y, 0, col);
       T.el.style.left = (X - TW / 2) + 'px'; T.el.style.top = (Y - TH / 2) + 'px';
-      T.el.style.opacity = v.o * (1 - col); T.el.style.transform = `scale(${s})`;
-      T.el.style.filter = v.b > 0.05 ? `blur(${v.b}px)` : 'none';
-      T.el.style.visibility = v.o * (1 - col) < 0.002 ? 'hidden' : 'visible';
+      const fo = 1 - clamp(col * 2.6), fb = v.b + 14 * col;   // fall in fast and soft: no shrunken-grid blob
+      T.el.style.opacity = v.o * fo; T.el.style.transform = `scale(${s})`;
+      T.el.style.filter = fb > 0.05 ? `blur(${fb}px)` : 'none';
+      T.el.style.visibility = v.o * fo < 0.002 ? 'hidden' : 'visible';
     }
     const k = stepR(t - tileChk(T.i), SP.pop), ck = T.el.querySelector('.ck');
     ck.style.opacity = clamp(k * 2); ck.style.transform = `scale(${0.4 + 0.6 * k})`; ck.style.transformOrigin = '19px 19px';
