@@ -12,6 +12,8 @@
   body { font-family: 'Inter', system-ui, sans-serif; color: #302E28; -webkit-font-smoothing: antialiased; font-feature-settings: 'cv11', 'ss01'; }
   .grain { position: absolute; inset: -44px; background-size: 22px 22px; }
   #grainL { background-image: radial-gradient(rgba(48,46,40,0.05) 1px, transparent 1.3px); }
+  /* fine static noise over the light pools so the gradients don't band in H.264 */
+  #dither { opacity: 0.05; mix-blend-mode: soft-light; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)'/%3E%3C/svg%3E"); }
   #grainD { background-image: radial-gradient(rgba(238,238,236,0.035) 1px, transparent 1.3px); opacity: 0; }
   #world { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; }
   #hud { position: absolute; inset: 0; pointer-events: none; }
@@ -34,7 +36,7 @@
 </style>
 </head>
 <body>
-<div id="bg" class="a" style="inset:0"><div id="grainL" class="grain"></div><div id="grainD" class="grain"></div></div>
+<div id="bg" class="a" style="inset:0"><div id="glowL" class="a" style="inset:0"></div><div id="glowD" class="a" style="inset:0"></div><div id="grainL" class="grain"></div><div id="grainD" class="grain"></div><div id="dither" class="a" style="inset:0"></div></div>
 
 <div id="world">
   <!-- HOOK serif lines -->
@@ -418,16 +420,15 @@ const tiles = FRIDAYS.map((d, i) => {
 FRIDAYS.forEach((_, i) => cue(tileChk(i), 'tchk', i));
 const COLLAPSE = 32.0;
 cue(31.5, 'cut');
-cue(COLLAPSE, 'slam0');
+cue(COLLAPSE, 'swell');
 
 // ───────────────────────── logo ─────────────────────────
-const SLAM = k => 32.5 + 0.25 * k;
-for (let k = 0; k < 6; k++) cue(SLAM(k), 'slam', k);
-cue(34.0, 'mark'); cue(34.5, 'tagline');
+cue(34.22, 'mark'); cue(34.7, 'tagline');
 $('logoG').innerHTML = slatsSVG();
-const logoSlats = [...$('logoG').children];
-const logoRot = new Track(0);
-for (let k = 0; k < 6; k++) logoRot.to(SLAM(k) - 0.01, 10 * (k + 1), { w: 17, z: 0.78 });
+// one continuous move, eased in and out: the mark leaves the cursor, grows to centre turning a sixth
+// of a turn (so it lands looking like itself), breathes, then slides left for the wordmark
+const eio = u => (u = clamp(u), u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2);
+const FLY = [COLLAPSE, COLLAPSE + 1.25], SHIFT = [33.7, 34.55];
 
 // ───────────────────────── camera ─────────────────────────
 const CAM = { x: new Track(0), y: new Track(-40), lz: new Track(Math.log(0.93)) };
@@ -520,6 +521,16 @@ function seek(t) {
   const dark = stepR(t - COLLAPSE + 0.02, { w: 17, z: 1 });
   document.body.style.background = rgb(mix(hex(PAPER), [20, 20, 22], dark));
   $('grainL').style.opacity = 1 - dark; $('grainD').style.opacity = dark;
+  // warm light pools on the parchment: drift slowly (parallax with the camera) and open up a little on the drop
+  { const lift = 0.8 + 0.2 * stepR(t - 14.0, { w: 2.2, z: 1 }) - 0.12 * stepR(t - 24.0, { w: 2, z: 1 }) + 0.12 * stepR(t - 28.0, { w: 2, z: 1 });
+    const px = -c.x * 0.12, py = -c.y * 0.12;
+    const ax = 560 + 140 * Math.sin(t * 0.21) + px, ay = 300 + 90 * Math.cos(t * 0.17) + py;
+    const bx = 1480 + 120 * Math.cos(t * 0.19) + px, by = 860 + 80 * Math.sin(t * 0.23) + py;
+    const gl = $('glowL'); gl.style.opacity = (1 - dark).toFixed(4);
+    gl.style.background = `radial-gradient(1200px 820px at ${ax}px ${ay}px, rgba(255,253,246,${(0.78 * lift).toFixed(3)}), transparent 70%),`
+      + ` radial-gradient(1300px 900px at ${bx}px ${by}px, rgba(214,203,176,${(0.30 * lift).toFixed(3)}), transparent 72%),`
+      + ` radial-gradient(130% 120% at 50% 45%, transparent 58%, rgba(120,108,84,0.10))`;
+    $('glowD').style.opacity = dark.toFixed(4); }
   const gx = (-c.x * c.z * 0.35) % 22, gy = (-c.y * c.z * 0.35) % 22;
   $('grainL').style.transform = $('grainD').style.transform = `translate(${gx}px,${gy}px)`;
   $('world').style.transform = `translate(960px,540px) scale(${c.z}) translate(${-c.x}px,${-c.y}px)`;
@@ -699,27 +710,25 @@ function drawLogo(t) {
   L.style.visibility = on ? 'visible' : 'hidden';
   const hideText = el => { el.style.visibility = 'hidden'; };
   if (!on) { ['wordmark', 'tag', 'fine'].forEach(id => hideText($(id))); return; }
-  const f = stepR(t - COLLAPSE, { w: 9.5, z: 0.9 }), g = stepR(t - 34.0, { w: 10, z: 0.92 });
+  const f = eio((t - FLY[0]) / (FLY[1] - FLY[0])), g = eio((t - SHIFT[0]) / (SHIFT[1] - SHIFT[0]));
   // flight: from the cursor pill mark to centre, then left to make room for the wordmark
   const size0 = 20, size1 = 300, size2 = 170;
-  const size = lerp(lerp(size0, size1, f), size2, g);
+  const breathe = 1 + 0.025 * clamp((t - FLY[1]) / (SHIFT[0] - FLY[1])) * (1 - g);
+  const size = lerp(lerp(size0, size1, f), size2, g) * breathe;
   const gap = 40, total = size2 + gap + WMW;
   const fx = 960 - total / 2 + size2 / 2;
   const cxy = [lerp(lerp(P0[0], 960, f), fx, g), lerp(lerp(P0[1], 470, f), 410, g)];
   L.style.width = L.style.height = size + 'px';
   L.style.left = (cxy[0] - size / 2) + 'px'; L.style.top = (cxy[1] - size / 2) + 'px';
-  $('logoG').setAttribute('transform', `rotate(${logoRot.at(t)})`);
-  logoSlats.forEach((s, k) => {
-    const ghost = 1 - clamp((t - 32.28) / 0.14) * 0.86;              // the flying mark fades to a ghost…
-    const hit = stepR(t - SLAM(k), { w: 40, z: 1 });                  // …then each slat slams in
-    const sc = 1 + 0.45 * (1 - stepR(t - SLAM(k), { w: 21, z: 0.72 })) * (t >= SLAM(k) ? 1 : 0);
-    s.setAttribute('opacity', Math.max(ghost, hit).toFixed(3));
-    s.firstChild.setAttribute('transform', `skewX(-18) scale(${sc.toFixed(4)})`);
-  });
+  $('logoG').setAttribute('transform', `rotate(${(60 * f).toFixed(3)})`);
+  L.style.filter = 'none';
+  // soft light behind the mark, opening with the flight and following it left
+  const gw = $('glowD'); gw.style.background = `radial-gradient(${560 + 260 * f}px ${420 + 200 * f}px at ${cxy[0]}px ${cxy[1] + 30}px, rgba(238,226,200,${(0.11 * f).toFixed(4)}), transparent 72%),`
+    + ` radial-gradient(1400px 900px at 960px 1180px, rgba(120,110,92,${(0.10 * f).toFixed(4)}), transparent 70%)`;
   // flying mark colour: paper (on ink pill) → cream
   $('logoG').setAttribute('fill', '#EEEEEC');
-  const wv = vis(t, 34.08, null), tv = vis(t, 34.5, null), fv = vis(t, 35.0, null);
-  const wm = $('wordmark'); wm.style.left = (fx + size2 / 2 + gap + WMW / 2) + 'px'; wm.style.top = '418px'; applyVis(wm, wv, 'translate(-50%,-50%)');
+  const wv = vis(t, 34.22, null), tv = vis(t, 34.7, null), fv = vis(t, 35.15, null);
+  const wm = $('wordmark'); wm.style.left = (fx + size2 / 2 + gap + WMW / 2 + 70 * (1 - g)) + 'px'; /* trails the mark in from the right */ wm.style.top = '418px'; applyVis(wm, wv, 'translate(-50%,-50%)');
   const tg = $('tag'); tg.style.left = '960px'; tg.style.top = '640px'; applyVis(tg, tv, 'translate(-50%,-50%)');
   const fn = $('fine'); fn.style.left = '960px'; fn.style.top = '772px'; applyVis(fn, fv, 'translate(-50%,-50%)');
 }

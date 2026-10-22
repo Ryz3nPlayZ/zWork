@@ -82,8 +82,8 @@ for b in range(16):  # bars 0..15 (0–32 s)
     d = 2.0 if t0 + 2 <= 31.5 else 31.5 - t0
     L, R = pad_bar(CHORDS[b % 4], d, br, rel=0.5 if t0 + 2 <= 31.5 else 0.05)
     add(music, L, t0, -0.35, 0.05 * g); add(music, R, t0, 0.35, 0.05 * g)
-# ending chord: Dm(add9) slam, rings out
-L, R = pad_bar([38, 50, 53, 57, 64, 69], 3.6, 4.5, rel=1.6, att=0.004)
+# ending chord: Dm(add9) swells in and rings out
+L, R = pad_bar([38, 50, 53, 57, 64, 69], 3.6, 4.0, rel=1.6, att=0.18)
 add(music, L, 32.0, -0.3, 0.06); add(music, R, 32.0, 0.3, 0.06)
 
 # arp (8ths) with ping-pong dotted-8th delay
@@ -164,7 +164,7 @@ def boom(d=1.4, f0=55):
     t = tt(d); f = f0 + 60 * np.exp(-t / 0.05)
     return np.sin(2 * np.pi * np.cumsum(f) / SR) * env_ad(t, 0.002, d / 3.5)
 add(music, boom(1.2, 49), 14.0, 0, 0.55)
-add(music, kick(1.0), 32.0); add(music, boom(2.2, 36.7), 32.0, 0, 0.8)
+add(music, boom(2.2, 36.7), 32.0, 0, 0.4)
 
 # section mute: one beat of silence before the slam, and fade at the end
 tm = np.arange(music.shape[1]) / SR
@@ -208,46 +208,40 @@ def mclick(big=False):
     if big: x[: int(0.06 * SR)] += 0.7 * sine(110, 0.06, 0.001, 0.02)
     return x
 
+def soft_bell(f, d=0.9, dec=0.3):  # rounder than bell(): slower attack, almost no upper partials
+    t = tt(d)
+    return (np.sin(2 * np.pi * f * t) + 0.12 * np.sin(4 * np.pi * f * t)) * env_ad(t, 0.006, dec)
+def thock(d=0.05, f=900):  # muted key/click body, no hiss
+    t = tt(d)
+    return lp(hp(noise(d)), 0.25) * np.exp(-t / 0.006) + 0.6 * np.sin(2 * np.pi * f * t) * np.exp(-t / 0.008)
+
+# Kept deliberately sparse: the score carries the rhythm, SFX only mark what the viewer sees happen.
+# (Dropped after review: clock ticks, word blips, row blips, odometer ticks, tile pops, chirps.)
 for c in EV['cues']:
     t, k, v = c['t'], c['k'], c['v']
-    if k == 'pop':      put(mx(sine(880, 0.12, 0.001, 0.04) * 0.6, sine(140, 0.18, 0.002, 0.06)), t, 0, 0.45)
-    elif k == 'tick':   put(mx(sine(2600, 0.02, 0.0005, 0.004), 0.7 * sine(1300, 0.04, 0.0005, 0.012)), t, 0.2, 0.22)
-    elif k == 'word':   put(mx(sine(620, 0.08, 0.001, 0.03), 0.3 * hp(noise(0.02)) * np.exp(-np.arange(int(0.02 * SR)) / 150)), t, -0.1, 0.26)
-    elif k == 'whoosh': put(whoosh(0.32 + 0.25 * v, 0.18 + 0.2 * v), t, 0, 0.12 + 0.22 * v)
-    elif k == 'drop':   put(whoosh(0.5, 0.45), t - 0.02, 0, 0.35)
-    elif k == 'whooshBig': put(whoosh(0.9, 0.35), t + 0.25, 0, 0.42)
-    elif k == 'row':    put(sine(1500 + 120 * (t * 8 % 7), 0.05, 0.0005, 0.012), t, 0.15, 0.13)
-    elif k == 'sweep':  put(lp(hp(noise(0.22)), 0.35) * np.sin(np.pi * np.clip(tt(0.22) / 0.22, 0, 1)), t + 0.08, -0.15, 0.2)
-    elif k == 'key':
-        x = hp(noise(0.012), 2) * np.exp(-np.arange(int(0.012 * SR)) / (90 + 40 * rng.random()))
-        x = np.concatenate([x, np.zeros(400)]); x[:600] += 0.5 * sine(170 + 60 * rng.random(), 0.0125, 0.0005, 0.004)[:600]
-        put(x, t, 0.25 * (rng.random() - 0.5), 0.2 + 0.06 * rng.random())
-    elif k == 'click':  put(mclick(), t, 0.1, 0.42)
-    elif k == 'clickBig': put(mclick(True), t, 0.1, 0.5)
-    elif k == 'tick2':  put(sine(1250, 0.05, 0.001, 0.015), t, 0.1, 0.09)
-    elif k == 'check':  put(bell(mtof(PENTA[v + 3]), 0.8, 0.3), t, -0.1 + 0.05 * v, 0.26)
-    elif k == 'done':   put(bell(mtof(81), 1.0, 0.4) + 0.8 * np.concatenate([np.zeros(int(0.09 * SR)), bell(mtof(86), 1.0, 0.45)])[: int(SR * 1.0)], t, 0, 0.3)
-    elif k == 'odo':    put(sine(3600, 0.006, 0.0003, 0.0015), t, 0.3, 0.06)
-    elif k == 'pop2':   put(mx(sine(700, 0.1, 0.001, 0.035), 0.4 * sine(1400, 0.06, 0.001, 0.02)), t, 0, 0.25)
-    elif k == 'born':   x = tt(0.12); put(np.sin(2 * np.pi * np.cumsum(500 + 600 * x / 0.12) / SR) * env_ad(x, 0.004, 0.05), t, 0.2, 0.2)
-    elif k == 'row2':   put(sine(1700 + 90 * v, 0.04, 0.0005, 0.01), t, 0.2, 0.1)
-    elif k == 'bar':    put(sine(mtof(PENTA[v + 2]), 0.25, 0.01, 0.08), t, 0.3, 0.1)
-    elif k == 'toast':  put(bell(mtof(86), 1.2, 0.5) + 0.6 * bell(mtof(93), 1.2, 0.45), t, 0, 0.3)
-    elif k == 'toggle':
-        x = np.concatenate([sine(660, 0.05, 0.001, 0.02), sine(990, 0.08, 0.001, 0.03)]); put(x, t, 0.15, 0.28)
-    elif k == 'tpop':   put(sine(900 + 40 * v, 0.05, 0.0008, 0.015), t, -0.4 + 0.08 * v, 0.1)
-    elif k == 'tchk':   put(bell(mtof(PENTA[v]), 0.5, 0.18), t, -0.5 + 0.09 * v, 0.16)
-    elif k == 'slam0':  put(hp(noise(0.25)) * np.exp(-tt(0.25) / 0.05), t, 0, 0.35)
-    elif k == 'slam':
-        f = mtof([50, 53, 55, 57, 60, 62][v])
-        x = boom(0.6, f / 2) * 0.9 + 0.5 * bell(f * 2, 0.6, 0.18) + 0.3 * hp(noise(0.6)) * np.exp(-tt(0.6) / 0.015)
-        put(x, t, -0.3 + 0.12 * v, 0.62)
+    if k == 'pop':      put(mx(soft_bell(660, 0.3, 0.07), 0.8 * sine(165, 0.25, 0.006, 0.07)), t, 0, 0.16)
+    elif k == 'whoosh': put(whoosh(0.36 + 0.25 * v, 0.1 + 0.12 * v), t, 0, 0.06 + 0.12 * v)
+    elif k == 'drop':   put(whoosh(0.5, 0.3), t - 0.02, 0, 0.2)
+    elif k == 'whooshBig': put(whoosh(0.9, 0.22), t + 0.25, 0, 0.22)
+    elif k == 'sweep':  put(lp(hp(noise(0.22)), 0.2) * np.sin(np.pi * np.clip(tt(0.22) / 0.22, 0, 1)), t + 0.08, -0.15, 0.06)
+    elif k == 'key':    put(thock(0.04, 700 + 200 * rng.random()), t, 0.2 * (rng.random() - 0.5), 0.07 + 0.02 * rng.random())
+    elif k == 'click':  put(thock(0.06, 1000), t, 0.1, 0.2)
+    elif k == 'clickBig': put(mx(thock(0.06, 900), 0.5 * sine(180, 0.08, 0.003, 0.03)), t, 0.1, 0.24)
+    elif k == 'check':  put(soft_bell(mtof(PENTA[v + 3]), 0.6, 0.18), t, -0.1 + 0.05 * v, 0.1)
+    elif k == 'done':   put(mx(soft_bell(mtof(81), 1.0, 0.35), 0.7 * np.concatenate([np.zeros(int(0.09 * SR)), soft_bell(mtof(86), 1.0, 0.4)])), t, 0, 0.13)
+    elif k == 'pop2':   put(soft_bell(700, 0.2, 0.05), t, 0, 0.1)
+    elif k == 'toast':  put(mx(soft_bell(mtof(86), 1.2, 0.45), 0.5 * soft_bell(mtof(93), 1.2, 0.4)), t, 0, 0.13)
+    elif k == 'toggle': put(mx(thock(0.06, 800), 0.6 * soft_bell(mtof(74), 0.3, 0.06)), t, 0.15, 0.18)
+    elif k == 'tchk':   put(soft_bell(mtof(PENTA[v]), 0.4, 0.12), t, -0.5 + 0.09 * v, 0.05)
+    elif k == 'swell':  # a soft reversed swell that breathes into the dark ending
+        d = 1.0; u = tt(d) / d; put(lp(noise(d), 0.01 + 0.2 * u ** 2) * u ** 3, t, 0, 0.2)
     elif k == 'mark':
-        x = sum(bell(mtof(m), 2.0, 0.8) for m in (74, 81, 86)) * env_ad(tt(2.0), 0.25, 1.5)
-        put(x, t + 0.25, 0, 0.13)
+        x = sum(soft_bell(mtof(m), 2.0, 0.8) for m in (74, 81, 86)) * env_ad(tt(2.0), 0.3, 1.5)
+        put(x, t + 0.3, 0, 0.09)
+sfx = reverb(sfx, 1.4, 0.2)
 
 # ───────────────────────── mix ─────────────────────────
-mix = 0.5 * music[:, :N] + 0.62 * sfx[:, :N]
+mix = 0.5 * music[:, :N] + 0.5 * sfx[:, :N]
 import sys
 DRIVE = float(sys.argv[1]) if len(sys.argv) > 1 else 1.45
 mix *= DRIVE / np.max(np.abs(mix))   # gentle tanh limiter: louder body, peaks held at 0.93

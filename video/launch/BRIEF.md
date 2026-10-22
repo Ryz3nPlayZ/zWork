@@ -21,7 +21,7 @@ call yourself, log each one as a DECISION, and list them at the end.
 States: director's cut, listed below. Palette: zWork's locked system (parchment and ink, monochrome
 accent, green only for done). Score: director picks. Use an original score synthesized in numpy at
 120 BPM in D minor, with a real arc: a quiet intro, a snare build, a drop, a breakdown, and a
-slam ending.
+soft, swelling ending.
 </inputs>
 
 <takeaway>
@@ -53,7 +53,8 @@ sunken #F6F4EC, line #DAD6CA, success #10B981 for checks only. Instrument Serif 
 (the site's hero voice, with an italic "done."). Inter for UI. The ending falls into the site's
 graphite horizon (#141416, cream #EEEEEC) so it lands like the capabilities section.
 
-Banned: bouncy easing, particles, glows, gradients on UI chrome, neon, fake dashboards, model
+Banned: bouncy easing, particles, glows on UI (background light pools and the
+logo's soft halo are allowed, revised after the first cut), gradients on UI chrome, neon, fake dashboards, model
 names, developer framing, dead time, template looks, and copying site copy wholesale. The hero
 headline is the one exception, since it is the tagline.
 </direction>
@@ -82,7 +83,8 @@ Bars 15–16 28–32 s  EVERY WEEK. The toast becomes a schedule row, "Every Fri
                     the cursor flips the toggle so the knob stretches. Pull back: the row becomes one
                     of 12 Friday tiles in a wall, each checking in on 16ths.
 Bars 17–18 32–36 s  LOGO. The canvas falls to graphite and the wall collapses to center. The
-                    zWork cursor's mark flies in, six slats slam one per 8th, then "zWork" and
+                    zWork cursor's mark grows to center in one ease-in-out move with a soft
+                    glow behind it, eases aside, then "zWork" and
                     "Your weekly paperwork, done." Last line: "$12 a month · free with your own key ·
                     Mac, Windows, Linux". Hold until the score rings out.
 </structure>
