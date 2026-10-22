@@ -423,12 +423,13 @@ cue(31.5, 'cut');
 cue(COLLAPSE, 'swell');
 
 // ───────────────────────── logo ─────────────────────────
-// the site's preloader, replayed: the mark grows to centre at 1.45×, rolls a full turn left into its
-// slot in the lockup, and a cream block draws out of its trail and retracts right over the wordmark
+// the site's preloader, replayed: the mark pops in at centre to 1.45× (back.out 2.2), rolls a full turn
+// left into its slot in the lockup, and a cream block draws out of its trail and retracts right over the wordmark
 const eio = u => (u = clamp(u), u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2);
-const FLY = [COLLAPSE, COLLAPSE + 1.1], ROLL = [33.25, 34.2];
+const backOut = (u, s = 2.2) => (u = clamp(u) - 1, u * u * ((s + 1) * u + s) + 1);
+const POP = 32.5, ROLL = [POP + 0.3, POP + 1.25];
 const COVER = ROLL[0] + 0.44, COVER_IN = 0.36, COVER_OUT = 0.44, WORD = COVER + COVER_IN;
-cue((ROLL[0] + ROLL[1]) / 2, 'whoosh', 0.25); cue(WORD, 'mark'); cue(34.75, 'tagline');
+cue(POP + 0.1, 'pop'); cue((ROLL[0] + ROLL[1]) / 2, 'whoosh', 0.25); cue(WORD, 'mark'); cue(WORD + 0.7, 'tagline');
 $('logoG').innerHTML = slatsSVG();
 
 // ───────────────────────── camera ─────────────────────────
@@ -705,29 +706,28 @@ function drawRipples(t) {
   for (; n < ripplePool.length; n++) ripplePool[n].style.display = 'none';
 }
 
-let P0 = [0, 0], WMW = 0;
+let WMW = 0;
 function drawLogo(t) {
   const L = $('logo'), on = t >= COLLAPSE - 0.001;
   L.style.visibility = on ? 'visible' : 'hidden';
   const hideText = el => { el.style.visibility = 'hidden'; };
   if (!on) { ['wbox', 'tag', 'fine'].forEach(id => hideText($(id))); return; }
-  const f = eio((t - FLY[0]) / (FLY[1] - FLY[0])), g = eio((t - ROLL[0]) / (ROLL[1] - ROLL[0]));
-  // flight: from the cursor pill mark to centre, then the roll left into the lockup (site proportions)
-  const size2 = 0.86 * 190, size0 = 20, size1 = 1.45 * size2;
-  const size = lerp(lerp(size0, size1, f), size2, g);
+  const p = backOut((t - POP) / 0.34), g = eio((t - ROLL[0]) / (ROLL[1] - ROLL[0])), f = eio((t - POP) / 0.6);
+  // pop at centre, then the roll left into the lockup (site proportions); only x moves, as on the site
+  const size2 = 0.86 * 190, size1 = 1.45 * size2;
+  const size = Math.max(0, lerp(size1 * p, size2, g));
   const gap = 0.22 * 190, total = size2 + gap + WMW;
   const fx = 960 - total / 2 + size2 / 2;
-  const cxy = [lerp(lerp(P0[0], 960, f), fx, g), lerp(lerp(P0[1], 470, f), 410, g)];
+  const cxy = [lerp(960, fx, g), 410];
   L.style.width = L.style.height = size + 'px';
   L.style.left = (cxy[0] - size / 2) + 'px'; L.style.top = (cxy[1] - size / 2) + 'px';
-  $('logoG').setAttribute('transform', `rotate(${(60 * f - 360 * g).toFixed(3)})`);
+  $('logoG').setAttribute('transform', `rotate(${(-360 * g).toFixed(3)})`);
   L.style.filter = 'none';
   // soft light behind the mark, opening with the flight and following it left
   const gw = $('glowD'); gw.style.background = `radial-gradient(${560 + 260 * f}px ${420 + 200 * f}px at ${cxy[0]}px ${cxy[1] + 30}px, rgba(238,226,200,${(0.11 * f).toFixed(4)}), transparent 72%),`
     + ` radial-gradient(1400px 900px at 960px 1180px, rgba(120,110,92,${(0.10 * f).toFixed(4)}), transparent 70%)`;
-  // flying mark colour: paper (on ink pill) → cream
   $('logoG').setAttribute('fill', '#EEEEEC');
-  const tv = vis(t, 34.75, null), fv = vis(t, 35.2, null);
+  const tv = vis(t, WORD + 0.7, null), fv = vis(t, WORD + 1.15, null);
   // cover wipes in from the left (power3.in), then retracts right (power3.out) with the word under it
   const box = $('wbox'), cv = $('wcover'), wm = $('wordmark');
   box.style.visibility = t >= COVER ? 'visible' : 'hidden';
@@ -744,8 +744,6 @@ function drawLogo(t) {
 window.seek = seek; window.M = M;
 document.fonts.ready.then(() => {
   layout(); planChip();
-  // where the mark sits in the zWork pill at the collapse (screen px)
-  const [sx, sy] = curScreen(Z, COLLAPSE); P0 = [sx + 1.32 * (22 + 13 + 10), sy + 1.32 * (30 + 17)];
   WMW = $('wordmark').offsetWidth;
   M.cues.sort((a, b) => a.t - b.t);
   const q = new URLSearchParams(location.search);
