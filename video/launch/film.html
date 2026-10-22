@@ -36,7 +36,7 @@
 </style>
 </head>
 <body>
-<div id="bg" class="a" style="inset:0"><div id="glowL" class="a" style="inset:0"></div><div id="glowD" class="a" style="inset:0"></div><div id="grainL" class="grain"></div><div id="grainD" class="grain"></div><div id="dither" class="a" style="inset:0"></div></div>
+<div id="bg" class="a" style="inset:0"><div id="glowL" class="a" style="inset:0"></div><div id="grainL" class="grain"></div><div id="grainD" class="grain"></div><div id="dither" class="a" style="inset:0"></div></div>
 
 <div id="world">
   <!-- HOOK serif lines -->
@@ -531,8 +531,7 @@ function seek(t) {
     const gl = $('glowL'); gl.style.opacity = (1 - dark).toFixed(4);
     gl.style.background = `radial-gradient(1200px 820px at ${ax}px ${ay}px, rgba(255,253,246,${(0.78 * lift).toFixed(3)}), transparent 70%),`
       + ` radial-gradient(1300px 900px at ${bx}px ${by}px, rgba(214,203,176,${(0.30 * lift).toFixed(3)}), transparent 72%),`
-      + ` radial-gradient(130% 120% at 50% 45%, transparent 58%, rgba(120,108,84,0.10))`;
-    $('glowD').style.opacity = dark.toFixed(4); }
+      + ` radial-gradient(130% 120% at 50% 45%, transparent 58%, rgba(120,108,84,0.10))`; }
   const gx = (-c.x * c.z * 0.35) % 22, gy = (-c.y * c.z * 0.35) % 22;
   $('grainL').style.transform = $('grainD').style.transform = `translate(${gx}px,${gy}px)`;
   $('world').style.transform = `translate(960px,540px) scale(${c.z}) translate(${-c.x}px,${-c.y}px)`;
@@ -712,7 +711,7 @@ function drawLogo(t) {
   L.style.visibility = on ? 'visible' : 'hidden';
   const hideText = el => { el.style.visibility = 'hidden'; };
   if (!on) { ['wbox', 'tag', 'fine'].forEach(id => hideText($(id))); return; }
-  const p = backOut((t - POP) / 0.34), g = eio((t - ROLL[0]) / (ROLL[1] - ROLL[0])), f = eio((t - POP) / 0.6);
+  const p = backOut((t - POP) / 0.34), g = eio((t - ROLL[0]) / (ROLL[1] - ROLL[0]));
   // pop at centre, then the roll left into the lockup (site proportions); only x moves, as on the site
   const size2 = 0.86 * 190, size1 = 1.45 * size2;
   const size = Math.max(0, lerp(size1 * p, size2, g));
@@ -723,9 +722,6 @@ function drawLogo(t) {
   L.style.left = (cxy[0] - size / 2) + 'px'; L.style.top = (cxy[1] - size / 2) + 'px';
   $('logoG').setAttribute('transform', `rotate(${(-360 * g).toFixed(3)})`);
   L.style.filter = 'none';
-  // soft light behind the mark, opening with the flight and following it left
-  const gw = $('glowD'); gw.style.background = `radial-gradient(${560 + 260 * f}px ${420 + 200 * f}px at ${cxy[0]}px ${cxy[1] + 30}px, rgba(238,226,200,${(0.11 * f).toFixed(4)}), transparent 72%),`
-    + ` radial-gradient(1400px 900px at 960px 1180px, rgba(120,110,92,${(0.10 * f).toFixed(4)}), transparent 70%)`;
   $('logoG').setAttribute('fill', '#EEEEEC');
   const tv = vis(t, WORD + 0.7, null), fv = vis(t, WORD + 1.15, null);
   // cover wipes in from the left (power3.in), then retracts right (power3.out) with the word under it

@@ -53,8 +53,8 @@ sunken #F6F4EC, line #DAD6CA, success #10B981 for checks only. Instrument Serif 
 (the site's hero voice, with an italic "done."). Inter for UI. The ending falls into the site's
 graphite horizon (#141416, cream #EEEEEC) so it lands like the capabilities section.
 
-Banned: bouncy easing, particles, glows on UI (background light pools and the
-logo's soft halo are allowed, revised after the first cut), gradients on UI chrome, neon, fake dashboards, model
+Banned: bouncy easing, particles, glows on UI (soft light pools on the parchment
+background are allowed, revised after the first cut; the dark ending stays flat), gradients on UI chrome, neon, fake dashboards, model
 names, developer framing, dead time, template looks, and copying site copy wholesale. The hero
 headline is the one exception, since it is the tagline.
 </direction>
