@@ -171,7 +171,7 @@
   <div id="curU" class="cursor"></div>
   <div id="curZ" class="cursor"></div>
   <svg id="logo" class="a" width="300" height="300" viewBox="-20 -20 40 40" style="left:0;top:0;overflow:visible"><g id="logoG" fill="#EEEEEC"></g></svg>
-  <div id="wordmark" class="c serif" style="font-size:190px;color:#EEEEEC;letter-spacing:-0.025em">zWork</div>
+  <div id="wbox" class="a" style="overflow:hidden"><div id="wordmark" class="serif" style="position:relative;font-size:190px;line-height:1;padding-bottom:0.1em;color:#EEEEEC;letter-spacing:-0.025em;white-space:nowrap">zWork</div><div id="wcover" class="a" style="inset:0;background:#EEEEEC"></div></div>
   <div id="tag" class="c serif" style="font-size:96px;color:#EEEEEC">Your weekly paperwork, <i>done.</i></div>
   <div id="fine" class="c" style="font-size:29px;color:rgba(238,238,236,.62);font-weight:450;letter-spacing:.005em">$12 a month · free with your own key · Mac, Windows, Linux</div>
 </div>
@@ -423,12 +423,13 @@ cue(31.5, 'cut');
 cue(COLLAPSE, 'swell');
 
 // ───────────────────────── logo ─────────────────────────
-cue(34.22, 'mark'); cue(34.7, 'tagline');
-$('logoG').innerHTML = slatsSVG();
-// one continuous move, eased in and out: the mark leaves the cursor, grows to centre turning a sixth
-// of a turn (so it lands looking like itself), breathes, then slides left for the wordmark
+// the site's preloader, replayed: the mark grows to centre at 1.45×, rolls a full turn left into its
+// slot in the lockup, and a cream block draws out of its trail and retracts right over the wordmark
 const eio = u => (u = clamp(u), u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2);
-const FLY = [COLLAPSE, COLLAPSE + 1.25], SHIFT = [33.7, 34.55];
+const FLY = [COLLAPSE, COLLAPSE + 1.1], ROLL = [33.25, 34.2];
+const COVER = ROLL[0] + 0.44, COVER_IN = 0.36, COVER_OUT = 0.44, WORD = COVER + COVER_IN;
+cue((ROLL[0] + ROLL[1]) / 2, 'whoosh', 0.25); cue(WORD, 'mark'); cue(34.75, 'tagline');
+$('logoG').innerHTML = slatsSVG();
 
 // ───────────────────────── camera ─────────────────────────
 const CAM = { x: new Track(0), y: new Track(-40), lz: new Track(Math.log(0.93)) };
@@ -709,26 +710,33 @@ function drawLogo(t) {
   const L = $('logo'), on = t >= COLLAPSE - 0.001;
   L.style.visibility = on ? 'visible' : 'hidden';
   const hideText = el => { el.style.visibility = 'hidden'; };
-  if (!on) { ['wordmark', 'tag', 'fine'].forEach(id => hideText($(id))); return; }
-  const f = eio((t - FLY[0]) / (FLY[1] - FLY[0])), g = eio((t - SHIFT[0]) / (SHIFT[1] - SHIFT[0]));
-  // flight: from the cursor pill mark to centre, then left to make room for the wordmark
-  const size0 = 20, size1 = 300, size2 = 170;
-  const breathe = 1 + 0.025 * clamp((t - FLY[1]) / (SHIFT[0] - FLY[1])) * (1 - g);
-  const size = lerp(lerp(size0, size1, f), size2, g) * breathe;
-  const gap = 40, total = size2 + gap + WMW;
+  if (!on) { ['wbox', 'tag', 'fine'].forEach(id => hideText($(id))); return; }
+  const f = eio((t - FLY[0]) / (FLY[1] - FLY[0])), g = eio((t - ROLL[0]) / (ROLL[1] - ROLL[0]));
+  // flight: from the cursor pill mark to centre, then the roll left into the lockup (site proportions)
+  const size2 = 0.86 * 190, size0 = 20, size1 = 1.45 * size2;
+  const size = lerp(lerp(size0, size1, f), size2, g);
+  const gap = 0.22 * 190, total = size2 + gap + WMW;
   const fx = 960 - total / 2 + size2 / 2;
   const cxy = [lerp(lerp(P0[0], 960, f), fx, g), lerp(lerp(P0[1], 470, f), 410, g)];
   L.style.width = L.style.height = size + 'px';
   L.style.left = (cxy[0] - size / 2) + 'px'; L.style.top = (cxy[1] - size / 2) + 'px';
-  $('logoG').setAttribute('transform', `rotate(${(60 * f).toFixed(3)})`);
+  $('logoG').setAttribute('transform', `rotate(${(60 * f - 360 * g).toFixed(3)})`);
   L.style.filter = 'none';
   // soft light behind the mark, opening with the flight and following it left
   const gw = $('glowD'); gw.style.background = `radial-gradient(${560 + 260 * f}px ${420 + 200 * f}px at ${cxy[0]}px ${cxy[1] + 30}px, rgba(238,226,200,${(0.11 * f).toFixed(4)}), transparent 72%),`
     + ` radial-gradient(1400px 900px at 960px 1180px, rgba(120,110,92,${(0.10 * f).toFixed(4)}), transparent 70%)`;
   // flying mark colour: paper (on ink pill) → cream
   $('logoG').setAttribute('fill', '#EEEEEC');
-  const wv = vis(t, 34.22, null), tv = vis(t, 34.7, null), fv = vis(t, 35.15, null);
-  const wm = $('wordmark'); wm.style.left = (fx + size2 / 2 + gap + WMW / 2 + 70 * (1 - g)) + 'px'; /* trails the mark in from the right */ wm.style.top = '418px'; applyVis(wm, wv, 'translate(-50%,-50%)');
+  const tv = vis(t, 34.75, null), fv = vis(t, 35.2, null);
+  // cover wipes in from the left (power3.in), then retracts right (power3.out) with the word under it
+  const box = $('wbox'), cv = $('wcover'), wm = $('wordmark');
+  box.style.visibility = t >= COVER ? 'visible' : 'hidden';
+  box.style.left = (fx + size2 / 2 + gap) + 'px'; box.style.top = (418 - 95) + 'px';
+  const cin = clamp((t - COVER) / COVER_IN), cout = clamp((t - WORD) / COVER_OUT);
+  cv.style.transformOrigin = t < WORD ? '0% 50%' : '100% 50%';
+  cv.style.transform = `scaleX(${(t < WORD ? cin ** 3 : (1 - cout) ** 3).toFixed(4)})`;
+  wm.style.visibility = t >= WORD ? 'inherit' : 'hidden';
+  wm.style.transform = `translateX(${(-25 * (1 - clamp((t - WORD) / 0.6)) ** 3).toFixed(2)}px)`;
   const tg = $('tag'); tg.style.left = '960px'; tg.style.top = '640px'; applyVis(tg, tv, 'translate(-50%,-50%)');
   const fn = $('fine'); fn.style.left = '960px'; fn.style.top = '772px'; applyVis(fn, fv, 'translate(-50%,-50%)');
 }

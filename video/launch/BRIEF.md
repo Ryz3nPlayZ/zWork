@@ -83,8 +83,9 @@ Bars 15–16 28–32 s  EVERY WEEK. The toast becomes a schedule row, "Every Fri
                     the cursor flips the toggle so the knob stretches. Pull back: the row becomes one
                     of 12 Friday tiles in a wall, each checking in on 16ths.
 Bars 17–18 32–36 s  LOGO. The canvas falls to graphite and the wall collapses to center. The
-                    zWork cursor's mark grows to center in one ease-in-out move with a soft
-                    glow behind it, eases aside, then "zWork" and
+                    zWork cursor's mark grows to center, then replays the site's preloader:
+                    it rolls a full turn left into the lockup while a cream block wipes over
+                    the wordmark slot and retracts right to reveal "zWork". Then
                     "Your weekly paperwork, done." Last line: "$12 a month · free with your own key ·
                     Mac, Windows, Linux". Hold until the score rings out.
 </structure>
