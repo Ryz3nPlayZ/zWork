@@ -271,6 +271,41 @@ Defer: cloud runner, transcription, phone calls, mobile access, e-signature.
 
 ---
 
+## 5. Architecture review — bugs and inefficiencies (2026-10-25)
+
+CONFIRMED = read in code and traced end to end. PLAUSIBLE = depends on behaviour we can't see without a live key.
+
+| # | Finding | Verdict | Where | Smallest fix |
+|---|---|---|---|---|
+| 1 | **Outbound connector actions run without approval.** `evaluate_tool_risk` gates only `bash` and `write`/`edit`, and every other tool falls through to `Safe`. Composio actions go through the native-tool path and are never gated. That includes Gmail send and delete, Slack post and HubSpot edits. The same applies to `send_telegram_message`, `deploy_web_app`, and the `desktop_*` and `browser_*` clicks. | CONFIRMED | `tools/mod.rs:65`, `agent/harness_turn.rs:259` | Gate `composio__*` tools unless the verb is read-only (FETCH/GET/LIST/SEARCH/FIND). About 15 lines plus a test. |
+| 2 | **Scheduled runs can never get an approval.** Scheduled runs set `auto_approve=false`. A gated call then waits for `GATE_TIMEOUT`, which is 10 minutes, on a "permission" event. The scheduler's drain only reads `delta` and `error`, so nobody sees the request and it is auto-denied. Example: "Sort Downloads every Friday" changes files outside the workspace, so it always fails after a 10-minute stall. | CONFIRMED | `scheduler.rs` (drain), `agent/harness_turn.rs:46,192` | For unattended runs: deny immediately and `post_to_inbox` with "needs your OK, press Run now". Later: let the user pre-approve actions per task when creating it. |
+| 3 | **The scheduler runs tasks one at a time.** `scheduler_loop` awaits `run_task` for each due task, so one long run, or one 10-minute gate, delays every other task. | CONFIRMED | `scheduler.rs:66` | `tokio::spawn(run_task(task))`. A per-task overlap guard already exists. |
+| 4 | **Every message waits on uncached Composio round trips before the first token.** The sidecar calls cloud `/tools`. The cloud then calls Composio `connected_accounts`, then fetches each connected app's tools one after another. The sidecar then calls cloud `/status`, which makes another `connected_accounts` call. Total: 2 + N + 1 serial network hops per message. | CONFIRMED | `connectors/composio.rs:318-350`, `cloud-src/api/src/main.rs:6198-6330` | Cache the schemas in the sidecar and invalidate on connect/disconnect. Derive the app list from the same response instead of calling `/status`. |
+| 5 | **Connector tool lists may be truncated.** Composio's `/tools` endpoint is paginated (`next_cursor`), and the cloud neither sets `limit` nor follows the cursor. If the default page is smaller than a toolkit (Gmail has about 60 tools), tools late in the alphabet, such as `GMAIL_SEND_EMAIL` and `GMAIL_REPLY_TO_THREAD`, silently disappear. | PLAUSIBLE | `cloud-src/api/src/main.rs:6256` | Verify with one request on the VM. Then either set an explicit `limit` or request only Composio's "important" tools, which also cuts prompt size. |
+| 6 | **The full tool list is sent on every run.** That is 42 native tools, 7 coding tools and whole Composio toolkits, with no deferred loading. Claude and OpenAI agents load tool schemas on demand. | CONFIRMED | `agent/harness_turn.rs:1775` | Product mode (see #4 above), then a tool-search tool for connector actions. |
+| 7 | **Prompt-cache misses.** The system prompt carries the live Chrome-bridge status, so the cache is invalidated whenever the bridge connects or disconnects. The code comment says the system prompt stays byte-stable, which this contradicts. | CONFIRMED | `agent/harness_turn.rs:1697` | Move the status line into `turn_extras`. |
+| 8 | **Chat saves can overwrite each other.** Each save reads, modifies and rewrites the whole chat JSON file, with no lock shared across writers. A rename or project move made during a run can be lost when the run's own save lands. Separately, a comment calls the store SQLite; it is JSON, and SQLite holds the run sessions. | CONFIRMED (rare) | `chatstore.rs:243,353`, `agent/harness_turn.rs:125` | A per-chat mutex around `get`→`save`. Low priority. |
+| 9 | **Developer flavour in every turn.** The turn context runs `git` and injects repository state on every turn. | CONFIRMED (minor) | `agent/orientation.rs:63` | Drop it in product mode. |
+
+Checked and fine:
+- A schedule landing in a DST gap falls back to +1 h; it is not silently disabled.
+- MCP tools honour a server's confirmation hints (`GatedTool.confirm`).
+- The frontend store uses selectors throughout.
+- Prompt caching is wired up for Anthropic and for OpenRouter's Anthropic models.
+
+### Architecture versus competitors
+
+| | zWork | ChatGPT Work / Claude Cowork | Microsoft Copilot | OpenClaw / Hermes |
+|---|---|---|---|---|
+| Where work runs | Local Rust sidecar on the user's machine | Cloud sandbox, with a desktop bridge for local files and apps | Inside Office and Windows | Local |
+| Schedules | Local loop, one task at a time, only while awake | Cloud; run with the device off | Cloud | Local |
+| Approvals | Only `bash` and file writes are gated. **Sends and deletes are not.** | Plan mode with approvals (ChatGPT) | Approval before data leaves the device (Windows agent) | Varies |
+| Tool loading | Everything, every run | On demand | Fixed, app-scoped | Skills on demand |
+| Office output | Python libraries, unverified | Native add-ins plus verification | Native editing | Skills |
+| Model | Any (router or BYOK) | Vendor-locked | Vendor-locked (OpenAI and Anthropic) | Any |
+
+Our structural edges are local, private and any model. The structural gaps are #1 and #2 above, which make the product feel unsafe and unreliable; those are trust problems more than performance problems.
+
 ## Sources
 
 Read via web search/fetch on 2026-10-24–25; listed by site. Prices and plan details move fast, so recheck before quoting them publicly.
