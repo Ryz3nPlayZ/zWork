@@ -29,9 +29,67 @@ fn extract_all_tags(content: &str, tag: &str) -> Vec<String> {
     out
 }
 
+/// Per-result cap so a handful of long pages can't flood the context.
+const EXA_RESULT_CHARS: usize = 1500;
+
+/// Pulls the result text out of Exa's MCP reply (one SSE `data:` line holding a
+/// JSON-RPC response). None on an error, rate limit or empty result.
+fn parse_exa_reply(body: &str) -> Option<String> {
+    let json = body.lines().find_map(|l| l.strip_prefix("data:")).unwrap_or(body).trim();
+    let reply: Value = serde_json::from_str(json).ok()?;
+    let result = reply.get("result")?;
+    if result.get("isError").and_then(|v| v.as_bool()).unwrap_or(false) {
+        return None;
+    }
+    let text = result.get("content")?.as_array()?.iter()
+        .filter_map(|c| c.get("text").and_then(|t| t.as_str()))
+        .collect::<Vec<_>>()
+        .join("\n\n---\n\n");
+    let results: Vec<String> = text.split("\n\n---\n\n")
+        .map(|r| r.trim())
+        .filter(|r| r.starts_with("Title:"))
+        .map(|r| match r.char_indices().nth(EXA_RESULT_CHARS) {
+            Some((i, _)) => format!("{}…", &r[..i]),
+            None => r.to_string(),
+        })
+        .collect();
+    (!results.is_empty()).then(|| results.join("\n\n---\n\n"))
+}
+
+/// Exa's hosted MCP endpoint needs no key; its free limits are per caller IP,
+/// so each install gets its own allowance instead of sharing one account's pool.
+async fn exa_search(query: &str, max_results: usize) -> Option<String> {
+    let body = serde_json::json!({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": { "name": "web_search_exa", "arguments": { "query": query, "numResults": max_results } }
+    });
+    let resp = reqwest::Client::builder().timeout(Duration::from_secs(20)).build().ok()?
+        .post("https://mcp.exa.ai/mcp")
+        .header("Accept", "application/json, text/event-stream")
+        .json(&body)
+        .send().await.ok()?;
+    if !resp.status().is_success() {
+        tracing::warn!("web_search: exa returned {}, falling back to Google News", resp.status());
+        return None;
+    }
+    parse_exa_reply(&resp.text().await.ok()?)
+}
+
 pub async fn execute_web_search(params: &Value) -> Result<String, String> {
     let query = params.get("query").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    let max_results = params.get("max_results").and_then(|v| v.as_u64()).unwrap_or(6) as usize;
+    let max_results = (params.get("max_results").and_then(|v| v.as_u64()).unwrap_or(6) as usize).clamp(1, 10);
+
+    if !query.is_empty() {
+        if let Some(results) = exa_search(&query, max_results).await {
+            return Ok(format!("Results for: {}\n\n{}", query, results));
+        }
+    }
+    google_news(&query, max_results).await
+}
+
+/// Fallback, and the only source for an empty query (top headlines).
+async fn google_news(query: &str, max_results: usize) -> Result<String, String> {
+    let query = query.to_string();
     
     let mut base_url = "https://news.google.com/rss".to_string();
     let mut query_params = Vec::new();
@@ -96,4 +154,28 @@ pub async fn execute_web_search(params: &Value) -> Result<String, String> {
     };
     
     Ok(format!("{}\n\n{}", heading, rows.join("\n")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_exa_reply;
+
+    #[test]
+    fn exa_reply_parsing() {
+        let long = "x".repeat(2000);
+        let body = format!(
+            "event: message\ndata: {}\n",
+            serde_json::json!({"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text",
+                "text": format!("Title: A\nURL: https://a\nHighlights:\nfirst\n\n---\n\nTitle: B\nURL: https://b\nHighlights:\n{long}")}]}})
+        );
+        let out = parse_exa_reply(&body).unwrap();
+        assert!(out.starts_with("Title: A\nURL: https://a"));
+        assert!(out.contains("\n\n---\n\nTitle: B"));
+        assert!(out.ends_with('…') && out.len() < 2000 + 100);
+
+        let err = r#"data: {"jsonrpc":"2.0","id":1,"result":{"isError":true,"content":[{"type":"text","text":"rate limited"}]}}"#;
+        assert_eq!(parse_exa_reply(err), None);
+        assert_eq!(parse_exa_reply(r#"data: {"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"x"}}"#), None);
+        assert_eq!(parse_exa_reply("<html>502</html>"), None);
+    }
 }

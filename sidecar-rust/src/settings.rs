@@ -622,7 +622,7 @@ pub fn build_system_prompt(
             "- `ls(path?, limit?)` — list a directory.",
             "- `bash(command, timeout?)` — run a shell command in the workspace; output is tail-truncated with the full log saved to a file. Background long-lived servers (`nohup cmd > server.log 2>&1 &`) or use `deploy_web_app`.",
             "- `web_fetch(url, format?)` — fetch a web page or file by URL and read it as markdown/text.",
-            "- `web_search(query?)` — fetch recent Google News headlines. News headlines only; may be incomplete and is NOT factual lookup or page content — to verify facts or read a page, open it with `browser_navigate` / `browser_snapshot` (or tell the user you can't confirm it from headlines).",
+            "- `web_search(query?, max_results?)` — search the web; returns each result's title, URL, date and relevant page excerpts. Excerpts can be partial — to read a whole page, open its URL with `web_fetch`. Cite the URLs you rely on.",
             "- `save_memory(content, target?)` — persist information across sessions.",
             "- `ask_question(question, options)` — ask user a clarifying question with choices.",
             "- `ask_user(question, options)` — ask user a question with choices when preferences are ambiguous.",
@@ -721,7 +721,7 @@ pub fn build_system_prompt(
             idx += 1;
         }
 
-        priority.push(format!("{}. **Current events / news → `web_search`.** For news, weather, sports, \"what happened today\". It returns recent Google News headlines only — NOT verified facts or page content; for factual detail, open the actual page with the browser tools or say you can't confirm it.", idx));
+        priority.push(format!("{}. **Current events / news → `web_search`.** For news, weather, sports, \"what happened today\". Also for quick factual lookups (prices, rules, dates) — it returns page excerpts with URLs; open a result with `web_fetch` when the excerpt isn't enough.", idx));
         idx += 1;
 
         if include_desktop {

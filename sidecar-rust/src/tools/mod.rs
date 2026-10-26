@@ -170,7 +170,7 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
     let mut schemas = vec![
         json!({
             "name": "web_search",
-            "description": "Search the web/news for current information without opening a browser.",
+            "description": "Search the web for current information without opening a browser. Returns titles, URLs and page excerpts.",
             "parameters": {
                 "type": "object",
                 "properties": {
