@@ -6254,7 +6254,10 @@ async fn composio_tools(
 
     for app in &connected_apps {
         let tools_url = format!(
-            "{}/tools?toolkit_slug={}&toolkit_versions=latest",
+            // Without a limit Composio pages at 20, alphabetically: Gmail stopped at
+            // GET_FILTER (no SEND_EMAIL), Notion at DUPLICATE_PAGE (no search).
+            // `important` is Composio's curated set, so big toolkits stay small.
+            "{}/tools?toolkit_slug={}&toolkit_versions=latest&important=true&limit=200",
             COMPOSIO_BASE_URL,
             urlencoding::encode(app)
         );
@@ -6314,7 +6317,8 @@ async fn composio_tools(
                 .and_then(|d| d.as_str())
                 .unwrap_or("")
                 .to_string();
-            let params = t.get("parameters").cloned().unwrap_or_else(|| {
+            // v3 calls the input schema `input_parameters`; there is no `parameters`.
+            let params = t.get("input_parameters").or_else(|| t.get("parameters")).cloned().unwrap_or_else(|| {
                 serde_json::json!({"type": "object", "properties": {}})
             });
             all_tools.push(serde_json::json!({
