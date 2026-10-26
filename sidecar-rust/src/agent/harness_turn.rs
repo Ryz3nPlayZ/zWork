@@ -2330,22 +2330,40 @@ pub async fn resume_interrupted_runs() {
     let repo = crate::harness::session::sqlite::SqliteSessionRepo::new(
         crate::paths::home_dir().join("sessions"),
     );
-    let candidates: Vec<String> = repo
+    let candidates: Vec<(String, u64)> = repo
         .list()
         .unwrap_or_default()
         .into_iter()
-        .map(|meta| meta.id)
-        .filter(|id| !id.starts_with("subagent_"))
+        .map(|meta| (meta.id, meta.created_at))
+        .filter(|(id, _)| !id.starts_with("subagent_"))
         .collect();
-    for session_id in candidates {
-        let resumed = resume_one_interrupted(&repo, &session_id).await;
+    for (session_id, created_at) in candidates {
+        let resumed = resume_one_interrupted(&repo, &session_id, created_at).await;
         tracing::info!("resume scan: {session_id} -> {resumed}");
+    }
+}
+
+/// Runs older than this are left alone: finishing a task hours or days after
+/// the user last saw it acts on stale context with nobody watching.
+const RESUME_MAX_AGE_MS: u64 = 60 * 60 * 1000;
+
+/// Why an interrupted run must not be resumed, if it mustn't. Scheduled runs
+/// never resume: the scheduler only advances a task after its run finishes,
+/// so it re-fires the task itself and a resume would run it twice.
+fn resume_skip_reason(run_id: &str, created_at_ms: u64, now_ms: u64) -> Option<&'static str> {
+    if run_id.starts_with("sched_") {
+        Some("skipped-scheduled")
+    } else if now_ms.saturating_sub(created_at_ms) > RESUME_MAX_AGE_MS {
+        Some("skipped-stale")
+    } else {
+        None
     }
 }
 
 async fn resume_one_interrupted(
     repo: &crate::harness::session::sqlite::SqliteSessionRepo,
     session_id: &str,
+    created_at_ms: u64,
 ) -> &'static str {
     use crate::harness::runtime::harness::{Harness, HarnessOptions};
     use crate::harness::session::values::value;
@@ -2374,6 +2392,9 @@ async fn resume_one_interrupted(
     }
     // Sessions from before run ids were stored resume as a new run.
     let run_id = read_str("turn.run_id").unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    if let Some(reason) = resume_skip_reason(&run_id, created_at_ms, run_state::now_ms()) {
+        return reason;
+    }
 
     let restored = match crate::harness::runtime::restore::restore_session(&session) {
         Ok(restored) => restored,
@@ -2561,6 +2582,15 @@ async fn resume_one_interrupted(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn scheduled_and_stale_runs_are_not_resumed() {
+        use super::resume_skip_reason;
+        let now: u64 = 1_792_976_256_102;
+        assert_eq!(resume_skip_reason("sched_20261022111303_6b796f47", now, now), Some("skipped-scheduled"));
+        assert_eq!(resume_skip_reason("run-1", now - 3 * 24 * 60 * 60 * 1000, now), Some("skipped-stale"));
+        assert_eq!(resume_skip_reason("run-1", now - 5 * 60 * 1000, now), None);
+    }
+
     #[test]
     fn titles_are_cleaned_or_rejected() {
         use super::clean_title;
