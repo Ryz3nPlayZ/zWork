@@ -58,7 +58,13 @@ function getSidecarToken(): Promise<string> {
   return sidecarTokenPromise;
 }
 
-const API_BASE = IS_TAURI ? "http://127.0.0.1:8787" : "";
+// The web app calls api.tryzwork.app directly: the Better Auth session cookie
+// is scoped to that host, so same-origin calls from app.tryzwork.app arrive
+// without it and 401.
+const API_BASE = IS_TAURI ? "http://127.0.0.1:8787" : IS_WEB ? "https://api.tryzwork.app" : "";
+
+/** Sends the session cookie on the web app's cross-origin API calls. */
+const WEB_CREDENTIALS: RequestInit = IS_WEB ? { credentials: "include" } : {};
 
 /** One progress record from Ollama's /api/pull stream. */
 export interface OllamaPullProgress {
@@ -333,7 +339,7 @@ async function localFetch(path: string, init?: RequestInit) {
     headers.set("x-zwork-token", token);
     init = { ...init, headers };
   }
-  return fetch(u(path), init);
+  return fetch(u(path), { ...WEB_CREDENTIALS, ...init });
 }
 
 export interface MeResponse {
@@ -1383,6 +1389,7 @@ async function streamChatWeb(
   if (!serverChatId || serverChatId.startsWith("tmp_") || serverChatId.startsWith("web_")) {
     try {
       const chat = await fetch(u("/api/web/chats"), {
+        ...WEB_CREDENTIALS,
         method: "POST",
         headers,
         body: JSON.stringify({ title: webChatTitle }),
@@ -1395,6 +1402,7 @@ async function streamChatWeb(
   if (serverChatId) {
     try {
       await fetch(u(`/api/web/chats/${serverChatId}/messages`), {
+        ...WEB_CREDENTIALS,
         method: "POST",
         headers,
         body: JSON.stringify({ role: "user", content: body.message || webChatTitle }),
@@ -1406,6 +1414,7 @@ async function streamChatWeb(
   onEvent({ type: "status", text: "Thinking" });
 
   const resp = await fetch(u("/api/v1/chat/completions"), {
+    ...WEB_CREDENTIALS,
     method: "POST",
     headers,
     body: JSON.stringify(upstreamBody),
@@ -1521,6 +1530,7 @@ async function streamChatWeb(
   if (serverChatId && assistantText) {
     try {
       await fetch(u(`/api/web/chats/${serverChatId}/messages`), {
+        ...WEB_CREDENTIALS,
         method: "POST",
         headers,
         body: JSON.stringify({ role: "assistant", content: assistantText }),
