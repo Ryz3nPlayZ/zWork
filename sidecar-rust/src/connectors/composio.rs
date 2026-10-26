@@ -505,6 +505,7 @@ pub async fn call_tool(prefixed_name: &str, params: Value) -> Value {
             })
         }
     };
+    let raw = unwrap_proxy_reply(raw);
 
     // The cloud wraps every action result in `{ data: {...}, successful: bool,
     // error: ... }`. A 200 with `successful:false` (or `data.status_code` in
@@ -531,6 +532,21 @@ pub async fn call_tool(prefixed_name: &str, params: Value) -> Value {
         "isError": is_error,
         "content": [{ "type": "text", "text": text }]
     })
+}
+
+/// The cloud proxy returns Composio's reply as a JSON string inside
+/// `{ isError: false, content: [{ text }] }`; parse it back out so the
+/// failure check and result shaping below see `successful` / `data`.
+fn unwrap_proxy_reply(raw: Value) -> Value {
+    if raw.get("isError").and_then(|v| v.as_bool()) == Some(false) {
+        let inner = raw.pointer("/content/0/text").and_then(|t| t.as_str())
+            .and_then(|t| serde_json::from_str::<Value>(t).ok())
+            .filter(|v| v.get("successful").is_some() || v.get("data").is_some());
+        if let Some(inner) = inner {
+            return inner;
+        }
+    }
+    raw
 }
 
 /// Pull the `(payload_json_string, success, error_message)` triple out of a
@@ -711,10 +727,10 @@ fn shape_email_list(raw: &Value) -> Shaped {
                 .unwrap_or_default();
             json!({
                 "messageId": m.get("messageId").cloned().unwrap_or(Value::Null),
-                "from": m.get("from").cloned().unwrap_or(Value::Null),
+                "from": m.get("sender").or_else(|| m.get("from")).cloned().unwrap_or(Value::Null),
                 "to": m.get("to").cloned().unwrap_or(Value::Null),
                 "subject": m.get("subject").cloned().unwrap_or(Value::Null),
-                "date": m.get("date").cloned().unwrap_or(Value::Null),
+                "date": m.get("messageTimestamp").or_else(|| m.get("date")).cloned().unwrap_or(Value::Null),
                 "labelIds": m.get("labelIds").cloned().unwrap_or(Value::Null),
                 "snippet": snippet,
             })
@@ -799,10 +815,10 @@ fn shape_single_message(raw: &Value) -> Shaped {
 
     let envelope = json!({
         "messageId": msg.get("messageId").cloned().unwrap_or(Value::Null),
-        "from": msg.get("from").cloned().unwrap_or(Value::Null),
+        "from": msg.get("sender").or_else(|| msg.get("from")).cloned().unwrap_or(Value::Null),
         "to": msg.get("to").cloned().unwrap_or(Value::Null),
         "subject": msg.get("subject").cloned().unwrap_or(Value::Null),
-        "date": msg.get("date").cloned().unwrap_or(Value::Null),
+        "date": msg.get("messageTimestamp").or_else(|| msg.get("date")).cloned().unwrap_or(Value::Null),
         "labelIds": msg.get("labelIds").cloned().unwrap_or(Value::Null),
         "body": body,
     });
@@ -905,10 +921,10 @@ mod tests {
             .map(|i| {
                 json!({
                     "messageId": format!("19f2fd73e55356{:02x}", i),
-                    "from": format!("alerts+{}@example.com", i),
+                    "sender": format!("alerts+{}@example.com", i),
                     "to": "user@example.com",
                     "subject": format!("Message {}", i),
-                    "date": "Thu, 4 Jul 2026 18:00:00 +0000",
+                    "messageTimestamp": "2026-07-04T18:00:00Z",
                     "labelIds": ["INBOX", "UNREAD"],
                     "messageText": big_html,
                     "attachmentList": [
@@ -937,10 +953,7 @@ mod tests {
             shaped.text.contains("alerts+1@example.com"),
             "expected sender envelope"
         );
-        assert!(
-            !shaped.text.contains("doc.pdf"),
-            "attachment metadata must be stripped"
-        );
+        assert!(shaped.text.contains("2026-07-04T18:00:00Z"), "expected messageTimestamp as date");
         assert!(
             !shaped.text.contains("doc.pdf"),
             "attachment metadata must be stripped"
@@ -1024,6 +1037,22 @@ mod tests {
             "expected a truncation/omission marker the model can act on; got: {}",
             &capped.text[..capped.text.len().min(200)]
         );
+    }
+
+    #[test]
+    fn proxy_reply_is_unwrapped_before_the_failure_check() {
+        // Verbatim shape from a real trace: the 400 was reported as ok.
+        let inner = json!({ "data": { "message": "Following fields are missing: {'message_id'}", "status_code": 400 },
+                            "successful": false, "error": "Invalid request data provided" });
+        let raw = json!({ "isError": false, "content": [{ "type": "text", "text": inner.to_string() }] });
+        let (_, success, err) = extract_cloud_envelope(&unwrap_proxy_reply(raw), "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID");
+        assert!(!success);
+        assert!(err.contains("Invalid request"));
+
+        let err_reply = json!({ "isError": true, "content": [{ "type": "text", "text": "Composio error: 500" }] });
+        assert_eq!(unwrap_proxy_reply(err_reply.clone()), err_reply);
+        let plain = json!({ "isError": false, "content": [{ "type": "text", "text": "not json" }] });
+        assert_eq!(unwrap_proxy_reply(plain.clone()), plain);
     }
 
     #[test]
