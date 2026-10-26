@@ -131,17 +131,10 @@ export const auth = betterAuth({
     },
   },
   trustedOrigins: TRUSTED_ORIGINS,
-  // The web app (app.tryzwork.app) and the auth API (api.tryzwork.app) are on
-  // different subdomains. The OAuth state cookie must therefore be readable
-  // across both AND survive the cross-site redirect from Google back to the
-  // callback. With the default `SameSite=Lax` + host-scoped cookie, the state
-  // cookie set by a cross-origin fetch from the app either isn't stored or
-  // doesn't round-trip, producing `state_mismatch` / `please_restart_the_process`.
-  // Share cookies across *.tryzwork.app and loosen SameSite to None (Secure).
-  crossSubDomainCookies: {
-    enabled: true,
-    domain: ".tryzwork.app",
-  },
+  // Session cookies are host-only on api.tryzwork.app, so the web app
+  // (app.tryzwork.app) calls api.tryzwork.app cross-origin with credentials.
+  // Don't share them across *.tryzwork.app: browsers that already hold the
+  // host-only cookie would then carry two, and sign-out clears only one.
   advanced: {
     cookies: {
       // The transient OAuth/PKCE state cookie. Must be SameSite=None so the
