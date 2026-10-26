@@ -7570,6 +7570,11 @@ async fn main() {
             HeaderName::from_static("x-zwork-project-id"),
             HeaderName::from_static("x-zwork-app-version"),
             HeaderName::from_static("x-zwork-os"),
+        ])
+        // The web app (app.tryzwork.app) reads these off its chat replies.
+        .expose_headers([
+            HeaderName::from_static("x-zwork-router-provider"),
+            HeaderName::from_static("x-zwork-router-model"),
         ]);
 
     // Per-IP rate limit applied only to the credential-handling auth endpoints.
