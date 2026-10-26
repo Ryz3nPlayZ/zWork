@@ -1679,7 +1679,8 @@ export const useApp = create<AppState>((set, get) => ({
       set({ chatSummaries: visible, backendOffline: false });
     } catch (e) {
       console.warn("refreshChats failed:", e);
-      set({ backendOffline: true });
+      // The offline banner is about the desktop's local backend.
+      if (!IS_WEB) set({ backendOffline: true });
       const cached = localStorage.getItem("zwork:cached-summaries");
       if (cached) set({ chatSummaries: JSON.parse(cached) });
     }

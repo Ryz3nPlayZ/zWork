@@ -814,7 +814,8 @@ export const api = {
 
   /** Slash commands: prompt files from zWork/Claude Code/opencode/pi folders, and skills. */
   commands: () =>
-    localFetch("/api/commands").then((r) =>
+    // The web app has no sidecar to read command folders from.
+    (IS_WEB ? Promise.resolve(new Response('{"commands":[]}')) : localFetch("/api/commands")).then((r) =>
       j<{ commands: { name: string; description: string; kind: "command" | "skill"; source: string }[] }>(r),
     ),
 
