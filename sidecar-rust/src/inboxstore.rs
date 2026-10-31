@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
@@ -53,6 +54,13 @@ struct InboxStoreData {
 
 // ─── Persistence ──────────────────────────────────────────────────────────────
 
+/// Every write is load-modify-save of one file; serialise them so a scheduled
+/// run posting while the user marks items read can't drop either change.
+fn write_lock() -> MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn load_data() -> InboxStoreData {
     let p = inbox_path();
     if !p.exists() {
@@ -97,6 +105,7 @@ pub struct CreateParams {
 }
 
 pub fn create(p: CreateParams) -> InboxItem {
+    let _guard = write_lock();
     let mut data = load_data();
     let item = InboxItem {
         id: uid(),
@@ -114,6 +123,7 @@ pub fn create(p: CreateParams) -> InboxItem {
 }
 
 pub fn mark_read(item_id: &str) -> bool {
+    let _guard = write_lock();
     let mut data = load_data();
     let item = data.items.iter_mut().find(|i| i.id == item_id);
     if let Some(i) = item {
@@ -126,6 +136,7 @@ pub fn mark_read(item_id: &str) -> bool {
 }
 
 pub fn mark_all_read() -> usize {
+    let _guard = write_lock();
     let mut data = load_data();
     let mut changed = 0;
     for i in data.items.iter_mut() {
@@ -141,6 +152,7 @@ pub fn mark_all_read() -> usize {
 }
 
 pub fn delete(item_id: &str) -> bool {
+    let _guard = write_lock();
     let mut data = load_data();
     let before = data.items.len();
     data.items.retain(|i| i.id != item_id);
