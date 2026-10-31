@@ -38,7 +38,7 @@ export function PageShell({
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-paper">
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[960px] px-6 pb-16 pt-8">
+        <div className="mx-auto flex min-h-full w-full max-w-[960px] flex-col px-6 pb-16 pt-8">
           <header className="mb-5 flex flex-wrap items-end justify-between gap-3">
             <div className="min-w-0">
               <h1 className="text-[22px] font-semibold tracking-tight text-ink">{title}</h1>
@@ -440,7 +440,8 @@ export function EmptyState({
     <div
       className={cn(
         "flex flex-col items-center rounded-2xl border border-dashed border-line-strong text-center",
-        compact ? "px-6 py-8" : "px-6 py-14",
+        // A page-level empty state fills the page instead of a short box over blank space.
+        compact ? "px-6 py-8" : "flex-1 justify-center px-6 py-14",
       )}
     >
       <IconTile size="lg">{icon}</IconTile>

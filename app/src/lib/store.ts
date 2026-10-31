@@ -2448,12 +2448,14 @@ export const useApp = create<AppState>((set, get) => ({
                 const updated: Chat = { ...c, id: evt.id, title: serverTitle };
                 return {
                   chats: { ...rest, [evt.id]: updated },
-                  activeChatId: evt.id,
+                  // Don't yank the user back if they already opened something else.
+                  activeChatId: s.activeChatId === prevId ? evt.id : s.activeChatId,
                 };
               });
               localId = evt.id;
-              // A brand-new chat just got its real id — tell the other window
-              // so its sidebar picks it up.
+              // The server has saved the row by now: list it in this sidebar
+              // immediately (not only after the run ends) and in the other window.
+              void get().refreshChats();
               void emitChatListChanged();
             } else if (evt.title && evt.title !== "New chat" && get().chats[evt.id]?.title !== evt.title) {
               // The backend named the chat from its first message.
@@ -3200,17 +3202,25 @@ export const useApp = create<AppState>((set, get) => ({
 }));
 
 if (typeof window !== "undefined") {
-  useApp.subscribe((state) => {
-    try {
-      // Version the cache shape so a message-model change (e.g. the
-      // content→parts migration) doesn't hydrate stale messages that crash
-      // the renderer. Bump this whenever the persisted Message shape changes.
-      localStorage.setItem("zwork:cache-version", CHAT_CACHE_VERSION);
-      localStorage.setItem("zwork:cached-chats", JSON.stringify(state.chats));
-      localStorage.setItem("zwork:cached-summaries", JSON.stringify(state.chatSummaries));
-    } catch (e) {
-      console.warn("Failed to write offline cache:", e);
-    }
+  // Serialising every chat on each streamed token blocked the UI thread, so
+  // write at most once a second; the cache is only an offline fallback.
+  let cacheTimer: ReturnType<typeof setTimeout> | null = null;
+  useApp.subscribe(() => {
+    if (cacheTimer) return;
+    cacheTimer = setTimeout(() => {
+      cacheTimer = null;
+      const state = useApp.getState();
+      try {
+        // Version the cache shape so a message-model change (e.g. the
+        // content→parts migration) doesn't hydrate stale messages that crash
+        // the renderer. Bump this whenever the persisted Message shape changes.
+        localStorage.setItem("zwork:cache-version", CHAT_CACHE_VERSION);
+        localStorage.setItem("zwork:cached-chats", JSON.stringify(state.chats));
+        localStorage.setItem("zwork:cached-summaries", JSON.stringify(state.chatSummaries));
+      } catch (e) {
+        console.warn("Failed to write offline cache:", e);
+      }
+    }, 1000);
   });
 }
 

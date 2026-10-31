@@ -1238,6 +1238,9 @@ fn main() {
 
             // Close-to-tray: intercept main window close to hide instead
             if let Some(main_window) = app.get_webview_window("main") {
+                // The UI is laid out in 11-13px; start at a reading size like
+                // ChatGPT/Claude (~16px body). Cmd +/- still adjusts it.
+                let _ = main_window.set_zoom(1.1);
                 let win = main_window.clone();
                 main_window.on_window_event(move |event| {
                     if let WindowEvent::CloseRequested { api, .. } = event {

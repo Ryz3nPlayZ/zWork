@@ -138,20 +138,17 @@ export function InboxPage() {
           </>
         }
         muted={item.read}
-        onClick={() => setOpenId(open ? null : item.id)}
+        onClick={() => {
+          // Opening an item is reading it, like email; no separate "Mark read" step.
+          if (!open && !item.read) void markRead(item.id);
+          setOpenId(open ? null : item.id);
+        }}
         expanded={open}
         trailing={<span>{timeAgo(item.created_at)}</span>}
         actions={
-          <>
-            {!item.read && (
-              <RowIconButton label="Mark read" onClick={() => void markRead(item.id)}>
-                <Check />
-              </RowIconButton>
-            )}
-            <RowIconButton label="Dismiss" onClick={() => dismiss(item.id)}>
-              <X />
-            </RowIconButton>
-          </>
+          <RowIconButton label="Dismiss" onClick={() => dismiss(item.id)}>
+            <X />
+          </RowIconButton>
         }
       >
         <p className="max-w-[68ch] whitespace-pre-wrap text-[13px] leading-relaxed text-ink-soft">{item.body}</p>
@@ -160,17 +157,9 @@ export function InboxPage() {
             <Button
               variant="primary"
               icon={<ArrowRight />}
-              onClick={() => {
-                void markRead(item.id);
-                void openChat(item.chat_id!);
-              }}
+              onClick={() => void openChat(item.chat_id!)}
             >
-              Open run
-            </Button>
-          )}
-          {!item.read && (
-            <Button icon={<Check />} onClick={() => void markRead(item.id)}>
-              Mark read
+              Open conversation
             </Button>
           )}
           <Button icon={<X />} onClick={() => dismiss(item.id)}>

@@ -116,9 +116,12 @@ export function ScheduledTasksPage() {
           : "Tasks zWork runs on a schedule. Results land in your Inbox."
       }
       actions={
-        <Button variant="primary" icon={<Plus />} onClick={() => openEditor(null)}>
-          New task
-        </Button>
+        // Empty state has its own button.
+        scheduledTasks.length > 0 ? (
+          <Button variant="primary" icon={<Plus />} onClick={() => openEditor(null)}>
+            New task
+          </Button>
+        ) : undefined
       }
       toolbar={
         showFilter ? (

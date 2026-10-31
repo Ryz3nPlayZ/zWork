@@ -667,7 +667,7 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
         }));
         schemas.push(json!({
             "name": "post_to_inbox",
-            "description": "Post a message to the user's inbox. The inbox is how the agent talks to the user UNPROMPTED — the user sees these messages without initiating a chat. Use during a scheduled task to surface a finding, flag, or question (e.g. 'Found an invoice over $1000', 'Your 9am meeting was moved'). Also usable in interactive chat to leave a note the user will see later. Be concise: a clear title and a short body.",
+            "description": "Post a message to the user's inbox. The inbox is how the agent talks to the user UNPROMPTED — the user sees these messages without initiating a chat. Use during a scheduled task to surface a finding, flag, or question (e.g. 'Found an invoice over $1000', 'Your 9am meeting was moved'). Also usable in interactive chat to leave a note the user will see later. Be concise: a clear title and a short body. Never include passwords, verification codes or other secrets; say one arrived instead.",
             "parameters": {
                 "type": "object",
                 "properties": {

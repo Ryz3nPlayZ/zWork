@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useState, type ReactNode } from "react";
-import { CheckCircle2, ExternalLink, X, AlertTriangle, PanelLeft, Search } from "lucide-react";
+import { CheckCircle2, ExternalLink, X, AlertTriangle, PanelLeft } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
 import { Landing } from "./components/Landing";
 import { IconButton } from "./components/IconButton";
@@ -751,7 +751,7 @@ export default function App() {
       </main>
 
       {/*
-        WINDOW-LEVEL CONTROLS — search + sidebar toggle. Pinned to the
+        WINDOW-LEVEL CONTROL — sidebar toggle (Search lives in the sidebar). Pinned to the
         top-left of the WINDOW (not the pane), so they never slide when
         the pane expands/contracts on sidebar toggle. With macOS traffic
         lights they sit just to their right, above the logo. Elsewhere they
@@ -763,22 +763,14 @@ export default function App() {
         className={cn(
           "absolute z-50 flex items-center gap-0.5",
           trafficLights
-            ? "left-[84px] top-[7px]"
+            // Centred on the traffic lights' row, one light-spacing after them.
+            ? "left-[72px] top-[1px]"
             : cn(
                 "top-[14px] transition-[left] duration-200 ease-out",
-                sidebarOpen ? "left-[182px]" : "left-[12px]",
+                sidebarOpen ? "left-[212px]" : "left-[12px]",
               ),
         )}
       >
-        <IconButton
-          icon={<Search />}
-          label="Search"
-          shortcut={modShortcut("K")}
-          tooltipSide="bottom"
-          showTooltip={false}
-          onClick={() => setSearchOpen(true)}
-          size="sm"
-        />
         <IconButton
           icon={<PanelLeft />}
           label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}

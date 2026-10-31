@@ -16,6 +16,7 @@ import {
   Plug,
   Inbox,
   Clock,
+  Search,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { hasTrafficLights, modShortcut } from "../lib/platform";
@@ -41,6 +42,7 @@ export function Sidebar() {
   const openLanding = useApp((s) => s.openLanding);
   const view = useApp((s) => s.view);
   const setView = useApp((s) => s.setView);
+  const setSearchOpen = useApp((s) => s.setSearchOpen);
   const setActiveProject = useApp((s) => s.setActiveProject);
   const inboxUnread = useApp((s) => s.inboxUnreadCount);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
@@ -132,6 +134,12 @@ export function Sidebar() {
             shortcut={modShortcut("N")}
             onClick={() => openLanding()}
             active={view === "chat" && active === null}
+          />
+          <SidebarButton
+            icon={<Search />}
+            label="Search chats"
+            shortcut={modShortcut("K")}
+            onClick={() => setSearchOpen(true)}
           />
           {/* Desktop-only views — hidden on the web. */}
           {!demo && (

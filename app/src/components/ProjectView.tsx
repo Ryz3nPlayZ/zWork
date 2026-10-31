@@ -73,9 +73,12 @@ function ProjectListPage() {
       title="Projects"
       subtitle="Chats, instructions and files grouped around one goal."
       actions={
-        <Button variant="primary" icon={<Plus />} onClick={() => setModalOpen(true)}>
-          New project
-        </Button>
+        // The empty state carries its own button; two identical CTAs read as clutter.
+        projects.length > 0 ? (
+          <Button variant="primary" icon={<Plus />} onClick={() => setModalOpen(true)}>
+            New project
+          </Button>
+        ) : undefined
       }
       toolbar={
         projects.length >= 5 ? <SearchField value={query} onChange={setQuery} placeholder="Search projects" /> : undefined

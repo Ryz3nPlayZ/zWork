@@ -22,6 +22,7 @@
         "minHeight": 560,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
+        "zoomHotkeysEnabled": true,
         "decorations": true,
         "transparent": true,
         "resizable": true,

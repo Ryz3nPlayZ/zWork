@@ -237,6 +237,7 @@ async fn run_task(task: ScheduledTask) {
     //    errors. `post_to_inbox` tool calls already wrote to the inbox inside
     //    the tool dispatcher, so we don't double-post those.
     let mut assistant_text = String::new();
+    let mut posted_to_inbox = false;
     let mut had_error = false;
     let mut error_text = String::new();
     let mut stream = stream;
@@ -246,6 +247,14 @@ async fn run_task(task: ScheduledTask) {
             Some("delta") => {
                 if let Some(t) = val.get("text").and_then(|v| v.as_str()) {
                     assistant_text.push_str(t);
+                }
+            }
+            // Text before a tool call is narration ("I'll check your inbox…");
+            // keep only what follows the last one, i.e. the actual result.
+            Some("tool_use") => {
+                assistant_text.clear();
+                if val.get("name").and_then(|v| v.as_str()) == Some("post_to_inbox") {
+                    posted_to_inbox = true;
                 }
             }
             Some("error") => {
@@ -267,11 +276,7 @@ async fn run_task(task: ScheduledTask) {
     //    with notable final text gets a `summary`. We avoid posting an empty
     //    summary when the run already posted flags via `post_to_inbox`.
     if had_error {
-        let body = if error_text.is_empty() {
-            "The scheduled task encountered an error. Open the run transcript for details.".to_string()
-        } else {
-            error_text
-        };
+        let body = friendly_error(&error_text);
         crate::inboxstore::create(crate::inboxstore::CreateParams {
             task_id: Some(task_id.clone()),
             chat_id: Some(chat.id.clone()),
@@ -280,8 +285,14 @@ async fn run_task(task: ScheduledTask) {
             body: Some(body),
         });
     } else {
+        // A clean run supersedes this task's earlier failures.
+        for old in crate::inboxstore::get_all(true) {
+            if old.kind == "error" && old.task_id.as_deref() == Some(task_id.as_str()) {
+                crate::inboxstore::mark_read(&old.id);
+            }
+        }
         let summary = assistant_text.trim();
-        if !summary.is_empty() {
+        if !summary.is_empty() && !posted_to_inbox {
             // Truncate very long summaries so the inbox stays scannable.
             let body = if summary.chars().count() > 600 {
                 let cut: String = summary.chars().take(600).collect();
@@ -316,6 +327,22 @@ async fn run_task(task: ScheduledTask) {
     );
 
     release_task(task_id).await;
+}
+
+/// The inbox is read by non-technical users: say what happened and what
+/// happens next, not the raw error. The full text stays in the transcript.
+fn friendly_error(raw: &str) -> String {
+    let lower = raw.to_lowercase();
+    let what = if lower.contains("sending request") || lower.contains("timed out") || lower.contains("connect") {
+        "zWork couldn't reach the AI service (no internet, or the service was down)."
+    } else if lower.contains("429") || lower.contains("quota") || lower.contains("rate limit") {
+        "You hit your usage limit for now."
+    } else if lower.contains("repeated-action loop") {
+        "zWork got stuck repeating the same step, so it stopped itself."
+    } else {
+        "Something went wrong partway through."
+    };
+    format!("{what} It will try again at the next scheduled time. Open the conversation to see what it got done.")
 }
 
 /// Stamp a fresh next_run_at without running (used when skipping).
@@ -452,5 +479,17 @@ mod tests {
             .expect("valid timestamp")
             .with_timezone(&chrono::Local);
         assert_eq!(dt.weekday().num_days_from_monday(), 0, "should be a Monday");
+    }
+}
+
+#[cfg(test)]
+mod friendly_error_tests {
+    use super::friendly_error;
+
+    #[test]
+    fn maps_known_failures_to_plain_language() {
+        assert!(friendly_error("request failed: error sending request for url (https://x)").starts_with("zWork couldn't reach"));
+        assert!(friendly_error("Stopped a repeated-action loop before it ran away.").contains("stuck"));
+        assert!(friendly_error("").starts_with("Something went wrong"));
     }
 }
