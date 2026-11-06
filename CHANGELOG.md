@@ -4,6 +4,18 @@ All notable changes to zWork are documented in this file.
 
 ## v0.6.1
 
+### New
+- **Setup is two questions.** Your name, then which paperwork keeps coming back. Your pick lands on the home screen ready to send, and sign-in is all you need to start; your own key stays optional in Settings.
+- **Six paperwork jobs on the home screen.** Expense reports, PDF invoices into a sheet, chasing unpaid invoices, client updates, comparing two spreadsheets and filling a template.
+- **Open at login.** Your first schedule turns this on, so schedules keep running after a restart. zWork starts quietly in the tray, and a switch on the Scheduled page turns it off.
+- **More apps to connect.** Outlook, OneDrive, Excel, Teams, QuickBooks and Xero.
+- **Approvals in the Inbox.** Connected apps now ask before they send or change anything. Scheduled runs can't stop to ask, so those actions wait in the Inbox with Approve and Don't do this.
+
+### Improvements
+- **Spreadsheets are checked.** Every formula is calculated and errors are reported, and a workbook with formula errors isn't delivered.
+- **Paperwork runs are lighter.** Tools for research, deploying and building apps only load when you ask for them.
+- **Schedules run side by side, and late runs say so.**
+
 ### Fixes
 - **Windows updates finish again.** Updating could stop on "Error opening file for writing … zwork-backend.exe" because zWork's background process kept running while the installer tried to replace it. The installer now closes it first, and zWork clears a leftover one when it starts.
 - **Windows layout makes sense again.** The chat title, Versions and Export are back in the chat pane instead of a strip over the sidebar, search and the sidebar toggle share the logo's row instead of floating over an empty strip, and the window buttons sit in the pane's corner. Shortcuts read Ctrl+K, Ctrl+N and so on instead of Mac's ⌘.
@@ -24,7 +36,7 @@ All notable changes to zWork are documented in this file.
 - **Built-in Python and Node.** Installed on first launch (checksum-verified), so document skills and `npx`/`uvx` connectors work on a stock Mac with nothing else to install.
 - **Integrated Windows title bar.** The Windows build no longer stacks the app under a native, mismatched title-bar strip. The window ships undecorated (`tauri.windows.conf.json`) and a new `TitleBar` component owns the top chrome: a full-width strip in the surface color (the sidebar/frame fill, so the window edge, sidebar, and pane seams read as one continuous surface) hosting the search + sidebar-toggle controls, the active chat's title and metadata (rename, message count, export menu, a working pulse) — or the current view's name on non-chat screens — with Windows-style minimize/maximize/close caption buttons at the right edge. Empty strip space drags the window and double-click toggles maximize. The chat pane starts below the strip and ChatView drops its in-pane header there, so there's one continuous bar instead of two stacked ones. Boot/login/onboarding screens carry their own drag strip + caption buttons. macOS (native traffic-light overlay), Linux (native decorations), and the web build are unchanged.
 - **Working-state border beams.** The chat input glows with a circling border beam ([border-beam](https://libraries.dev/beam.html)) whenever the agent is working — slowed to a 3.5s revolution (the 1.96s default's crossings read as jumps) and boosted in strength — and the send/stop button gets a spinning beam ring that exists only while the button is in Stop state (the send button stays matte). Both adapt to light/dark theme and follow `prefers-reduced-motion`.
-- **zWork picks the model.** The hosted lineup is now zWork, which sends everyday work to a fast model and moves genuinely hard or stuck tasks to a stronger one, and ??????, the smartest model, on Pro and Max. Free plans get 3 harder tasks a month; every hosted model reads images.
+- **zWork picks the model.** The hosted lineup is now zWork, which sends everyday work to a fast model and moves genuinely hard or stuck tasks to a stronger one, and Apex, the smartest model, on Pro and Max. Free plans get 3 harder tasks a month; every hosted model reads images.
 - **Effort control.** Choose Low to Max in the model menu to trade speed for depth.
 
 ### Improvements

@@ -31,7 +31,7 @@ references are given where it matters. "Not run" means it was read in code, not 
 ### What changed versus POSITIONING.md
 
 1. **"Cheapest real agent" is no longer true.** ChatGPT Free ships limited desktop Work, and TRAE's free tier allows BYOK. Price alone is no longer our moat.
-2. **Cowork going cloud-first helps our local angle.** "Your files never leave your computer, any model, $12" is now a real difference from Claude, and a softer one against ChatGPT, whose desktop Work still sends file contents to OpenAI.
+2. **Cowork going cloud-first helps our local angle.** "Your files stay on your computer, any model, $12" is now a real difference from Claude, and a softer one against ChatGPT, whose desktop Work still sends file contents to OpenAI.
 3. **Rivals now keep working when the laptop is off.** Both leaders run schedules with no device online, and zWork does not, so P2 #9 (cloud runner) is closer to P1.
 4. **Office-native agents are mainstream.** Microsoft and Anthropic both edit the real Excel or Word file. Handing back an unverified .xlsx is now below the bar.
 

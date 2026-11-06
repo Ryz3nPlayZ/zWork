@@ -50,7 +50,7 @@ const CAPS = [
   {
     icon: FolderOpen,
     title: "Works through whole folders",
-    body: "Every PDF, every export, every row. No upload limits, because nothing gets uploaded.",
+    body: "Every PDF, every export, every row. No upload limits, because your files stay on your computer.",
   },
   {
     icon: Plug,

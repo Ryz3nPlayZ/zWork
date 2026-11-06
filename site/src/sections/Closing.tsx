@@ -300,7 +300,7 @@ export function Pricing({ heading }: { heading?: "h1" } = {}) {
 const FAQ: [string, string][] = [
   [
     "How is this different from ChatGPT or Claude?",
-    "Use ChatGPT for questions. Use zWork for the jobs you do every week. It works on the files already on your computer, so nothing gets uploaded, gives you back a real Excel or Word file, runs the job on a schedule and asks before it sends or deletes anything. It costs $12 instead of $20, and it's free if you bring your own AI key.",
+    "Use ChatGPT for questions. Use zWork for the jobs you do every week. It works on the files already on your computer, so there's nothing to upload, gives you back a real Excel or Word file, runs the job on a schedule and asks before it sends or deletes anything. It costs $12 instead of $20, and it's free if you bring your own AI key.",
   ],
   [
     "Is it really free?",

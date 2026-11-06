@@ -30,9 +30,9 @@ specific job* better and charges less for it.
 
 These are the things that are true today and hard for the big companies to copy.
 
-1. **Price.** At $12, zWork Pro is the cheapest real agent from a Western company. ChatGPT's
-   $8 Go plan has no agent, and every comparable agent starts at $20. zWork is also free with
-   your own key or a local model. We can sustain $12 because we don't depend on one lab: cheap
+1. **Price.** $12 is a fair price, not the lowest one. ChatGPT Work has had a limited free
+   desktop tier since October 2026, so never say "cheapest". zWork is also free with your own
+   key or a local model. We can sustain $12 because we don't depend on one lab: cheap
    open models do most steps. OpenAI and Anthropic cannot route their agents through somebody
    else's cheaper model.
 2. **Your computer, your files, your model.** Work happens in your folders, with no file
@@ -87,7 +87,7 @@ than recurring, and they churn every semester.
 ## One-sentence positioning
 
 > **zWork does your weekly paperwork on your own computer, in real Excel and Word files, and
-> asks before anything leaves. $12 a month, less than any other AI agent.**
+> asks before it sends or changes anything. $12 a month.**
 
 The short version for the hero: **"Your weekly paperwork, done."**
 
@@ -96,11 +96,12 @@ The short version for the hero: **"Your weekly paperwork, done."**
 Use this in the FAQ, sales replies and anything else that gets asked:
 
 > Use ChatGPT for questions. Use zWork for the jobs you do every week. It works on the files
-> already on your computer, so nothing gets uploaded, and it gives you back a real Excel or Word
+> already on your computer, so there's nothing to upload, and it gives you back a real Excel or Word
 > file. It can do the job on a schedule and asks before it sends or deletes anything. It costs
 > $12 instead of $20, and it's free if you bring your own AI key.
 
-Don't claim that zWork is smarter, that it is the only one that "does things", or that the others
+Don't say "nothing leaves your computer" either: the parts the AI reads go to the AI company
+doing the work, unless the person runs a local model. Don't claim that zWork is smarter, that it is the only one that "does things", or that the others
 are chatbots. Those claims were true in 2025. They are false now, and a buyer who has seen
 Cowork will stop reading.
 
