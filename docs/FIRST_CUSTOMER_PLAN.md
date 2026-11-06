@@ -1,9 +1,10 @@
 # Getting the first paying customer
 
 Written 2026-11-06. The goal is one stranger-to-the-code person paying $12 a month because zWork
-did a real job for them. Nothing can promise that. What this plan does is remove the reasons a
-first sale fails: the person never hears of zWork, can't install it, doesn't see it work on their
-own files, or is never asked to pay.
+did a real job for them. Nobody can promise that a given person will pay, but one sale can be made
+very likely by doing two things. Show each person the finished result before they install or pay
+anything, and keep going until someone pays instead of stopping after one round. "The numbers" has
+the odds. They only hold if the job works on real files and the asks actually go out.
 
 Most of it is done by a person, not by the product. That's the point. A founder sitting with
 someone for twenty minutes beats every landing page, and zWork's weakest moments (the unsigned
@@ -33,6 +34,22 @@ installer, the first job) are exactly the ones a person can walk someone through
   Promo codes already work at checkout if one is ever needed.
 - **The refund is a personal promise, made by you, by hand in Stripe.** `legal/TERMS.md` says fees
   are non-refundable, so don't put this on the website until you decide to change that sentence.
+
+## Show the result first
+
+Don't start with an install. Ask for five old invoices, run the job yourself in zWork, and send
+back the finished spreadsheet, ideally the same day. That removes the installer warnings, shows the
+value before anyone commits, and can start today, before the release.
+
+- Tell them first: their files will be on your computer, and the parts the AI reads go to the AI
+  company. Offer a local model if that's a problem. Ask for old or redacted invoices, and delete
+  them when you're done.
+- Read every line of the spreadsheet before you send it. Your first impression is that file.
+- Then book the call: "Want this to happen by itself every month?" The call covers installing and
+  scheduling, so the person already knows it works.
+- **If they say "can you just do it for me?", sell that.** Take $49 through a Stripe payment link
+  for setting it up, then move them to Pro. Do it by hand for the first few people. Money from a
+  stranger for this work is a real sale, and it tells you more than a free trial does.
 
 ## Who to ask
 
@@ -155,6 +172,20 @@ So 30 real asks should give one or two sales. Send ten a day and hold calls in t
 Log every ask, reply, call and result in the private sheet. Track the hours they said the job
 took, and whether they saved a schedule.
 
+**Don't stop at 30. Keep going until someone pays.** One round of 5 calls can easily miss. The
+chance of at least one sale grows quickly with the number of calls:
+
+| Calls held | If 1 in 10 pays | If 1 in 5 pays | If 3 in 10 pay | Asks needed, at 1 call per 6 asks |
+|---|---|---|---|---|
+| 5 | 41% | 67% | 83% | 30 |
+| 12 | 72% | 93% | 99% | 72 |
+| 20 | 88% | 99% | 99.9% | 120 |
+| 30 | 96% | 99.9% | 99.99% | 180 |
+
+The rates are guesses and the math treats each call as independent, so read this as direction, not
+a promise. Commit to 20 calls in four weeks. At ten asks a day that's about 120 asks, more than most
+people have in their contacts, so introductions and groups 3 and 4 have to supply the rest.
+
 ## When to change course
 
 Decide with evidence, not mood.
@@ -164,8 +195,10 @@ Decide with evidence, not mood.
 - **Calls happen but the job fails:** stop outreach and fix the product. This is the only result
   that sends you back to code.
 - **The job works but nobody pays after 5 calls:** ask each of them what it's worth. If they say
-  free is enough, Pro's limits or the offer are wrong. A $49 "I set it up for you" one-time fee is
-  the next thing to try.
+  free is enough, Pro's limits or the offer are wrong. Change the offer and keep going, since 5
+  calls is still a small sample. Offer the $49 setup on every call from then on.
+- **No sale after 20 calls where the job worked:** the audience or the job is wrong, not your luck.
+  Stop, read your notes on what people said, and pick a different job or kind of person.
 - **It works and one pays:** get them through the first month. Ask for an introduction, then
   repeat with that person's friends. Stick to whichever job sold.
 
