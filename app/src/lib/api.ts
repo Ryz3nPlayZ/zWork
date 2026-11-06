@@ -667,6 +667,9 @@ export const api = {
     }).then((r) => j<{ ok: boolean }>(r)),
 
   // --- Scheduled Tasks ---
+  getLaunchAtLogin: () => (IS_TAURI ? invoke<boolean>("get_launch_at_login") : Promise.resolve(false)),
+  setLaunchAtLogin: (enabled: boolean) =>
+    IS_TAURI ? invoke("set_launch_at_login", { enabled }) : Promise.resolve(),
   listSchedules: () =>
     localFetch("/api/schedules").then((r) => j<{ tasks: ScheduledTask[] }>(r)),
 

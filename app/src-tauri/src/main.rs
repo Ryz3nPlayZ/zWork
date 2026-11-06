@@ -13,6 +13,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::{Manager, RunEvent, WindowEvent};
 use tauri::tray::{TrayIconBuilder, MouseButton, MouseButtonState, TrayIconEvent};
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt as AutostartExt};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri_plugin_process::init as process_init;
@@ -327,6 +328,8 @@ fn kill_stale_on_port(port: u16) {
 
 /// Spawn a backend without cleaning the port. Used during normal operation
 /// where the previous child is shut down via its PID before calling this.
+const AT_LOGIN_ARG: &str = "--at-login";
+
 fn spawn_backend(app: &tauri::AppHandle) -> Option<BackendChild> {
     // Remove stale PID lock so the new backend won't refuse to start.
     // This handles the case where a previous backend was killed (SIGKILL,
@@ -576,6 +579,17 @@ fn request_screen_capture() -> bool {
     {
         false
     }
+}
+
+#[tauri::command]
+fn get_launch_at_login(app: tauri::AppHandle) -> bool {
+    app.autolaunch().is_enabled().unwrap_or(false)
+}
+
+#[tauri::command]
+fn set_launch_at_login(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let auto = app.autolaunch();
+    if enabled { auto.enable() } else { auto.disable() }.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1148,6 +1162,7 @@ fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(process_init())
+        .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![AT_LOGIN_ARG])))
         .plugin(UpdaterBuilder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app: &tauri::AppHandle, shortcut, event| {
             use tauri_plugin_global_shortcut::ShortcutState;
@@ -1178,9 +1193,19 @@ fn main() {
             request_screen_capture,
             register_overlay_shortcut,
             get_overlay_shortcut,
-            get_sidecar_token
+            get_sidecar_token,
+            get_launch_at_login,
+            set_launch_at_login
         ])
         .setup(|app| {
+            // shortcut: the window can flash before this hide; start it hidden if anyone notices.
+            // Started by login: stay in the tray and just run schedules.
+            if std::env::args().any(|a| a == AT_LOGIN_ARG) {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.hide();
+                }
+            }
+
             use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 
             // Check for user-configured shortcut in localStorage first

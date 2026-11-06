@@ -3,7 +3,8 @@
 import { useState, useEffect } from "react";
 import { Clock, Plus, Play, Trash2, Pencil, CalendarDays, Repeat, ArrowRight, Loader2 } from "lucide-react";
 import { useApp } from "../../lib/store";
-import type { ScheduledTask } from "../../lib/api";
+import { api, type ScheduledTask } from "../../lib/api";
+import { IS_TAURI } from "../../lib/platform";
 import {
   Button,
   EmptyState,
@@ -72,10 +73,17 @@ export function ScheduledTasksPage() {
   const [running, setRunning] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "active" | "paused">("all");
   const [confirmDialog, confirm] = useConfirm();
+  const [openAtLogin, setOpenAtLogin] = useState(false);
 
   useEffect(() => {
-    void fetchSchedules();
+    void fetchSchedules().then(() => api.getLaunchAtLogin()).then(setOpenAtLogin);
   }, [fetchSchedules]);
+
+  const toggleOpenAtLogin = () => {
+    const next = !openAtLogin;
+    setOpenAtLogin(next);
+    void api.setLaunchAtLogin(next).catch(() => setOpenAtLogin(!next));
+  };
 
   const activeCount = scheduledTasks.filter((t) => t.enabled).length;
   const pausedCount = scheduledTasks.length - activeCount;
@@ -219,6 +227,13 @@ export function ScheduledTasksPage() {
             );
           })}
         </ListGroup>
+      )}
+
+      {IS_TAURI && scheduledTasks.length > 0 && (
+        <div className="mt-4 flex items-center justify-between gap-4 px-1 text-[13px] text-ink-muted">
+          <span>Open zWork when you log in. Schedules only run while zWork is open and your computer is awake.</span>
+          <Switch checked={openAtLogin} onChange={toggleOpenAtLogin} label="Open zWork when you log in" />
+        </div>
       )}
 
       {modalOpen && <ScheduleModal task={editingTask} onClose={() => setModalOpen(false)} />}

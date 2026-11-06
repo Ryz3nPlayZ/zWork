@@ -26,6 +26,8 @@ uuid = { version = "1", features = ["v4"] }
 # PNG -> base64 data_url for Share Window screenshots (matches the frontend's
 # existing { data_url, mime } contract from the cua-driver path).
 base64 = "0.22"
+# shortcut: pinned because 2.7 forces a Tauri and wry upgrade; unpin with the next Tauri bump.
+tauri-plugin-autostart = "=2.5.1"
 
 [features]
 default = ["custom-protocol"]

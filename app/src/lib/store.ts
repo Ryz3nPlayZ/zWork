@@ -62,6 +62,7 @@ async function upsertHostedModels() {
   }
 }
 const ONBOARDING_DONE_KEY = "zwork:onboarding-completed";
+const LOGIN_START_KEY = "zwork:login-start-set";
 const SECURITY_PRESET_KEY = "zwork:security-preset";
 export type SecurityPreset = "ask" | "edit" | "plan" | "full";
 
@@ -1455,6 +1456,12 @@ export const useApp = create<AppState>((set, get) => ({
     try {
       const { tasks } = await api.listSchedules();
       set({ scheduledTasks: tasks });
+      // A schedule can't run if zWork isn't open, so the first one turns on
+      // open-at-login, once. The switch on the Scheduled page turns it off for good.
+      if (tasks.length > 0 && !localStorage.getItem(LOGIN_START_KEY)) {
+        localStorage.setItem(LOGIN_START_KEY, "1");
+        await api.setLaunchAtLogin(true);
+      }
     } catch (e) { console.warn("fetchSchedules failed:", e); }
   },
 
@@ -3007,6 +3014,7 @@ export const useApp = create<AppState>((set, get) => ({
           } else if (evt.type === "heartbeat") {
             return;
           } else if (evt.type === "done" || evt.type === "end") {
+            void get().fetchSchedules(); // the run may have saved a schedule
             set((s) => {
               const c = s.chats[localId];
               if (!c) return s;
