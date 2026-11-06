@@ -175,6 +175,30 @@ fn redirect_overwrites_outside(cmd: &str, cwd: Option<&str>) -> bool {
     false
 }
 
+/// Tools a paperwork run has no use for. Every schema is sent on every model
+/// call, which costs money and makes cheap models pick worse.
+pub fn is_specialist_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "search_papers" | "format_citation" | "write_research_paper" | "review_paper" | "check_novelty"
+            | "get_stock_data" | "detect_hardware" | "deploy_web_app" | "send_telegram_message"
+            // Duplicates of ask_user and of the permission gate.
+            | "ask_question" | "ask_user_for_permission"
+    )
+}
+
+/// Whether this message is about the work those tools are for.
+/// shortcut: keyword match on the latest message, so "now do the same again"
+/// loses them; replace with an opt-in setting if people hit that.
+pub fn wants_specialist_tools(message: &str) -> bool {
+    const WORDS: &[&str] = &[
+        "research paper", "citation", "cite ", "literature", "academic", "journal article", "thesis",
+        "stock price", "ticker", "telegram", "deploy", "website", "web app", "landing page",
+    ];
+    let message = message.to_lowercase();
+    WORDS.iter().any(|w| message.contains(w))
+}
+
 pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
     let mut schemas = vec![
         json!({

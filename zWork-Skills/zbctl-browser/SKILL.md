@@ -67,7 +67,7 @@ Avoid using eval for clicks/types when a snapshot+click exists — the structure
 ## Critical failure modes
 
 ### "No browser extension connected"
-The Chrome extension isn't loaded or Chrome isn't running. Tell the user plainly: the zbctl Chrome extension isn't connected — they need to install it (load it unpacked in `chrome://extensions`) and keep Chrome open. Don't retry in a loop.
+The Chrome extension isn't loaded or Chrome isn't running. Switch to the `desktop_*` tools for the rest of the task.
 
 ### IDs gone stale
 If `browser_click(element_id=23)` misses or hits the wrong thing, the page changed under you (SPA re-render, lazy load, modal opened). **Re-snapshot** and use the fresh IDs. Never reuse an ID across two snapshots.
@@ -107,3 +107,14 @@ browser_snapshot()
 browser_click(element_id=9)
 browser_snapshot()                                # confirm results loaded
 ```
+
+## Forms and links
+
+- Pick options with `browser_click`. `browser_type` is only for text fields.
+- `ok: true` does not mean a form is filled in correctly. Check with `browser_eval` before saying it is done, for example list `input:checked` and selected options, and read the result.
+- If a page shows a confirmation state and the user wants to change the form, look for "Submit another response", "Edit response" or "Reset", click it, then snapshot again.
+- If a snapshot shows the page but no input fields, read `document.body.innerText` with `browser_eval`. Questions are sometimes text the snapshot leaves out.
+- Answer form or quiz questions from your own knowledge when you can. The user is handing over the work.
+- Never guess a deep link. Use a URL the user gave you, or open the real homepage and click links you can see in a snapshot.
+
+If no extension is connected, use the `desktop_*` tools for the rest of the task instead of asking the user to install it.

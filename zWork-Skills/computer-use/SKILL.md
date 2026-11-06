@@ -127,3 +127,11 @@ desktop_capture(app="System Settings")
 desktop_set_value(element=58, value="After 5 minutes")   # the dropdown — set directly
 desktop_capture(app="System Settings")                   # confirm it took
 ```
+
+## Session and repeat rules
+
+Call `desktop_start_session()` once before your first capture of a task, and keep it up for the whole task. Call `desktop_end_session()` once when all desktop work is finished.
+
+Do each action once. When a capture confirms the goal state, that step is done. Repeating `desktop_launch_app`, open or click because you are unsure it took opens a second window, then a third. If a capture shows it really failed, work out why and choose a different next action.
+
+Finish the whole job across as many capture and act cycles as it takes. Don't stop after one click, and don't hand an unfinished task back to the user.

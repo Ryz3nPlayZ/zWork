@@ -1694,11 +1694,11 @@ pub fn run_agent_turn(
         let user_name = crate::server::display_name();
         let os_name = std::env::consts::OS.to_string();
         let cwd = std::env::current_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| ".".to_string());
-        let skills_list = crate::skills::format_for_system_prompt();
+        let include_academic = crate::tools::wants_specialist_tools(&user_message);
+        let skills_list = crate::skills::format_for_system_prompt(include_academic);
         let skills = crate::skills::list_skills();
         let example_slug = skills.first().map(|s| s.slug.as_str()).unwrap_or("frontend-design");
         let include_desktop = crate::cua::driver_available();
-        let include_academic = true;
 
         let composio_schemas = crate::connectors::composio::all_tool_schemas().await;
         let composio_apps = crate::connectors::composio::connected_apps().await;
@@ -1817,6 +1817,7 @@ pub fn run_agent_turn(
 
         // ── Tools ───────────────────────────────────────────────────────
         let mut schemas = get_tool_schemas(plan_mode);
+        schemas.retain(|s| include_academic || !crate::tools::is_specialist_tool(s["name"].as_str().unwrap_or("")));
         schemas.extend(composio_schemas);
         let mut tools: Vec<DynTool> = schemas
             .iter()

@@ -102,8 +102,18 @@ pub fn invoke(slug: &str, instructions: Option<&str>) -> Option<String> {
     Some(format_skill_invocation(&skill, body.trim(), instructions))
 }
 
-pub fn format_for_system_prompt() -> String {
-    let skills = list_skills();
+/// Skills for building software or art. They still load by name; they just
+/// don't ride on every paperwork run.
+const SPECIALIST_SKILLS: &[&str] = &[
+    "academic-research", "algorithmic-art", "brand-guidelines", "claude-api", "frontend-design", "mcp-builder", "skill-creator",
+    "slack-gif-creator", "theme-factory", "ui-ux-pro-max", "web-artifacts-builder", "webapp-testing",
+];
+
+pub fn format_for_system_prompt(include_specialist: bool) -> String {
+    let skills: Vec<SkillMeta> = list_skills()
+        .into_iter()
+        .filter(|s| include_specialist || !SPECIALIST_SKILLS.contains(&s.slug.as_str()))
+        .collect();
     if skills.is_empty() {
         return "(none installed)".to_string();
     }
