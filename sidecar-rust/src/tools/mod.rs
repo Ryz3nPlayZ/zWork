@@ -714,6 +714,22 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
 }
 
 // Global dispatcher yielding SSE events via a channel stream
+/// Formula errors in the workbooks a post is about, so a broken sheet never
+/// reaches the user. A check that can't run must not block the report.
+async fn spreadsheet_errors(params: &Value) -> Option<String> {
+    let script = crate::paths::skills_dir().join("anthropic-skills/xlsx/scripts/recalc.py");
+    let files = params.get("files")?.as_array()?;
+    let mut problems = Vec::new();
+    for file in files.iter().filter_map(|f| f.as_str()).filter(|f| f.to_lowercase().ends_with(".xlsx")) {
+        let Ok(output) = crate::runtime::python().arg(&script).arg(file).output().await else { continue };
+        let Ok(report) = serde_json::from_slice::<Value>(&output.stdout) else { continue };
+        if report["status"] == "errors_found" {
+            problems.push(format!("{file}: {}", report["error_summary"]));
+        }
+    }
+    (!problems.is_empty()).then(|| problems.join("\n"))
+}
+
 pub fn execute_tool(
     name: &str,
     params: Value,
@@ -1120,8 +1136,11 @@ pub fn execute_tool(
             "post_to_inbox" => {
                 let title = params.get("title").and_then(|v| v.as_str()).unwrap_or("");
                 let body = params.get("body").and_then(|v| v.as_str()).unwrap_or("");
+                let broken = spreadsheet_errors(&params).await;
                 if title.is_empty() {
                     Err("title is required".to_string())
+                } else if let Some(problems) = broken {
+                    Err(format!("Not posted: fix these formula errors first, then post again.\n{problems}"))
                 } else {
                     let kind = params
                         .get("kind")

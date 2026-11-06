@@ -4,6 +4,8 @@ description: "Use this skill whenever the user wants to create, read, edit, or m
 license: Proprietary. LICENSE.txt has complete terms
 ---
 
+> **In zWork:** the `scripts/` helpers and LibreOffice mentioned below are not included. Use python-docx directly, then reopen the file with it to confirm the content is there. Skip the steps that need them, and tell the user if a step can't be done, such as converting a legacy format.
+
 # DOCX creation, editing, and analysis
 
 ## Overview

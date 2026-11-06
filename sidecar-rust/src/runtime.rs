@@ -29,6 +29,7 @@ const PYTHON_PACKAGES: &[&str] = &[
     "pdfplumber",
     "reportlab",
     "pandas",
+    "formulas",
     "matplotlib",
     "xlsxwriter",
     "markdown",
@@ -38,7 +39,7 @@ const PYTHON_PACKAGES: &[&str] = &[
 ];
 const NODE_CHANNEL: &str = "latest-v22.x";
 /// Bumped when the package set changes so existing installs top up.
-const LAYOUT_VERSION: u32 = 1;
+const LAYOUT_VERSION: u32 = 2;
 
 pub fn dir() -> PathBuf {
     crate::paths::home_dir().join("runtime")
