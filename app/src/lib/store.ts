@@ -42,11 +42,11 @@ const LEGACY_MANAGED_MODEL_IDS = new Set([
 const ROUTER_BASE_URL = "https://api.tryzwork.app/api";
 /**
  * The hosted lineup: zWork picks the model for each task itself (cheap by
- * default, stronger when the task needs it); ?????? is the strongest model.
+ * default, stronger when the task needs it); Apex is the strongest model.
  */
 const HOSTED_MODELS = [
   { id: "zwork-auto", name: "zWork" },
-  { id: "zwork-apex", name: "??????" },
+  { id: "zwork-apex", name: "Apex" },
 ] as const;
 
 async function upsertHostedModels() {
@@ -945,6 +945,8 @@ interface AppState {
   /** Composer draft pushed from the store (Stop returning unconsumed queued
    *  messages back to the composer). ChatInput consumes + clears it. */
   draftInject: { chatId: string; text: string; nonce: number } | null;
+  /** First job picked in onboarding; the home screen puts it in the composer once. */
+  starterDraft: string;
   clearDraftInject: () => void;
 
   saveSettings: (patch: Partial<SettingsPublic> & { api_keys?: Record<string, string> }) => Promise<void>;
@@ -1126,6 +1128,7 @@ export const useApp = create<AppState>((set, get) => ({
   activeChatId: null,
   _abort: null,
   draftInject: null,
+  starterDraft: "",
   clearDraftInject: () => set({ draftInject: null }),
 
   artifacts: [],
@@ -1541,7 +1544,7 @@ export const useApp = create<AppState>((set, get) => ({
       // Mark onboarding done in web (no local sidecar)
       rememberOnboardingDone(true);
 
-      // The web app runs the auto router only; ?????? needs the desktop app.
+      // The web app runs the auto router only; Apex needs the desktop app.
       const webProviders: ProvidersResponse = {
         credentials: {},
         default_model: "zwork-auto",

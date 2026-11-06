@@ -281,7 +281,7 @@ function sleep(ms: number) {
 /**
  * Map a model id the router echoes (a tier alias, or an upstream id from an
  * older router) to the user-facing tier id, so upstream providers are never
- * shown. Sol is ??????; every other id is the auto router.
+ * shown. Sol is Apex; every other id is the auto router.
  */
 export function whitelabelModelName(upstreamId: string | null | undefined): string | undefined {
   if (!upstreamId) return undefined;
@@ -1356,7 +1356,7 @@ async function streamChatWeb(
     : "";
 
   // The web app is a plain chat on the auto router: no tools, so it stays on
-  // the cheap model, and no ?????? (that needs the desktop app).
+  // the cheap model, and no Apex (that needs the desktop app).
   const friendlyModel = "zwork-auto";
 
   const headers: Record<string, string> = {

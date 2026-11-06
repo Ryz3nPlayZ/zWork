@@ -193,7 +193,7 @@ export function ModelPicker() {
           <div className="border-t border-line pt-1">
             {IS_WEB ? (
               <div className="px-2.5 py-2 text-[11.5px] text-ink-muted">
-                ?????? and custom models are in the desktop app.
+                Apex and custom models are in the desktop app.
               </div>
             ) : (
               <button

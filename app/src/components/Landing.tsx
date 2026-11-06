@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Download, ArrowUpRight, Loader2 } from "lucide-react";
 import { ChatInput } from "./ChatInput";
 import { useApp } from "../lib/store";
@@ -6,6 +6,7 @@ import { useResolvedTheme } from "../lib/theme";
 import { needsLightweightRendering } from "../lib/platform";
 import { isDemoMode } from "../lib/preview";
 import { cn } from "../lib/cn";
+import { CHORES } from "../lib/chores";
 import type { UpdateCardState, UpdateProgress } from "../lib/update";
 import LightRays from "./LightRays";
 
@@ -91,7 +92,8 @@ export function Landing({
   const me = useApp((s) => s.me);
   const firstName = (me?.name?.split(/\s+/)[0] || "friend").trim();
   const [sending, setSending] = useState(false);
-  const [inputValue, setInputValue] = useState("");
+  const [inputValue, setInputValue] = useState(() => useApp.getState().starterDraft);
+  useEffect(() => useApp.setState({ starterDraft: "" }), []);
   const theme = useResolvedTheme();
   const greeting = useMemo(() => pickGreeting(), []);
   const updateBusy = updateProgress.phase !== "idle" && updateProgress.phase !== "error";
@@ -152,7 +154,7 @@ export function Landing({
           >
             <ChatInput
               autoFocus
-              placeholder="What can I help with?"
+              placeholder="What paperwork can I take off your plate?"
               value={inputValue}
               onChange={setInputValue}
               onSend={() => {
@@ -161,6 +163,21 @@ export function Landing({
               }}
             />
           </div>
+
+          {!isDemoMode() && !inputValue && (
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              {CHORES.map((chore) => (
+                <button
+                  key={chore.id}
+                  type="button"
+                  onClick={() => setInputValue(chore.prompt)}
+                  className="press rounded-full border border-line bg-paper-raised px-3 py-1.5 text-[13px] text-ink-soft transition-colors hover:border-line-strong hover:text-ink"
+                >
+                  {chore.label}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Public web demo only: prompt visitors toward the full desktop app. */}
           {isDemoMode() && (

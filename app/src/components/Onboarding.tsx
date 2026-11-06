@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRight, ArrowLeft, Check, ChevronDown, Sparkles } from "lucide-react";
+import { ArrowRight, ArrowLeft, Check } from "lucide-react";
 import { Logo } from "./Logo";
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
@@ -8,10 +8,9 @@ import { recordTelemetry } from "../lib/telemetry";
 import { useResolvedTheme } from "../lib/theme";
 import { needsLightweightRendering } from "../lib/platform";
 import { api, type OnboardingAnswer, type OnboardingCredential } from "../lib/api";
+import { CHORES } from "../lib/chores";
 import LightRays from "./LightRays";
 import { EarlyScreenChrome } from "./TitleBar";
-
-const ZWORK_ROUTER_TARGET_MODEL_ID = "zwork-auto";
 
 /* ------------------------------------------------------------------ *
  *  Question model
@@ -23,7 +22,6 @@ type CommonQ = {
   eyebrow?: string;
   /** Short tagline shown beneath the question for context. */
   subtitle?: string;
-  optional?: boolean;
 };
 
 type TextQuestion = CommonQ & {
@@ -39,12 +37,9 @@ type ChoiceQuestion = CommonQ & {
   hint?: string;
 };
 
-type ApiKeyQuestion = CommonQ & {
-  kind: "apikey";
-  question: string;
-};
+type Question = TextQuestion | ChoiceQuestion;
 
-type Question = TextQuestion | ChoiceQuestion | ApiKeyQuestion;
+const SOMETHING_ELSE = "Something else";
 
 const QUESTIONS: Question[] = [
   {
@@ -52,265 +47,17 @@ const QUESTIONS: Question[] = [
     key: "name",
     eyebrow: "Say hi",
     question: "First, what should we call you?",
-    subtitle: "Just your first name — it's how zWork will greet you.",
     placeholder: "Your first name",
   },
   {
     kind: "choice",
-    key: "profession",
-    eyebrow: "About you",
-    question: "What do you spend most of your day on?",
-    subtitle: "This helps tune the examples and phrasing we reach for.",
-    options: [
-      "Student",
-      "Founder",
-      "Engineer",
-      "Designer",
-      "Product / PM",
-      "Researcher",
-      "Creator",
-      "Something else",
-    ],
-  },
-  {
-    kind: "choice",
-    key: "age_range",
-    eyebrow: "About you",
-    question: "Roughly, what's your age range?",
-    subtitle: "Optional — helps us pick cultural references that land.",
-    options: ["Under 18", "18–24", "25–34", "35–44", "45–54", "55+", "Prefer not to say"],
-  },
-  {
-    kind: "choice",
-    key: "industry",
-    eyebrow: "About you",
-    question: "Which industry are you closest to?",
-    subtitle: "Pick whichever feels most like your day-to-day.",
-    options: [
-      "Software / AI",
-      "Finance",
-      "Healthcare",
-      "Education",
-      "Design / Creative",
-      "Science / Research",
-      "Other",
-    ],
-  },
-  {
-    kind: "choice",
-    key: "ai_usage",
-    eyebrow: "Habits",
-    question: "How often do you already reach for AI?",
-    subtitle: "No wrong answers — this sets our default depth of guidance.",
-    options: [
-      "Daily power user",
-      "Several times a week",
-      "Occasionally",
-      "Just getting started",
-    ],
-  },
-  {
-    kind: "choice",
-    key: "decisions",
-    eyebrow: "Working style",
-    question: "When zWork is doing work for you, you'd rather…",
-    subtitle: "Affects how often we pause to check in mid-task.",
-    options: [
-      "Walk me through decisions briefly",
-      "Just give me the answer — pick and go",
-      "Balanced — explain when it matters",
-    ],
-  },
-  {
-    kind: "choice",
-    key: "organization",
-    eyebrow: "Working style",
-    question: "How do you keep track of work?",
-    subtitle: "We'll mirror your organizational style in follow-ups.",
-    options: [
-      "Chaos mode — it's all in my head",
-      "Todo lists",
-      "Calendar-driven",
-      "All of the above",
-    ],
-  },
-  {
-    kind: "choice",
-    key: "vibe",
-    eyebrow: "Voice",
-    question: "Pick a vibe for our conversations.",
-    subtitle: "You can change this anytime in Settings → Personalization.",
-    options: [
-      "Casual & friendly",
-      "Professional & focused",
-      "Direct & minimal",
-    ],
-  },
-  {
-    kind: "choice",
-    key: "verbosity",
-    eyebrow: "Voice",
-    question: "How long should replies usually run?",
-    subtitle: "We'll lean into this unless you ask for more or less.",
-    options: ["Short & punchy", "Balanced", "Thorough & detailed"],
-  },
-  {
-    kind: "choice",
-    key: "goal",
-    eyebrow: "North star",
-    question: "What's the long game for you right now?",
-    subtitle: "We'll connect small tasks back to this whenever it helps.",
-    options: [
-      "Launch a startup",
-      "Graduate / learn deeply",
-      "Level up at my job",
-      "Build a creative practice",
-      "Research / discovery",
-      "Still figuring it out",
-    ],
-  },
-  {
-    kind: "apikey",
-    key: "credential",
-    eyebrow: "Almost there",
-    question: "Connect a model to start chatting.",
-    subtitle: "Bring your own key for private local use, or switch to managed hosted routing after sign-in.",
+    key: "first_job",
+    eyebrow: "Your first job",
+    question: "What paperwork keeps coming back?",
+    subtitle: "Pick one to start with. zWork sets it up with you, and you check the result.",
+    options: [...CHORES.map((c) => c.label), SOMETHING_ELSE],
   },
 ];
-
-/* ------------------------------------------------------------------ *
- *  Credential presets
- * ------------------------------------------------------------------ */
-
-interface CredentialPreset {
-  id: "zwork_managed" | "claude_code" | "openai" | "anthropic";
-  label: string;
-  subtitle: string;
-  shape: "anthropic" | "openai";
-  credential: "anthropic" | "openai" | "claude_code" | "zwork_router";
-  defaultBaseUrl: string;
-  defaultModelId: string;
-  keyless?: boolean;
-  managed?: boolean;
-  recommended?: boolean;
-}
-
-const PRESETS: CredentialPreset[] = [
-  {
-    id: "zwork_managed",
-    label: "zWork",
-    subtitle: "Use the hosted zWork router, which picks the right model for each task",
-    shape: "anthropic",
-    credential: "zwork_router",
-    defaultBaseUrl: "https://api.tryzwork.app/api",
-    defaultModelId: ZWORK_ROUTER_TARGET_MODEL_ID,
-    keyless: true,
-    managed: true,
-    recommended: true,
-  },
-  {
-    id: "claude_code",
-    label: "Local credentials",
-    subtitle: "Reuse your installed local credentials",
-    shape: "anthropic",
-    credential: "claude_code",
-    defaultBaseUrl: "",
-    defaultModelId: "",
-    keyless: true,
-  },
-  {
-    id: "openai",
-    label: "OpenAI",
-    subtitle: "Or any OpenAI-compatible endpoint",
-    shape: "openai",
-    credential: "openai",
-    defaultBaseUrl: "https://api.openai.com/v1",
-    defaultModelId: "gpt-4o-mini",
-  },
-  {
-    id: "anthropic",
-    label: "Anthropic",
-    subtitle: "Direct Anthropic API key",
-    shape: "anthropic",
-    credential: "anthropic",
-    defaultBaseUrl: "https://api.anthropic.com",
-    defaultModelId: "claude-3-5-sonnet-latest",
-  },
-];
-
-/* ------------------------------------------------------------------ *
- *  Curated model catalog per preset — keeps the picker friendly for
- *  non-technical users. A `CUSTOM` sentinel lets power-users type any
- *  model ID they want.
- * ------------------------------------------------------------------ */
-
-export interface ModelChoice {
-  id: string;
-  label: string;
-  description: string;
-  /** Short cost blurb. "Free tier" / "~$X / 1M in" etc. */
-  cost: string;
-}
-
-export const MODEL_CATALOG: Record<CredentialPreset["id"], ModelChoice[]> = {
-  zwork_managed: [
-    {
-      id: "zwork-auto",
-      label: "zWork",
-      description: "Picks the right model for each task.",
-      cost: "Managed by zWork",
-    },
-    {
-      id: "zwork-apex",
-      label: "??????",
-      description: "Smartest. Pro plan.",
-      cost: "Managed by zWork",
-    },
-  ],
-  openai: [
-    {
-      id: "gpt-4o-mini",
-      label: "GPT-4o mini",
-      description: "Cheap and fast. Great default for everyday use.",
-      cost: "~$0.15 / $0.60 per 1M tokens (in / out)",
-    },
-    {
-      id: "gpt-4o",
-      label: "GPT-4o",
-      description: "Flagship quality — best for hard problems.",
-      cost: "~$2.50 / $10 per 1M tokens (in / out)",
-    },
-    {
-      id: "gpt-4.1",
-      label: "GPT-4.1",
-      description: "Newer generation — improved reasoning at lower cost.",
-      cost: "~$2 / $8 per 1M tokens (in / out)",
-    },
-  ],
-  anthropic: [
-    {
-      id: "claude-3-5-haiku-latest",
-      label: "Claude 3.5 Haiku",
-      description: "Fast and affordable — great for quick tasks.",
-      cost: "~$0.80 / $4 per 1M tokens (in / out)",
-    },
-    {
-      id: "claude-3-5-sonnet-latest",
-      label: "Claude 3.5 Sonnet",
-      description: "Best balance of quality and cost. Recommended.",
-      cost: "~$3 / $15 per 1M tokens (in / out)",
-    },
-    {
-      id: "claude-opus-4-latest",
-      label: "Claude Opus 4",
-      description: "Top-tier reasoning — pick this for complex work.",
-      cost: "~$15 / $75 per 1M tokens (in / out)",
-    },
-  ],
-  claude_code: [],
-};
-
-const CUSTOM_MODEL_SENTINEL = "__custom__";
 
 /* ------------------------------------------------------------------ *
  *  Root component
@@ -327,7 +74,6 @@ export function Onboarding() {
   const [answers, setAnswers] = useState<Record<string, string>>(() => ({
     name: me?.name?.split(/\s+/)[0] || "",
   }));
-  const [credential, setCredential] = useState<OnboardingCredential | null>(null);
   const [error, setError] = useState("");
 
   // Final "Personalizing..." phase
@@ -340,13 +86,7 @@ export function Onboarding() {
   const setAnswer = (key: string, answer: string) =>
     setAnswers((a) => ({ ...a, [key]: answer }));
 
-  const canAdvance = () => {
-    if (q.kind === "apikey") return credential !== null;
-    return true; // all questions are skippable
-  };
-
   const next = () => {
-    if (!canAdvance()) return;
     if (step < total - 1) setStep(step + 1);
     else complete();
   };
@@ -354,33 +94,43 @@ export function Onboarding() {
     if (step > 0) setStep(step - 1);
   };
 
-  const skip = () => {
-    if (q.optional) setStep((s) => Math.min(s + 1, total - 1));
-  };
-
   const complete = async () => {
     if (finalizing) return;
     setError("");
     setFinalizing(true);
-    const payload: OnboardingAnswer[] = QUESTIONS.filter(
-      (qq) => qq.kind !== "apikey",
-    ).map((qq) => ({
+    const payload: OnboardingAnswer[] = QUESTIONS.map((qq) => ({
       key: qq.key,
       question: qq.question,
       answer: answers[qq.key] || "",
     }));
+    // Sign-in is required on desktop and Free includes hosted models, so nobody
+    // needs a key to start. Their own key is in Settings.
+    const token = (window.localStorage.getItem("zwork:cloud-token") || "").trim();
+    const credential: OnboardingCredential | undefined = token
+      ? {
+          shape: "anthropic",
+          credential: "zwork_router",
+          api_key: token,
+          base_url: "https://api.tryzwork.app/api",
+          model_id: "zwork-auto",
+          model_name: "zwork-auto · zWork",
+        }
+      : undefined;
+    const chore = CHORES.find((c) => c.label === answers.first_job);
     try {
       await api.waitForBackend();
       await api.onboardComplete({
         answers: payload,
-        credential: credential || undefined,
+        credential,
         telemetry_enabled: true,
       });
       await Promise.all([refreshProviders(), refreshSettings(), refreshMe()]);
       recordTelemetry("onboarding_completed", {
         credential: credential?.credential || "",
         model_id: credential?.model_id || "",
+        first_job: chore?.id || "",
       });
+      useApp.setState({ starterDraft: chore?.prompt || "" });
       setDone(true);
       // Small delay so the "Setting things up…" message has breathing room.
       setTimeout(() => setOnboardingDone(true), 900);
@@ -392,21 +142,17 @@ export function Onboarding() {
     }
   };
 
-  const onSubmitCredential = (c: OnboardingCredential | null) => {
-    setCredential(c);
-  };
-
   const friendlySetupError = (detail: string) => {
     if (/failed to fetch|load failed|networkerror|did not become ready/i.test(detail)) {
-      return "The local backend is not ready. Quit and reopen zWork; if it repeats, send the backend.log file.";
+      return "zWork didn't finish starting. Quit and reopen it.";
     }
     if (/address already in use|eaddrinuse/i.test(detail)) {
-      return "Another zWork backend is already running on port 8787. Quit all zWork windows and reopen the app.";
+      return "Another copy of zWork is already running. Quit it and reopen zWork.";
     }
-    return detail || "Check the model key/base URL and try again.";
+    return detail || "Please try again.";
   };
 
-  // Keyboard: Enter advances, Shift+Enter (or Escape for optional) skips.
+  // Keyboard: Enter advances.
   const rootRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -417,9 +163,6 @@ export function Onboarding() {
         if (active?.tagName === "TEXTAREA") return;
         e.preventDefault();
         next();
-      } else if (e.key === "Escape" && q.optional) {
-        e.preventDefault();
-        skip();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -552,12 +295,6 @@ export function Onboarding() {
                           onSelect={(v) => setAnswer(q.key, v)}
                         />
                       )}
-                      {q.kind === "apikey" && (
-                        <ApiKeyStep
-                          initial={credential}
-                          onChange={onSubmitCredential}
-                        />
-                      )}
                     </div>
                     {error && (
                       <p className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-[12.5px] text-red-700 dark:text-red-200">
@@ -592,13 +329,7 @@ export function Onboarding() {
                 <button
                   type="button"
                   onClick={next}
-                  disabled={!canAdvance()}
-                  className={cn(
-                    "press inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-[13px] font-medium",
-                    canAdvance()
-                      ? "bg-ink text-paper hover:bg-ink-soft shadow-sm"
-                      : "bg-paper-sunken text-ink-faint cursor-not-allowed",
-                  )}
+                  className="press inline-flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 text-[13px] font-medium text-paper shadow-sm hover:bg-ink-soft"
                 >
                   {step === total - 1 ? "Finish" : "Continue"}
                   <ArrowRight className="h-3.5 w-3.5" />
@@ -695,7 +426,7 @@ function OnboardingVisual() {
         <span className="block">Your agent for</span>
         <div className="relative flex h-[1.18em] min-w-[8.2em] items-center justify-center overflow-hidden leading-none">
           <span className="pointer-events-none invisible select-none italic">
-            getting unstuck
+            weekly paperwork
           </span>
           <AnimatePresence mode="popLayout">
             <motion.span
@@ -819,397 +550,11 @@ function ChoiceList({
   );
 }
 
-function ApiKeyStep({
-  initial,
-  onChange,
-}: {
-  initial: OnboardingCredential | null;
-  onChange: (c: OnboardingCredential | null) => void;
-}) {
-  const hasCloudToken = typeof window !== "undefined" && !!window.localStorage.getItem("zwork:cloud-token");
-  const cloudUnlocked = !!hasCloudToken;
-  const visiblePresets = PRESETS.filter((preset) => !preset.managed || hasCloudToken);
-  const recommended = visiblePresets.find((p) => p.recommended) || visiblePresets[0];
-  const others = visiblePresets.filter((p) => !p.recommended);
-
-  const [preset, setPreset] = useState<CredentialPreset | null>(() =>
-    initial
-      ? PRESETS.find((p) => p.credential === initial.credential) || recommended
-      : null,
-  );
-  const [apiKey, setApiKey] = useState(initial?.api_key || "");
-  const [baseUrl, setBaseUrl] = useState(initial?.base_url || "");
-  const [modelId, setModelId] = useState(initial?.model_id || "");
-  const [othersOpen, setOthersOpen] = useState<boolean>(() =>
-    !!initial && !PRESETS.find((p) => p.credential === initial.credential)?.recommended,
-  );
-
-  // Whether the user chose "Custom…" from the model dropdown — switches the
-  // model field to a free-form text input.
-  const initialIsKnown = (() => {
-    if (!initial) return true;
-    const pId = PRESETS.find((p) => p.credential === initial.credential)?.id;
-    if (!pId) return true;
-    return MODEL_CATALOG[pId].some((m) => m.id === initial.model_id);
-  })();
-  const [customMode, setCustomMode] = useState<boolean>(!initialIsKnown);
-
-  const apply = (next: {
-    preset: CredentialPreset | null;
-    apiKey: string;
-    baseUrl: string;
-    modelId: string;
-  }) => {
-    if (!next.preset) {
-      onChange(null);
-      return;
-    }
-    const effectiveApiKey = next.preset.managed
-      ? (window.localStorage.getItem("zwork:cloud-token") || "").trim()
-      : next.apiKey.trim();
-    const valid =
-      next.preset.keyless ||
-      (effectiveApiKey.length > 0 && next.modelId.trim().length > 0);
-    if (!valid) {
-      onChange(null);
-      return;
-    }
-    onChange({
-      shape: next.preset.shape,
-      credential: next.preset.credential,
-      api_key: effectiveApiKey,
-      base_url: next.baseUrl.trim() || next.preset.defaultBaseUrl,
-      model_id: next.modelId.trim() || next.preset.defaultModelId,
-      model_name:
-        (next.modelId.trim() || next.preset.defaultModelId) +
-        " · " +
-        next.preset.label,
-    });
-  };
-
-  const pickPreset = (p: CredentialPreset) => {
-    if (p.managed && !cloudUnlocked) {
-      setPreset(p);
-      onChange(null);
-      return;
-    }
-    setPreset(p);
-    setBaseUrl(p.defaultBaseUrl);
-    // Default to the first catalog entry for this provider when available,
-    // otherwise fall back to the preset's declared default model id.
-    const catalog = MODEL_CATALOG[p.id] || [];
-    const nextModel = catalog[0]?.id || p.defaultModelId;
-    setModelId(nextModel);
-    setCustomMode(false);
-    if (p.keyless) {
-      apply({ preset: p, apiKey: "", baseUrl: p.defaultBaseUrl, modelId: nextModel });
-    } else {
-      apply({ preset: p, apiKey, baseUrl: p.defaultBaseUrl, modelId: nextModel });
-    }
-  };
-
-  const renderPresetCard = (p: CredentialPreset, variant: "hero" | "compact") => {
-    const active = preset?.id === p.id;
-    if (variant === "hero") {
-      return (
-        <button
-          key={p.id}
-          type="button"
-          disabled={!!p.managed && !cloudUnlocked}
-          onClick={() => pickPreset(p)}
-          className={cn(
-            "press relative flex w-full items-center justify-between rounded-xl border px-4 py-3.5 text-left transition-colors",
-            active
-              ? "border-emerald-500/70 bg-emerald-50 text-ink ring-1 ring-inset ring-emerald-500/40 dark:bg-emerald-500/10 dark:border-emerald-400/40 dark:ring-emerald-400/40"
-              : "border-emerald-200 bg-emerald-50/60 text-ink hover:border-emerald-400 dark:border-emerald-500/30 dark:bg-emerald-500/5",
-            p.managed && !cloudUnlocked && "cursor-not-allowed opacity-65",
-          )}
-        >
-          <div className="flex flex-col items-start">
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-300" />
-              <span className="text-[14px] font-semibold">{p.label}</span>
-              {p.managed ? (
-                <span className={cn(
-                  "rounded-full px-1.5 py-0.5 text-[10px] font-medium",
-                  cloudUnlocked
-                    ? "border border-emerald-200 bg-emerald-100 text-emerald-700 dark:border-emerald-400/40 dark:bg-emerald-500/20 dark:text-emerald-200"
-                    : "border border-amber-200 bg-amber-100 text-amber-700",
-                )}>
-                  {cloudUnlocked ? "Managed" : "Sign in to use"}
-                </span>
-              ) : (
-                <span className="rounded-full border border-emerald-200 bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:border-emerald-400/40 dark:bg-emerald-500/20 dark:text-emerald-200">
-                  Recommended
-                </span>
-              )}
-            </div>
-            <span className="mt-0.5 text-[11.5px] text-ink-muted">{p.subtitle}</span>
-          </div>
-          {active && <Check className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />}
-        </button>
-      );
-    }
-    return (
-      <button
-        key={p.id}
-        type="button"
-        onClick={() => pickPreset(p)}
-        className={cn(
-          "press flex flex-col items-start rounded-xl border px-3 py-2.5 text-left transition-colors",
-          active
-            ? "border-line-strong bg-paper-sunken text-ink ring-1 ring-inset ring-line-strong"
-            : "border-line bg-paper-raised text-ink hover:border-line-strong",
-        )}
-      >
-        <span className="text-[13px] font-medium">{p.label}</span>
-        <span
-          className={cn(
-            "text-[11px]",
-            active ? "text-ink-muted" : "text-ink-faint",
-          )}
-        >
-          {p.subtitle}
-        </span>
-      </button>
-    );
-  };
-
-  return (
-    <div className="flex flex-col gap-3">
-      {/* Recommended provider — full-width hero card */}
-      {renderPresetCard(recommended, "hero")}
-
-      {/* Collapsible "Other providers" */}
-      <div>
-        <button
-          type="button"
-          onClick={() => setOthersOpen((v) => !v)}
-          className="press flex w-full items-center justify-between rounded-md px-1 py-1 text-[12px] text-ink-muted hover:text-ink"
-        >
-          <span>Other providers</span>
-          <ChevronDown
-            className={cn(
-              "h-3.5 w-3.5 transition-transform duration-200",
-              othersOpen && "rotate-180",
-            )}
-          />
-        </button>
-        <AnimatePresence initial={false}>
-          {othersOpen && (
-            <motion.div
-              key="others"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.2 }}
-              className="overflow-hidden"
-            >
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                {others.map((p) => renderPresetCard(p, "compact"))}
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
-
-      {preset?.managed && !cloudUnlocked && (
-        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12.5px] text-amber-800">
-          Your account is signed in, but managed hosting is locked until you unlock Pro. Use the Analytics tab to redeem the dev coupon, then come back here or activate it there directly.
-        </p>
-      )}
-
-      {preset && !preset.keyless && !preset.managed && (
-        <motion.div
-          initial={{ opacity: 0, y: -4 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2 }}
-          className="flex flex-col gap-2 rounded-xl border border-line bg-paper-raised p-3"
-        >
-          <Field
-            label="API key"
-            value={apiKey}
-            onChange={(v) => {
-              setApiKey(v);
-              apply({ preset, apiKey: v, baseUrl, modelId });
-            }}
-            placeholder="sk-…"
-            type="password"
-          />
-          <Field
-            label="Base URL"
-            value={baseUrl}
-            onChange={(v) => {
-              setBaseUrl(v);
-              apply({ preset, apiKey, baseUrl: v, modelId });
-            }}
-            placeholder={preset.defaultBaseUrl}
-          />
-
-          {/* Curated model picker — users pick from a short, sensible list
-              and fall back to a free-form text input via "Custom…". */}
-          <ModelPicker
-            catalog={MODEL_CATALOG[preset.id] || []}
-            value={modelId}
-            customMode={customMode}
-            defaultModelId={preset.defaultModelId}
-            onSelectKnown={(id) => {
-              setCustomMode(false);
-              setModelId(id);
-              apply({ preset, apiKey, baseUrl, modelId: id });
-            }}
-            onCustom={() => {
-              setCustomMode(true);
-              // Clear the field so the user isn't editing a previously-picked
-              // catalog entry by accident.
-              setModelId("");
-              apply({ preset, apiKey, baseUrl, modelId: "" });
-            }}
-            onCustomChange={(id) => {
-              setModelId(id);
-              apply({ preset, apiKey, baseUrl, modelId: id });
-            }}
-          />
-        </motion.div>
-      )}
-
-      {preset?.keyless && (
-        <p className="rounded-lg border border-line bg-paper-raised px-3 py-2 text-[12.5px] text-ink-muted">
-          {preset.managed ? (
-            <>✓ zWork will use your signed-in desktop session and route requests through the hosted zWork gateway.</>
-          ) : (
-            <>
-              ✓ zWork will detect your local credentials from{" "}
-              <code className="rounded bg-paper-sunken px-1 py-0.5 text-[11.5px]">
-                ~/.claude/
-              </code>
-              .
-            </>
-          )}
-        </p>
-      )}
-    </div>
-  );
-}
-
-/**
- * ModelPicker — curated dropdown of known models for a provider, plus an
- * option to add a custom model ID. Shows a short description and cost blurb
- * for the selected model so non-technical users know what they're picking.
- */
-function ModelPicker({
-  catalog,
-  value,
-  customMode,
-  defaultModelId,
-  onSelectKnown,
-  onCustom,
-  onCustomChange,
-}: {
-  catalog: ModelChoice[];
-  value: string;
-  customMode: boolean;
-  defaultModelId: string;
-  onSelectKnown: (id: string) => void;
-  onCustom: () => void;
-  onCustomChange: (id: string) => void;
-}) {
-  const selected = !customMode ? catalog.find((m) => m.id === value) : undefined;
-
-  const selectValue = customMode ? CUSTOM_MODEL_SENTINEL : value;
-
-  return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-[11px] font-medium uppercase tracking-wider text-ink-faint">
-        Model
-      </span>
-      <div className="relative">
-        <select
-          value={selectValue}
-          onChange={(e) => {
-            const v = e.target.value;
-            if (v === CUSTOM_MODEL_SENTINEL) onCustom();
-            else onSelectKnown(v);
-          }}
-          className="w-full appearance-none rounded-md border border-line bg-paper px-3 py-2 pr-8 text-[13.5px] text-ink focus:border-line-strong focus:outline-none"
-        >
-          {catalog.length === 0 && (
-            <option value="" disabled>
-              No preset models — pick Custom
-            </option>
-          )}
-          {catalog.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.label}
-            </option>
-          ))}
-          <option value={CUSTOM_MODEL_SENTINEL}>＋ Custom model ID…</option>
-        </select>
-        <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint" />
-      </div>
-
-      {selected && (
-        <div className="mt-0.5 rounded-md border border-line/80 bg-paper-raised/70 px-2.5 py-2 text-[11.5px] leading-snug text-ink-muted">
-          <p className="text-ink-soft">{selected.description}</p>
-          <p className="mt-0.5 font-mono text-[10.5px] text-ink-faint">{selected.cost}</p>
-        </div>
-      )}
-
-      {customMode && (
-        <input
-          type="text"
-          autoFocus
-          value={value}
-          placeholder={defaultModelId || "e.g. my-finetune-v1"}
-          onChange={(e) => onCustomChange(e.target.value)}
-          className="mt-1 w-full rounded-md border border-line bg-paper px-3 py-2 font-mono text-[12.5px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
-        />
-      )}
-    </div>
-  );
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  placeholder,
-  type,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder: string;
-  type?: string;
-}) {
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="text-[11px] font-medium uppercase tracking-wider text-ink-faint">
-        {label}
-      </span>
-      <input
-        type={type || "text"}
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-md border border-line bg-paper px-3 py-2 text-[13.5px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
-      />
-    </label>
-  );
-}
-
 /* ------------------------------------------------------------------ *
  *  Finalizing screen — shimmer text cycling through phases
  * ------------------------------------------------------------------ */
 
-const FINALIZING_PHASES = [
-  "Personalizing…",
-  "Setting things up…",
-  "Teaching the agent your vibe…",
-  "Wiring up your model…",
-  "Reading skills…",
-  "Almost ready…",
-];
+const FINALIZING_PHASES = ["Setting things up…", "Almost ready…"];
 
 function FinalizingScreen({ done }: { done: boolean }) {
   const [idx, setIdx] = useState(0);

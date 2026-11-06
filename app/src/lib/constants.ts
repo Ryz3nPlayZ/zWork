@@ -1,8 +1,7 @@
 export const ROTATING_WORDS = [
-  "deep work",
-  "getting unstuck",
-  "shipping faster",
-  "clear thinking",
-  "brainstorming",
-  "side projects",
+  "weekly paperwork",
+  "expense reports",
+  "unpaid invoices",
+  "client updates",
+  "monthly reports",
 ] as const;
