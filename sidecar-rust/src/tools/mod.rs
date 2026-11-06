@@ -32,9 +32,7 @@ pub fn evaluate_tool_risk(name: &str, params: &Value) -> Risk {
                 // permission GATE (matches route to the user-approval flow),
                 // not a silent block — so it errs on the side of catching
                 // suspicious shapes.
-                if is_destructive_command(&cmd_lower)
-                    || redirect_overwrites_outside(cmd, cwd)
-                {
+                if is_destructive_command(&cmd_lower) {
                     Risk::Destructive {
                         reason: format!("Executing potentially destructive command: '{}'", cmd),
                     }
@@ -133,46 +131,6 @@ fn is_destructive_command(cmd_lower: &str) -> bool {
     PATTERNS.iter().any(|p| {
         regex::Regex::new(p).map(|re| re.is_match(cmd_lower)).unwrap_or(false)
     })
-}
-
-/// Truncating redirect (`>`) targeting an absolute path outside the command's
-/// working directory — e.g. `echo x > /etc/hosts`. `/tmp` scratch space and
-/// `/dev/*` sinks are exempt; a redirect to an absolute path under an
-/// absolute `cwd` is inside the working directory and allowed. Appends (`>>`)
-/// don't truncate and are not gated here.
-fn redirect_overwrites_outside(cmd: &str, cwd: Option<&str>) -> bool {
-    // Rust's regex crate has no look-around, so capture the char after `>`
-    // instead: `>>` (append) and `>&` (fd dup) are skipped via group 1.
-    let re = regex::Regex::new(r"(?:^|[\s;&|])(?:\d+)?>([>&]?)\s*([^\s;&|]+)").unwrap();
-    for caps in re.captures_iter(cmd) {
-        if caps.get(1).map(|m| !m.as_str().is_empty()).unwrap_or(false) {
-            continue;
-        }
-        let target = caps
-            .get(2)
-            .map(|m| m.as_str())
-            .unwrap_or("")
-            .trim_matches(|c| c == '"' || c == '\'');
-        if !target.starts_with('/') {
-            continue;
-        }
-        if target.starts_with("/tmp/")
-            || target.starts_with("/var/tmp/")
-            || target.starts_with("/dev/")
-        {
-            continue;
-        }
-        if let Some(cwd) = cwd {
-            let cwd = cwd.trim_end_matches('/');
-            if !cwd.is_empty() && cwd.starts_with('/') {
-                if target == cwd || target.starts_with(&format!("{}/", cwd)) {
-                    continue;
-                }
-            }
-        }
-        return true;
-    }
-    false
 }
 
 /// Tools a paperwork run has no use for. Every schema is sent on every model
@@ -1698,6 +1656,21 @@ mod tests {
         assert!(gated_with_cwd("echo hi > /etc/other.txt", ws));
         // A folder of the user's own is theirs, even as the cwd.
         assert!(gated_with_cwd("echo hi > /work/proj/out.txt", "/work/proj"));
+    }
+
+    #[test]
+    fn scripts_saved_in_zworks_own_folders_are_not_gated() {
+        let _lock = crate::paths::HOME_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let out = crate::paths::workspace_outputs_dir();
+        let script = format!("cat << 'EOF' > {}/sum.py\nif total > limit:\n    print(total)\nEOF\npython3 {}/sum.py", out.display(), out.display());
+        assert!(!gated(&script));
+        assert!(!gated("cat << 'EOF' > /private/tmp/sum.py\nprint(1)\nEOF"));
+        // A `>` in the script body isn't a redirect, whatever folder this runs from.
+        assert!(!gated_with_cwd(&script, "/work/proj"));
+        // What comes after the script, or runs in a shell, still counts.
+        assert!(gated_with_cwd("cat << EOF > /private/tmp/a\nhi\nEOF\nrm /work/proj/report.xlsx", "/work/proj"));
+        assert!(gated_with_cwd("bash << EOF\nrm /work/proj/report.xlsx\nEOF", "/work/proj"));
+        assert!(gated_with_cwd("cat <<< hi > /work/proj/out.txt", "/work/proj"));
     }
 
     #[test]

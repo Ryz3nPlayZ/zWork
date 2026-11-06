@@ -39,11 +39,33 @@ pub fn user_file_written(path: &str, cwd: &Path) -> Option<PathBuf> {
     is_users(&resolved, &agent_roots()).then_some(resolved)
 }
 
+/// A heredoc body is a script's text: `if a > b` in Python is no redirect. A
+/// body fed to a shell really is commands, so that one stays.
+fn without_script_bodies(command: &str) -> String {
+    let start = regex::Regex::new(r#"(?:^|[^<])<<-?\s*['"]?(\w+)"#).unwrap();
+    let mut kept = String::new();
+    let mut end: Option<String> = None;
+    for line in command.lines() {
+        if let Some(e) = &end {
+            if line.trim() == e {
+                end = None;
+            }
+            continue;
+        }
+        kept.push_str(line);
+        kept.push('\n');
+        if !matches!(line.split_whitespace().next(), Some("sh" | "bash" | "zsh")) {
+            end = start.captures(line).map(|c| c[1].to_string());
+        }
+    }
+    kept
+}
+
 /// The first user-owned path a shell command would change, if any.
 pub fn user_file_changed_by(command: &str, cwd: &Path) -> Option<PathBuf> {
     let roots = agent_roots();
     let mut cwd = cwd.to_path_buf();
-    for segment in segments(command) {
+    for segment in segments(&without_script_bodies(command)) {
         let resolve = |s: &str, cwd: &Path| resolve_to_cwd(&expand_home_var(s), cwd);
         for target in segment.iter().filter(|t| t.redirect) {
             let p = resolve(&target.text, &cwd);
