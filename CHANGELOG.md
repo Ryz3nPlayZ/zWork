@@ -17,6 +17,7 @@ All notable changes to zWork are documented in this file.
 - **Schedules run side by side, and late runs say so.**
 
 ### Fixes
+- **Your first job comes back as the file you asked for.** If you started while first-time setup was still running, zWork could hand back a text file instead of Excel and keep doing that on its schedule. It now waits for setup to finish. Scheduled runs also report only what they actually did.
 - **Windows updates finish again.** Updating could stop on "Error opening file for writing … zwork-backend.exe" because zWork's background process kept running while the installer tried to replace it. The installer now closes it first, and zWork clears a leftover one when it starts.
 - **Windows layout makes sense again.** The chat title, Versions and Export are back in the chat pane instead of a strip over the sidebar, search and the sidebar toggle share the logo's row instead of floating over an empty strip, and the window buttons sit in the pane's corner. Shortcuts read Ctrl+K, Ctrl+N and so on instead of Mac's ⌘.
 - **The agent can run commands on Windows.** It used bash, which Windows doesn't have, so every command step failed; it now runs PowerShell there, and recursive deletes, disk and shutdown commands, and downloaded scripts ask before running.

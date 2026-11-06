@@ -745,8 +745,10 @@ fn runtime_block() -> &'static str {
              Use `uv pip install --python python3 <pkg>` for anything else. `node`, `npm` and `npx` are available too.\n\n"
         }
         crate::runtime::Status::Installing { .. } => {
-            "**Making files:** zWork is still installing its Python and Node tools in the background; if `python3` lacks a \
-             library or `node` is missing, say so and use what's available rather than asking the user to install anything.\n\n"
+            "**Making files:** zWork is finishing its Python and Node setup. `bash` waits for it, then `python3` has \
+             openpyxl, python-docx, python-pptx, pandas and reportlab, so write a script and run it. If a library is still \
+             missing after that, tell the user plainly. Never swap the format they asked for, such as a text file for Excel, \
+             and never ask them to install anything.\n\n"
         }
         _ => "",
     }

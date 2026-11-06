@@ -22,6 +22,11 @@ installer, the first job) are exactly the ones a person can walk someone through
   local files, needs no connector, and the result can be checked line by line. The spreadsheet
   checker refuses to deliver a workbook with broken formulas. Fall back to the other five jobs on
   the home screen when the person has a different problem.
+- **Ask if their PDFs are scans before the call.** On 2026-11-06 this job passed from a fresh
+  install three times out of three with hand-made PDFs: right numbers in a real Excel file, a saved
+  schedule, a new invoice picked up on the next run, and a plain note about a PDF it couldn't read.
+  Real scans and phone photos depend on OCR, which hasn't been tested. Neither have messy real
+  invoices, so check every line on the first call.
 - **Don't lead with Outlook, QuickBooks or Xero.** Those tiles need setup on Composio and a cloud
   deploy, and they haven't been tested end to end.
 - **Don't discount.** $12 is already the price. A first customer on a 100% coupon proves nothing.
@@ -58,8 +63,9 @@ Do these in order. Only you can do them.
    flips to Pro, cancel, refund yourself. Checkout has never been proven with real money in this
    work, and the first customer must not be the test.
 3. **Do the lead job on a clean machine.** Use a second computer or a new macOS user. Download
-   from the website, install, sign in, run the invoice job on ten real PDFs, then time it. Fix
-   whatever breaks. You'll also see the Gatekeeper and SmartScreen warnings the customer will see.
+   from the website, install, sign in, run the invoice job on ten real PDFs, including a scan,
+   then time it. First-time setup runs in the background and the job waits for it, so note how
+   long that takes on a normal connection. Fix whatever breaks. You'll also see the Gatekeeper and SmartScreen warnings the customer will see.
 4. **Decide on signing.** Installers are unsigned, so macOS and Windows both warn. On a call you
    can talk someone past it, so it doesn't block step 1 of "Who to ask". It does block everything
    sent to people who don't know you. Apple is $99 a year and Azure Trusted Signing about $10 a

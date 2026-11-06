@@ -116,6 +116,28 @@ pub fn status() -> Status {
     }
 }
 
+/// Long enough for a slow connection. After this the command runs anyway and
+/// reports whatever is missing, so a stuck download can't hang a turn forever.
+const SETUP_WAIT: Duration = Duration::from_secs(300);
+
+pub fn installing() -> bool {
+    matches!(status(), Status::Installing { .. })
+}
+
+/// Hold a command until first-launch setup is done. Otherwise a person's first
+/// job runs on the bare system Python, the model settles for a lesser file, and
+/// a schedule saved from that turn repeats the downgrade every week.
+pub async fn wait_for_setup() {
+    wait_while(installing, SETUP_WAIT).await;
+}
+
+async fn wait_while(busy: impl Fn() -> bool, limit: Duration) {
+    let start = std::time::Instant::now();
+    while busy() && start.elapsed() < limit {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
 pub fn venv_python() -> PathBuf {
     bin(venv_dir()).join(if cfg!(windows) { "python.exe" } else { "python3" })
 }
@@ -344,6 +366,15 @@ async fn capture(cmd: &mut tokio::process::Command) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn waiting_for_setup_ends_when_setup_ends_or_at_the_limit() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let checks = AtomicU32::new(0);
+        super::wait_while(|| checks.fetch_add(1, Ordering::SeqCst) < 2, super::Duration::from_secs(5)).await;
+        assert_eq!(checks.load(Ordering::SeqCst), 3);
+        super::wait_while(|| true, super::Duration::from_millis(1)).await;
+    }
+
     use axum::response::IntoResponse;
     use crate::sync_util::Unpoison;
 

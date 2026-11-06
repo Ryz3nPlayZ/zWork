@@ -8,6 +8,7 @@ use std::time::Duration;
 
 /// Run an inline Python script and return (stdout, stderr, ok).
 async fn run_python(script: &str) -> (String, String, bool) {
+    crate::runtime::wait_for_setup().await;
     let out = tokio::time::timeout(
         Duration::from_secs(30),
         crate::runtime::python().arg("-c").arg(script).output(),

@@ -489,6 +489,10 @@ impl GatedTool {
                 let _ = tx.try_send(json!({ "type": "status", "text": line }));
             }
         });
+        if name == "bash" && crate::runtime::installing() {
+            let _ = shared.tx.try_send(json!({ "type": "status", "text": "Finishing first-time setup. This only happens once." }));
+            crate::runtime::wait_for_setup().await;
+        }
         let outcome = self.inner.execute(tc_id, params, signal, forward).await;
 
         let (ok, text) = match &outcome {
