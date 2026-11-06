@@ -232,7 +232,9 @@ async fn run_task(task: ScheduledTask) {
          - You can read the user's files anywhere. Never change or overwrite them on a scheduled \
            run: save what you make in {outputs}.\n\
          - Anything that sends, posts or changes something in a connected app goes to the user's \
-           inbox for approval and does not happen during this run. Prepare each one anyway.",
+           inbox for approval and does not happen during this run. Prepare each one anyway.\n\
+         - Report only what your tools actually did on this run. If you can't reach an app or a \
+           file, say that plainly. Never say you checked something you didn't.",
         outputs = crate::paths::workspace_outputs_dir().display()
     ));
     extra.push_str(
