@@ -178,7 +178,7 @@ pub fn is_read_only_action(prefixed_name: &str) -> bool {
 /// the message body.
 pub fn describe_action(prefixed_name: &str, params: &Value) -> String {
     let slug = prefixed_name.strip_prefix(TOOL_PREFIX).unwrap_or(prefixed_name);
-    let (app, action) = slug.split_once('_').unwrap_or((slug, ""));
+    let (app, action) = split_action(slug);
     let mut fields: Vec<(String, String)> = params
         .as_object()
         .into_iter()
@@ -197,13 +197,32 @@ pub fn describe_action(prefixed_name: &str, params: &Value) -> String {
         })
         .collect();
     fields.sort_by_key(|(_, text)| text.len());
-    let mut out = format!("{}: {}", capitalise(&app.to_lowercase()), action.replace('_', " ").to_lowercase());
+    let mut out = format!("{app}: {}", action.replace('_', " ").to_lowercase());
     for (label, text) in fields {
         let shown: String = text.chars().take(2000).collect();
         let cut = if text.chars().count() > 2000 { "…" } else { "" };
         out.push_str(&format!("\n{label}: {shown}{cut}"));
     }
     out
+}
+
+/// `MICROSOFT_TEAMS_SEND_MESSAGE` -> ("Microsoft Teams", "SEND_MESSAGE"), for the
+/// labels people read in step rows and approvals.
+pub fn split_action(slug: &str) -> (String, &str) {
+    const NAMES: &[(&str, &str)] = &[
+        ("MICROSOFT_TEAMS_", "Microsoft Teams"),
+        ("ONE_DRIVE_", "OneDrive"),
+        ("GOOGLECALENDAR_", "Google Calendar"),
+        ("GOOGLEDRIVE_", "Google Drive"),
+        ("QUICKBOOKS_", "QuickBooks"),
+    ];
+    for (prefix, name) in NAMES {
+        if let Some(action) = slug.strip_prefix(prefix) {
+            return ((*name).to_string(), action);
+        }
+    }
+    let (app, action) = slug.split_once('_').unwrap_or((slug, ""));
+    (capitalise(&app.to_lowercase()), action)
 }
 
 fn capitalise(word: &str) -> String {
@@ -229,6 +248,12 @@ pub fn apps() -> Value {
         ("linear", "Linear", "zap", "#5E6AD2"),
         ("asana", "Asana", "target", "#F06A6A"),
         ("hubspot", "HubSpot", "circle-dot", "#FF7A59"),
+        ("outlook", "Outlook", "mail", "#0078D4"),
+        ("one_drive", "OneDrive", "folder", "#0078D4"),
+        ("excel", "Excel", "table", "#217346"),
+        ("microsoft_teams", "Microsoft Teams", "hash", "#6264A7"),
+        ("quickbooks", "QuickBooks", "receipt", "#2CA01C"),
+        ("xero", "Xero", "receipt", "#13B5EA"),
     ];
     let apps: Vec<Value> = apps
         .iter()
@@ -1169,6 +1194,13 @@ mod tests {
         ] {
             assert!(!is_read_only_action(write), "{write}");
         }
+    }
+
+    #[test]
+    fn app_names_read_properly_in_labels() {
+        assert_eq!(split_action("MICROSOFT_TEAMS_SEND_MESSAGE"), ("Microsoft Teams".to_string(), "SEND_MESSAGE"));
+        assert_eq!(split_action("ONE_DRIVE_LIST_ITEMS"), ("OneDrive".to_string(), "LIST_ITEMS"));
+        assert_eq!(split_action("OUTLOOK_SEND_EMAIL"), ("Outlook".to_string(), "SEND_EMAIL"));
     }
 
     #[test]

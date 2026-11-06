@@ -225,6 +225,11 @@ mod tests {
 
     #[test]
     fn pending_action_runs_once_and_queues_once() {
+        let _env_guard = crate::paths::HOME_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev_home = std::env::var_os("ZWORK_HOME");
+        let home = std::env::temp_dir().join(format!("zwork-inbox-test-{}", uuid::Uuid::new_v4()));
+        std::env::set_var("ZWORK_HOME", &home);
+
         let unique = uuid::Uuid::new_v4().to_string();
         let action = PendingAction { tool: "composio__GMAIL_SEND_EMAIL".into(), params: serde_json::json!({ "to": unique }) };
         let params = || CreateParams {
@@ -244,6 +249,11 @@ mod tests {
         mark_action_done(&item.id);
         let done = get_all(false).into_iter().find(|i| i.id == item.id).unwrap();
         assert_eq!((done.kind.as_str(), done.read), ("summary", true));
-        delete(&item.id);
+
+        let _ = std::fs::remove_dir_all(&home);
+        match prev_home {
+            Some(p) => std::env::set_var("ZWORK_HOME", p),
+            None => std::env::remove_var("ZWORK_HOME"),
+        }
     }
 }

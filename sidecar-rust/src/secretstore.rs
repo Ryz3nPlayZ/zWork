@@ -125,6 +125,7 @@ mod tests {
     // one test to stay race-free under the parallel test harness.
     #[test]
     fn file_store_round_trip_and_legacy_migration() {
+        let _env_guard = crate::paths::HOME_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = std::env::temp_dir().join(format!(
             "zwork-secretstore-test-{}",
             std::process::id()

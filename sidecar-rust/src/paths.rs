@@ -1,6 +1,11 @@
 use std::path::{Path, PathBuf};
 use std::env;
 
+/// ZWORK_HOME is process-global and tests run in parallel: any test that sets it,
+/// or needs it to stay put, holds this.
+#[cfg(test)]
+pub static HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub fn home_dir() -> PathBuf {
     let p = if let Ok(val) = env::var("ZWORK_HOME") {
         PathBuf::from(val)

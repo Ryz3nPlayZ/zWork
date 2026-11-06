@@ -1716,10 +1716,11 @@ export const useApp = create<AppState>((set, get) => ({
     const STATIC_APPS = [
       { id: "gmail",          name: "Gmail",           color: "#EA4335", icon: null },
       { id: "googlecalendar", name: "Google Calendar", color: "#4285F4", icon: null },
-      { id: "notion",         name: "Notion",          color: "#000000", icon: null },
+      { id: "outlook",        name: "Outlook",         color: "#0078D4", icon: null },
       { id: "googledrive",    name: "Google Drive",    color: "#34A853", icon: null },
-      { id: "github",         name: "GitHub",          color: "#181717", icon: null },
-      { id: "linear",         name: "Linear",          color: "#5E6AD2", icon: null },
+      { id: "one_drive",      name: "OneDrive",        color: "#0078D4", icon: null },
+      { id: "excel",          name: "Excel",           color: "#217346", icon: null },
+      { id: "notion",         name: "Notion",          color: "#000000", icon: null },
     ];
     // Seed immediately so grid doesn't flash empty
     if (get().composioApps.length === 0) {

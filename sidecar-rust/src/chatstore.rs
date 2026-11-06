@@ -609,10 +609,6 @@ mod tests {
     use crate::harness::types::{Usage, UsageCost};
     use serde_json::json;
 
-    /// Env is process-global and tests run in parallel: serialize the
-    /// env-mutating tests (see the convention note in harness_turn tests).
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     #[test]
     fn auto_title_cuts_at_a_word() {
         assert_eq!(auto_title("\n  Clean up my Q3 expenses\nmore"), "Clean up my Q3 expenses");
@@ -646,7 +642,7 @@ mod tests {
     /// convention note in harness_turn tests).
     #[test]
     fn record_usage_merges_deltas_into_totals() {
-        let _env_guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _env_guard = crate::paths::HOME_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let prev = std::env::var("ZWORK_HOME").ok();
         let home = std::env::temp_dir().join(format!("zwork-chatstore-{}", uuid::Uuid::new_v4().simple()));
         std::env::set_var("ZWORK_HOME", &home);
@@ -675,7 +671,7 @@ mod tests {
     /// Env-mutating test — same convention as above.
     #[test]
     fn fork_truncate_and_restore_are_non_destructive() {
-        let _env_guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _env_guard = crate::paths::HOME_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let prev = std::env::var("ZWORK_HOME").ok();
         let home = std::env::temp_dir().join(format!("zwork-chatstore-{}", uuid::Uuid::new_v4().simple()));
         std::env::set_var("ZWORK_HOME", &home);

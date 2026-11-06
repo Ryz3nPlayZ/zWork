@@ -20,6 +20,12 @@ const APP_DESCRIPTIONS: Record<string, string> = {
   linear: "Create issues, track progress, and manage your team",
   asana: "Manage tasks, track projects, and organize work",
   hubspot: "Manage contacts, deals, and your CRM pipeline",
+  outlook: "Read and send email, and manage your calendar",
+  one_drive: "Find, read, and save your files",
+  excel: "Read and update workbooks stored online",
+  microsoft_teams: "Read and send messages in your teams",
+  quickbooks: "Look up invoices, customers, and reports",
+  xero: "Look up invoices, contacts, and bills",
 };
 
 const APP_DETAILED_DESCRIPTIONS: Record<string, string> = {
@@ -35,15 +41,26 @@ const APP_DETAILED_DESCRIPTIONS: Record<string, string> = {
   linear: "Connect Linear to create issues, track progress, and manage your team.",
   asana: "Connect Asana to manage tasks, track projects, and organize work.",
   hubspot: "Connect HubSpot to manage contacts, deals, and your CRM pipeline.",
+  outlook: "Connect Outlook to read and send email and manage your calendar. zWork asks before sending anything.",
+  one_drive: "Connect OneDrive to find, read, and save your files.",
+  excel: "Connect Excel to read and update workbooks stored in OneDrive or SharePoint.",
+  microsoft_teams: "Connect Teams to read and send messages. zWork asks before sending anything.",
+  quickbooks: "Connect QuickBooks to look up invoices, customers, and reports. zWork asks before changing anything.",
+  xero: "Connect Xero to look up invoices, contacts, and bills. zWork asks before changing anything.",
 };
 
 const ALLOWED_APPS = new Set([
   "gmail",
+  "outlook",
   "googlecalendar",
   "googledrive",
+  "one_drive",
+  "excel",
+  "slack",
+  "microsoft_teams",
   "notion",
-  "github",
-  "linear"
+  "quickbooks",
+  "xero",
 ]);
 
 /** Near-black brand marks (Notion, GitHub) are drawn in ink so they show in dark mode. */
@@ -104,7 +121,12 @@ export function ConnectorsPage() {
       await connectComposioApp(appId);
       setExpandedApp(null);
     } catch (e: any) {
-      setConnectError(e?.message || String(e));
+      const message = e?.message || String(e);
+      setConnectError(
+        message.includes("composio_auth_config_not_found")
+          ? "This app isn't ready to connect yet. Please try again later."
+          : message,
+      );
     } finally {
       setConnecting(null);
     }
@@ -130,7 +152,7 @@ export function ConnectorsPage() {
     }
   }
 
-  const allowedComposioApps = composioApps.filter((app) => ALLOWED_APPS.has(app.id));
+  const allowedComposioApps = composioApps.filter((app) => ALLOWED_APPS.has(app.id) || connectedApps.has(app.id));
   const connectedCount = allowedComposioApps.filter((a) => connectedApps.has(a.id)).length;
   const expandedAppData = allowedComposioApps.find((a) => a.id === expandedApp);
   const isExpandedConnected = expandedApp ? connectedApps.has(expandedApp) : false;

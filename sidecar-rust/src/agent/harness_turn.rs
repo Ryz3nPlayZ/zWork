@@ -591,8 +591,7 @@ fn step_labels(name: &str, params: &Value) -> (String, String) {
         n if n.starts_with("desktop_") => pair("Using your computer", "Used your computer", String::new()),
         // App actions arrive as `GMAIL_SEND_EMAIL`: "Using Gmail: send email".
         n if n.contains('_') && !n.chars().any(|c| c.is_ascii_lowercase()) => {
-            let (app, action) = n.split_once('_').unwrap_or((n, ""));
-            let app = app.chars().next().map(|c| c.to_string()).unwrap_or_default() + &app[1..].to_lowercase();
+            let (app, action) = crate::connectors::composio::split_action(n);
             let what = format!("{app}: {}", action.replace('_', " ").to_lowercase());
             (format!("Using {what}"), format!("Used {what}"))
         }

@@ -1108,6 +1108,12 @@ fn composio_app_display_map() -> HashMap<String, (String, String, String)> {
     m.insert("linear".into(), ("Linear".into(), "zap".into(), "#5E6AD2".into()));
     m.insert("asana".into(), ("Asana".into(), "target".into(), "#F06A6A".into()));
     m.insert("hubspot".into(), ("HubSpot".into(), "circle-dot".into(), "#FF7A59".into()));
+    m.insert("outlook".into(), ("Outlook".into(), "mail".into(), "#0078D4".into()));
+    m.insert("one_drive".into(), ("OneDrive".into(), "folder".into(), "#0078D4".into()));
+    m.insert("excel".into(), ("Excel".into(), "table".into(), "#217346".into()));
+    m.insert("microsoft_teams".into(), ("Microsoft Teams".into(), "hash".into(), "#6264A7".into()));
+    m.insert("quickbooks".into(), ("QuickBooks".into(), "receipt".into(), "#2CA01C".into()));
+    m.insert("xero".into(), ("Xero".into(), "receipt".into(), "#13B5EA".into()));
     m
 }
 
@@ -6183,6 +6189,7 @@ async fn composio_apps() -> Json<Value> {
     let app_ids = [
         "gmail", "googlecalendar", "slack", "notion", "googledrive",
         "github", "jira", "trello", "todoist", "linear", "asana", "hubspot",
+        "outlook", "one_drive", "excel", "microsoft_teams", "quickbooks", "xero",
     ];
     let apps: Vec<Value> = app_ids
         .iter()
