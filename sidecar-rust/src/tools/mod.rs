@@ -62,6 +62,15 @@ pub fn evaluate_tool_risk(name: &str, params: &Value) -> Risk {
                 Risk::Safe
             }
         }
+        // Anything that leaves the computer asks first: this is the promise on
+        // the box, and connector sends used to skip it entirely.
+        "send_telegram_message" => Risk::Destructive { reason: "Send a Telegram message".to_string() },
+        "deploy_web_app" => Risk::Destructive { reason: "Publish a web app to the internet".to_string() },
+        n if n.starts_with(crate::connectors::composio::TOOL_PREFIX)
+            && !crate::connectors::composio::is_read_only_action(n) =>
+        {
+            Risk::Destructive { reason: crate::connectors::composio::describe_action(n, params) }
+        }
         _ => Risk::Safe,
     }
 }
@@ -673,7 +682,8 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
                 "properties": {
                     "title": { "type": "string", "description": "Short headline the user sees in the inbox list (e.g. 'Invoice anomaly: Acme $4,200')." },
                     "body": { "type": "string", "description": "1-3 sentences of detail. Include what was found and any recommended action." },
-                    "kind": { "type": "string", "enum": ["summary", "flag", "question"], "description": "summary = routine result; flag = something looks off / needs attention; question = you need a decision from the user." }
+                    "kind": { "type": "string", "enum": ["summary", "flag", "question"], "description": "summary = routine result; flag = something looks off / needs attention; question = you need a decision from the user." },
+                    "files": { "type": "array", "items": { "type": "string" }, "description": "Absolute paths of the finished files this message is about. The user gets an Open button for each." }
                 },
                 "required": ["title", "body"]
             }
@@ -1119,24 +1129,20 @@ pub fn execute_tool(
                         .unwrap_or("summary")
                         .to_string();
                     // Link the inbox item to this chat so the UI can deep-link
-                    // into the transcript. If this chat belongs to a scheduled
-                    // task, stamp the task_id too.
-                    let (task_id, linked_chat) = match crate::chatstore::get(chat_id.as_str()) {
-                        Some(c) if c.kind == "automation" => {
-                            let tid = crate::schedulestore::get_all()
-                                .into_iter()
-                                .find(|t| t.last_chat_id.as_deref() == Some(chat_id.as_str()))
-                                .map(|t| t.id);
-                            (tid, Some(chat_id.clone()))
-                        }
-                        _ => (None, Some(chat_id.clone())),
-                    };
+                    // into the transcript, and to its scheduled task if any.
+                    let files = params
+                        .get("files")
+                        .and_then(|v| v.as_array())
+                        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                        .unwrap_or_default();
                     let item = crate::inboxstore::create(crate::inboxstore::CreateParams {
-                        task_id,
-                        chat_id: linked_chat,
+                        task_id: crate::schedulestore::task_for_chat(chat_id.as_str()),
+                        chat_id: Some(chat_id.clone()),
                         kind: Some(kind),
                         title: title.to_string(),
                         body: Some(body.to_string()),
+                        files,
+                        ..Default::default()
                     });
                     Ok(format!("Posted to inbox: {} (id={})", item.title, item.id))
                 }

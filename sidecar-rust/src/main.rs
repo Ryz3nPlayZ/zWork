@@ -264,6 +264,7 @@ async fn run() {
             "/api/inbox/:item_id",
             patch(server::mark_inbox_read).delete(server::delete_inbox_item),
         )
+        .route("/api/inbox/:item_id/approve", post(server::approve_inbox_item))
         .route("/api/uploads", get(server::list_uploads).post(server::upload_files))
         .route("/api/uploads/:filename", get(server::get_upload))
         .route("/api/files/open", post(fileopen::open_file))

@@ -160,6 +160,57 @@ pub async fn disconnect(app: &str) -> Result<Value, String> {
         .map_err(|e| format!("Invalid response from zWork Cloud: {}", e))
 }
 
+/// True when a connector action only looks at data. Anything unrecognised
+/// counts as a change, so a new action asks first instead of acting silently.
+pub fn is_read_only_action(prefixed_name: &str) -> bool {
+    const READS: &[&str] = &["FETCH", "GET", "LIST", "SEARCH", "FIND", "READ", "QUERY", "RETRIEVE", "LOOKUP"];
+    const WRITES: &[&str] = &[
+        "SEND", "REPLY", "FORWARD", "CREATE", "ADD", "INSERT", "UPDATE", "EDIT", "MODIFY", "PATCH", "SET",
+        "REPLACE", "DELETE", "REMOVE", "TRASH", "ARCHIVE", "MOVE", "POST", "SHARE", "INVITE", "UPLOAD",
+    ];
+    let slug = prefixed_name.strip_prefix(TOOL_PREFIX).unwrap_or(prefixed_name);
+    let words: Vec<&str> = slug.split('_').collect();
+    words.iter().any(|w| READS.contains(w)) && !words.iter().any(|w| WRITES.contains(w))
+}
+
+/// What the user reads before approving a connector action: the action, then
+/// every field it will send, shortest first so "To" and "Subject" sit above
+/// the message body.
+pub fn describe_action(prefixed_name: &str, params: &Value) -> String {
+    let slug = prefixed_name.strip_prefix(TOOL_PREFIX).unwrap_or(prefixed_name);
+    let (app, action) = slug.split_once('_').unwrap_or((slug, ""));
+    let mut fields: Vec<(String, String)> = params
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(key, value)| {
+            let text = match value {
+                Value::String(s) => s.clone(),
+                Value::Number(n) => n.to_string(),
+                Value::Array(a) => a.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join(", "),
+                _ => return None,
+            };
+            if text.trim().is_empty() || key == "user_id" {
+                return None;
+            }
+            Some((capitalise(&key.replace('_', " ")), text))
+        })
+        .collect();
+    fields.sort_by_key(|(_, text)| text.len());
+    let mut out = format!("{}: {}", capitalise(&app.to_lowercase()), action.replace('_', " ").to_lowercase());
+    for (label, text) in fields {
+        let shown: String = text.chars().take(2000).collect();
+        let cut = if text.chars().count() > 2000 { "…" } else { "" };
+        out.push_str(&format!("\n{label}: {shown}{cut}"));
+    }
+    out
+}
+
+fn capitalise(word: &str) -> String {
+    let mut chars = word.chars();
+    chars.next().map_or(String::new(), |c| c.to_uppercase().chain(chars).collect())
+}
+
 /// Static, curated app catalogue so the Connectors page grid renders even
 /// before the user has a token. Mirrors the cloud's `composio_apps` list so
 /// the two stay in sync.
@@ -1101,5 +1152,31 @@ mod tests {
         });
         let shaped = shape_result("GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID", &raw, &raw.to_string());
         assert!(shaped.text.contains("hello world"));
+    }
+
+    #[test]
+    fn only_clear_reads_skip_approval() {
+        for read in ["composio__GMAIL_FETCH_EMAILS", "composio__SLACK_LIST_CHANNELS", "composio__NOTION_SEARCH_NOTION_PAGE"] {
+            assert!(is_read_only_action(read), "{read}");
+        }
+        for write in [
+            "composio__GMAIL_SEND_EMAIL",
+            "composio__GMAIL_REPLY_TO_THREAD",
+            "composio__SLACK_SEND_MESSAGE",
+            "composio__NOTION_CREATE_PAGE",
+            "composio__GOOGLEDRIVE_FIND_AND_REPLACE",
+            "composio__HUBSPOT_SOMETHING_NEW",
+        ] {
+            assert!(!is_read_only_action(write), "{write}");
+        }
+    }
+
+    #[test]
+    fn approval_text_puts_the_short_fields_first() {
+        let text = describe_action(
+            "composio__GMAIL_SEND_EMAIL",
+            &json!({ "body": "A long message about your invoice", "to": "a@b.com", "user_id": "me", "cc": "" }),
+        );
+        assert_eq!(text, "Gmail: send email\nTo: a@b.com\nBody: A long message about your invoice");
     }
 }

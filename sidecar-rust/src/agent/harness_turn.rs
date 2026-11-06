@@ -177,6 +177,12 @@ impl TurnShared {
         if self.auto_approve || already_approved {
             return true;
         }
+        // Nobody is watching a scheduled run, so a prompt would only stall it
+        // until it timed out. Leave the decision in the inbox instead.
+        if self.unattended() {
+            self.leave_for_inbox(tool, reason, params);
+            return false;
+        }
         let (gate_id, gate_rx) = super::run_state::open_gate(&self.chat_id, tool, &reason, tc_id);
         self.send(json!({
             "type": "permission",
@@ -205,9 +211,46 @@ impl TurnShared {
         }
     }
 
+    fn unattended(&self) -> bool {
+        trigger_for(&self.run_id) == "schedule"
+    }
+
+    /// A connector action waits in the inbox and runs on the user's approval.
+    /// Anything else (a shell command, a file outside the workspace) can't be
+    /// replayed out of context, so the user is told it was skipped.
+    fn leave_for_inbox(&self, tool: &str, reason: String, params: &Value) {
+        let connector = tool.starts_with(crate::connectors::composio::TOOL_PREFIX);
+        let (kind, title) = if connector {
+            ("approval", reason.lines().next().unwrap_or(tool).to_string())
+        } else {
+            ("flag", "A scheduled task needs your OK".to_string())
+        };
+        let body = if connector {
+            reason.lines().skip(1).collect::<Vec<_>>().join("\n")
+        } else {
+            format!("It skipped this step because nobody was there to approve it:\n{reason}\n\nOpen the conversation and ask zWork to do it.")
+        };
+        crate::inboxstore::create(crate::inboxstore::CreateParams {
+            task_id: crate::schedulestore::task_for_chat(&self.chat_id),
+            chat_id: Some(self.chat_id.clone()),
+            kind: Some(kind.to_string()),
+            title,
+            body: Some(body),
+            pending_action: connector.then(|| crate::inboxstore::PendingAction {
+                tool: tool.to_string(),
+                params: params.clone(),
+            }),
+            ..Default::default()
+        });
+    }
+
     /// Report a call the user declined; returns the error the model sees.
     async fn denied(&self, tool: &str, tc_id: &str) -> String {
-        let msg = "Permission denied by user. Action aborted.".to_string();
+        let msg = if self.unattended() {
+            "Not done: this needs the user's OK and they are away. It is in their inbox, so don't try it again. Carry on with the rest of the job and mention it in your summary.".to_string()
+        } else {
+            "Permission denied by user. Action aborted.".to_string()
+        };
         self.send(json!({ "type": "tool_result", "tool": tool, "ok": false, "message": msg, "tool_use_id": tc_id }))
             .await;
         llm_trace(&self.chat_id, self.turn(), "tool_result", json!({ "name": tool, "ok": false, "len": msg.len(), "preview": msg, "denied": true }));
@@ -503,6 +546,7 @@ fn mcp_prompt_block(mcp: &crate::connectors::mcp::Toolset) -> String {
 /// says what happened in their terms: "Read expenses.csv", "Ran Python
 /// script clean.py", "Updated the plan".
 fn step_labels(name: &str, params: &Value) -> (String, String) {
+    let name = name.strip_prefix(crate::connectors::composio::TOOL_PREFIX).unwrap_or(name);
     let arg = |k: &str| params.get(k).and_then(|v| v.as_str()).unwrap_or("").trim();
     let file = |k: &str| {
         let path = arg(k);

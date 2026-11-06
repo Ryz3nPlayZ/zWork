@@ -1565,7 +1565,7 @@ function PermissionCardBody({
         <div className="flex-1">
           <p className="text-[13px] font-medium text-ink">zWork needs your OK</p>
           {reason && (
-            <p className="mt-1 text-[12px] leading-relaxed text-ink-muted">{reason}</p>
+            <p className="mt-1 whitespace-pre-wrap text-[12px] leading-relaxed text-ink-muted">{reason}</p>
           )}
         </div>
       </div>

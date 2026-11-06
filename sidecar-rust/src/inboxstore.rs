@@ -33,7 +33,7 @@ pub struct InboxItem {
     /// The run's automation chat id, so the UI can deep-link into the transcript.
     #[serde(default)]
     pub chat_id: Option<String>,
-    /// `"summary"` | `"flag"` | `"question"` | `"error"`
+    /// `"summary"` | `"flag"` | `"question"` | `"error"` | `"approval"`
     #[serde(default = "default_kind")]
     pub kind: String,
     pub title: String,
@@ -42,6 +42,19 @@ pub struct InboxItem {
     pub created_at: u64,
     #[serde(default)]
     pub read: bool,
+    /// An app action a scheduled run wanted to take. Nobody was there to ask,
+    /// so it waits here and only runs if the user approves it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_action: Option<PendingAction>,
+    /// Finished files the item is about; the inbox offers to open them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct PendingAction {
+    pub tool: String,
+    pub params: serde_json::Value,
 }
 
 fn default_kind() -> String { "summary".to_string() }
@@ -102,11 +115,19 @@ pub struct CreateParams {
     pub kind: Option<String>,
     pub title: String,
     pub body: Option<String>,
+    pub pending_action: Option<PendingAction>,
+    pub files: Vec<String>,
 }
 
 pub fn create(p: CreateParams) -> InboxItem {
     let _guard = write_lock();
     let mut data = load_data();
+    // A model retrying a denied send must not queue the same email twice.
+    if let Some(pending) = &p.pending_action {
+        if let Some(existing) = data.items.iter().find(|i| i.pending_action.as_ref() == Some(pending)) {
+            return existing.clone();
+        }
+    }
     let item = InboxItem {
         id: uid(),
         task_id: p.task_id,
@@ -116,10 +137,44 @@ pub fn create(p: CreateParams) -> InboxItem {
         body: p.body.unwrap_or_default(),
         created_at: now_ms(),
         read: false,
+        pending_action: p.pending_action,
+        files: p.files,
     };
     data.items.push(item.clone());
     save_data(&data);
     item
+}
+
+/// Claim an item's waiting action. Clearing it under the lock is what stops a
+/// double click sending the same email twice.
+pub fn take_pending(item_id: &str) -> Option<PendingAction> {
+    let _guard = write_lock();
+    let mut data = load_data();
+    let action = data.items.iter_mut().find(|i| i.id == item_id)?.pending_action.take()?;
+    save_data(&data);
+    Some(action)
+}
+
+/// Put a claimed action back after it failed, so the user can try again.
+pub fn restore_pending(item_id: &str, action: PendingAction) {
+    let _guard = write_lock();
+    let mut data = load_data();
+    if let Some(item) = data.items.iter_mut().find(|i| i.id == item_id) {
+        item.pending_action = Some(action);
+        save_data(&data);
+    }
+}
+
+/// The waiting action ran: the item becomes an ordinary, read record of it.
+pub fn mark_action_done(item_id: &str) {
+    let _guard = write_lock();
+    let mut data = load_data();
+    if let Some(item) = data.items.iter_mut().find(|i| i.id == item_id) {
+        item.kind = "summary".to_string();
+        item.title = format!("Done: {}", item.title);
+        item.read = true;
+        save_data(&data);
+    }
 }
 
 pub fn mark_read(item_id: &str) -> bool {
@@ -161,5 +216,34 @@ pub fn delete(item_id: &str) -> bool {
         true
     } else {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pending_action_runs_once_and_queues_once() {
+        let unique = uuid::Uuid::new_v4().to_string();
+        let action = PendingAction { tool: "composio__GMAIL_SEND_EMAIL".into(), params: serde_json::json!({ "to": unique }) };
+        let params = || CreateParams {
+            title: "Gmail: send email".into(),
+            kind: Some("approval".into()),
+            pending_action: Some(action.clone()),
+            ..Default::default()
+        };
+        let item = create(params());
+        assert_eq!(create(params()).id, item.id, "a retry must not queue a second send");
+
+        let taken = take_pending(&item.id).expect("first approve claims it");
+        assert!(take_pending(&item.id).is_none(), "a double click must not send twice");
+
+        restore_pending(&item.id, taken);
+        assert!(take_pending(&item.id).is_some(), "a failed send can be retried");
+        mark_action_done(&item.id);
+        let done = get_all(false).into_iter().find(|i| i.id == item.id).unwrap();
+        assert_eq!((done.kind.as_str(), done.read), ("summary", true));
+        delete(&item.id);
     }
 }

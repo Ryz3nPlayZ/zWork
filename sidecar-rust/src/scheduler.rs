@@ -64,9 +64,32 @@ pub async fn scheduler_loop() {
             // Minimal startup catch-up: if a run is overdue, fire once then
             // advance. Full catch-up (run N missed intervals) is intentionally
             // deferred — see plan.
-            run_task(task).await;
+            if now_ms().saturating_sub(next) > MISSED_AFTER_MS {
+                note_missed_run(&task, next);
+            }
+            // Spawned so one long job can't hold up every other task.
+            tokio::spawn(run_task(task));
         }
     }
+}
+
+/// How late a run must be before the user is told about it.
+const MISSED_AFTER_MS: u64 = 10 * 60 * 1000;
+
+/// Tell the user a job ran late rather than letting it look on time.
+fn note_missed_run(task: &ScheduledTask, due_ms: u64) {
+    let due = chrono::DateTime::from_timestamp_millis(due_ms as i64)
+        .map(|d| d.with_timezone(&Local).format("%A at %-I:%M %p").to_string())
+        .unwrap_or_else(|| "its scheduled time".to_string());
+    crate::inboxstore::create(crate::inboxstore::CreateParams {
+        task_id: Some(task.id.clone()),
+        kind: Some("flag".to_string()),
+        title: format!("“{}” ran late", task.title),
+        body: Some(format!(
+            "It was due {due}, but your computer was asleep or zWork was closed, so it ran as soon as zWork was back."
+        )),
+        ..Default::default()
+    });
 }
 
 /// Compute the next run time (epoch-ms) given the schedule and "from" instant.
@@ -182,6 +205,7 @@ async fn run_task(task: ScheduledTask) {
         .clone()
         .unwrap_or_else(|| crate::settings::load().default_model.clone());
     let chat = crate::chatstore::create_kind(&task_title, &model, "", "automation");
+    crate::schedulestore::set_last_chat(&task_id, &chat.id);
 
     // 2. Build the scheduled-task system-prompt block: identity, trigger
     //    description, and per-task memory (notes aggregated from prior runs).
@@ -203,11 +227,19 @@ async fn run_task(task: ScheduledTask) {
             memory = task_memory.trim()
         ));
     }
+    extra.push_str(&format!(
+        "\n\n### Working unattended\n\
+         - You can read the user's files anywhere. Never change or overwrite them on a scheduled \
+           run: save what you make in {outputs}.\n\
+         - Anything that sends, posts or changes something in a connected app goes to the user's \
+           inbox for approval and does not happen during this run. Prepare each one anyway.",
+        outputs = crate::paths::workspace_outputs_dir().display()
+    ));
     extra.push_str(
         "\n\n### Reporting\n\
          - If you find something the user should act on — an anomaly, a decision needed, \
            a failure — call `post_to_inbox` with a concise title and body. This is how the \
-           user hears from you without opening the app.\n\
+           user hears from you without opening the app. List finished files in `files`.\n\
          - After completing the objective, save any durable, task-relevant findings for \
            future runs via `save_memory` with `target: \"task\"`.\n\
          - Keep your final text response short — the user reads a one-line summary in their \
@@ -283,6 +315,7 @@ async fn run_task(task: ScheduledTask) {
             kind: Some("error".to_string()),
             title: format!("“{}” hit an error", task_title),
             body: Some(body),
+            ..Default::default()
         });
     } else {
         // A clean run supersedes this task's earlier failures.
@@ -306,6 +339,7 @@ async fn run_task(task: ScheduledTask) {
                 kind: Some("summary".to_string()),
                 title: format!("“{}” finished", task_title),
                 body: Some(body),
+                ..Default::default()
             });
         }
     }

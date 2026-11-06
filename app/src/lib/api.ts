@@ -376,11 +376,15 @@ export interface InboxItem {
   id: string;
   task_id: string | null;
   chat_id: string | null;
-  kind: "summary" | "flag" | "question" | "error";
+  kind: "summary" | "flag" | "question" | "error" | "approval";
   title: string;
   body: string;
   created_at: number;
   read: boolean;
+  /** Present while an action waits for the user's OK. */
+  pending_action?: { tool: string; params: unknown };
+  /** Finished files this item is about. */
+  files?: string[];
 }
 
 export interface SkillMeta {
@@ -724,6 +728,11 @@ export const api = {
   markAllInboxRead: () =>
     localFetch("/api/inbox/all-read", { method: "POST" }).then((r) =>
       j<{ success: boolean; marked_read: number }>(r),
+    ),
+
+  approveInboxItem: (id: string) =>
+    localFetch(`/api/inbox/${id}/approve`, { method: "POST" }).then((r) =>
+      j<{ ok: boolean; error?: string }>(r),
     ),
 
   deleteInboxItem: (id: string) =>

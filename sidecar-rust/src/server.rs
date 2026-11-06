@@ -2493,6 +2493,20 @@ pub async fn mark_all_inbox_read() -> impl IntoResponse {
     Json(json!({ "success": true, "marked_read": changed }))
 }
 
+/// The user approved what a scheduled run left waiting.
+pub async fn approve_inbox_item(Path(item_id): Path<String>) -> impl IntoResponse {
+    let Some(action) = crate::inboxstore::take_pending(&item_id) else {
+        return Json(json!({ "ok": false, "error": "This has already been handled." }));
+    };
+    let res = crate::connectors::composio::call_tool(&action.tool, action.params.clone()).await;
+    if res.get("isError").and_then(|v| v.as_bool()).unwrap_or(false) {
+        crate::inboxstore::restore_pending(&item_id, action);
+        return Json(json!({ "ok": false, "error": "That didn't go through. Check the app is still connected, then try again." }));
+    }
+    crate::inboxstore::mark_action_done(&item_id);
+    Json(json!({ "ok": true }))
+}
+
 pub async fn delete_inbox_item(Path(item_id): Path<String>) -> impl IntoResponse {
     let ok = crate::inboxstore::delete(&item_id);
     Json(json!({ "success": ok }))

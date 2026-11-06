@@ -1,9 +1,9 @@
 /* Hallmark · genre: modern-minimal · macrostructure: Workbench · design-system: design.md · designed-as-app */
 
 import { useState, useEffect, useRef } from "react";
-import { Inbox, Check, CheckCheck, AlertTriangle, HelpCircle, X, Bot, ArrowRight, CalendarClock } from "lucide-react";
+import { Inbox, Check, CheckCheck, AlertTriangle, HelpCircle, X, Bot, ArrowRight, CalendarClock, FileText, ShieldCheck } from "lucide-react";
 import { useApp } from "../lib/store";
-import type { InboxItem } from "../lib/api";
+import { api, type InboxItem } from "../lib/api";
 import {
   Button,
   EmptyState,
@@ -20,6 +20,8 @@ import {
 /** Icon and tone per inbox item kind. */
 function kindMeta(kind: InboxItem["kind"]): { icon: typeof Bot; tone: Tone; label: string } {
   switch (kind) {
+    case "approval":
+      return { icon: ShieldCheck, tone: "warning", label: "Needs your OK" };
     case "flag":
       return { icon: AlertTriangle, tone: "warning", label: "Needs attention" };
     case "question":
@@ -57,6 +59,8 @@ export function InboxPage() {
   const [tab, setTab] = useState<"unread" | "all">("unread");
   const [openId, setOpenId] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [approving, setApproving] = useState<string | null>(null);
+  const [approveError, setApproveError] = useState<{ id: string; message: string } | null>(null);
   const timers = useRef(new Map<string, number>());
 
   useEffect(() => {
@@ -99,8 +103,26 @@ export function InboxPage() {
     });
   }
 
-  const unread = inboxItems.filter((i) => !i.read);
-  const read = inboxItems.filter((i) => i.read);
+  async function approve(id: string) {
+    setApproving(id);
+    setApproveError(null);
+    try {
+      const res = await api.approveInboxItem(id);
+      if (!res.ok) setApproveError({ id, message: res.error ?? "That didn't go through. Try again." });
+      await fetchInbox();
+    } catch {
+      setApproveError({ id, message: "That didn't go through. Try again." });
+    } finally {
+      setApproving(null);
+    }
+  }
+
+  // A waiting action stays up top until it's decided, even after it's been read.
+  const needsDecision = (i: InboxItem) => !!i.pending_action;
+  const unread = inboxItems
+    .filter((i) => !i.read || needsDecision(i))
+    .sort((a, b) => Number(needsDecision(b)) - Number(needsDecision(a)));
+  const read = inboxItems.filter((i) => i.read && !needsDecision(i));
   const showTabs = read.length > 0;
   const view = showTabs ? tab : "unread";
 
@@ -152,10 +174,32 @@ export function InboxPage() {
         }
       >
         <p className="max-w-[68ch] whitespace-pre-wrap text-[13px] leading-relaxed text-ink-soft">{item.body}</p>
+        {item.files && item.files.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {item.files.map((path) => (
+              <Button key={path} icon={<FileText />} onClick={() => void api.openFile(path)}>
+                Open {path.split(/[\\/]/).pop()}
+              </Button>
+            ))}
+          </div>
+        )}
+        {approveError?.id === item.id && (
+          <p role="alert" className="mt-3 text-[13px] text-error">{approveError.message}</p>
+        )}
         <div className="mt-3 flex flex-wrap gap-2">
-          {item.chat_id && (
+          {item.pending_action && (
             <Button
               variant="primary"
+              icon={<Check />}
+              disabled={approving === item.id}
+              onClick={() => void approve(item.id)}
+            >
+              {approving === item.id ? "Working…" : "Approve"}
+            </Button>
+          )}
+          {item.chat_id && (
+            <Button
+              variant={item.pending_action ? undefined : "primary"}
               icon={<ArrowRight />}
               onClick={() => void openChat(item.chat_id!)}
             >
@@ -163,7 +207,7 @@ export function InboxPage() {
             </Button>
           )}
           <Button icon={<X />} onClick={() => dismiss(item.id)}>
-            Dismiss
+            {item.pending_action ? "Don't do this" : "Dismiss"}
           </Button>
         </div>
       </ListRow>

@@ -197,6 +197,22 @@ pub fn set_run_state(
     Some(result)
 }
 
+/// Note a run's chat as soon as it starts, so anything the run posts to the
+/// inbox can be traced to its task. Saving it only at the end left a task's
+/// first run with no task and later runs pointing at the previous one.
+pub fn set_last_chat(task_id: &str, chat_id: &str) {
+    let mut data = load_data();
+    if let Some(task) = data.tasks.iter_mut().find(|t| t.id == task_id) {
+        task.last_chat_id = Some(chat_id.to_string());
+        save_data(&data);
+    }
+}
+
+/// The scheduled task whose current or latest run is this chat.
+pub fn task_for_chat(chat_id: &str) -> Option<String> {
+    get_all().into_iter().find(|t| t.last_chat_id.as_deref() == Some(chat_id)).map(|t| t.id)
+}
+
 pub fn delete(task_id: &str) -> bool {
     let mut data = load_data();
     let before = data.tasks.len();
