@@ -79,6 +79,9 @@ fn is_retryable(err: &ProviderError) -> bool {
         Some("false") => return false,
         _ => {}
     }
+    if err.body.as_deref().is_some_and(is_provider_limit_error) {
+        return false;
+    }
     match err.status {
         None => true,
         Some(s) => s == 408 || s == 409 || s == 429 || s >= 500,
@@ -262,8 +265,15 @@ use super::types::{now_ms, AssistantMessage, StopReason};
 /// Subscription/account limits and exhausted budgets look like throttles
 /// but never recover by retrying.
 static NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new("(?i)GoUsageLimitError|FreeUsageLimitError|Monthly usage limit reached|available balance|insufficient_quota|out of budget|quota exceeded|billing").unwrap()
+    // z.ai and DeepSeek send "Insufficient balance" (z.ai as HTTP 429 code 1113).
+    Regex::new("(?i)GoUsageLimitError|FreeUsageLimitError|Monthly usage limit reached|available balance|insufficient.?balance|no resource package|insufficient_quota|out of budget|quota exceeded|billing").unwrap()
 });
+
+/// True for account/billing limits that look like throttles (often a 429)
+/// but never clear by waiting.
+pub fn is_provider_limit_error(text: &str) -> bool {
+    NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN.is_match(text)
+}
 
 /// Transient provider load, transport, and premature-stream failures.
 static RETRYABLE_PROVIDER_ERROR_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
@@ -342,5 +352,15 @@ mod assistant_error_tests {
         assert!(is_retryable_assistant_error(&errored("overloaded error, please retry (503)")));
         assert!(!is_retryable_assistant_error(&errored("insufficient_quota: 429")));
         assert!(!is_retryable_assistant_error(&errored("invalid x-api-key")));
+    }
+
+    #[test]
+    fn zai_out_of_credit_429_is_not_retried() {
+        let body = r#"{"error":{"code":"1113","message":"Insufficient balance or no resource package. Please recharge."}}"#;
+        let err = ProviderError { status: Some(429), message: "Too Many Requests".into(), headers: Vec::new(), body: Some(body.into()) };
+        assert!(!is_retryable(&err));
+        assert!(!is_retryable_assistant_error(&errored(&err.format())));
+        let throttle = ProviderError { body: Some(r#"{"error":{"message":"Rate limit reached"}}"#.into()), ..err };
+        assert!(is_retryable(&throttle));
     }
 }

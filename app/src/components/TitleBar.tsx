@@ -179,21 +179,26 @@ export function WindowControls({ inset }: { inset?: boolean }) {
  *  app draws its own.
  * ------------------------------------------------------------------ */
 
-export function EarlyScreenChrome() {
+export function EarlyScreenChrome({ controlsInCard }: { controlsInCard?: boolean } = {}) {
   if (!IS_TAURI) return null;
   if (usesIntegratedTitleBar()) {
+    // Card screens (login, onboarding) put the buttons in the card's header
+    // via CardWindowControls; the strip then covers only the 20px gutter
+    // above the card so it doesn't swallow clicks on them.
     return (
       <>
         <div
           {...dragRegionAttrs()}
           onMouseDown={onDragMouseDown}
           className="absolute inset-x-0 top-0 z-30"
-          style={{ height: TITLEBAR_H }}
+          style={{ height: controlsInCard ? 20 : TITLEBAR_H }}
           aria-hidden="true"
         />
-        <div className="absolute right-0 top-0 z-30 flex" style={{ height: TITLEBAR_H }}>
-          <WindowControls />
-        </div>
+        {!controlsInCard && (
+          <div className="absolute right-0 top-0 z-30 flex" style={{ height: TITLEBAR_H }}>
+            <WindowControls />
+          </div>
+        )}
       </>
     );
   }
@@ -208,4 +213,16 @@ export function EarlyScreenChrome() {
     );
   }
   return null;
+}
+
+/** Caption buttons flush to the top-right of a login/onboarding card header
+ *  (px-7 md:px-9 py-4), so they belong to the card the way they belong to
+ *  the main pane after sign-in. Windows only. */
+export function CardWindowControls() {
+  if (!usesIntegratedTitleBar()) return null;
+  return (
+    <div className="-my-4 -mr-7 flex self-stretch md:-mr-9">
+      <WindowControls />
+    </div>
+  );
 }

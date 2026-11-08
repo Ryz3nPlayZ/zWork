@@ -1160,6 +1160,20 @@ fn main() {
     configure_linux_webview_env();
 
     let app = tauri::Builder::default()
+        // Must be the first plugin. Closing the window only hides it to the
+        // tray, so launching zWork again used to start a second app (and a
+        // second backend on the same port) whose window vanished at once;
+        // now the relaunch just brings the running window back.
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if args.iter().any(|a| a == AT_LOGIN_ARG) {
+                return;
+            }
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.unminimize();
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_shell::init())
         .plugin(process_init())
         .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![AT_LOGIN_ARG])))

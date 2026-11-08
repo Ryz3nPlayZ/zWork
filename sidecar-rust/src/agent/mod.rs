@@ -288,6 +288,17 @@ pub fn friendly_upstream_error(message: &str, raw: Option<&str>, retries_exhaust
         );
     }
 
+    // Out of credit / model not in the plan. z.ai sends this as a 429, so it
+    // must be caught before the rate-limit branch or it reads as "wait".
+    if crate::harness::retry::is_provider_limit_error(message)
+        || raw.is_some_and(crate::harness::retry::is_provider_limit_error)
+    {
+        return "The model provider says your account has no credit left for this model \
+                (or it isn't in your plan). Add credit or a plan with the provider, or pick \
+                another model in Settings."
+            .to_string();
+    }
+
     // 429 rate limit — surfaced as permanent after retries are exhausted.
     if lower.contains("429") || lower.contains("rate limit") || lower.contains("too many requests") {
         return "You've hit the model provider's rate limit. Please wait a moment and try again.".to_string();
@@ -567,6 +578,18 @@ impl DoomLoopDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zai_out_of_credit_429_is_not_called_a_rate_limit() {
+        let msg = friendly_upstream_error(
+            r#"429 Too Many Requests: {"error":{"code":"1113","message":"Insufficient balance or no resource package. Please recharge."}}"#,
+            None,
+            true,
+        );
+        assert!(msg.contains("no credit"), "got: {msg}");
+        let throttle = friendly_upstream_error("429 Too Many Requests: slow down", None, true);
+        assert!(throttle.contains("rate limit"), "got: {throttle}");
+    }
     use serde_json::json;
 
     #[test]

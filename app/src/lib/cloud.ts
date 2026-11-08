@@ -363,6 +363,7 @@ export function pollForPlanChange(
   currentTier: string,
   onPlanChanged: (user: CloudUser) => void,
   timeoutMs = 300_000,
+  onGiveUp?: () => void,
 ): () => void {
   let stopped = false;
   const interval = setInterval(async () => {
@@ -379,6 +380,7 @@ export function pollForPlanChange(
   const timer = setTimeout(() => {
     stopped = true;
     clearInterval(interval);
+    onGiveUp?.();
   }, timeoutMs);
   return () => {
     stopped = true;

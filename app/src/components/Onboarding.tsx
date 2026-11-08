@@ -10,7 +10,8 @@ import { needsLightweightRendering } from "../lib/platform";
 import { api, type OnboardingAnswer, type OnboardingCredential } from "../lib/api";
 import { CHORES } from "../lib/chores";
 import LightRays from "./LightRays";
-import { EarlyScreenChrome } from "./TitleBar";
+import { CardWindowControls, EarlyScreenChrome } from "./TitleBar";
+import { dragRegionAttrs, onDragMouseDown } from "../lib/drag";
 
 /* ------------------------------------------------------------------ *
  *  Question model
@@ -215,7 +216,7 @@ export function Onboarding() {
       {/* Window chrome — these full-screen gates render without the main
           layout's base layer, so they need their own top strip (drag region
           on macOS, drag region + caption buttons on Windows). */}
-      <EarlyScreenChrome />
+      <EarlyScreenChrome controlsInCard />
 
       {/* Content area — card spans full viewport height, pinned right. */}
       <div className="relative z-20 flex h-full flex-1 items-center p-5 md:p-6">
@@ -241,14 +242,21 @@ export function Onboarding() {
           )}
         >
           {/* Card header: logo left, progress dots right. */}
-          <div className="flex flex-shrink-0 items-center justify-between border-b border-line/70 px-7 py-4 md:px-9">
+          <div
+            {...dragRegionAttrs()}
+            onMouseDown={onDragMouseDown}
+            className="flex flex-shrink-0 items-center justify-between border-b border-line/70 px-7 py-4 md:px-9"
+          >
           <div className="flex items-center gap-2">
               <Logo size={20} />
               <span className="text-[13.5px] font-semibold tracking-tight text-ink">
                 <span className="lowercase">z</span>Work
               </span>
             </div>
-            <ProgressDots step={step} total={total} />
+            <div className="flex items-center gap-4 self-stretch">
+              <ProgressDots step={step} total={total} />
+              <CardWindowControls />
+            </div>
           </div>
 
           {/* Scrollable body — centers the current question vertically. */}

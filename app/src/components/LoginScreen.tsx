@@ -9,7 +9,8 @@ import { startWebGoogleSignIn, isWebAuthClient } from "../lib/cloud";
 import { cn } from "../lib/cn";
 import { needsLightweightRendering } from "../lib/platform";
 import { ROTATING_WORDS } from "../lib/constants";
-import { EarlyScreenChrome } from "./TitleBar";
+import { CardWindowControls, EarlyScreenChrome } from "./TitleBar";
+import { dragRegionAttrs, onDragMouseDown } from "../lib/drag";
 
 function LeftVisual() {
   const [index, setIndex] = useState(0);
@@ -112,7 +113,7 @@ export function LoginScreen() {
       {/* Window chrome — these full-screen gates render without the main
           layout's base layer, so they need their own top strip (drag region
           on macOS, drag region + caption buttons on Windows). */}
-      <EarlyScreenChrome />
+      <EarlyScreenChrome controlsInCard />
 
       {/* Content area */}
       <div className="relative z-20 flex h-full flex-1 items-center p-5 md:p-6">
@@ -140,13 +141,18 @@ export function LoginScreen() {
           )}
         >
           {/* Card header */}
-          <div className="flex flex-shrink-0 items-center border-b border-line/70 px-7 py-4 md:px-9">
+          <div
+            {...dragRegionAttrs()}
+            onMouseDown={onDragMouseDown}
+            className="flex flex-shrink-0 items-center justify-between border-b border-line/70 px-7 py-4 md:px-9"
+          >
             <div className="flex items-center gap-2">
               <Logo size={20} />
               <span className="text-[13.5px] font-semibold tracking-tight text-ink">
                 <span className="lowercase">z</span>Work
               </span>
             </div>
+            <CardWindowControls />
           </div>
 
           {/* Scrollable body */}

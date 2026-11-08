@@ -140,6 +140,9 @@ export function PlanPage({
             setUpgrading(false);
             onUserChanged?.(user);
           },
+          undefined,
+          // Checkout abandoned: drop the banner instead of waiting forever.
+          () => setUpgrading(false),
         );
       }
     } catch (err) {
@@ -156,15 +159,9 @@ export function PlanPage({
       const session = await createBillingPortalSession();
       if (session?.url) {
         await openUrl(session.url);
-        setUpgrading(true);
+        // The portal isn't a payment; just pick up a plan change quietly.
         stopPollRef.current?.();
-        stopPollRef.current = pollForPlanChange(
-          currentTier,
-          (user) => {
-            setUpgrading(false);
-            onUserChanged?.(user);
-          },
-        );
+        stopPollRef.current = pollForPlanChange(currentTier, (user) => onUserChanged?.(user));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to open billing portal");
