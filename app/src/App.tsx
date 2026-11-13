@@ -653,7 +653,7 @@ export default function App() {
           />
         )}
         <OfflineBanner />
-        <div className="relative flex flex-1 min-h-0 overflow-hidden">
+        <div className="relative flex flex-1 min-h-0 overflow-clip">
           {view === "settings" ? (
             <Suspense fallback={panelFallback}>
               <SettingsPage />

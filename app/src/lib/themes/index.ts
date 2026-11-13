@@ -11,6 +11,8 @@ import {
   type TokenSet,
 } from "./presets";
 
+import { CUSTOM_SCHEME_ID, customScheme } from "./custom";
+
 export type { ColorScheme, TokenSet } from "./presets";
 export { COLOR_SCHEMES, DEFAULT_SCHEME_ID } from "./presets";
 
@@ -40,6 +42,7 @@ const TOKEN_CSS_VARS: Array<{ token: keyof TokenSet; var: string }> = [
 ];
 
 export function getScheme(id: string): ColorScheme {
+  if (id === CUSTOM_SCHEME_ID) return customScheme();
   return COLOR_SCHEMES.find((s) => s.id === id) ?? COLOR_SCHEMES[0]!;
 }
 

@@ -1,6 +1,6 @@
 /* Hallmark · genre: modern-minimal · macrostructure: Workbench · design-system: design.md · designed-as-app */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Eye,
@@ -12,9 +12,6 @@ import {
   Plus,
   Trash2,
   X,
-  Sun,
-  Moon,
-  Monitor,
   Cpu,
   Plug,
   Sliders,
@@ -33,21 +30,8 @@ import { useApp } from "../lib/store";
 import { IS_TAURI, isMacOS } from "../lib/platform";
 import { isWebAuthClient, startWebGoogleSignIn } from "../lib/cloud";
 import { dragRegionAttrs, onDragMouseDown } from "../lib/drag";
-import {
-  setTranslucencyPref,
-  useTranslucencyPref,
-  nativeVibrancySupported,
-  translucencySupported,
-} from "../lib/translucency";
-import { WALLPAPER_PRESETS, encodeWallpaper, saveWallpaper, useWallpaper } from "../lib/wallpaper";
-import {
-  loadSchemePref,
-  setSchemePref,
-  loadThemePref,
-  setThemePref,
-  resolvedSchemeModes,
-} from "../lib/theme";
-import { COLOR_SCHEMES, DEFAULT_SCHEME_ID } from "../lib/themes";
+import { searchSettings } from "../lib/settingsSearch";
+import { AppearanceSettings } from "./AppearanceSettings";
 import { fallbackAppVersion, resolveAppVersion } from "../lib/appVersion";
 import {
   loadTemplates,
@@ -63,6 +47,11 @@ import { KeybindRecorder } from "./KeybindRecorder";
 type Section = "account" | "appearance" | "general" | "memory" | "models" | "integrations";
 
 const SECTION_META: Record<Section, { title: string; description: string; icon: React.ReactNode }> = {
+  general: {
+    title: "General",
+    description: "Defaults, permissions, and preferences.",
+    icon: <Sliders className="h-4 w-4" />,
+  },
   account: {
     title: "Account",
     description: "Sign in with Google to sync your data.",
@@ -70,13 +59,8 @@ const SECTION_META: Record<Section, { title: string; description: string; icon: 
   },
   appearance: {
     title: "Appearance",
-    description: "Theme, color scheme, glass, and background.",
+    description: "Theme, size, wallpaper, and panels.",
     icon: <Palette className="h-4 w-4" />,
-  },
-  general: {
-    title: "General",
-    description: "Defaults, permissions, and preferences.",
-    icon: <Sliders className="h-4 w-4" />,
   },
   memory: {
     title: "Memory",
@@ -146,6 +130,43 @@ export function SettingsPage() {
   const upsertCustomModel = useApp((s) => s.upsertCustomModel);
   const deleteCustomModel = useApp((s) => s.deleteCustomModel);
 
+  const [query, setQuery] = useState("");
+  const [focusLabel, setFocusLabel] = useState<string | null>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const hits = useMemo(
+    () => searchSettings(query, VISIBLE_SECTIONS.map((id) => ({ id, label: SECTION_META[id].title })), !IS_WEB),
+    [query],
+  );
+  const openHit = (hit: { page: Section; detail?: string }) => {
+    setSection(hit.page);
+    setQuery("");
+    setFocusLabel(hit.detail ?? null);
+  };
+
+  // After a search pick, scroll to the setting whose label matches and flash it.
+  useEffect(() => {
+    if (!focusLabel) return;
+    const id = requestAnimationFrame(() => {
+      const root = contentRef.current;
+      if (!root) return;
+      const want = focusLabel.toLowerCase();
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+        if (n.textContent?.trim().toLowerCase() !== want) continue;
+        const el = n.parentElement!.closest("section > div > div, section, h3, label") ?? n.parentElement!;
+        // Scroll only the content pane: scrollIntoView also shifts overflow-hidden ancestors.
+        const r = el.getBoundingClientRect(), box = root.getBoundingClientRect();
+        root.scrollTo({ top: root.scrollTop + r.top - box.top - (box.height - r.height) / 2, behavior: "smooth" });
+        el.classList.remove("setting-flash");
+        void (el as HTMLElement).offsetWidth;
+        el.classList.add("setting-flash");
+        break;
+      }
+      setFocusLabel(null);
+    });
+    return () => cancelAnimationFrame(id);
+  }, [focusLabel, section]);
+
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col bg-paper">
       {/* Header — also a window drag region so the pane is movable
@@ -170,34 +191,57 @@ export function SettingsPage() {
       {/* Body — nav is sticky, only content scrolls */}
       <div className="min-h-0 flex-1 flex flex-col lg:flex-row overflow-hidden">
         <div className="mx-auto flex w-full max-w-[1080px] gap-0 lg:gap-8 px-0 lg:px-8 py-0 lg:py-6 flex-1 min-h-0">
-          {/* Section tabs — horizontal sticky on mobile, vertical sticky on desktop */}
-          <nav className="flex shrink-0 flex-row gap-0 lg:flex-col lg:w-[200px] border-b border-line lg:border-b-0 lg:pt-2 overflow-x-auto lg:overflow-visible lg:sticky lg:top-0 bg-paper">
-            {VISIBLE_SECTIONS.map((key) => {
+          {/* Section tabs — horizontal on narrow windows, vertical sticky on wide.
+              Search first: type what you want to change instead of hunting for it. */}
+          <nav className="flex shrink-0 flex-row items-center gap-0 lg:flex-col lg:items-stretch lg:w-[220px] border-b border-line lg:border-b-0 lg:pt-1 overflow-x-auto lg:overflow-visible lg:sticky lg:top-0">
+            <div className="relative shrink-0 px-3 py-2 lg:px-0 lg:pt-0 lg:pb-2">
+              <Search className="pointer-events-none absolute left-5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint lg:left-2.5 lg:top-[calc(50%-4px)]" />
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && hits[0]) openHit(hits[0]);
+                  if (e.key === "Escape") setQuery("");
+                }}
+                placeholder="Search settings"
+                aria-label="Search settings"
+                className="ring-focus h-8 w-44 lg:w-full rounded-lg border border-line bg-paper pl-8 pr-2.5 text-[12.5px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+              />
+            </div>
+            {hits.length === 0 && (
+              <p className="px-4 py-3 text-[12px] text-ink-muted lg:px-3 lg:py-2">Nothing matches “{query.trim()}”.</p>
+            )}
+            {hits.map((hit) => {
+              const key = hit.page;
               const meta = SECTION_META[key];
-              const isActive = section === key;
+              const isActive = !query && section === key;
               return (
                 <button
                   key={key}
                   type="button"
-                  onClick={() => setSection(key)}
+                  onClick={() => openHit(hit)}
                   className={cn(
-                    "press flex items-center gap-2.5 whitespace-nowrap px-4 py-3 text-[13px] font-medium transition-colors lg:rounded-lg lg:px-3 lg:py-2",
+                    "press flex items-center gap-2.5 whitespace-nowrap px-4 py-3 text-left text-[13px] font-medium transition-colors lg:rounded-lg lg:px-3 lg:py-2",
                     isActive
                       ? "text-ink border-b-2 border-ink lg:border-b-0 lg:bg-line"
                       : "text-ink-muted border-b-2 border-transparent hover:text-ink lg:border-b-0 lg:hover:bg-line/40",
                   )}
                 >
-                  <span className={cn("flex h-5 w-5 items-center justify-center", isActive ? "text-ink" : "text-ink-faint")}>
+                  <span className={cn("flex h-5 w-5 shrink-0 items-center justify-center", isActive ? "text-ink" : "text-ink-faint")}>
                     {meta.icon}
                   </span>
-                  <span>{meta.title}</span>
+                  <span className="min-w-0">
+                    <span className="block">{meta.title}</span>
+                    {hit.detail && <span className="block truncate text-[11.5px] font-normal text-ink-muted">{hit.detail}</span>}
+                  </span>
                 </button>
               );
             })}
           </nav>
 
           {/* Content area — only this scrolls */}
-          <div className="min-w-0 flex-1 w-full px-5 lg:px-0 py-5 space-y-5 overflow-y-auto" style={{ scrollbarGutter: "stable" }}>
+          <div ref={contentRef} className="min-w-0 flex-1 w-full px-5 lg:px-0 py-5 space-y-5 overflow-y-auto" style={{ scrollbarGutter: "stable" }}>
             {section === "account" && <AccountPanel />}
             {section === "models" && (
               <ModelsPanel
@@ -211,7 +255,7 @@ export function SettingsPage() {
             {section === "integrations" && (
               <IntegrationsPanel integrations={integrations} onRefresh={refreshSettingsPage} />
             )}
-            {section === "appearance" && <AppearancePanel />}
+            {section === "appearance" && <AppearanceSettings />}
             {section === "general" && (
               <GeneralPanel settings={settings} onSave={saveSettings} />
             )}
@@ -1030,275 +1074,6 @@ function IntegrationsPanel({
         )}
       </div>
     </div>
-  );
-}
-
-// ---------------- Appearance ----------------
-
-function AppearancePanel() {
-  const [themePref, setThemePrefState] = useState<"system" | "light" | "dark">(() =>
-    loadThemePref(),
-  );
-  const [schemePref, setSchemePrefState] = useState<string>(() => loadSchemePref());
-  const translucencyPref = useTranslucencyPref();
-  const translucencyNative = nativeVibrancySupported();
-  const schemeModes = resolvedSchemeModes();
-  const modeLocked = schemeModes.length === 1;
-
-  const applyTheme = (v: "system" | "light" | "dark") => {
-    setThemePrefState(v);
-    setThemePref(v);
-  };
-
-  const applyScheme = (id: string) => {
-    setSchemePrefState(id);
-    setSchemePref(id);
-    const pref = loadThemePref();
-    setThemePrefState(pref);
-  };
-
-  const themeOptions: { value: "system" | "light" | "dark"; icon: React.ReactNode; label: string }[] = [
-    { value: "system", icon: <Monitor className="h-4 w-4" />, label: "System" },
-    { value: "light", icon: <Sun className="h-4 w-4" />, label: "Light" },
-    { value: "dark", icon: <Moon className="h-4 w-4" />, label: "Dark" },
-  ];
-
-  return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <h2 className="text-[17px] font-semibold tracking-tight text-ink">Appearance</h2>
-        <p className="mt-1 text-[13px] leading-5 text-ink-muted">Theme, color scheme, glass, and background.</p>
-      </div>
-
-      <section className="rounded-xl border border-line bg-paper-raised p-4 space-y-4">
-        <Field
-          label="Theme"
-          description={
-            modeLocked
-              ? `This color scheme is ${schemeModes[0]} only.`
-              : "Follows your system by default."
-          }
-        >
-          <div className="flex gap-2 mt-1">
-            {themeOptions.map((opt) => {
-              const disabled =
-                modeLocked ||
-                (opt.value !== "system" && !schemeModes.includes(opt.value));
-              return (
-                <button
-                  key={opt.value}
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => applyTheme(opt.value)}
-                  className={cn(
-                    "press flex flex-col items-center gap-1.5 rounded-xl border px-4 py-3 transition-colors min-w-[64px]",
-                    disabled && "opacity-40 cursor-not-allowed",
-                    !disabled && themePref === opt.value
-                      ? "border-line-strong bg-paper-sunken text-ink shadow-[0_0_0_1px_rgb(var(--line-strong))]"
-                      : "border-line bg-paper text-ink-muted hover:border-line-strong hover:bg-paper-sunken hover:text-ink",
-                  )}
-                >
-                  {opt.icon}
-                  <span className="text-[11px] font-medium">{opt.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </Field>
-
-        <Field
-          label="Color scheme"
-          description="The palette family. Parchment is the zWork default."
-        >
-          <div className="mt-1.5 flex items-center gap-2">
-            <div className="relative">
-              <select
-                value={schemePref}
-                onChange={(e) => applyScheme(e.target.value)}
-                className="press ring-focus appearance-none rounded-lg border border-line bg-paper px-3 py-2 pr-8 text-[12.5px] text-ink hover:border-line-strong focus:border-line-strong focus:outline-none cursor-pointer min-w-[180px]"
-              >
-                {Object.entries(
-                  COLOR_SCHEMES.reduce<Record<string, typeof COLOR_SCHEMES>>((acc, s) => {
-                    const g = s.group ?? "Other";
-                    (acc[g] ??= []).push(s);
-                    return acc;
-                  }, {}),
-                ).map(([group, schemes]) => (
-                  <optgroup key={group} label={group}>
-                    {schemes.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.label}
-                        {s.id === DEFAULT_SCHEME_ID ? " (default)" : ""}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-muted" />
-            </div>
-            <span
-              className="h-6 w-6 rounded-full border border-line"
-              style={{ backgroundColor: "rgb(var(--accent))" }}
-              aria-hidden
-            />
-          </div>
-        </Field>
-      </section>
-
-      {/* No compositor blur behind the window on Tauri Windows/Linux — the
-          effect can't render there, so don't offer a dead toggle. */}
-      {translucencySupported() && (
-        <section className="rounded-xl border border-line bg-paper-raised p-4">
-          <Field
-            label="Sidebar translucency"
-            description={
-              translucencyNative
-                ? "Frosted-glass sidebar that blurs the desktop behind the window."
-                : "A lighter, glassy sidebar. Best on macOS, where it shows real desktop blur."
-            }
-          >
-            <button
-              type="button"
-              role="switch"
-              aria-checked={translucencyPref === "on"}
-              onClick={() =>
-                setTranslucencyPref(translucencyPref === "on" ? "off" : "on")
-              }
-              className={cn(
-                "press ring-focus relative mt-2 inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors",
-                translucencyPref === "on"
-                  ? "border-transparent bg-accent"
-                  : "border-line bg-paper-sunken",
-              )}
-            >
-              <span
-                className={cn(
-                  "pointer-events-none h-[1.125rem] w-[1.125rem] rounded-full bg-paper-raised shadow-sm transition-transform",
-                  translucencyPref === "on" ? "translate-x-5" : "translate-x-0.5",
-                )}
-              />
-            </button>
-          </Field>
-        </section>
-      )}
-
-      <BackgroundSection />
-    </div>
-  );
-}
-
-function BackgroundSection() {
-  const wallpaper = useWallpaper();
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const active = wallpaper.choice !== "none";
-
-  const pick = (patch: Parameters<typeof saveWallpaper>[0]) => {
-    setError(null);
-    try {
-      saveWallpaper(patch);
-    } catch {
-      setError("zWork couldn't save that background. Try a smaller picture.");
-    }
-  };
-
-  const upload = async (file: File | undefined) => {
-    if (!file) return;
-    setBusy(true);
-    setError(null);
-    try {
-      pick({ choice: "image", image: await encodeWallpaper(file) });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const swatch = (selected: boolean) =>
-    cn(
-      "press ring-focus h-12 w-16 shrink-0 rounded-lg border bg-cover bg-center transition-shadow",
-      selected
-        ? "border-line-strong shadow-[0_0_0_2px_rgb(var(--accent))]"
-        : "border-line hover:border-line-strong",
-    );
-
-  return (
-    <section className="rounded-xl border border-line bg-paper-raised p-4 space-y-4">
-      <Field label="Background" description="A color or picture behind the sidebar and chat.">
-        <div className="mt-2 flex flex-wrap gap-2">
-          <button
-            type="button"
-            aria-label="No background"
-            aria-pressed={!active}
-            onClick={() => pick({ choice: "none" })}
-            className={cn(swatch(!active), "flex items-center justify-center bg-paper text-[11px] text-ink-muted")}
-          >
-            None
-          </button>
-          {WALLPAPER_PRESETS.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              aria-label={p.label}
-              title={p.label}
-              aria-pressed={wallpaper.choice === p.id}
-              onClick={() => pick({ choice: p.id })}
-              className={swatch(wallpaper.choice === p.id)}
-              style={{ backgroundImage: p.css }}
-            />
-          ))}
-          {wallpaper.image && (
-            <button
-              type="button"
-              aria-label="Your picture"
-              title="Your picture"
-              aria-pressed={wallpaper.choice === "image"}
-              onClick={() => pick({ choice: "image" })}
-              className={swatch(wallpaper.choice === "image")}
-              style={{ backgroundImage: `url("${wallpaper.image}")` }}
-            />
-          )}
-          <label
-            className={cn(
-              swatch(false),
-              "flex cursor-pointer items-center justify-center border-dashed bg-paper text-[11px] text-ink-muted hover:text-ink",
-              busy && "pointer-events-none opacity-60",
-            )}
-          >
-            {busy ? "…" : wallpaper.image ? "Replace" : "Upload"}
-            <input
-              type="file"
-              accept="image/*"
-              className="sr-only"
-              onChange={(e) => {
-                void upload(e.target.files?.[0]);
-                e.target.value = "";
-              }}
-            />
-          </label>
-        </div>
-        {error && <p className="mt-2 text-[12px] text-error">{error}</p>}
-      </Field>
-
-      {active && (
-        <Field label="Chat panel opacity" description="Lower shows more of the background; higher is easier to read.">
-          <div className="mt-2 flex items-center gap-3">
-            <input
-              type="range"
-              min={70}
-              max={100}
-              step={1}
-              value={wallpaper.pane}
-              onChange={(e) => pick({ pane: Number(e.target.value) })}
-              className="ring-focus w-48 accent-[rgb(var(--accent))]"
-              aria-label="Chat panel opacity"
-            />
-            <span className="w-10 text-[12px] tabular-nums text-ink-muted">{wallpaper.pane}%</span>
-          </div>
-        </Field>
-      )}
-    </section>
   );
 }
 

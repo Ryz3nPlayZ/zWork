@@ -26,7 +26,7 @@ import { IS_TAURI } from "./platform";
 
 const STORAGE_KEY = "zwork.zoom";
 const MIN = 0.5;
-const MAX = 1.5;
+const MAX = 1.6;
 
 export function loadZoom(): number {
   try {
