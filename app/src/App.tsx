@@ -603,7 +603,7 @@ export default function App() {
         {...dragRegionAttrs()}
         onMouseDown={onDragMouseDown}
         className={cn(
-          "absolute inset-0",
+          "app-base absolute inset-0",
           useNativeGlass
             ? "bg-transparent"
             : translucentOn
@@ -624,7 +624,7 @@ export default function App() {
       */}
       <main
         className={cn(
-          "absolute flex flex-col overflow-hidden rounded-[14px] bg-paper shadow-float",
+          "app-pane absolute flex flex-col overflow-hidden rounded-[14px] bg-paper shadow-float",
           "transition-[left] duration-200 ease-out",
           "top-[5px] right-[5px] bottom-[5px]",
           sidebarOpen ? "left-[253px]" : "left-[5px]",

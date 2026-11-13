@@ -227,6 +227,26 @@ html.sidebar-translucent aside.native-glass .bg-paper-raised {
   backdrop-filter: saturate(1.8) blur(20px);
 }
 
+/* Wallpaper (lib/wallpaper.ts): the picture fills the window and the sidebar
+   layer and main pane tint over it so text stays readable. Placed after the
+   translucency rules so a chosen wallpaper wins over the desktop showing through. */
+html.has-wallpaper body {
+  background: var(--wallpaper) center / cover no-repeat;
+}
+html.has-wallpaper .app-base {
+  background-color: rgb(var(--paper-sidebar) / 0.3);
+  backdrop-filter: blur(18px) saturate(1.2);
+}
+/* The sidebar paints its own fill; the base layer above is the tint instead. */
+html.has-wallpaper .app-base aside {
+  background-color: transparent;
+  backdrop-filter: none;
+}
+html.has-wallpaper .app-pane {
+  background-color: rgb(var(--paper) / var(--pane-alpha, 0.85));
+  backdrop-filter: blur(28px) saturate(1.2);
+}
+
 /* --------------------------------------------------------
    Text selection — theme-aware so it matches the palette
    -------------------------------------------------------- */

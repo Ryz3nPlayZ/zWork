@@ -39,6 +39,7 @@ import {
   nativeVibrancySupported,
   translucencySupported,
 } from "../lib/translucency";
+import { WALLPAPER_PRESETS, encodeWallpaper, saveWallpaper, useWallpaper } from "../lib/wallpaper";
 import {
   loadSchemePref,
   setSchemePref,
@@ -69,7 +70,7 @@ const SECTION_META: Record<Section, { title: string; description: string; icon: 
   },
   appearance: {
     title: "Appearance",
-    description: "Theme, color scheme, and sidebar glass.",
+    description: "Theme, color scheme, glass, and background.",
     icon: <Palette className="h-4 w-4" />,
   },
   general: {
@@ -1066,7 +1067,7 @@ function AppearancePanel() {
     <div className="flex flex-col gap-5">
       <div>
         <h2 className="text-[17px] font-semibold tracking-tight text-ink">Appearance</h2>
-        <p className="mt-1 text-[13px] leading-5 text-ink-muted">Theme, color scheme, and sidebar glass.</p>
+        <p className="mt-1 text-[13px] leading-5 text-ink-muted">Theme, color scheme, glass, and background.</p>
       </div>
 
       <section className="rounded-xl border border-line bg-paper-raised p-4 space-y-4">
@@ -1180,7 +1181,124 @@ function AppearancePanel() {
           </Field>
         </section>
       )}
+
+      <BackgroundSection />
     </div>
+  );
+}
+
+function BackgroundSection() {
+  const wallpaper = useWallpaper();
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const active = wallpaper.choice !== "none";
+
+  const pick = (patch: Parameters<typeof saveWallpaper>[0]) => {
+    setError(null);
+    try {
+      saveWallpaper(patch);
+    } catch {
+      setError("zWork couldn't save that background. Try a smaller picture.");
+    }
+  };
+
+  const upload = async (file: File | undefined) => {
+    if (!file) return;
+    setBusy(true);
+    setError(null);
+    try {
+      pick({ choice: "image", image: await encodeWallpaper(file) });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const swatch = (selected: boolean) =>
+    cn(
+      "press ring-focus h-12 w-16 shrink-0 rounded-lg border bg-cover bg-center transition-shadow",
+      selected
+        ? "border-line-strong shadow-[0_0_0_2px_rgb(var(--accent))]"
+        : "border-line hover:border-line-strong",
+    );
+
+  return (
+    <section className="rounded-xl border border-line bg-paper-raised p-4 space-y-4">
+      <Field label="Background" description="A color or picture behind the sidebar and chat.">
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            aria-label="No background"
+            aria-pressed={!active}
+            onClick={() => pick({ choice: "none" })}
+            className={cn(swatch(!active), "flex items-center justify-center bg-paper text-[11px] text-ink-muted")}
+          >
+            None
+          </button>
+          {WALLPAPER_PRESETS.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              aria-label={p.label}
+              title={p.label}
+              aria-pressed={wallpaper.choice === p.id}
+              onClick={() => pick({ choice: p.id })}
+              className={swatch(wallpaper.choice === p.id)}
+              style={{ backgroundImage: p.css }}
+            />
+          ))}
+          {wallpaper.image && (
+            <button
+              type="button"
+              aria-label="Your picture"
+              title="Your picture"
+              aria-pressed={wallpaper.choice === "image"}
+              onClick={() => pick({ choice: "image" })}
+              className={swatch(wallpaper.choice === "image")}
+              style={{ backgroundImage: `url("${wallpaper.image}")` }}
+            />
+          )}
+          <label
+            className={cn(
+              swatch(false),
+              "flex cursor-pointer items-center justify-center border-dashed bg-paper text-[11px] text-ink-muted hover:text-ink",
+              busy && "pointer-events-none opacity-60",
+            )}
+          >
+            {busy ? "…" : wallpaper.image ? "Replace" : "Upload"}
+            <input
+              type="file"
+              accept="image/*"
+              className="sr-only"
+              onChange={(e) => {
+                void upload(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+          </label>
+        </div>
+        {error && <p className="mt-2 text-[12px] text-error">{error}</p>}
+      </Field>
+
+      {active && (
+        <Field label="Chat panel opacity" description="Lower shows more of the background; higher is easier to read.">
+          <div className="mt-2 flex items-center gap-3">
+            <input
+              type="range"
+              min={70}
+              max={100}
+              step={1}
+              value={wallpaper.pane}
+              onChange={(e) => pick({ pane: Number(e.target.value) })}
+              className="ring-focus w-48 accent-[rgb(var(--accent))]"
+              aria-label="Chat panel opacity"
+            />
+            <span className="w-10 text-[12px] tabular-nums text-ink-muted">{wallpaper.pane}%</span>
+          </div>
+        </Field>
+      )}
+    </section>
   );
 }
 
