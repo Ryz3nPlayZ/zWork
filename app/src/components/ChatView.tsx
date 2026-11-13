@@ -191,13 +191,13 @@ export function ChatView() {
             "absolute inset-x-0 top-0 z-20 flex items-center justify-between py-2.5 bg-gradient-to-b from-paper via-paper/95 to-transparent",
             usesIntegratedTitleBar() ? CAPTION_CLEARANCE : "pr-5",
             // When the sidebar is collapsed, the main pane slides left and the
-            // chat title would slide under the window-level sidebar toggle.
+            // chat title would slide under the window-level search + sidebar toggle.
             // Reserve a left gutter so the title stays clear. Beside macOS
-            // traffic lights the toggle sits at 72px; elsewhere at 12px.
+            // traffic lights the controls sit at 72px; elsewhere at 12px (58px wide).
             sidebarOpen
               ? "pl-5"
               : hasTrafficLights()
-                ? "pl-[108px]"
+                ? "pl-[138px]"
                 : "pl-[72px]",
           )}
         >
