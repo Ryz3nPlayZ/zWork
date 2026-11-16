@@ -12,6 +12,11 @@ All notable changes to zWork are documented in this file.
 - **Approvals in the Inbox.** Connected apps now ask before they send or change anything. Scheduled runs can't stop to ask, so those actions wait in the Inbox with Approve and Don't do this.
 
 ### Improvements
+- **A calmer working state.** The glow around the chat box while zWork works is gone. The thinking orb is the one sign that it's working, and it changes with what it's doing (thinking, using a tool, writing). When the reply is done, the zWork logo stands on its own without a circle.
+- **Gmail works when you ask about a specific email.** zWork searches your mail for it instead of re-reading the newest 25 messages, and it can send, reply and draft again.
+- **Repeating a step only stops when it gets nowhere.** zWork used to stop on the third identical step even when each one returned something new. Now it only steps in when the same step keeps returning the same result: first it's asked to try something else, and only then does the run stop.
+- **Browser steps are more reliable.** Reading a page with a script works again, a click that opens a new page counts as done, and zWork acts on the browser window you last used.
+- **Fewer wrong turns.** File paths missing your home folder ("/Desktop/a.pdf") are found, and if you don't answer a question in time zWork stops and asks again instead of guessing.
 - **Spreadsheets are checked.** Every formula is calculated and errors are reported, and a workbook with formula errors isn't delivered.
 - **Paperwork runs are lighter.** Tools for research, deploying and building apps only load when you ask for them.
 - **Schedules run side by side, and late runs say so.**

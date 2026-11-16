@@ -31,10 +31,8 @@ import {
   Play,
   Layers,
 } from "lucide-react";
-import { BorderBeam } from "border-beam";
 import { cn } from "../lib/cn";
 import { needsLightweightRendering } from "../lib/platform";
-import { useResolvedTheme } from "../lib/theme";
 import { useApp } from "../lib/store";
 import type { SecurityPreset } from "../lib/store";
 import { api, IS_WEB, type QueuedItem, type UploadedFile } from "../lib/api";
@@ -302,7 +300,6 @@ export function ChatInput({
     const id = s.activeChatId;
     return id ? (s.chats[id]?.queuedItems ?? []) : [];
   });
-  const beamTheme = useResolvedTheme();
   const model = useApp((s) => s.model);
   const providers = useApp((s) => s.providers);
   const pendingShareImage = useApp((s) => s.pendingShareImage);
@@ -1131,24 +1128,6 @@ export function ChatInput({
         </div>
       )}
 
-      <BorderBeam
-        // Circling border glow while the agent works. Keep the stock
-        // constant-ANGLE-rate sweep: the arc's footprint is angle-symmetric,
-        // so equal angle rates keep lit time perfectly even around the
-        // border. Re-timing for equal PERIMETER speed was tried and
-        // reverted — it dwells on the rounded ends, where the same 86° of
-        // arc wraps onto ~4× more border. Duration is the ONLY knob: 3.5s is
-        // livelier than the 4.5s that tamed the default, but still ~1.8×
-        // slower than 1.96s, whose left↔right crossings read as jumps.
-        size="md"
-        colorVariant="colorful"
-        strength={1}
-        brightness={1.6}
-        duration={3.5}
-        active={working}
-        theme={beamTheme}
-        className="composer-beam block w-full"
-      >
       <div
         ref={isOverlay ? toolsRef : undefined}
         // The pill is a SINGLE drag mechanism: the declarative
@@ -1309,13 +1288,10 @@ export function ChatInput({
           <span className="inline-flex max-w-[120px] items-center truncate text-[12px] font-medium text-ink-muted">
             {modelLabel}
           </span>
-          {/* Beam ring only while the button is Stop — send stays matte. */}
           {working ? (
             <>
               {queueButtons}
-              <BorderBeam size="sm" colorVariant="colorful" strength={1} theme={beamTheme}>
-                {stopButton}
-              </BorderBeam>
+              {stopButton}
             </>
           ) : (
             sendButton
@@ -1351,13 +1327,10 @@ export function ChatInput({
           </div>
           <div className="flex items-center gap-2">
             <ModelPicker />
-            {/* Beam ring only while the button is Stop — send stays matte. */}
-            {working ? (
+              {working ? (
               <>
                 {queueButtons}
-                <BorderBeam size="sm" colorVariant="colorful" strength={1} theme={beamTheme}>
-                  {stopButton}
-                </BorderBeam>
+                {stopButton}
               </>
             ) : (
               sendButton
@@ -1426,7 +1399,6 @@ export function ChatInput({
         accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.txt,.md,.markdown,.csv,.tsv,.json,.yaml,.yml,.py,.js,.jsx,.ts,.tsx,.html,.css,.xml,.pdf,.xlsx,.xls,.xlsm,.docx,.doc,.pptx,.ppt,.odt,.ods,.odp,.rtf,.key,.numbers,.pages,.zip"
       />
     </div>
-      </BorderBeam>
     </>
   );
 }

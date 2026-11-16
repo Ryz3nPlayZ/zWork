@@ -586,17 +586,13 @@ function ProcessPanel({
         }}
         className="press flex max-w-full items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[12px] font-medium text-ink-faint hover:text-ink-muted hover:bg-paper-sunken"
       >
-        {isActive ? (
-          <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
-        ) : (
-          <ChevronDown
-            className={cn(
-              "h-3 w-3 shrink-0 transition-transform duration-200",
-              expanded && "rotate-180",
-            )}
-          />
-        )}
-        <span className="truncate">{summary}</span>
+        <ChevronDown
+          className={cn(
+            "h-3 w-3 shrink-0 transition-transform duration-200",
+            expanded && "rotate-180",
+          )}
+        />
+        <span className={cn("truncate", isActive && "shimmer-text")}>{summary}</span>
       </button>
       {expanded && (
         <div className="mt-1.5 space-y-1.5">
@@ -818,9 +814,7 @@ export function Message({
 
   return (
     <div className="group flex w-full gap-3 justify-start">
-      <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-line bg-paper">
-        <Logo size={14} />
-      </div>
+      <AssistantMark orbState={streaming ? orbStateForParts(parts) : null} />
       <div className="min-w-0 flex-1 max-w-[92%]">
         <div className="text-[15px] leading-[25px] text-ink">
           {hasProcess && (
@@ -1052,6 +1046,42 @@ const ORB_STATES: readonly OrbState[] = [
   "connecting", "weaving", "composing", "breathing",
 ];
 
+/** Stable string hash — spreads label words across ORB_STATES so the orb
+ *  varies as the label cycles. Without it, virtually every whimsical word
+ *  falls through the exact-name match to the same constant "weaving" orb. */
+function hashLabel(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(31, h) + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+/** The assistant's avatar slot: the thinking orb while a reply is in
+ *  progress, the bare zWork logo once it is done. One fixed 28px slot so
+ *  nothing shifts when the orb hands over to the logo. */
+function AssistantMark({ orbState }: { orbState: OrbState | null }) {
+  return (
+    <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center" aria-hidden="true">
+      {orbState ? (
+        // The package's small presets draw sub-pixel dots that vanish at
+        // inline scale; the denser 64px design shown at 32px stays legible.
+        <ThinkingOrb state={orbState} size={64} style={{ width: 32, height: 32 }} className="shrink-0" />
+      ) : (
+        <Logo size={18} />
+      )}
+    </div>
+  );
+}
+
+/** Orb animation for what the reply is doing right now. */
+function orbStateForParts(parts: readonly { kind: string; done?: boolean }[]): OrbState {
+  const last = parts[parts.length - 1];
+  if (!last) return "weaving";
+  if (last.kind === "text") return "composing";
+  if (last.kind === "thinking") return "solving";
+  if (last.kind === "tool") return last.done ? "weaving" : "searching";
+  return "weaving";
+}
+
 function WorkingLabel({ status }: { status?: string }) {
   // Cycle through a shuffled pool of whimsical "-ing" words at a slower pace.
   // The backend's `status` string wins if it isn't the generic "Thinking".
@@ -1066,19 +1096,15 @@ function WorkingLabel({ status }: { status?: string }) {
   const label = generic ? pool[idx] : status;
 
   const words = label.toLowerCase().split(/[^a-z]+/);
-  const orbState: OrbState = ORB_STATES.find((s) => words.includes(s)) ?? "weaving";
+  // A word that literally names a state uses it; every other word maps
+  // through the hash, so the orb animation changes along with the label.
+  const orbState: OrbState =
+    ORB_STATES.find((s) => words.includes(s)) ??
+    ORB_STATES[hashLabel(label) % ORB_STATES.length];
 
   return (
     <div className="group flex w-full gap-3 justify-start">
-      {/* While the agent works, the orb takes the logo avatar's slot. The
-          package's 20px preset draws sub-pixel dots that vanish at inline
-          scale; the denser 64px design displayed at 32px stays legible. */}
-      <ThinkingOrb
-        state={orbState}
-        size={64}
-        style={{ width: 32, height: 32 }}
-        className="mt-0.5 shrink-0"
-      />
+      <AssistantMark orbState={orbState} />
       <div className="min-w-0 flex-1 max-w-[92%] self-center">
         <span
           key={label /* re-fade on word change */}
