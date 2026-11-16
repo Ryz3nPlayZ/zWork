@@ -63,7 +63,7 @@ export function handleOAuthTokenCallback(): boolean {
   return false;
 }
 
-class CloudFetchError extends Error {
+export class CloudFetchError extends Error {
   status: number;
 
   constructor(status: number, statusText: string, body: string) {

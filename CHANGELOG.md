@@ -21,6 +21,7 @@ All notable changes to zWork are documented in this file.
 - **Paperwork runs are lighter.** Tools for research, deploying and building apps only load when you ask for them.
 - **Schedules run side by side, and late runs say so.**
 - **Scheduled, Projects and Inbox are rebuilt.** Scheduled shows each task in plain words ("Weekdays at 8:00 AM · next tomorrow at 8:00 AM"), with a switch to pause it, Run now, and four ready-to-edit ideas when nothing is scheduled yet. Projects open to their chats, instructions and files side by side, and you can rename, star or delete a project from its page. The Inbox puts what needs your OK first, then today, yesterday and earlier, and dismissing something can be undone for a few seconds.
+- **A clearer Analytics page.** Messages today, this week and all time up top; your plan limits as a share used, with a note when one is almost used up; a daily chart and a past-year calendar you can hover for each day. If you're signed out it asks you to sign in instead of showing an error.
 
 ### Fixes
 - **New scheduled tasks run on time.** A task you created or changed didn't get its next run until zWork restarted, so it could sit there without running. It now gets one as soon as you save it.

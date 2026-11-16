@@ -1,374 +1,509 @@
-import { useEffect, useState } from "react";
-import {
-  TrendingUp,
-  Loader2,
-  CalendarDays,
-} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { AlertTriangle, Loader2, LogIn } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useApp } from "../lib/store";
-import { fetchAnalyticsSummary, type AnalyticsDay, type AnalyticsSummary } from "../lib/cloud";
+import {
+  CloudFetchError,
+  fetchAnalyticsSummary,
+  isWebAuthClient,
+  startWebGoogleSignIn,
+  type AnalyticsDay,
+  type AnalyticsSummary,
+} from "../lib/cloud";
+import { Badge, Button, EmptyState, PageShell, SectionHeading, Segmented } from "./page/Page";
 
-function formatNumber(value: number) {
-  return new Intl.NumberFormat("en-US").format(value);
+const DAY_MS = 86_400_000;
+const number = new Intl.NumberFormat();
+const compact = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 });
+
+/** The gateway buckets by UTC day, so every date on this page is a UTC day. */
+function utcToday(): number {
+  const now = new Date();
+  return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
 }
 
-function dateKey(date: Date) {
-  return date.toISOString().slice(0, 10);
+function dayKey(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
 }
 
-function formatDayLabel(day: string) {
-  const date = new Date(`${day}T00:00:00`);
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+function dayLabel(ms: number, opts: Intl.DateTimeFormatOptions): string {
+  return new Date(ms).toLocaleDateString(undefined, { ...opts, timeZone: "UTC" });
 }
 
-function buildSeries(days: number, rows: AnalyticsDay[]) {
-  const byDay = new Map(rows.map((row) => [row.day, row]));
-  const today = new Date();
-  return Array.from({ length: days }, (_, index) => {
-    const date = new Date(today);
-    date.setDate(today.getDate() - (days - index - 1));
-    const key = dateKey(date);
-    const row = byDay.get(key);
-    return {
-      date: formatDayLabel(key),
-      value: (row?.roots || 0) + (row?.continuations || 0),
-    };
+function plural(n: number, one: string, many: string): string {
+  return `${number.format(n)} ${n === 1 ? one : many}`;
+}
+
+interface Day {
+  ms: number;
+  /** Messages: each new request, from you or a scheduled task. */
+  messages: number;
+  /** Steps zWork took while working on them. */
+  steps: number;
+}
+
+/** One entry per day for the last `days` days, oldest first; missing days are zero. */
+function lastDays(days: number, rows: AnalyticsDay[]): Day[] {
+  const byDay = new Map(rows.map((r) => [r.day, r]));
+  const today = utcToday();
+  return Array.from({ length: days }, (_, i) => {
+    const ms = today - (days - 1 - i) * DAY_MS;
+    const row = byDay.get(dayKey(ms));
+    return { ms, messages: row?.roots ?? 0, steps: row?.continuations ?? 0 };
   });
 }
 
+type Load =
+  | { state: "loading" }
+  | { state: "signed-out" }
+  | { state: "failed" }
+  | { state: "ready"; summary: AnalyticsSummary };
+
 export function AnalyticsPage() {
-  const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [chartDays, setChartDays] = useState<7 | 30>(7);
   const setView = useApp((s) => s.setView);
+  const userId = useApp((s) => s.user?.id ?? null);
+  const signingIn = useApp((s) => s.isLoadingAuth);
+  const signInWithGoogle = useApp((s) => s.signInWithGoogle);
+  const [load, setLoad] = useState<Load>({ state: "loading" });
+  const [range, setRange] = useState<"7" | "30">("7");
+  const [signInError, setSignInError] = useState(false);
 
-
-
-  useEffect(() => {
+  const fetchSummary = useCallback(() => {
+    // Usage lives with the account, so there is nothing to fetch until you sign in.
+    if (!userId) {
+      setLoad({ state: "signed-out" });
+      return;
+    }
     let alive = true;
-    setLoading(true);
-    setError("");
-    void fetchAnalyticsSummary()
-      .then((data) => {
-        if (!alive) return;
-        setSummary(data);
-      })
+    setLoad({ state: "loading" });
+    fetchAnalyticsSummary()
+      .then((summary) => alive && setLoad({ state: "ready", summary }))
       .catch((err) => {
         if (!alive) return;
-        setSummary(null);
-        setError(err instanceof Error ? err.message : String(err));
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
+        const signedOut = err instanceof CloudFetchError && (err.status === 401 || err.status === 403);
+        setLoad({ state: signedOut ? "signed-out" : "failed" });
       });
     return () => {
       alive = false;
     };
-  }, []);
+  }, [userId]);
 
-  const chartSource = chartDays === 7
-    ? summary?.past_week ?? []
-    : summary?.past_month ?? [];
-  const chartData = summary ? buildSeries(chartDays, chartSource) : [];
-  const maxValue = Math.max(1, ...chartData.map((d) => d.value));
+  // Runs again after signing in, when the user changes.
+  useEffect(() => fetchSummary(), [fetchSummary]);
 
+  const signIn = () => {
+    setSignInError(false);
+    if (isWebAuthClient()) return startWebGoogleSignIn();
+    signInWithGoogle().catch(() => setSignInError(true));
+  };
+
+  const summary = load.state === "ready" ? load.summary : null;
   const tier = summary?.user?.tier ?? "free";
-  const isPaid = tier !== "free";
+  const isFree = tier === "free";
 
   return (
-    <div className="flex h-full min-w-0 flex-1 overflow-y-auto bg-paper">
-      <div className="mx-auto w-full max-w-[720px] px-6 pt-8 pb-20">
-        {/* Header */}
-        <header className="mb-14 text-center flex flex-col items-center">
-          <div className="flex items-center gap-3 justify-center">
-            <h1 className="font-serif text-[42px] font-bold tracking-tight text-ink">Analytics</h1>
-            <span className={cn(
-              "rounded-full px-2.5 py-0.5 text-[12px] font-semibold",
-              tier === "max" ? "bg-warning/10 text-warning" :
-              tier === "pro" ? "bg-accent/10 text-ink" :
-              "bg-ink/5 text-ink-soft"
-            )}>
-              {tier === "max" ? "Max" : tier === "pro" ? "Pro" : "Free"}
-            </span>
-          </div>
-          <p className="mt-4 text-[14px] leading-relaxed text-ink-soft max-w-[500px]">
-            Track your usage and activity over time.
-          </p>
-        </header>
+    <PageShell
+      title="Analytics"
+      subtitle="How much of your plan you've used, and when you've worked with zWork."
+      actions={
+        summary ? (
+          <>
+            <Badge>{tier === "max" ? "Max plan" : tier === "pro" ? "Pro plan" : "Free plan"}</Badge>
+            <Button variant={isFree ? "primary" : "secondary"} onClick={() => setView("plan")}>
+              {isFree ? "Upgrade" : "Manage plan"}
+            </Button>
+          </>
+        ) : undefined
+      }
+    >
+      {load.state === "loading" ? (
+        <div className="flex flex-1 items-center justify-center py-20 text-[13px] text-ink-muted">
+          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          Loading your usage…
+        </div>
+      ) : load.state === "signed-out" ? (
+        <EmptyState
+          icon={<LogIn />}
+          title="Sign in to see your usage"
+          body={
+            signInError ? (
+              <span className="text-error">That didn&rsquo;t work. Try again.</span>
+            ) : (
+              "Your usage is kept with your zWork account."
+            )
+          }
+          action={
+            <Button variant="primary" icon={<LogIn />} disabled={signingIn} onClick={signIn}>
+              {signingIn ? "Signing in…" : "Sign in with Google"}
+            </Button>
+          }
+        />
+      ) : load.state === "failed" ? (
+        <EmptyState
+          icon={<AlertTriangle />}
+          title="Your usage didn't load"
+          body="Check your internet connection and try again."
+          action={<Button onClick={() => fetchSummary()}>Try again</Button>}
+        />
+      ) : (
+        <Overview summary={load.summary} range={range} onRange={setRange} />
+      )}
+    </PageShell>
+  );
+}
 
-        {error && (
-          <section className="mb-6 rounded-2xl border border-line bg-paper-raised p-5">
-            <div className="text-[13px] font-semibold text-ink">Usage unavailable</div>
-            <p className="mt-2 text-[13px] leading-5 text-ink-soft">
-              {error.includes("401") ? "Sign in to view your usage." : error}
-            </p>
-          </section>
+function Overview({
+  summary,
+  range,
+  onRange,
+}: {
+  summary: AnalyticsSummary;
+  range: "7" | "30";
+  onRange: (r: "7" | "30") => void;
+}) {
+  const week = useMemo(() => lastDays(7, summary.past_week), [summary.past_week]);
+  const month = useMemo(() => lastDays(30, summary.past_month), [summary.past_month]);
+  const series = range === "7" ? week : month;
+  const weekTotal = week.reduce((n, d) => n + d.messages, 0);
+  const isFree = (summary.user?.tier ?? "free") === "free";
+  const harder =
+    isFree && summary.free_escalations_left != null
+      ? { left: summary.free_escalations_left, limit: summary.free_escalations_limit ?? 3 }
+      : null;
+
+  return (
+    <>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <StatTile label="Messages today" value={summary.root_requests_today} />
+        <StatTile label="Last 7 days" value={weekTotal} />
+        <StatTile label="All time" value={summary.root_requests_total} />
+      </div>
+
+      <SectionHeading
+        title="Plan limits"
+        description="If one runs out, zWork waits until it frees up. Each one frees up bit by bit as older use drops off."
+      />
+      <div className="divide-y divide-line rounded-2xl border border-line bg-paper-raised">
+        <Meter label="Last 5 hours" used={summary.five_hour_used} limit={summary.five_hour_limit} />
+        <Meter label="Last 7 days" used={summary.weekly_used} limit={summary.weekly_limit} />
+        {harder && (
+          <Meter
+            label="Hard tasks, last 30 days"
+            hint={`zWork can hand ${plural(harder.left, "more hard task", "more hard tasks")} to its stronger model.`}
+            used={Math.max(0, harder.limit - harder.left)}
+            limit={harder.limit}
+            valueText={`${Math.max(0, harder.limit - harder.left)} of ${harder.limit} used`}
+          />
         )}
+      </div>
 
-        {/* Usage limits */}
-        <section className="mb-8 rounded-2xl border border-line bg-paper-raised p-6">
-          <div className="mb-5 flex items-center justify-between">
-            <div>
-              <h2 className="text-[16px] font-bold text-ink">Usage limits</h2>
-              <p className="mt-0.5 text-[12.5px] text-ink-muted">
-                Your plan's limits determine how much you can use zWork over time.
-              </p>
-            </div>
-            {!loading && summary && (
-              <span className="text-[12px] text-ink-faint">Updated just now</span>
-            )}
+      <SectionHeading
+        title="Activity"
+        description={`${plural(series.reduce((n, d) => n + d.messages, 0), "message", "messages")} in the last ${range} days.`}
+        action={
+          <Segmented
+            label="Time range"
+            value={range}
+            onChange={onRange}
+            options={[
+              { value: "7", label: "7 days" },
+              { value: "30", label: "30 days" },
+            ]}
+          />
+        }
+      />
+      <div className="rounded-2xl border border-line bg-paper-raised p-4">
+        <ActivityChart key={range} days={series} />
+      </div>
+
+      {summary.past_year && (
+        <>
+          <SectionHeading
+            title="Past year"
+            description={`${plural(
+              summary.past_year.reduce((n, d) => n + d.roots, 0),
+              "message",
+              "messages",
+            )} in the last 12 months.`}
+          />
+          <div className="rounded-2xl border border-line bg-paper-raised p-4">
+            <YearHeatmap rows={summary.past_year} />
           </div>
+        </>
+      )}
+    </>
+  );
+}
 
-          <div className="space-y-5">
-            <UsageBar
-              label="5-hour window"
-              used={summary?.five_hour_used ?? 0}
-              limit={summary?.five_hour_limit ?? 0}
-              loading={loading}
-            />
-            <UsageBar
-              label="Weekly limit"
-              used={summary?.weekly_used ?? 0}
-              limit={summary?.weekly_limit ?? 0}
-              loading={loading}
-            />
-          </div>
-          {!isPaid && !loading && summary?.free_escalations_left != null && (
-            <p className="mt-4 text-[12.5px] text-ink-soft">
-              Harder tasks: {summary.free_escalations_left} of {summary.free_escalations_limit ?? 3} left this month on the stronger model.
-            </p>
-          )}
-          {!isPaid && !loading && (
-            <div className="mt-4 text-right">
-              <p className="text-[12px] text-ink-faint">
-                Need more capacity?{" "}
-                <button
-                  type="button"
-                  onClick={() => setView("plan")}
-                  className="press ring-focus font-semibold text-ink-muted hover:text-ink hover:underline underline-offset-2 transition-all"
-                >
-                  Upgrade to Pro or Max
-                </button>
-              </p>
-            </div>
-          )}
-        </section>
-
-        {/* Past year heatmap */}
-        <section className="mb-8 rounded-2xl border border-line bg-paper-raised p-6">
-          <div className="mb-5 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <CalendarDays className="h-4 w-4 text-ink-soft" />
-              <h2 className="text-[16px] font-bold text-ink">Past year</h2>
-            </div>
-            {summary?.past_year && (
-              <span className="text-[12px] text-ink-faint">
-                {formatNumber(summary.past_year.reduce((n, d) => n + d.roots, 0))} messages
-              </span>
-            )}
-          </div>
-          {loading && !summary ? (
-            <div className="h-[120px] animate-pulse rounded-lg bg-paper-sunken" />
-          ) : (
-            <YearHeatmap rows={summary?.past_year ?? []} />
-          )}
-        </section>
-
-        {/* Activity chart */}
-        <section className="rounded-2xl border border-line bg-paper-raised p-6">
-          <div className="mb-6 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <TrendingUp className="h-4 w-4 text-ink-soft" />
-              <h2 className="text-[16px] font-bold text-ink">Activity</h2>
-            </div>
-            <div className="inline-flex rounded-full border border-line bg-paper p-0.5">
-              <button
-                type="button"
-                onClick={() => setChartDays(7)}
-                className={cn(
-                  "press rounded-full px-3 py-1 text-[12px] font-medium transition-colors",
-                  chartDays === 7 ? "bg-ink text-paper" : "text-ink-muted hover:text-ink"
-                )}
-              >
-                7 days
-              </button>
-              <button
-                type="button"
-                onClick={() => setChartDays(30)}
-                className={cn(
-                  "press rounded-full px-3 py-1 text-[12px] font-medium transition-colors",
-                  chartDays === 30 ? "bg-ink text-paper" : "text-ink-muted hover:text-ink"
-                )}
-              >
-                30 days
-              </button>
-            </div>
-          </div>
-
-          {loading && !summary ? (
-            <div className="flex h-[240px] items-center justify-center text-[13px] text-ink-soft">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Loading activity…
-            </div>
-          ) : chartData.length === 0 || chartData.every((d) => d.value === 0) ? (
-            <div className="flex h-[240px] items-center justify-center">
-              <p className="text-[13px] text-ink-soft">No activity yet.</p>
-            </div>
-          ) : (
-            <div className="relative" role="img" aria-label="Activity chart">
-              {/* Y-axis */}
-              <div className="absolute inset-y-0 left-0 flex w-10 flex-col justify-between text-[11px] text-ink-faint py-2">
-                <span>{formatNumber(maxValue)}</span>
-                <span>{formatNumber(Math.round(maxValue / 2))}</span>
-                <span>0</span>
-              </div>
-
-              {/* Chart */}
-              <div className="relative ml-10" style={{ height: "240px" }}>
-                {/* Grid lines */}
-                <div className="pointer-events-none absolute inset-0 py-2">
-                  {[0, 0.5].map((pos) => (
-                    <div
-                      key={pos}
-                      className="absolute left-0 right-0 border-t border-line/40"
-                      style={{ top: `${pos * 100}%` }}
-                    />
-                  ))}
-                </div>
-
-                {/* Bars */}
-                <div className="relative flex h-full items-end gap-[3px] py-2">
-                  {chartData.map((day, i) => {
-                    const h = day.value > 0 ? Math.max(4, (day.value / maxValue) * 232) : 0;
-                    return (
-                      <div
-                        key={`${day.date}-${i}`}
-                        className="group flex-1 flex flex-col justify-end"
-                        style={{ minWidth: 1 }}
-                      >
-                        <div
-                          className={cn(
-                            "w-full rounded-md transition-colors",
-                            day.value > 0 ? "bg-accent/50 hover:bg-accent/70" : "bg-line/30"
-                          )}
-                          style={{ height: `${h}px` }}
-                          title={`${day.date}: ${formatNumber(day.value)} requests`}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* X-axis */}
-              <div className="ml-10 mt-3 flex text-[11px] text-ink-faint">
-                <span>{chartData[0]?.date}</span>
-                <span className="flex-1 text-center">{chartData[Math.floor(chartData.length / 2)]?.date}</span>
-                <span>{chartData[chartData.length - 1]?.date}</span>
-              </div>
-            </div>
-          )}
-        </section>
-
+function StatTile({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-2xl border border-line bg-paper-raised p-4">
+      <div className="text-[12px] text-ink-muted">{label}</div>
+      <div className="mt-1 text-[24px] font-semibold tracking-tight text-ink">
+        {value >= 10_000 ? compact.format(value) : number.format(value)}
       </div>
     </div>
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  Gemini-style usage bar                                             */
-/* ------------------------------------------------------------------ */
-function UsageBar({
+/** A plan limit. The numbers are internal cost units, so only the share is shown. */
+function Meter({
   label,
+  hint,
   used,
   limit,
-  loading,
+  valueText,
 }: {
   label: string;
+  hint?: string;
   used: number;
   limit: number;
-  loading: boolean;
+  valueText?: string;
 }) {
-  const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
-  const isHigh = pct > 80;
-  const isCritical = pct > 95;
+  const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+  const status: { tone: "warning" | "error"; text: string } | null =
+    pct >= 100 ? { tone: "error", text: "Used up" } : pct >= 80 ? { tone: "warning", text: "Almost used up" } : null;
 
   return (
-    <div>
-      <div className="mb-2 flex items-end justify-between">
-        <div className="text-[13px] font-medium text-ink">{label}</div>
-        <div className="text-right">
-          <span className={cn("text-[18px] font-semibold tracking-tight text-ink", loading && "opacity-40")}>
-            {loading ? "—" : `${Math.round(pct)}%`}
-          </span>
-          <span className="ml-1 text-[11px] text-ink-faint">
-            {loading ? "" : `used`}
-          </span>
+    <div className="px-4 py-3.5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="text-[13px] font-medium text-ink">{label}</span>
+          {status && <Badge tone={status.tone}>{status.text}</Badge>}
         </div>
+        <span className="shrink-0 text-[12.5px] tabular-nums text-ink-muted">{valueText ?? `${pct}% used`}</span>
       </div>
       <div
-        className="h-2.5 overflow-hidden rounded-full bg-paper-sunken"
+        className="mt-2 h-2 overflow-hidden rounded-full bg-line/60"
         role="progressbar"
-        aria-valuenow={used}
+        aria-label={label}
         aria-valuemin={0}
-        aria-valuemax={limit}
-        aria-label={`${label}: ${used} of ${limit}`}
+        aria-valuemax={100}
+        aria-valuenow={pct}
+        aria-valuetext={valueText ?? `${pct}% used`}
       >
         <div
           className={cn(
-            "h-full rounded-full transition-all duration-500",
-            isCritical ? "bg-error" : isHigh ? "bg-warning" : "bg-accent/60"
+            "h-full rounded-full transition-[width] duration-500",
+            status?.tone === "error" ? "bg-error" : status?.tone === "warning" ? "bg-warning" : "bg-accent/70",
           )}
-          style={{ width: `${Math.max(pct, 0.5)}%` }}
+          style={{ width: `${pct}%` }}
         />
       </div>
-      <div className="mt-1.5 flex justify-between text-[11px] text-ink-faint">
-        <span>{loading ? "—" : `${formatNumber(used)} of ${formatNumber(limit)}`}</span>
-      </div>
+      {hint && <p className="mt-1.5 text-[12px] text-ink-faint">{hint}</p>}
     </div>
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  Year heatmap: one cell per day, a column per week (Sunday first)  */
-/* ------------------------------------------------------------------ */
-const HEAT_LEVELS = ["bg-paper-sunken", "bg-accent/25", "bg-accent/45", "bg-accent/70", "bg-accent"];
+/** Clean axis steps: the smallest 1/2/5 × 10ⁿ step that fits the data in 4 ticks. */
+function niceTicks(max: number): number[] {
+  if (max <= 4) return [0, 1, 2, 3, 4].slice(0, Math.max(2, max + 1));
+  const raw = max / 4;
+  const pow = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 5, 10].map((m) => m * pow).find((s) => s >= raw) ?? raw;
+  return Array.from({ length: Math.ceil(max / step) + 1 }, (_, i) => i * step);
+}
+
+function Tip({ children, style }: { children: ReactNode; style: React.CSSProperties }) {
+  return (
+    <div
+      role="tooltip"
+      className="pointer-events-none absolute z-10 whitespace-nowrap rounded-lg border border-line bg-paper px-2.5 py-1.5 text-[12px] shadow-md"
+      style={style}
+    >
+      {children}
+    </div>
+  );
+}
+
+const CHART_H = 180;
+
+function ActivityChart({ days }: { days: Day[] }) {
+  const [active, setActive] = useState<number | null>(null);
+  const max = Math.max(0, ...days.map((d) => d.messages));
+  const ticks = niceTicks(max);
+  const top = ticks[ticks.length - 1] || 1;
+  const short = days.length <= 7;
+
+  if (max === 0) {
+    return (
+      <div className="flex items-center justify-center text-[13px] text-ink-muted" style={{ height: CHART_H + 28 }}>
+        No messages in these {days.length} days.
+      </div>
+    );
+  }
+
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const from = active ?? days.length;
+    setActive(Math.min(days.length - 1, Math.max(0, from + (e.key === "ArrowLeft" ? -1 : 1))));
+  };
+
+  // Label every day for a week; for a month, every 7th day counting back from today.
+  const labelled = (i: number) => short || (days.length - 1 - i) % 7 === 0;
+  const tipDay = active !== null ? days[active] : null;
+
+  return (
+    <div>
+      <div className="flex">
+        {/* Y axis */}
+        <div className="relative w-9 shrink-0 text-[11px] tabular-nums text-ink-faint" style={{ height: CHART_H }}>
+          {ticks.map((t) => (
+            <span key={t} className="absolute right-2 -translate-y-1/2" style={{ top: `${(1 - t / top) * 100}%` }}>
+              {t >= 10_000 ? compact.format(t) : number.format(t)}
+            </span>
+          ))}
+        </div>
+
+        <div
+          className="ring-focus relative min-w-0 flex-1 rounded-sm"
+          style={{ height: CHART_H }}
+          tabIndex={0}
+          role="group"
+          aria-label={`Messages per day. Use the left and right arrow keys to read each day.`}
+          onKeyDown={onKey}
+          onBlur={() => setActive(null)}
+          onMouseLeave={() => setActive(null)}
+        >
+          {/* Gridlines; the 0 line is the baseline. */}
+          {ticks.map((t) => (
+            <div
+              key={t}
+              className={cn("absolute inset-x-0 border-t", t === 0 ? "border-line-strong" : "border-line/70")}
+              style={{ top: `${(1 - t / top) * 100}%` }}
+            />
+          ))}
+
+          <div className="absolute inset-0 flex">
+            {days.map((d, i) => {
+              const h = d.messages > 0 ? Math.max(2, (d.messages / top) * CHART_H) : 0;
+              return (
+                // The whole column is the hover target, not just the bar.
+                <div key={d.ms} className="flex flex-1 items-end justify-center px-px" onMouseEnter={() => setActive(i)}>
+                  <div
+                    className={cn(
+                      "w-[72%] max-w-[24px] rounded-t-[4px] transition-colors",
+                      active === i ? "bg-accent" : "bg-accent/55",
+                    )}
+                    style={{ height: h }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+
+          {tipDay && active !== null && (
+            <Tip
+              style={{
+                left: `${((active + 0.5) / days.length) * 100}%`,
+                bottom: Math.min(CHART_H - 46, Math.max(2, (tipDay.messages / top) * CHART_H) + 8),
+                // Keep the tip inside the chart at both ends.
+                transform:
+                  active < days.length * 0.2
+                    ? "translateX(-12px)"
+                    : active > days.length * 0.8
+                      ? "translateX(calc(-100% + 12px))"
+                      : "translateX(-50%)",
+              }}
+            >
+              <div className="font-medium text-ink">
+                {dayLabel(tipDay.ms, { weekday: "short", month: "short", day: "numeric" })}
+              </div>
+              <div className="text-ink-muted">
+                {plural(tipDay.messages, "message", "messages")}
+                {tipDay.steps > 0 && ` · ${plural(tipDay.steps, "step", "steps")}`}
+              </div>
+            </Tip>
+          )}
+        </div>
+      </div>
+
+      {/* X axis */}
+      <div className="ml-9 mt-2 flex h-4 text-[11px] text-ink-faint" aria-hidden>
+        {days.map((d, i) => (
+          <span key={d.ms} className="relative min-w-0 flex-1">
+            {labelled(i) && (
+              <span className="absolute left-1/2 -translate-x-1/2 whitespace-nowrap">
+                {dayLabel(d.ms, short ? { weekday: "short" } : { month: "short", day: "numeric" })}
+              </span>
+            )}
+          </span>
+        ))}
+      </div>
+
+      <table className="sr-only">
+        <caption>Messages per day</caption>
+        <thead>
+          <tr>
+            <th scope="col">Day</th>
+            <th scope="col">Messages</th>
+            <th scope="col">Steps</th>
+          </tr>
+        </thead>
+        <tbody>
+          {days.map((d) => (
+            <tr key={d.ms}>
+              <td>{dayLabel(d.ms, { weekday: "long", month: "long", day: "numeric" })}</td>
+              <td>{d.messages}</td>
+              <td>{d.steps}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** One cell per day, a column per week (Sunday first), one hue from light to dark. */
+const HEAT_LEVELS = ["bg-line/60", "bg-accent/25", "bg-accent/45", "bg-accent/70", "bg-accent"];
 const WEEKS = 53;
 
 function YearHeatmap({ rows }: { rows: AnalyticsDay[] }) {
-  // The gateway buckets by UTC day, so the grid is built in UTC too.
-  const counts = new Map(rows.map((r) => [r.day, r.roots + r.continuations]));
-  const today = new Date();
-  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
-  const DAY = 86_400_000;
-  // Start on the Sunday 52 weeks before this week's Sunday.
-  const start = todayUtc - (new Date(todayUtc).getUTCDay() + (WEEKS - 1) * 7) * DAY;
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [tip, setTip] = useState<{ x: number; y: number; ms: number; value: number } | null>(null);
 
-  const cells: { key: string; value: number; future: boolean }[] = [];
-  for (let i = 0; i < WEEKS * 7; i++) {
-    const t = start + i * DAY;
-    const key = new Date(t).toISOString().slice(0, 10);
-    cells.push({ key, value: counts.get(key) ?? 0, future: t > todayUtc });
-  }
-  const max = Math.max(0, ...cells.map((c) => c.value));
-  const level = (v: number) => (v <= 0 || max === 0 ? 0 : Math.min(4, Math.ceil((v / max) * 4)));
-
-  // A month label over the first week that starts in that month.
-  const months: { col: number; label: string }[] = [];
-  for (let w = 0; w < WEEKS; w++) {
-    const d = new Date(start + w * 7 * DAY);
-    const prev = w === 0 ? null : new Date(start + (w - 1) * 7 * DAY);
-    if (!prev || prev.getUTCMonth() !== d.getUTCMonth()) {
-      if (w > WEEKS - 3 && months.length) continue;
-      months.push({ col: w, label: d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" }) });
+  const { cells, months, max } = useMemo(() => {
+    const counts = new Map(rows.map((r) => [r.day, r.roots]));
+    const today = utcToday();
+    // Start on the Sunday 52 weeks before this week's Sunday.
+    const start = today - (new Date(today).getUTCDay() + (WEEKS - 1) * 7) * DAY_MS;
+    const cells = Array.from({ length: WEEKS * 7 }, (_, i) => {
+      const ms = start + i * DAY_MS;
+      return { ms, value: counts.get(dayKey(ms)) ?? 0, future: ms > today };
+    });
+    // A month name over the first week that starts in that month.
+    const months: { col: number; label: string }[] = [];
+    for (let w = 0; w < WEEKS; w++) {
+      const d = new Date(start + w * 7 * DAY_MS);
+      const prev = w === 0 ? null : new Date(start + (w - 1) * 7 * DAY_MS);
+      if ((!prev || prev.getUTCMonth() !== d.getUTCMonth()) && !(w > WEEKS - 3 && months.length)) {
+        months.push({ col: w, label: dayLabel(d.getTime(), { month: "short" }) });
+      }
     }
-  }
+    return { cells, months, max: Math.max(0, ...cells.map((c) => c.value)) };
+  }, [rows]);
 
+  const level = (v: number) => (v <= 0 || max === 0 ? 0 : Math.min(4, Math.ceil((v / max) * 4)));
   const grid = { gridTemplateColumns: `repeat(${WEEKS}, minmax(0, 1fr))` };
+  const busiest = cells.reduce((b, c) => (c.value > b.value ? c : b), cells[0]);
+
   return (
-    <div role="img" aria-label="Activity over the past year">
-      <div className="grid gap-[3px] pb-1.5 text-[10px] text-ink-faint" style={grid}>
+    <div
+      ref={wrapRef}
+      className="relative"
+      role="img"
+      aria-label={
+        max === 0
+          ? "No messages in the past year."
+          : `Messages per day over the past year. The busiest day was ${dayLabel(busiest.ms, {
+              month: "long",
+              day: "numeric",
+            })} with ${plural(busiest.value, "message", "messages")}.`
+      }
+      onMouseLeave={() => setTip(null)}
+    >
+      <div className="grid gap-[3px] pb-1.5 text-[10.5px] text-ink-faint" style={grid}>
         {months.map((m) => (
           <span key={`${m.col}-${m.label}`} className="whitespace-nowrap" style={{ gridColumnStart: m.col + 1 }}>
             {m.label}
@@ -378,19 +513,48 @@ function YearHeatmap({ rows }: { rows: AnalyticsDay[] }) {
       <div className="grid grid-flow-col grid-rows-7 gap-[3px]" style={grid}>
         {cells.map((c) => (
           <div
-            key={c.key}
-            className={cn("aspect-square rounded-[3px]", c.future ? "bg-transparent" : HEAT_LEVELS[level(c.value)])}
-            title={c.future ? undefined : `${formatDayLabel(c.key)}: ${formatNumber(c.value)} requests`}
+            key={c.ms}
+            className={cn(
+              "aspect-square rounded-[3px]",
+              c.future ? "bg-transparent" : HEAT_LEVELS[level(c.value)],
+              tip?.ms === c.ms && "ring-1 ring-ink",
+            )}
+            onMouseEnter={(e) => {
+              if (c.future || !wrapRef.current) return setTip(null);
+              const box = wrapRef.current.getBoundingClientRect();
+              const cell = e.currentTarget.getBoundingClientRect();
+              setTip({ x: cell.left + cell.width / 2 - box.left, y: cell.top - box.top, ms: c.ms, value: c.value });
+            }}
           />
         ))}
       </div>
-      <div className="mt-3 flex items-center justify-end gap-1.5 text-[10.5px] text-ink-faint">
-        <span>Less</span>
+      <div className="mt-3 flex items-center justify-end gap-1.5 text-[11px] text-ink-faint">
+        <span>Fewer</span>
         {HEAT_LEVELS.map((cls) => (
           <span key={cls} className={cn("h-2.5 w-2.5 rounded-[3px]", cls)} />
         ))}
         <span>More</span>
       </div>
+
+      {tip && wrapRef.current && (
+        <Tip
+          style={{
+            left: tip.x,
+            top: tip.y - 6,
+            transform:
+              tip.x < 90
+                ? "translate(-12px, -100%)"
+                : tip.x > wrapRef.current.clientWidth - 90
+                  ? "translate(calc(-100% + 12px), -100%)"
+                  : "translate(-50%, -100%)",
+          }}
+        >
+          <span className="font-medium text-ink">
+            {dayLabel(tip.ms, { weekday: "short", month: "short", day: "numeric" })}
+          </span>
+          <span className="text-ink-muted"> · {plural(tip.value, "message", "messages")}</span>
+        </Tip>
+      )}
     </div>
   );
 }
