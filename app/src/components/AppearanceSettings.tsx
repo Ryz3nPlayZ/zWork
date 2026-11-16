@@ -55,7 +55,7 @@ function Group({ title, hint, children }: { title: string; hint?: string; childr
     <section>
       <h3 className="text-[13.5px] font-semibold text-ink">{title}</h3>
       {hint && <p className="mt-0.5 text-[12px] text-ink-muted">{hint}</p>}
-      <div className="mt-2.5 divide-y divide-line-soft rounded-xl border border-line bg-paper-raised px-4">{children}</div>
+      <div className="mt-2.5 divide-y divide-line-soft rounded-2xl border border-line bg-paper-raised px-4">{children}</div>
     </section>
   );
 }

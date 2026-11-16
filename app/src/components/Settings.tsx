@@ -43,6 +43,7 @@ import {
 import { IconButton } from "./IconButton";
 import { api, IS_WEB, type CatalogModel, type CatalogProvider, type Integration, type RuntimeStatus } from "../lib/api";
 import { KeybindRecorder } from "./KeybindRecorder";
+import { Badge, Button, EmptyState, Switch } from "./page/Page";
 
 type Section = "account" | "appearance" | "general" | "memory" | "models" | "integrations";
 
@@ -375,7 +376,7 @@ function ProviderPicker({
         onClick={() => pick(id)}
         className={cn(
           "flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left text-[12.5px] transition-colors",
-          id === value ? "bg-accent/10 text-accent" : "text-ink hover:bg-paper-sunken",
+          id === value ? "bg-line font-medium text-ink" : "text-ink hover:bg-line/40",
         )}
       >
         <span className="flex min-w-0 items-center gap-2">
@@ -396,7 +397,7 @@ function ProviderPicker({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="ring-focus flex w-full items-center justify-between rounded-xl border border-line bg-paper px-3.5 py-2 text-left text-[13px] text-ink transition-colors hover:border-line-strong"
+        className="ring-focus flex w-full items-center justify-between rounded-lg border border-line bg-paper px-3 py-2 text-left text-[13px] text-ink transition-colors hover:border-line-strong"
       >
         <span className="flex items-center gap-2">
           {current?.configured ? (
@@ -635,27 +636,23 @@ function ModelsPanel({
             Bring any model from 150+ providers — Anthropic, OpenAI, Gemini, OpenRouter, local Ollama and more.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={openNew}
-          className="press ring-focus inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-line bg-paper px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-paper-sunken"
-        >
-          <Plus className="h-3.5 w-3.5" /> Add model
-        </button>
+        <Button icon={<Plus />} onClick={openNew}>
+          Add model
+        </Button>
       </div>
 
       {/* Synthesized models */}
       {models.filter((m) => m.synthesized).map((m) => (
-        <div key={m.id} className="rounded-xl border border-line bg-paper-raised p-4">
+        <div key={m.id} className="rounded-2xl border border-line bg-paper-raised p-4">
           <div className="flex items-start justify-between">
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-[13.5px] font-semibold text-ink">{m.name}</span>
-                <span className="rounded-full border border-success/20 bg-success/10 px-1.5 py-0.5 text-[10px] font-medium text-success">Auto-detected</span>
+                <CircleCheck className="h-3.5 w-3.5 text-success" aria-label="Ready" />
+                <Badge>Found on this computer</Badge>
               </div>
               <p className="mt-0.5 text-[12px] text-ink-muted">{m.subtitle}</p>
             </div>
-            <CircleCheck className="mt-0.5 h-4 w-4 text-success" />
           </div>
         </div>
       ))}
@@ -664,7 +661,7 @@ function ModelsPanel({
       {customModels.map((m) => {
         const live = models.find((lm) => lm.id === m.id);
         return (
-          <div key={m.id} className="rounded-xl border border-line bg-paper-raised p-4">
+          <div key={m.id} className="rounded-2xl border border-line bg-paper-raised p-4">
             <div className="flex items-start justify-between">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
@@ -684,7 +681,7 @@ function ModelsPanel({
                 <button
                   type="button"
                   onClick={() => startEdit(m.id)}
-                  className="press rounded px-2 py-1 text-[11.5px] text-ink-muted hover:bg-paper-sunken hover:text-ink"
+                  className="press ring-focus rounded-md px-2 py-1 text-[12px] text-ink-muted hover:bg-line/40 hover:text-ink"
                 >
                   Edit
                 </button>
@@ -696,17 +693,17 @@ function ModelsPanel({
       })}
 
       {customModels.length === 0 && models.filter((m) => !m.synthesized).length === 0 && !showForm && (
-        <div className="rounded-xl border border-dashed border-line bg-paper p-6 text-center">
-          <p className="text-[13px] font-medium text-ink">No models configured</p>
-          <p className="mt-1 text-[12.5px] text-ink-muted">
-            Add a model above with a key from any AI provider, or sign in to zWork to use its models.
-          </p>
-        </div>
+        <EmptyState
+          compact
+          icon={<Cpu />}
+          title="No models yet"
+          body="Add a model with a key from any AI provider, or sign in to zWork to use its models."
+        />
       )}
 
       {/* Add / Edit form */}
       {showForm && (
-        <section className="rounded-xl border border-line-strong bg-paper-raised p-4">
+        <section className="rounded-2xl border border-line bg-paper-raised p-4">
           <div className="mb-3 flex items-center justify-between">
             <h3 className="text-[13.5px] font-semibold text-ink">{editId ? "Edit model" : "Add model"}</h3>
             <IconButton icon={<X />} label="Cancel" size="sm" onClick={() => setShowForm(false)} />
@@ -809,7 +806,7 @@ function ModelsPanel({
                       <button
                         type="button"
                         onClick={() => pickModel(m.id, m.name)}
-                        className="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left hover:bg-paper-sunken"
+                        className="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left hover:bg-line/40"
                       >
                         <span className="min-w-0">
                           <span className="block truncate text-[12.5px] text-ink">{m.name}</span>
@@ -841,7 +838,7 @@ function ModelsPanel({
             </Field>
 
             {isOllama && (
-              <div className="space-y-2 rounded-lg border border-line bg-paper-sunken/40 px-3 py-2.5">
+              <div className="space-y-2 rounded-lg border border-line bg-paper px-3 py-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-[12px] text-ink-muted">
                     {ollamaLoading
@@ -852,15 +849,13 @@ function ModelsPanel({
                           ? ollamaError || "No models found."
                           : `${ollamaModels.length} model${ollamaModels.length === 1 ? "" : "s"} installed — click to use:`}
                   </span>
-                  <button
-                    type="button"
+                  <Button
+                    icon={<RefreshCw className={cn(ollamaLoading && "animate-spin")} />}
                     onClick={() => void loadOllamaModels()}
                     disabled={ollamaLoading}
-                    className="press inline-flex items-center gap-1.5 rounded-md border border-line bg-paper px-2 py-1 text-[11.5px] font-semibold text-ink hover:border-line-strong disabled:opacity-50"
                   >
-                    <RefreshCw className={cn("h-3 w-3", ollamaLoading && "animate-spin")} />
                     {ollamaLoading ? "Loading…" : "Refresh"}
-                  </button>
+                  </Button>
                 </div>
                 {ollamaModels && ollamaModels.length > 0 && (
                   <ul className="flex flex-wrap gap-1.5">
@@ -872,8 +867,8 @@ function ModelsPanel({
                           className={cn(
                             "press rounded-md border px-2 py-1 font-mono text-[11px] transition-colors",
                             form.model_id === m.id
-                              ? "border-accent/40 bg-accent/10 text-accent"
-                              : "border-line bg-paper text-ink-muted hover:border-line-strong hover:text-ink",
+                              ? "border-line-strong bg-line text-ink"
+                              : "border-line bg-paper text-ink-muted hover:bg-line/40 hover:text-ink",
                           )}
                         >
                           {m.id}
@@ -895,17 +890,15 @@ function ModelsPanel({
                     }}
                     placeholder="Pull a model — e.g. llama3.2"
                     disabled={ollamaPulling}
-                    className="min-w-0 flex-1 rounded-md border border-line bg-paper px-2 py-1.5 font-mono text-[11.5px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none disabled:opacity-50"
+                    className="h-8 min-w-0 flex-1 rounded-lg border border-line bg-paper px-2.5 font-mono text-[12px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none disabled:opacity-50"
                   />
-                  <button
-                    type="button"
+                  <Button
+                    icon={<Download className={cn(ollamaPulling && "animate-pulse")} />}
                     onClick={() => void pullOllamaModel()}
                     disabled={ollamaPulling || !ollamaPullName.trim()}
-                    className="press inline-flex shrink-0 items-center gap-1.5 rounded-md border border-line bg-paper px-2.5 py-1.5 text-[11.5px] font-semibold text-ink hover:border-line-strong disabled:opacity-50"
                   >
-                    <Download className={cn("h-3 w-3", ollamaPulling && "animate-pulse")} />
                     {ollamaPulling ? "Pulling…" : "Pull"}
-                  </button>
+                  </Button>
                 </div>
                 {ollamaPullProgress && <p className="font-mono text-[11px] text-ink-muted">{ollamaPullProgress}</p>}
                 {ollamaError && (
@@ -954,7 +947,7 @@ function ModelsPanel({
                         <select
                           value={form.shape || "auto"}
                           onChange={(e) => setForm((f) => ({ ...f, shape: e.target.value }))}
-                          className="ring-focus w-full cursor-pointer appearance-none rounded-xl border border-line bg-paper px-3.5 py-2 pr-10 text-[13px] text-ink transition-colors hover:border-line-strong focus:border-line-strong focus:outline-none"
+                          className="ring-focus w-full cursor-pointer appearance-none rounded-lg border border-line bg-paper px-3 py-2 pr-10 text-[13px] text-ink transition-colors hover:border-line-strong focus:border-line-strong focus:outline-none"
                         >
                           {PROTOCOLS.map((p) => (
                             <option key={p.value} value={p.value} className="bg-paper text-ink">
@@ -974,17 +967,12 @@ function ModelsPanel({
               <p className="text-[12px] text-ink-muted">Fill in {missingVars.join(", ")} to use {provider?.name}.</p>
             )}
             {error && (
-              <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] leading-5 text-red-700">{error}</p>
+              <p className="rounded-lg border border-error/30 bg-error/5 px-3 py-2 text-[12px] leading-5 text-error">{error}</p>
             )}
             <div className="flex justify-end pt-1">
-              <button
-                type="button"
-                disabled={busy || !canSubmit}
-                onClick={submit}
-                className="press inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-paper hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-40"
-              >
+              <Button variant="primary" disabled={busy || !canSubmit} onClick={submit}>
                 {busy ? "Saving…" : editId ? "Update" : "Add"}
-              </button>
+              </Button>
             </div>
           </div>
         </section>
@@ -1012,42 +1000,24 @@ function IntegrationsPanel({
             AI apps already on this computer. zWork can use their accounts so you don't need a separate key. To connect Gmail, Slack, Drive and others, use Connectors in the sidebar.
           </p>
         </div>
-        <IconButton
-          icon={<RefreshCw />}
-          label="Rescan"
-          variant="outline"
-          size="md"
-          onClick={() => onRefresh()}
-        />
+        <Button icon={<RefreshCw />} onClick={() => void onRefresh()}>
+          Check again
+        </Button>
       </div>
 
       <div className="flex flex-col gap-3">
         {items.map((i) => (
           <div
             key={i.id}
-            className="flex items-start justify-between gap-3 rounded-xl border border-line bg-paper-raised p-4"
+            className="flex items-start justify-between gap-3 rounded-2xl border border-line bg-paper-raised p-4"
           >
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <span
-                  className={cn(
-                    "inline-flex h-1.5 w-1.5 rounded-full",
-                    i.can_reuse_credentials
-                      ? "bg-success"
-                      : i.detected
-                        ? "bg-warning"
-                        : "bg-ink/20",
-                  )}
-                />
                 <h3 className="text-[13.5px] font-semibold text-ink">{i.name}</h3>
-                {i.detected ? (
-                  <span className="rounded-full border border-line bg-paper-sunken px-2 py-0.5 text-[10.5px] font-medium text-ink-muted">
-                    {i.can_reuse_credentials ? "Connected" : "Detected"}
-                  </span>
+                {i.can_reuse_credentials ? (
+                  <Badge tone="success">Connected</Badge>
                 ) : (
-                  <span className="rounded-full border border-line bg-paper-sunken px-2 py-0.5 text-[10.5px] font-medium text-ink-faint">
-                    Not installed
-                  </span>
+                  <Badge>{i.detected ? "Found" : "Not installed"}</Badge>
                 )}
               </div>
               <p className="mt-1 text-[12px] text-ink-muted">{i.detail || "Not detected on this machine."}</p>
@@ -1060,7 +1030,7 @@ function IntegrationsPanel({
                 href="https://docs.anthropic.com/en/docs/claude-code"
                 target="_blank"
                 rel="noreferrer"
-                className="press inline-flex items-center gap-1 rounded-md border border-line bg-paper px-2.5 py-1 text-[11.5px] font-medium text-ink-muted hover:text-ink hover:border-line-strong"
+                className="press ring-focus inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-line bg-paper px-3 text-[12.5px] font-medium text-ink transition-colors hover:bg-paper-sunken"
               >
                 Docs <ExternalLink className="h-3 w-3" />
               </a>
@@ -1068,9 +1038,7 @@ function IntegrationsPanel({
           </div>
         ))}
         {items.length === 0 && (
-          <div className="rounded-xl border border-dashed border-line bg-paper p-6 text-center text-[12.5px] text-ink-muted">
-            No integrations detected.
-          </div>
+          <EmptyState compact icon={<Plug />} title="No AI apps found on this computer" />
         )}
       </div>
     </div>
@@ -1159,7 +1127,7 @@ function GeneralPanel({
 
       {/* System Permissions Section */}
       {!IS_WEB && (
-        <section className="rounded-xl border border-line bg-paper-raised p-5 space-y-4 select-none">
+        <section className="rounded-2xl border border-line bg-paper-raised p-4 space-y-4 select-none">
           {/* CuaDriver needs macOS privacy grants; Windows and Linux ask for none. */}
           {isMacOS() && (<>
           <div>
@@ -1181,13 +1149,13 @@ function GeneralPanel({
               (zworkSelfTrusted === true &&
                 (accessibilityPermissionGranted === false ||
                   screenRecordingPermissionGranted === false))) && (
-              <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5">
-                <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 mt-0.5" />
+              <div className="flex items-start gap-2.5 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2.5">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-warning mt-0.5" />
                 <div className="flex-1 min-w-0">
                   <div className="text-[12px] font-medium text-ink">
                     Allowed for zWork, but it's CuaDriver that needs it
                   </div>
-                  <p className="text-[11px] text-ink-muted leading-relaxed mt-0.5">
+                  <p className="text-[11.5px] text-ink-muted leading-relaxed mt-0.5">
                     {wrongIdentityHint ??
                       "In System Settings → Privacy & Security → Accessibility, switch on CuaDriver (not zWork), then try again."}
                   </p>
@@ -1205,7 +1173,7 @@ function GeneralPanel({
                 <div className="text-[12px] font-medium text-ink">
                   The helper app isn&rsquo;t running
                 </div>
-                <p className="text-[11px] text-ink-muted leading-relaxed mt-0.5">
+                <p className="text-[11.5px] text-ink-muted leading-relaxed mt-0.5">
                   zWork installs CuaDriver on first launch. Quit and reopen zWork
                   to set it up again. Everything else works without it.
                 </p>
@@ -1220,26 +1188,16 @@ function GeneralPanel({
             <div className="space-y-0.5">
               <div className="text-[13px] font-medium text-ink flex items-center gap-2">
                 <span>Control apps</span>
-                <span className={cn(
-                  "px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase",
-                  accessibilityPermissionGranted
-                    ? "bg-success/10 text-success border border-success/20"
-                    : "bg-warning/10 text-warning border border-warning/20"
-                )}>
+                <Badge tone={accessibilityPermissionGranted ? "success" : "warning"}>
                   {accessibilityPermissionGranted ? "Allowed" : "Not allowed"}
-                </span>
+                </Badge>
               </div>
               <p className="text-[11.5px] text-ink-muted">
                 Lets zWork read what's in a window, click, and type, like you would.
               </p>
             </div>
             {!accessibilityPermissionGranted && (
-              <button
-                onClick={requestAccessibility}
-                className="press px-3 py-1.5 text-[11px] font-medium border border-line bg-paper-raised hover:bg-paper-sunken text-ink rounded-lg transition-colors cursor-pointer shrink-0"
-              >
-                Allow
-              </button>
+              <Button onClick={requestAccessibility}>Allow</Button>
             )}
           </div>
 
@@ -1250,25 +1208,15 @@ function GeneralPanel({
             <div className="space-y-0.5">
               <div className="text-[13px] font-medium text-ink flex items-center gap-2">
                 <span>See the screen</span>
-                <span className={cn(
-                  "px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase",
-                  screenRecordingPermissionGranted
-                    ? "bg-success/10 text-success border border-success/20"
-                    : "bg-ink-faint/10 text-ink-muted border border-line"
-                )}>
+                <Badge tone={screenRecordingPermissionGranted ? "success" : "neutral"}>
                   {screenRecordingPermissionGranted ? "Allowed" : "Optional"}
-                </span>
+                </Badge>
               </div>
               <p className="text-[11.5px] text-ink-muted">
                 Lets zWork take screenshots when an app can't be read directly. Not needed for most tasks.
               </p>
             </div>
-            <button
-              onClick={requestScreenRecording}
-              className="press px-3 py-1.5 text-[11px] font-medium border border-line bg-paper-raised hover:bg-paper-sunken text-ink rounded-lg transition-colors cursor-pointer shrink-0"
-            >
-              Open Settings
-            </button>
+            <Button onClick={requestScreenRecording}>Open Settings</Button>
           </div>
 
           <div className="border-t border-line-soft" />
@@ -1279,14 +1227,11 @@ function GeneralPanel({
             <div className="space-y-0.5">
               <div className="text-[13px] font-medium text-ink flex items-center gap-2">
                 <span>Chrome extension</span>
-                <span className={cn(
-                  "px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase",
-                  extensionConnected
-                    ? "bg-success/10 text-success border border-success/20"
-                    : "bg-warning/10 text-warning border border-warning/20"
-                )}>
-                  {extensionConnected === null ? "…" : extensionConnected ? "Connected" : "Not connected"}
-                </span>
+                {extensionConnected !== null && (
+                  <Badge tone={extensionConnected ? "success" : "neutral"}>
+                    {extensionConnected ? "Connected" : "Not connected"}
+                  </Badge>
+                )}
               </div>
               <p className="text-[11.5px] text-ink-muted">
                 Optional. Lets zWork work in your own Chrome, where you're already signed in. Without it, zWork uses its own browser.
@@ -1301,40 +1246,25 @@ function GeneralPanel({
             <div className="space-y-1 flex-1">
               <div className="text-[13px] font-medium text-ink flex items-center gap-2">
                 <span>Skip the check before risky actions</span>
-                <span className={cn(
-                  "px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase",
-                  autoApproveDestructive
-                    ? "bg-success/10 text-success border border-success/20"
-                    : "bg-paper-sunken text-ink-faint border border-line"
-                )}>
-                  {autoApproveDestructive ? "On" : "Off"}
-                </span>
               </div>
               <p className="text-[11.5px] leading-relaxed text-ink-muted">
                 zWork normally stops and asks before anything that can't be undone, like deleting a folder or wiping a disk. Turn this on only if you want it to go ahead without asking. Keep it off unless you're sure.
               </p>
             </div>
             
-            <button
-              onClick={() => setAutoApproveDestructive(!autoApproveDestructive)}
-              className={cn(
-                "press ring-focus relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors mt-1",
-                autoApproveDestructive ? "bg-accent" : "bg-paper-sunken border-line"
-              )}
-            >
-              <span
-                className={cn(
-                  "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-paper-raised shadow ring-0 transition-transform",
-                  autoApproveDestructive ? "translate-x-4" : "translate-x-0"
-                )}
+            <span className="mt-0.5">
+              <Switch
+                checked={autoApproveDestructive}
+                onChange={() => setAutoApproveDestructive(!autoApproveDestructive)}
+                label="Skip the check before risky actions"
               />
-            </button>
+            </span>
           </div>
         </section>
       )}
 
       {/* Version check */}
-      <section className="rounded-xl border border-line bg-paper-raised p-4">
+      <section className="rounded-2xl border border-line bg-paper-raised p-4">
         <Field label="Version" description="If these two numbers differ after an update, quit zWork completely (Cmd+Q) and open it again.">
           <div className="inline-flex flex-wrap items-center gap-2 rounded-lg border border-line bg-paper px-3 py-2 text-[12.5px] text-ink">
             <span className="font-medium">zWork</span>
@@ -1365,7 +1295,7 @@ function GeneralPanel({
       </section>
 
       {/* Privacy & Telemetry Dashboard */}
-      <section className="rounded-xl border border-line bg-paper-raised p-5 space-y-4 select-none">
+      <section className="rounded-2xl border border-line bg-paper-raised p-4 space-y-4 select-none">
         <div>
           <h3 className="text-[14px] font-semibold text-ink flex items-center gap-1.5">
             <ShieldAlert className="h-4 w-4 text-accent" />
@@ -1384,14 +1314,6 @@ function GeneralPanel({
             <div className="space-y-1 flex-1">
               <div className="text-[13px] font-medium text-ink flex items-center gap-2">
                 <span>Share anonymous usage stats</span>
-                <span className={cn(
-                  "px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase",
-                  telemetryEnabled
-                    ? "bg-success/10 text-success border border-success/20"
-                    : "bg-paper-sunken text-ink-faint border border-line"
-                )}>
-                  {telemetryEnabled ? "On" : "Off"}
-                </span>
               </div>
               <p className="text-[11.5px] leading-relaxed text-ink-muted">
                 Counts like how often zWork is opened and which features get used, so we know what to improve.
@@ -1400,24 +1322,17 @@ function GeneralPanel({
             </div>
             
             {/* Toggle Button */}
-            <button
-              onClick={async () => {
-                const next = !telemetryEnabled;
-                setTelemetryEnabled(next);
-                await onSave({ telemetry_enabled: next });
-              }}
-              className={cn(
-                "press ring-focus relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors mt-1",
-                telemetryEnabled ? "bg-accent" : "bg-paper-sunken border-line"
-              )}
-            >
-              <span
-                className={cn(
-                  "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-paper-raised shadow ring-0 transition-transform",
-                  telemetryEnabled ? "translate-x-4" : "translate-x-0"
-                )}
+            <span className="mt-0.5">
+              <Switch
+                checked={telemetryEnabled}
+                onChange={() => {
+                  const next = !telemetryEnabled;
+                  setTelemetryEnabled(next);
+                  void onSave({ telemetry_enabled: next });
+                }}
+                label="Share anonymous usage stats"
               />
-            </button>
+            </span>
           </div>
 
           <div className="border-t border-line-soft" />
@@ -1427,9 +1342,7 @@ function GeneralPanel({
             <div className="space-y-1 flex-1">
               <div className="text-[13px] font-medium text-ink flex items-center gap-2">
                 <span>Your content is never collected</span>
-                <span className="bg-success/10 text-success border border-success/20 px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase">
-                  Always
-                </span>
+                <Badge tone="success">Always</Badge>
               </div>
               <p className="text-[11.5px] leading-relaxed text-ink-muted">
                 What you type, what zWork writes back, and your files are never sent to us. This can't be turned off.
@@ -1456,7 +1369,7 @@ function GeneralPanel({
                   alert("Couldn't clear it. Try again.");
                 }
               }}
-              className="press ring-focus px-3 py-1.5 text-[11px] font-medium border border-error/20 bg-error/5 hover:bg-error/10 text-error rounded-lg transition-colors cursor-pointer"
+              className="press ring-focus inline-flex h-8 shrink-0 items-center rounded-lg border border-error/30 bg-error/10 px-3 text-[12.5px] font-medium text-error transition-colors hover:bg-error/15"
             >
               Clear
             </button>
@@ -1467,7 +1380,7 @@ function GeneralPanel({
       {!IS_WEB && <RuntimeSection />}
 
       {/* Default model */}
-      <section className="rounded-xl border border-line bg-paper-raised p-4">
+      <section className="rounded-2xl border border-line bg-paper-raised p-4">
         <Field label="Default model" description="The AI model new chats start with. You can switch in any chat.">
           <div className="relative">
             <select
@@ -1476,7 +1389,7 @@ function GeneralPanel({
                 setDefaultModel(e.target.value);
                 await onSave({ default_model: e.target.value });
               }}
-              className="ring-focus w-full appearance-none rounded-xl border border-line bg-paper px-3.5 py-2 pr-10 text-[13px] text-ink hover:border-line-strong focus:border-line-strong focus:outline-none cursor-pointer transition-colors"
+              className="ring-focus w-full appearance-none rounded-lg border border-line bg-paper px-3 py-2 pr-10 text-[13px] text-ink hover:border-line-strong focus:border-line-strong focus:outline-none cursor-pointer transition-colors"
             >
               {models.map((m) => (
                 <option key={m.id} value={m.id} className="bg-paper text-ink">
@@ -1490,24 +1403,26 @@ function GeneralPanel({
       </section>
 
       {/* Local credential config toggle */}
-      <section className="rounded-xl border border-line bg-paper-raised p-4">
-        <label className="flex items-start gap-3">
-          <input
-            type="checkbox"
-            checked={useClaude}
-            onChange={async (e) => {
-              setUseClaude(e.target.checked);
-              await onSave({ use_claude_code_config: e.target.checked });
-            }}
-            className="mt-[3px] h-4 w-4 accent-ink"
-          />
+      <section className="rounded-2xl border border-line bg-paper-raised p-4">
+        <div className="flex items-start justify-between gap-4">
           <div>
             <div className="text-[13px] font-medium text-ink">Use my Claude Code sign-in</div>
-            <div className="text-[12px] text-ink-muted">
+            <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-muted">
               If you use Claude Code on this computer and haven't added a key here, zWork can use the same account.
-            </div>
+            </p>
           </div>
-        </label>
+          <span className="mt-0.5">
+            <Switch
+              checked={useClaude}
+              onChange={() => {
+                const next = !useClaude;
+                setUseClaude(next);
+                void onSave({ use_claude_code_config: next });
+              }}
+              label="Use my Claude Code sign-in"
+            />
+          </span>
+        </div>
       </section>
 
       {/* Global Keyboard Shortcut */}
@@ -1562,17 +1477,17 @@ function GlobalShortcutSection() {
   };
 
   return (
-    <section className="rounded-xl border border-line bg-paper-raised p-5 space-y-3">
+    <section className="rounded-2xl border border-line bg-paper-raised p-4 space-y-3">
       <div>
-        <h3 className="text-[14px] font-semibold text-ink">Keyboard Shortcuts</h3>
+        <h3 className="text-[14px] font-semibold text-ink">Keyboard shortcut</h3>
         <p className="text-[12px] text-ink-muted mt-1 leading-relaxed">
-          Configure global keyboard shortcuts that work even when zWork is not focused.
+          Works from any app, even when zWork isn&rsquo;t in front.
         </p>
       </div>
       <div className="border-t border-line" />
       <KeybindRecorder
-        label="Toggle Chatbox Overlay"
-        description="Brings up the zWork overlay on top of any app. Requires a modifier key (⌘, ⌃, ⌥, ⇧) plus another key."
+        label="Open the quick chat box"
+        description="Opens a small zWork chat box on top of whatever you're doing. Use ⌘, ⌃, ⌥ or ⇧ plus one other key."
         value={shortcut}
         onChange={handleChange}
       />
@@ -1608,26 +1523,21 @@ function MemoryPanel() {
         </p>
       </div>
 
-      <section className="rounded-xl border border-line bg-paper-raised p-4">
+      <section>
         <textarea
           value={draft}
           onChange={(e) => { setDraft(e.target.value); setDirty(true); }}
           rows={12}
-          className="block w-full resize-y rounded-lg border border-line bg-paper px-3 py-2.5 font-mono text-[12.5px] leading-5 text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+          className="ring-focus block w-full resize-y rounded-2xl border border-line bg-paper-raised px-4 py-3 font-mono text-[12.5px] leading-5 text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
           placeholder="- No memories saved yet"
         />
         <div className="mt-3 flex items-center justify-between">
           <p className="text-[11.5px] text-ink-faint">
             {dirty ? "Unsaved changes" : "Saved"}
           </p>
-          <button
-            type="button"
-            disabled={!dirty || saving}
-            onClick={save}
-            className="press ring-focus inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-paper hover:bg-ink-soft disabled:opacity-40 disabled:cursor-not-allowed"
-          >
+          <Button variant="primary" disabled={!dirty || saving} onClick={save}>
             {saving ? "Saving…" : "Save"}
-          </button>
+          </Button>
         </div>
       </section>
     </div>
@@ -1699,7 +1609,7 @@ function TemplatesSection() {
   };
 
   return (
-    <section className="rounded-xl border border-line bg-paper-raised p-4">
+    <section className="rounded-2xl border border-line bg-paper-raised p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="text-[14px] font-semibold text-ink">Prompt templates</h3>
@@ -1722,29 +1632,27 @@ function TemplatesSection() {
               setShowForm(true);
             }
           }}
-          className="press ring-focus inline-flex items-center gap-1.5 rounded-lg border border-line bg-paper px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-paper-sunken"
+          className="press ring-focus inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-line bg-paper px-3 text-[12.5px] font-medium text-ink transition-colors hover:bg-paper-sunken"
         >
           <Plus className="h-3.5 w-3.5" />
           New template
         </button>
       </div>
 
-      <div className="mt-3 flex flex-col gap-2">
+      <div className="mt-3 divide-y divide-line-soft border-t border-line-soft">
         {templates.length === 0 && !showForm && (
-          <div className="rounded-lg border border-dashed border-line bg-paper p-4 text-center text-[12.5px] text-ink-muted">
-            No templates yet. Create one to get started.
-          </div>
+          <p className="pt-3 text-[12.5px] text-ink-muted">No templates yet.</p>
         )}
         {templates.map((tpl) => (
           <div
             key={tpl.id}
-            className="rounded-lg border border-line bg-paper px-3 py-2.5"
+            className="py-2.5"
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="text-[13px] font-medium text-ink">{tpl.title}</span>
-                  <span className="rounded-full border border-line bg-paper-sunken px-1.5 py-px font-mono text-[10.5px] text-ink-muted">
+                  <span className="rounded-full border border-line px-1.5 py-px font-mono text-[10.5px] text-ink-muted">
                     /{tpl.trigger}
                   </span>
                 </div>
@@ -1756,7 +1664,7 @@ function TemplatesSection() {
                 <button
                   type="button"
                   onClick={() => startEdit(tpl)}
-                  className="press rounded px-2 py-1 text-[11.5px] text-ink-muted hover:bg-paper-sunken hover:text-ink"
+                  className="press ring-focus rounded-md px-2 py-1 text-[12px] text-ink-muted hover:bg-line/40 hover:text-ink"
                 >
                   Edit
                 </button>
@@ -1773,7 +1681,7 @@ function TemplatesSection() {
       </div>
 
       {showForm && (
-        <div className="mt-3 rounded-lg border border-line-strong bg-paper p-3">
+        <div className="mt-4 border-t border-line pt-4">
           <div className="mb-2 flex items-center justify-between">
             <h4 className="text-[12.5px] font-semibold text-ink">
               {editId ? "Edit template" : "New template"}
@@ -1786,7 +1694,7 @@ function TemplatesSection() {
                 value={trigger}
                 onChange={(e) => setTrigger(e.target.value)}
                 placeholder="summarize"
-                className="block w-full rounded-lg border border-line bg-paper-raised px-3 py-2 font-mono text-[12.5px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+                className="block w-full rounded-lg border border-line bg-paper px-3 py-2 font-mono text-[12.5px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
               />
             </Field>
             <Field label="Title">
@@ -1794,7 +1702,7 @@ function TemplatesSection() {
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Summarize"
-                className="block w-full rounded-lg border border-line bg-paper-raised px-3 py-2 text-[12.5px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+                className="block w-full rounded-lg border border-line bg-paper px-3 py-2 text-[12.5px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
               />
             </Field>
             <Field label="Body" description="The text inserted into the composer when the template is chosen.">
@@ -1803,25 +1711,18 @@ function TemplatesSection() {
                 onChange={(e) => setBody(e.target.value)}
                 rows={6}
                 placeholder="Summarize the following clearly and concisely…"
-                className="block w-full resize-y rounded-lg border border-line bg-paper-raised px-3 py-2 font-mono text-[12.5px] leading-5 text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+                className="block w-full resize-y rounded-lg border border-line bg-paper px-3 py-2 font-mono text-[12.5px] leading-5 text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
               />
             </Field>
             <div className="flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={resetForm}
-                className="press rounded-lg border border-line bg-paper-raised px-3 py-1.5 text-[12.5px] text-ink hover:bg-paper-sunken"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
+              <Button onClick={resetForm}>Cancel</Button>
+              <Button
+                variant="primary"
                 onClick={submit}
                 disabled={!normalizeTrigger(trigger) || !title.trim() || !body}
-                className="press ring-focus inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12.5px] font-medium text-paper hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {editId ? "Save" : "Create"}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -1861,7 +1762,7 @@ function AccountPanel() {
         </p>
       </div>
 
-      <section className="rounded-xl border border-line bg-paper-raised p-4">
+      <section className="rounded-2xl border border-line bg-paper-raised p-4">
         {user ? (
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -1877,21 +1778,16 @@ function AccountPanel() {
                 <p className="text-[12px] text-ink-muted">{user.email}</p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={signOut}
-              className="press ring-focus inline-flex items-center gap-1.5 rounded-lg border border-line bg-paper px-3 py-1.5 text-[12.5px] font-medium text-ink hover:bg-line/40"
-            >
-              <LogOut className="h-3.5 w-3.5" />
+            <Button icon={<LogOut />} onClick={signOut}>
               Sign out
-            </button>
+            </Button>
           </div>
         ) : (
           <button
             type="button"
             disabled={isLoadingAuth}
             onClick={handleSignIn}
-            className="press ring-focus inline-flex w-full items-center justify-center gap-2 rounded-lg border border-line bg-paper px-4 py-2.5 text-[13px] font-medium text-ink hover:bg-line/40 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="press ring-focus inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-line bg-paper px-4 text-[13px] font-medium text-ink transition-colors hover:bg-paper-sunken disabled:cursor-not-allowed disabled:opacity-40"
           >
             <svg className="h-4 w-4" viewBox="0 0 24 24">
               <path
@@ -1911,7 +1807,7 @@ function AccountPanel() {
                 d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
               />
             </svg>
-            {isLoadingAuth ? "Signing in..." : "Sign in with Google"}
+            {isLoadingAuth ? "Signing in…" : "Sign in with Google"}
           </button>
         )}
       </section>
@@ -1999,7 +1895,7 @@ function RuntimeSection() {
   }
 
   return (
-    <section className="rounded-xl border border-line bg-paper-raised p-4">
+    <section className="rounded-2xl border border-line bg-paper-raised p-4">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="text-[13px] font-medium text-ink flex items-center gap-2">
@@ -2007,25 +1903,20 @@ function RuntimeSection() {
             <span
               className={`h-1.5 w-1.5 rounded-full ${
                 status.state === "ready"
-                  ? "bg-emerald-500"
+                  ? "bg-success"
                   : status.state === "failed"
-                    ? "bg-red-500"
-                    : "bg-amber-500 animate-pulse"
+                    ? "bg-error"
+                    : "bg-warning animate-pulse"
               }`}
             />
           </div>
           <div className="mt-0.5 text-[12px] text-ink-muted">
             What zWork uses to create Word, Excel, PowerPoint and PDF files and to run connectors.{" "}
-            <span className={status.state === "failed" ? "text-red-500" : undefined}>{detail}</span>
+            <span className={status.state === "failed" ? "text-error" : undefined}>{detail}</span>
           </div>
         </div>
         {(status.state === "failed" || status.state === "missing") && (
-          <button
-            onClick={retry}
-            className="ring-focus shrink-0 rounded-lg border border-line px-3 py-1.5 text-[12.5px] font-medium text-ink hover:bg-paper-sunken transition-colors"
-          >
-            {status.state === "failed" ? "Retry" : "Install"}
-          </button>
+          <Button onClick={() => void retry()}>{status.state === "failed" ? "Try again" : "Install"}</Button>
         )}
       </div>
     </section>

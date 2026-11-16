@@ -479,7 +479,7 @@ function RowMenu({
               onOpenChange(false);
             }}
             role="menuitem"
-            className="press flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-red-600 hover:bg-red-500/10"
+            className="press flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-error hover:bg-error/10"
           >
             <Trash2 className="h-3.5 w-3.5" /> Delete chat
           </button>

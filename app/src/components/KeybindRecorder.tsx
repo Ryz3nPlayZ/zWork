@@ -161,14 +161,14 @@ export function KeybindRecorder({ value, onChange, label, description }: Keybind
           {/* Keybind display pill */}
           <div
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-medium transition-all duration-200 min-w-[100px] justify-center",
+              "inline-flex h-8 min-w-[100px] items-center justify-center gap-1.5 rounded-lg border px-3 text-[12.5px] font-medium transition-colors duration-200",
               state === "success"
-                ? "border-emerald-400 bg-emerald-50 text-emerald-700 shadow-[0_0_0_1px_rgb(52_211_153/0.3)]"
+                ? "border-success/30 bg-success/10 text-success"
                 : state !== "idle"
-                  ? "border-ink/40 bg-paper-sunken text-ink animate-pulse"
+                  ? "border-line-strong bg-paper text-ink animate-pulse"
                   : value
-                    ? "border-line bg-paper-raised text-ink"
-                    : "border-line border-dashed bg-paper text-ink-faint",
+                    ? "border-line bg-paper text-ink"
+                    : "border-dashed border-line bg-paper text-ink-faint",
             )}
           >
             {state === "success"
@@ -187,7 +187,7 @@ export function KeybindRecorder({ value, onChange, label, description }: Keybind
             <button
               type="button"
               onClick={startListening}
-              className="press rounded-md border border-line bg-paper px-2.5 py-1.5 text-[11px] font-medium text-ink hover:bg-paper-sunken transition-colors"
+              className="press ring-focus inline-flex h-8 items-center rounded-lg border border-line bg-paper px-3 text-[12.5px] font-medium text-ink transition-colors hover:bg-paper-sunken"
             >
               Edit
             </button>
@@ -195,7 +195,7 @@ export function KeybindRecorder({ value, onChange, label, description }: Keybind
             <button
               type="button"
               onClick={cancel}
-              className="press rounded-md border border-line bg-paper px-2.5 py-1.5 text-[11px] font-medium text-ink-muted hover:bg-paper-sunken transition-colors"
+              className="press ring-focus inline-flex h-8 items-center rounded-lg border border-line bg-paper px-3 text-[12.5px] font-medium text-ink transition-colors hover:bg-paper-sunken"
             >
               Cancel
             </button>
@@ -206,8 +206,8 @@ export function KeybindRecorder({ value, onChange, label, description }: Keybind
             <button
               type="button"
               onClick={() => onChange("")}
-              className="press rounded-md px-2.5 py-1.5 text-[11px] font-medium text-red-500 hover:bg-red-50 transition-colors"
-              title="Remove keybind"
+              className="press ring-focus inline-flex h-8 items-center rounded-lg px-3 text-[12.5px] font-medium text-error transition-colors hover:bg-error/10"
+              title="Remove shortcut"
             >
               Remove
             </button>
