@@ -85,7 +85,7 @@ workspace/
 
 # ===== Local ops notes =====
 serverdetails.md
-research/
+/research/
 
 # ===== Local build/cache overrides =====
 .cargo_cache/
