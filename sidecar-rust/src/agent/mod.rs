@@ -547,31 +547,96 @@ impl Drop for RunGuard {
     }
 }
 
-struct DoomLoopDetector {
-    last_calls: Vec<(String, Value)>,
+/// What the repeated-action guard decides about the next tool call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RepeatVerdict {
+    /// Run it.
+    Allow,
+    /// Don't run it, tell the model why, and let it pick another approach.
+    Steer,
+    /// Don't run it and end the run: the model ignored the nudge.
+    Stop,
 }
 
+/// Repeated-action guard.
+///
+/// The old rule stopped the whole run on the third identical call in a row,
+/// even when each call returned something new (re-reading a page that is
+/// still loading, checking a download). Now a repeat only counts as stuck
+/// when it keeps returning the same result: the first stuck repeat is refused
+/// with a note asking for a different approach, and only repeating again
+/// after that ends the run. Identical calls with changing results are allowed
+/// up to `MAX_IDENTICAL_CALLS` in a row.
+pub(crate) struct DoomLoopDetector {
+    last_call: Option<(String, Value)>,
+    /// Identical calls in a row, counting refused ones.
+    repeats: u32,
+    /// Hash of the most recent result for `last_call`.
+    last_result: Option<u64>,
+    /// How many results in a row for `last_call` were identical.
+    same_results: u32,
+    /// Times this streak has already been refused.
+    steered: u32,
+}
+
+/// Identical calls returning identical results before the guard steps in.
+const STUCK_AFTER_SAME_RESULTS: u32 = 2;
+/// Identical calls in a row allowed even when results keep changing.
+const MAX_IDENTICAL_CALLS: u32 = 12;
+
 impl DoomLoopDetector {
-    fn new() -> Self {
-        Self {
-            last_calls: Vec::new(),
+    pub(crate) fn new() -> Self {
+        Self { last_call: None, repeats: 0, last_result: None, same_results: 0, steered: 0 }
+    }
+
+    fn is_last(&self, name: &str, input: &Value) -> bool {
+        matches!(&self.last_call, Some((n, a)) if n == name && a == input)
+    }
+
+    /// Record an attempted call and decide whether it may run.
+    pub(crate) fn check(&mut self, name: &str, input: &Value) -> RepeatVerdict {
+        if self.is_last(name, input) {
+            self.repeats += 1;
+        } else {
+            *self = Self::new();
+            self.last_call = Some((name.to_string(), input.clone()));
+            self.repeats = 1;
+        }
+        let stuck = self.repeats > STUCK_AFTER_SAME_RESULTS && self.same_results >= STUCK_AFTER_SAME_RESULTS;
+        if !stuck && self.repeats <= MAX_IDENTICAL_CALLS {
+            return RepeatVerdict::Allow;
+        }
+        self.steered += 1;
+        if self.steered == 1 { RepeatVerdict::Steer } else { RepeatVerdict::Stop }
+    }
+
+    /// Record what a call returned, so repeats with new results count as progress.
+    pub(crate) fn record_result(&mut self, name: &str, input: &Value, result: &Value, is_error: bool) {
+        if !self.is_last(name, input) {
+            return;
+        }
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        result.to_string().hash(&mut hasher);
+        is_error.hash(&mut hasher);
+        let h = hasher.finish();
+        if self.last_result == Some(h) {
+            self.same_results += 1;
+        } else {
+            self.last_result = Some(h);
+            self.same_results = 1;
         }
     }
 
-    fn push(&mut self, name: &str, input: &Value) -> bool {
-        self.last_calls.push((name.to_string(), input.clone()));
-        if self.last_calls.len() > 3 {
-            self.last_calls.remove(0);
-        }
-        if self.last_calls.len() == 3 {
-            let first = &self.last_calls[0];
-            let second = &self.last_calls[1];
-            let third = &self.last_calls[2];
-            if first.0 == second.0 && second.0 == third.0 && first.1 == second.1 && second.1 == third.1 {
-                return true;
-            }
-        }
-        false
+    /// Note shown to the model when a stuck repeat is refused.
+    pub(crate) fn steer_reason(&self) -> String {
+        format!(
+            "Not run: this exact call already ran {} times in a row and returned the same result each time, \
+             so running it again won't change anything. Change the arguments (for example a search query, \
+             a different id, or the page_token from the last result), use a different tool, or answer with \
+             what you already have.",
+            self.repeats.saturating_sub(1)
+        )
     }
 }
 
@@ -783,19 +848,50 @@ mod tests {
     }
 
     #[test]
-    fn test_doom_loop_detector() {
-        let mut detector = DoomLoopDetector::new();
-        
-        // Push different calls
-        assert!(!detector.push("read_file", &json!({"path": "a.rs"})));
-        assert!(!detector.push("read_file", &json!({"path": "b.rs"})));
-        assert!(!detector.push("read_file", &json!({"path": "a.rs"})));
-        
-        // Push duplicate calls consecutively
-        let mut detector = DoomLoopDetector::new();
-        assert!(!detector.push("read_file", &json!({"path": "a.rs"})));
-        assert!(!detector.push("read_file", &json!({"path": "a.rs"})));
-        // The third duplicate call must trigger a doom loop!
-        assert!(detector.push("read_file", &json!({"path": "a.rs"})));
+    fn repeats_with_new_results_are_progress() {
+        let mut d = DoomLoopDetector::new();
+        let call = json!({"ref": "page"});
+        for i in 0..MAX_IDENTICAL_CALLS {
+            assert_eq!(d.check("browser_snapshot", &call), RepeatVerdict::Allow, "call {i}");
+            d.record_result("browser_snapshot", &call, &json!(format!("loading {i}")), false);
+        }
+        // Past the hard cap even changing results get a nudge, then a stop.
+        assert_eq!(d.check("browser_snapshot", &call), RepeatVerdict::Steer);
+        assert_eq!(d.check("browser_snapshot", &call), RepeatVerdict::Stop);
+    }
+
+    #[test]
+    fn same_call_same_result_is_steered_then_stopped() {
+        let mut d = DoomLoopDetector::new();
+        let call = json!({});
+        let inbox = json!({"messages": [1, 2, 3]});
+        assert_eq!(d.check("composio__GMAIL_FETCH_EMAILS", &call), RepeatVerdict::Allow);
+        d.record_result("composio__GMAIL_FETCH_EMAILS", &call, &inbox, false);
+        assert_eq!(d.check("composio__GMAIL_FETCH_EMAILS", &call), RepeatVerdict::Allow);
+        d.record_result("composio__GMAIL_FETCH_EMAILS", &call, &inbox, false);
+        // Third identical call with the same result: refused, run continues.
+        assert_eq!(d.check("composio__GMAIL_FETCH_EMAILS", &call), RepeatVerdict::Steer);
+        assert!(d.steer_reason().contains("2 times"));
+        // Ignoring the nudge ends the run.
+        assert_eq!(d.check("composio__GMAIL_FETCH_EMAILS", &call), RepeatVerdict::Stop);
+    }
+
+    #[test]
+    fn changing_the_call_resets_the_guard() {
+        let mut d = DoomLoopDetector::new();
+        let a = json!({"path": "a.rs"});
+        let b = json!({"path": "b.rs"});
+        for _ in 0..2 {
+            assert_eq!(d.check("read_file", &a), RepeatVerdict::Allow);
+            d.record_result("read_file", &a, &json!("same"), false);
+        }
+        assert_eq!(d.check("read_file", &a), RepeatVerdict::Steer);
+        // The model listens and changes course: back to normal.
+        assert_eq!(d.check("read_file", &b), RepeatVerdict::Allow);
+        d.record_result("read_file", &b, &json!("other"), false);
+        assert_eq!(d.check("read_file", &a), RepeatVerdict::Allow);
+        // A result recorded for a different call doesn't count.
+        d.record_result("read_file", &b, &json!("other"), false);
+        assert_eq!(d.check("read_file", &a), RepeatVerdict::Allow);
     }
 }

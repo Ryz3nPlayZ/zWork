@@ -39,7 +39,7 @@ use crate::{chatstore, settings};
 use super::{
     artifact_hint, classify_provider_error_with_raw, friendly_upstream_error, is_command_approved, llm_trace,
     log_agent_event, orientation, prompts, router_real_model,
-    run_state, DoomLoopDetector, ErrorClass, RunGuard,
+    run_state, DoomLoopDetector, ErrorClass, RepeatVerdict, RunGuard,
 };
 
 const DEFAULT_MAX_TURNS: u32 = 80;
@@ -990,24 +990,44 @@ async fn run_durable_once(
     }
     let user_entries = Arc::new(run_state::UserEntries::for_prompt(seeded));
 
-    // Doom-loop guard on the durable registry (same rule as the agent-loop
-    // hook): the same tool call three turns running blocks the call and
-    // terminates the run; the post-run section emits the recovery text.
+    // Repeated-action guard: an identical call that keeps returning the same
+    // result is refused once with a note to change approach; repeating it
+    // again ends the run and the post-run section explains in plain words.
     {
         let shared = shared.clone();
         harness.hooks.on_before_tool(Arc::new(move |_ctx, event| {
-            let doomed = shared.doom.lock_unpoisoned().push(&event.tool_name, &event.args);
-            if !doomed && !shared.doomed.load(Ordering::SeqCst) {
-                return Ok(None);
+            use crate::harness::runtime::hooks::{BeforeToolResult, ToolBlock};
+            if shared.doomed.load(Ordering::SeqCst) {
+                return Ok(Some(BeforeToolResult {
+                    args: None,
+                    block: Some(ToolBlock { reason: "Stopped: this step kept repeating.".into(), terminate: Some(true) }),
+                }));
             }
-            shared.doomed.store(true, Ordering::SeqCst);
-            Ok(Some(crate::harness::runtime::hooks::BeforeToolResult {
-                args: None,
-                block: Some(crate::harness::runtime::hooks::ToolBlock {
-                    reason: "Stopped: this exact action was repeated without progress.".into(),
-                    terminate: Some(true),
-                }),
-            }))
+            let mut doom = shared.doom.lock_unpoisoned();
+            match doom.check(&event.tool_name, &event.args) {
+                RepeatVerdict::Allow => Ok(None),
+                RepeatVerdict::Steer => {
+                    log_agent_event(&shared.chat_id, &shared.run_id, "repeat_steered", json!({ "tool": event.tool_name }));
+                    Ok(Some(BeforeToolResult {
+                        args: None,
+                        block: Some(ToolBlock { reason: doom.steer_reason(), terminate: Some(false) }),
+                    }))
+                }
+                RepeatVerdict::Stop => {
+                    shared.doomed.store(true, Ordering::SeqCst);
+                    Ok(Some(BeforeToolResult {
+                        args: None,
+                        block: Some(ToolBlock { reason: "Stopped: this step kept repeating with the same result.".into(), terminate: Some(true) }),
+                    }))
+                }
+            }
+        }));
+    }
+    {
+        let shared = shared.clone();
+        harness.hooks.on_after_tool(Arc::new(move |_ctx, event| {
+            shared.doom.lock_unpoisoned().record_result(&event.tool_name, &event.args, &event.content, event.is_error);
+            Ok(None)
         }));
     }
 
@@ -1879,20 +1899,18 @@ pub fn run_agent_turn(
         if shared.doomed.load(Ordering::SeqCst) {
             // Emit a real assistant text so the persisted turn isn't empty
             // and the next user message starts from a clean state.
-            let recovery = "I got stuck repeating the same action without making progress, \
-                so I stopped to avoid burning your quota. This usually means a tool returned \
-                more than I could usefully read. Try rephrasing — for example, narrow the \
-                request (a specific sender, date, or subject) — or ask for one specific item \
-                by name.";
+            let recovery = "I kept repeating the same step and getting the same result, so I stopped \
+                there. Tell me more specifically what to look for (for example a sender, a date, or a \
+                subject) and I'll go straight to it.";
             shared.accumulated_text.lock_unpoisoned().push_str(recovery);
             shared.persist().await;
             let _ = tx.send(json!({ "type": "delta", "text": recovery })).await;
-            let _ = tx.send(json!({ "type": "error", "text": "Stopped a repeated-action loop before it ran away." })).await;
+            let _ = tx.send(json!({ "type": "error", "text": "Stopped a step that kept repeating with no new result." })).await;
         }
         if shared.hit_turn_cap.load(Ordering::SeqCst) {
             let _ = tx.send(json!({
                 "type": "error",
-                "text": format!("Reached the {}-turn runaway cap and stopped to protect your request quota — the task wasn't converging on its own. Try rephrasing, switching models, or set ZWORK_MAX_TURNS (0 = unbounded).", max_turns)
+                "text": format!("Stopped after {} steps so this request doesn't keep using your credit. Try breaking the task into smaller requests, or say more precisely what you need.", max_turns)
             })).await;
         }
 
