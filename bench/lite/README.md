@@ -91,6 +91,40 @@ Everything goes in `runs/<timestamp>/`, which git ignores:
 
 ## Results so far
 
+### GLM 5.3 on the Z.ai coding plan
+
+All 17 tasks, 2 reps each, product mode, zWork commit `bcad87c`
+(run `20261116-001151`).
+
+| harness | pass | median time | median tool calls | median in tok | median out tok |
+|---|---|---|---|---|---|
+| opencode | 32/34 | 41s | 8 | 79k | 2.0k |
+| zWork | 30/34 | 49s | 6 | 80k | 2.0k |
+
+Every other task passed 2/2 for both harnesses, including all five office
+tasks for opencode and four of them for zWork.
+
+- **rename-symbol** failed 0/2 for both, the same way: they renamed `calc`'s
+  `disc` argument and left `Cart.total(disc=...)` alone. The prompt said "its
+  keyword argument", so that was a fair reading. The prompt now names
+  `Cart.total` too, and both went 2/2 (`20261116-003710`).
+- **zWork's two other misses had the same cause: it didn't check its work.**
+  On expense-report it typed the CSV by hand and dropped one row, while its
+  summary totals were right. On sqlite-query its SQL subtracted refunds
+  wrongly, and it reported a top customer at more than twice the runner-up
+  without a second look. The product prompt now has a short "check before
+  you say it's done" section: read back what you wrote, check that items
+  and totals agree with the inputs, look into a result that stands out, and
+  work things out with a script. Re-run on six tasks with 3 reps each
+  (`20261116-003254`, zWork only), expense-report, sqlite-query,
+  invoice-reconcile, weekly-payroll and csv-report all went 3/3.
+- **client-letters**: in that re-run zWork twice saved `James_OBrien.md`
+  without the apostrophe. The prompt doesn't say how to handle one, so the
+  grader now accepts either spelling, as long as `sent.csv` names the same
+  file. All three runs pass with that.
+
+### gpt-oss on Ollama
+
 All on `gpt-oss:120b-cloud` through Ollama, 2 reps per task, product mode.
 
 | run | zWork commit | zWork pass | opencode pass | zWork median in tok | opencode median in tok |

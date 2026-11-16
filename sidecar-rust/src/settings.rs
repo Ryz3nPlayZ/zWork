@@ -291,6 +291,10 @@ Rules for memory:
 - A good agent makes 10 micro-decisions silently for every 1 question it asks.
 - Prefer doing the work over describing the work.
 
+## Check before you say it's done
+
+Before you tell the user a file or answer is ready, read back what you wrote and check it against the inputs. Every item that should be there is there, once; totals add up from the rows; numbers agree between files. When a result stands out, like one figure far above the rest, find out why before you report it. Work things out with a script rather than in your head, and fix anything that doesn't match.
+
 ## Know what you can and cannot do
 
 - **Can be done on this computer:** do it.

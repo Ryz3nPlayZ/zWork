@@ -21,7 +21,21 @@ people = [
 d = w / "letters"
 errs = []
 got = sorted(p.name for p in d.glob("*.md")) if d.is_dir() else []
-if got != sorted(p[0] for p in people):
+
+
+def same_name(a, b):
+    # The prompt doesn't say what to do with an apostrophe in a name, so
+    # James_O'Brien.md and James_OBrien.md both count.
+    return a.replace("'", "").replace("\u2019", "") == b.replace("'", "").replace("\u2019", "")
+
+
+# Each expected letter -> the file the agent actually wrote for it.
+found = {}
+for want_name, *_ in people:
+    match = [g for g in got if same_name(g, want_name)]
+    if len(match) == 1:
+        found[want_name] = match[0]
+if len(found) != len(people) or len(got) != len(people):
     errs.append(f"letters {got} != {sorted(p[0] for p in people)}")
 
 
@@ -30,7 +44,7 @@ def lines(t):
 
 
 for name, _, greeting, city, company in people:
-    p = d / name
+    p = d / found.get(name, name)
     if p.exists():
         want = tpl.format(greeting=greeting, city=city, company=company)
         if lines(p.read_text(encoding="utf-8")) != lines(want):
@@ -41,7 +55,7 @@ try:
     if rows[0] != ["email", "file"]:
         errs.append(f"sent.csv header {rows[0]}")
     body = [(r[0], r[1].split("/")[-1]) for r in rows[1:]]
-    want = sorted((p[1], p[0]) for p in people)
+    want = sorted((p[1], found.get(p[0], p[0])) for p in people)
     if body != want:
         errs.append(f"sent.csv {body} != {want}")
 except (OSError, IndexError) as e:

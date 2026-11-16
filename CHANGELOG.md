@@ -17,6 +17,7 @@ All notable changes to zWork are documented in this file.
 - **Repeating a step only stops when it gets nowhere.** zWork used to stop on the third identical step even when each one returned something new. Now it only steps in when the same step keeps returning the same result: first it's asked to try something else, and only then does the run stop.
 - **Browser steps are more reliable.** Reading a page with a script works again, a click that opens a new page counts as done, and zWork acts on the browser window you last used.
 - **Fewer wrong turns.** File paths missing your home folder ("/Desktop/a.pdf") are found, and if you don't answer a question in time zWork stops and asks again instead of guessing.
+- **zWork checks its work before saying it's done.** It reads back what it wrote, makes sure every item is there once and the totals add up, and looks into any figure that stands out before reporting it.
 - **Spreadsheets are checked.** Every formula is calculated and errors are reported, and a workbook with formula errors isn't delivered.
 - **Paperwork runs are lighter.** Tools for research, deploying and building apps only load when you ask for them.
 - **Schedules run side by side, and late runs say so.**
