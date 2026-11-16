@@ -51,6 +51,9 @@ pub async fn scheduler_loop() {
     let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
     loop {
         ticker.tick().await;
+        // Tasks get a next run when saved; this catches any that slipped
+        // through (an older build, a hand-edited file) instead of never running.
+        startup_backfill();
         // Don't hold a lock across runs; snapshot the task list.
         let tasks = schedulestore::get_all();
         for task in tasks {
@@ -94,7 +97,7 @@ fn note_missed_run(task: &ScheduledTask, due_ms: u64) {
 
 /// Compute the next run time (epoch-ms) given the schedule and "from" instant.
 /// Returns `None` for a task with neither an interval nor a daily time.
-fn compute_next_run(task: &ScheduledTask, from_ms: u64) -> Option<u64> {
+pub(crate) fn compute_next_run(task: &ScheduledTask, from_ms: u64) -> Option<u64> {
     if let Some(mins) = task.interval_minutes {
         let step = (mins.max(MIN_INTERVAL_MINUTES) as u64) * 60_000;
         return Some(from_ms + step);
@@ -145,7 +148,8 @@ fn parse_hhmm(s: &str) -> Option<(u32, u32)> {
     }
 }
 
-/// On startup, set next_run_at for tasks that don't have one yet (first run).
+/// Set next_run_at for enabled tasks that don't have one yet. Runs at startup
+/// and on every tick.
 fn startup_backfill() {
     let tasks = schedulestore::get_all();
     let now = now_ms();

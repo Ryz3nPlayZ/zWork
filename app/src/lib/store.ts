@@ -820,7 +820,8 @@ interface AppState {
   activeProjectId: string | null;
   setActiveProject: (id: string | null) => void;
   refreshProjects: () => Promise<void>;
-  createProject: (name: string, description?: string, icon?: string) => Promise<void>;
+  /** Creates the project and resolves to its id. */
+  createProject: (name: string, description?: string, icon?: string) => Promise<string | undefined>;
   updateProject: (id: string, data: { name?: string; description?: string; starred?: boolean; icon?: string }) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
 
@@ -1346,8 +1347,9 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   createProject: async (name, description, icon) => {
-    await api.createProject(name, description, icon);
+    const res = await api.createProject(name, description, icon);
     await get().refreshProjects();
+    return res.project?.id;
   },
 
 

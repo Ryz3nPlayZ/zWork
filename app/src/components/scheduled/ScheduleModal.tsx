@@ -1,294 +1,237 @@
-/* Hallmark · genre: modern-minimal · macrostructure: Workbench · design-system: design.md · designed-as-app */
-
 import { useEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
 import { useApp } from "../../lib/store";
 import type { ScheduledTask } from "../../lib/api";
 import { cn } from "../../lib/cn";
+import { Button, Dialog, Field, Segmented, Switch, inputClass } from "../page/Page";
+import { ALL_DAYS, WEEKDAYS, describeSchedule, sameDays } from "./describe";
 
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const DAY_LETTERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MIN_INTERVAL_MINUTES = 15;
 
-type TriggerMode = "interval" | "daily";
+type Repeat = "daily" | "weekdays" | "days" | "interval";
+type Unit = "minutes" | "hours";
+
+/** What a new task starts from: a blank form or one of the starter ideas. */
+export interface ScheduleDraft {
+  title: string;
+  prompt: string;
+  daily_time?: string;
+  daily_weekdays?: number[];
+  interval_minutes?: number;
+}
+
+function initialRepeat(src: ScheduleDraft | ScheduledTask | null | undefined): Repeat {
+  if (src?.interval_minutes) return "interval";
+  const days = src?.daily_weekdays ?? WEEKDAYS;
+  if (days.length === 0 || sameDays(days, ALL_DAYS)) return "daily";
+  if (sameDays(days, WEEKDAYS)) return "weekdays";
+  return "days";
+}
 
 export function ScheduleModal({
   task,
+  initial,
   onClose,
 }: {
   task: ScheduledTask | null;
+  initial?: ScheduleDraft;
   onClose: () => void;
 }) {
   const createSchedule = useApp((s) => s.createSchedule);
   const updateSchedule = useApp((s) => s.updateSchedule);
+  const src = task ?? initial ?? null;
 
-  const [title, setTitle] = useState(task?.title ?? "");
-  const [prompt, setPrompt] = useState(task?.prompt ?? "");
-  const [triggerMode, setTriggerMode] = useState<TriggerMode>(
-    task?.interval_minutes ? "interval" : task?.daily_time ? "daily" : "daily",
-  );
-  const [intervalMinutes, setIntervalMinutes] = useState(
-    String(task?.interval_minutes ?? 30),
-  );
-  const [dailyTime, setDailyTime] = useState(task?.daily_time ?? "09:00");
-  const [dailyWeekdays, setDailyWeekdays] = useState<number[]>(
-    task?.daily_weekdays ?? [1, 2, 3, 4, 5],
-  );
+  const [title, setTitle] = useState(src?.title ?? "");
+  const [prompt, setPrompt] = useState(src?.prompt ?? "");
+  const [repeat, setRepeat] = useState<Repeat>(initialRepeat(src));
+  const [time, setTime] = useState(src?.daily_time ?? "09:00");
+  const [days, setDays] = useState<number[]>(() => {
+    const d = src?.daily_weekdays ?? [];
+    return d.length && !sameDays(d, ALL_DAYS) && !sameDays(d, WEEKDAYS) ? d : [1];
+  });
+  const startMinutes = src?.interval_minutes ?? 60;
+  const [unit, setUnit] = useState<Unit>(startMinutes % 60 === 0 ? "hours" : "minutes");
+  const [amount, setAmount] = useState(String(startMinutes % 60 === 0 ? startMinutes / 60 : startMinutes));
   const [enabled, setEnabled] = useState(task?.enabled ?? true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
   const titleRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     titleRef.current?.focus();
   }, []);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const intervalMinutes = Math.round(Number(amount) * (unit === "hours" ? 60 : 1));
+  const chosenDays = repeat === "daily" ? ALL_DAYS : repeat === "weekdays" ? WEEKDAYS : days;
+  const trigger =
+    repeat === "interval"
+      ? { interval_minutes: intervalMinutes, daily_time: null, daily_weekdays: null }
+      : { interval_minutes: null, daily_time: time, daily_weekdays: [...chosenDays].sort((a, b) => a - b) };
 
-  const toggleWeekday = (day: number) => {
-    setDailyWeekdays((prev) =>
-      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day].sort(),
-    );
-  };
+  const timingProblem =
+    repeat === "interval"
+      ? !Number.isFinite(intervalMinutes) || intervalMinutes < MIN_INTERVAL_MINUTES
+        ? "Pick 15 minutes or more."
+        : null
+      : !/^\d{2}:\d{2}$/.test(time)
+        ? "Pick a time."
+        : chosenDays.length === 0
+          ? "Pick at least one day."
+          : null;
+  const canSave = title.trim().length > 0 && prompt.trim().length > 0 && !timingProblem;
 
-  const canSave =
-    title.trim().length > 0 &&
-    prompt.trim().length > 0 &&
-    (triggerMode === "interval"
-      ? Number(intervalMinutes) >= 15
-      : /^\d{2}:\d{2}$/.test(dailyTime));
+  const toggleDay = (d: number) =>
+    setDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]));
 
-  const handleSave = async () => {
+  const save = async () => {
     if (!canSave || busy) return;
     setBusy(true);
     setError(null);
-
     try {
       if (task) {
-        // Edit mode — send only the trigger that's active, clearing the other.
-        await updateSchedule(task.id, {
-          title: title.trim(),
-          prompt: prompt.trim(),
-          enabled,
-          ...(triggerMode === "interval"
-            ? { interval_minutes: Number(intervalMinutes), daily_time: null, daily_weekdays: null }
-            : { interval_minutes: null, daily_time: dailyTime, daily_weekdays: dailyWeekdays }),
-        });
+        await updateSchedule(task.id, { title: title.trim(), prompt: prompt.trim(), enabled, ...trigger });
       } else {
-        // Create mode.
-        const res = await createSchedule({
-          title: title.trim(),
-          prompt: prompt.trim(),
-          enabled,
-          ...(triggerMode === "interval"
-            ? { interval_minutes: Number(intervalMinutes) }
-            : { daily_time: dailyTime, daily_weekdays: dailyWeekdays }),
-        });
+        const body =
+          trigger.interval_minutes !== null
+            ? { interval_minutes: trigger.interval_minutes }
+            : { daily_time: trigger.daily_time!, daily_weekdays: trigger.daily_weekdays! };
+        const res = await createSchedule({ title: title.trim(), prompt: prompt.trim(), enabled, ...body });
         if (res?.error) {
           setError(res.error);
-          setBusy(false);
           return;
         }
       }
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong");
+      setError(e instanceof Error ? e.message : "That didn't save. Try again.");
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div
-      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 backdrop-blur-sm px-4 animate-fade-in"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-[520px] rounded-2xl border border-line bg-paper-raised shadow-pop"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
-          <h2 className="text-[14px] font-semibold text-ink">
-            {task ? "Edit scheduled task" : "New scheduled task"}
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="press ring-focus rounded-lg p-1 text-ink-faint hover:bg-paper-sunken hover:text-ink"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        {/* Body */}
-        <div className="space-y-4 px-5 py-4">
-          {/* Title */}
-          <div>
-            <label className="mb-1.5 block text-[12.5px] font-medium text-ink-muted">
-              Title
-            </label>
-            <input
-              ref={titleRef}
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Email invoice check"
-              className="ring-focus w-full rounded-lg border border-line bg-paper px-3 py-2 text-[13px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
-            />
-          </div>
-
-          {/* Prompt */}
-          <div>
-            <label className="mb-1.5 block text-[12.5px] font-medium text-ink-muted">
-              What should the agent do each run?
-            </label>
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              rows={4}
-              placeholder="Be specific and self-contained — the agent has no memory of this conversation during a scheduled run. E.g. 'Check the Gmail inbox for invoices received since the last run. Extract vendor, amount, and due date. Flag any amount over $1000.'"
-              className="ring-focus w-full resize-none rounded-lg border border-line bg-paper px-3 py-2 text-[13px] leading-relaxed text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
-            />
-            <p className="mt-1 text-[11px] text-ink-faint">
-              The agent runs this fresh each time and posts findings to your Inbox.
-            </p>
-          </div>
-
-          {/* Trigger mode toggle */}
-          <div>
-            <label className="mb-1.5 block text-[12.5px] font-medium text-ink-muted">
-              Schedule
-            </label>
-            <div className="inline-flex rounded-lg border border-line bg-paper p-0.5">
-              <button
-                type="button"
-                onClick={() => setTriggerMode("interval")}
-                className={cn(
-                  "press ring-focus rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors",
-                  triggerMode === "interval"
-                    ? "bg-ink text-paper"
-                    : "text-ink-muted hover:text-ink",
-                )}
-              >
-                Repeat every
-              </button>
-              <button
-                type="button"
-                onClick={() => setTriggerMode("daily")}
-                className={cn(
-                  "press ring-focus rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors",
-                  triggerMode === "daily"
-                    ? "bg-ink text-paper"
-                    : "text-ink-muted hover:text-ink",
-                )}
-              >
-                Daily at
-              </button>
-            </div>
-
-            {/* Trigger config */}
-            <div className="mt-2.5">
-              {triggerMode === "interval" ? (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min={15}
-                    step={5}
-                    value={intervalMinutes}
-                    onChange={(e) => setIntervalMinutes(e.target.value)}
-                    className="ring-focus w-24 rounded-lg border border-line bg-paper px-3 py-2 text-[13px] text-ink focus:border-line-strong focus:outline-none"
-                  />
-                  <span className="text-[12.5px] text-ink-muted">minutes</span>
-                  <span className="text-[11px] text-ink-faint">
-                    (min 15)
-                  </span>
-                </div>
-              ) : (
-                <div className="space-y-2.5">
-                  <input
-                    type="time"
-                    value={dailyTime}
-                    onChange={(e) => setDailyTime(e.target.value)}
-                    className="ring-focus rounded-lg border border-line bg-paper px-3 py-2 text-[13px] text-ink focus:border-line-strong focus:outline-none"
-                  />
-                  <div className="flex flex-wrap gap-1.5">
-                    {WEEKDAYS.map((day, i) => (
-                      <button
-                        key={day}
-                        type="button"
-                        onClick={() => toggleWeekday(i)}
-                        className={cn(
-                          "press ring-focus rounded-md px-2.5 py-1 text-[11.5px] font-medium transition-colors",
-                          dailyWeekdays.includes(i)
-                            ? "bg-ink text-paper"
-                            : "border border-line bg-paper text-ink-muted hover:bg-paper-sunken",
-                        )}
-                      >
-                        {day}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="text-[11px] text-ink-faint">
-                    {dailyWeekdays.length === 0
-                      ? "Select at least one day"
-                      : `${dailyWeekdays.length} day${dailyWeekdays.length === 1 ? "" : "s"} selected`}
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Enabled toggle */}
+    <Dialog
+      title={task ? "Edit scheduled task" : "New scheduled task"}
+      description="zWork does this on its own at the times you pick and puts what it finds in your Inbox."
+      onClose={onClose}
+      width={520}
+      footer={
+        <>
           {task && (
-            <label className="flex cursor-pointer items-center gap-2">
-              <input
-                type="checkbox"
-                checked={enabled}
-                onChange={(e) => setEnabled(e.target.checked)}
-                className="h-4 w-4 accent-ink"
-              />
-              <span className="text-[12.5px] text-ink-muted">
-                Active (runs on schedule)
-              </span>
+            <label className="mr-auto flex items-center gap-2 text-[12.5px] text-ink-muted">
+              <Switch checked={enabled} onChange={() => setEnabled((v) => !v)} label="Run on schedule" />
+              {enabled ? "On" : "Paused"}
             </label>
           )}
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" disabled={!canSave || busy} onClick={() => void save()}>
+            {busy ? "Saving…" : task ? "Save changes" : "Create task"}
+          </Button>
+        </>
+      }
+    >
+      <Field label="Name" htmlFor="schedule-title">
+        <input
+          id="schedule-title"
+          ref={titleRef}
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Morning email summary"
+          className={inputClass}
+        />
+      </Field>
 
-          {error && (
-            <div className="rounded-lg border border-error/20 bg-error/5 px-3 py-2 text-[12px] text-error">
-              {error}
-            </div>
+      <Field
+        label="What should zWork do?"
+        htmlFor="schedule-prompt"
+        hint="Write it as if you were asking for the first time. Each run starts fresh and doesn't see your other chats."
+      >
+        <textarea
+          id="schedule-prompt"
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          rows={5}
+          placeholder="Look through the emails I got since yesterday. List the ones that need a reply, who sent them and what they need."
+          className={cn(inputClass, "resize-none leading-relaxed")}
+        />
+      </Field>
+
+      <Field label="When">
+        <Segmented
+          label="How often"
+          value={repeat}
+          onChange={setRepeat}
+          options={[
+            { value: "daily", label: "Every day" },
+            { value: "weekdays", label: "Weekdays" },
+            { value: "days", label: "Some days" },
+            { value: "interval", label: "Every few hours" },
+          ]}
+        />
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {repeat === "interval" ? (
+            <>
+              <span className="text-[12.5px] text-ink-muted">Every</span>
+              <input
+                type="number"
+                aria-label="How many"
+                min={unit === "hours" ? 1 : MIN_INTERVAL_MINUTES}
+                step={unit === "hours" ? 1 : 5}
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className={cn(inputClass, "w-20")}
+              />
+              <select
+                aria-label="Unit"
+                value={unit}
+                onChange={(e) => setUnit(e.target.value as Unit)}
+                className={cn(inputClass, "w-auto pr-8")}
+              >
+                <option value="minutes">minutes</option>
+                <option value="hours">hours</option>
+              </select>
+            </>
+          ) : (
+            <>
+              {repeat === "days" &&
+                DAY_LETTERS.map((d, i) => (
+                  <button
+                    key={d}
+                    type="button"
+                    aria-pressed={days.includes(i)}
+                    onClick={() => toggleDay(i)}
+                    className={cn(
+                      "press ring-focus h-8 rounded-lg border px-2.5 text-[12px] font-medium transition-colors",
+                      days.includes(i)
+                        ? "border-transparent bg-ink text-paper"
+                        : "border-line bg-paper text-ink-muted hover:border-line-strong hover:text-ink",
+                    )}
+                  >
+                    {d}
+                  </button>
+                ))}
+              <span className="text-[12.5px] text-ink-muted">at</span>
+              <input
+                type="time"
+                aria-label="Time"
+                value={time}
+                onChange={(e) => setTime(e.target.value)}
+                className={cn(inputClass, "w-auto")}
+              />
+            </>
           )}
         </div>
+        <p className={cn("mt-2 text-[11.5px]", timingProblem ? "text-error" : "text-ink-faint")}>
+          {timingProblem ??
+            `${describeSchedule(trigger)}, while zWork is open and your computer is awake.`}
+        </p>
+      </Field>
 
-        {/* Footer */}
-        <div className="flex items-center justify-end gap-2 border-t border-line px-5 py-3.5">
-          <button
-            type="button"
-            onClick={onClose}
-            className="press ring-focus inline-flex items-center gap-1.5 rounded-lg border border-line bg-paper px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-paper-sunken"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={!canSave || busy}
-            className={cn(
-              "press ring-focus inline-flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-[12px] font-medium text-paper hover:bg-ink/90",
-              (!canSave || busy) && "cursor-not-allowed opacity-50 hover:bg-ink",
-            )}
-          >
-            {busy ? "Saving…" : task ? "Save changes" : "Create task"}
-          </button>
-        </div>
-      </div>
-    </div>
+      {error && (
+        <p role="alert" className="rounded-lg border border-error/25 bg-error/10 px-3 py-2 text-[12.5px] text-error">
+          {error}
+        </p>
+      )}
+    </Dialog>
   );
 }

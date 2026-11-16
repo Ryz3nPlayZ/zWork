@@ -1227,7 +1227,7 @@ export const api = {
 
   getProjectFiles: (projectId: string) =>
     localFetch(`/api/projects/${projectId}/files`).then((r) =>
-      j<{ files: Array<{ name: string; size: number; mime: string; path: string }> }>(r),
+      j<{ files: Array<{ name: string; display_name?: string; size: number; path: string }> }>(r),
     ),
 
   uploadProjectFiles: (projectId: string, body: { files: Array<{ name: string; mime: string; kind: string; data_url: string }> }) =>
@@ -1235,10 +1235,10 @@ export const api = {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
-    }).then((r) => j<{ files: Array<{ name: string; size: number; mime: string; path: string }> }>(r)),
+    }).then((r) => j<{ files: Array<{ name: string; path: string }>; failed?: string[] }>(r)),
 
   deleteProjectFile: (projectId: string, filename: string) =>
-    localFetch(`/api/projects/${projectId}/files/${filename}`, {
+    localFetch(`/api/projects/${projectId}/files/${encodeURIComponent(filename)}`, {
       method: "DELETE",
     }).then((r) => j<{ ok: boolean }>(r)),
 };

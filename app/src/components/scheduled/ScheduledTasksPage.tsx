@@ -1,11 +1,23 @@
-/* Hallmark · genre: modern-minimal · macrostructure: Workbench · design-system: design.md · designed-as-app */
-
-import { useState, useEffect } from "react";
-import { Clock, Plus, Play, Trash2, Pencil, CalendarDays, Repeat, ArrowRight, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import {
+  ArrowRight,
+  CalendarDays,
+  Clock,
+  LogIn,
+  Mail,
+  Pencil,
+  Play,
+  Plus,
+  ReceiptText,
+  Repeat,
+  ListChecks,
+  Trash2,
+} from "lucide-react";
 import { useApp } from "../../lib/store";
 import { api, type ScheduledTask } from "../../lib/api";
 import { IS_TAURI } from "../../lib/platform";
 import {
+  Badge,
   Button,
   EmptyState,
   IconTile,
@@ -14,50 +26,49 @@ import {
   OverflowMenu,
   PageShell,
   RowIconButton,
+  SectionHeading,
   Segmented,
   Switch,
   useConfirm,
 } from "../page/Page";
-import { ScheduleModal } from "./ScheduleModal";
+import { ScheduleModal, type ScheduleDraft } from "./ScheduleModal";
+import { describeSchedule, formatAgo, formatNext } from "./describe";
 
-/** Human-readable trigger description. */
-function describeTrigger(t: ScheduledTask): string {
-  if (t.interval_minutes) {
-    return `Every ${t.interval_minutes} min`;
-  }
-  if (t.daily_time) {
-    const days = t.daily_weekdays?.length
-      ? t.daily_weekdays
-          .map((d) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d] ?? "?")
-          .join(", ")
-      : "Every day";
-    return `${t.daily_time} · ${days}`;
-  }
-  return "On a schedule";
-}
-
-function formatTimestamp(ms: number | null): string {
-  if (!ms) return "Never";
-  const d = new Date(ms);
-  const now = Date.now();
-  const diff = now - ms;
-  if (diff < 60_000) return "Just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
-function formatNext(ms: number | null): string {
-  if (!ms) return "not set";
-  const d = new Date(ms);
-  const now = Date.now();
-  const diff = ms - now;
-  if (diff < 0) return "overdue";
-  if (diff < 60_000) return "in under a minute";
-  if (diff < 3_600_000) return `in ${Math.floor(diff / 60_000)}m`;
-  if (diff < 86_400_000) return `in ${Math.floor(diff / 3_600_000)}h`;
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-}
+/** Starting points for the empty page: recurring office chores, editable before saving. */
+const IDEAS: (ScheduleDraft & { icon: typeof Mail })[] = [
+  {
+    icon: Mail,
+    title: "Morning email summary",
+    prompt:
+      "Look through the emails I got since yesterday morning. List the ones that need a reply or have a deadline: who sent it, what they need, and by when. Skip newsletters and notifications.",
+    daily_time: "08:00",
+    daily_weekdays: [1, 2, 3, 4, 5],
+  },
+  {
+    icon: ReceiptText,
+    title: "Bills and receipts",
+    prompt:
+      "Search my email from the past week for invoices, bills and receipts. Make a table with who it's from, the amount and the due date, and point out anything due in the next 7 days.",
+    daily_time: "09:00",
+    daily_weekdays: [1],
+  },
+  {
+    icon: CalendarDays,
+    title: "Next week at a glance",
+    prompt:
+      "Look at my calendar for next week. List each day's meetings with the time and who's coming, and point out clashes, back-to-back days and anything I should prepare for.",
+    daily_time: "16:00",
+    daily_weekdays: [5],
+  },
+  {
+    icon: ListChecks,
+    title: "Weekly wrap-up",
+    prompt:
+      "Using my sent emails and calendar from this week, write a short summary of what I worked on and what's still open, as bullet points I could paste into a status update.",
+    daily_time: "17:00",
+    daily_weekdays: [5],
+  },
+];
 
 export function ScheduledTasksPage() {
   const scheduledTasks = useApp((s) => s.scheduledTasks);
@@ -67,16 +78,24 @@ export function ScheduledTasksPage() {
   const runScheduleNow = useApp((s) => s.runScheduleNow);
   const openChat = useApp((s) => s.openChat);
 
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingTask, setEditingTask] = useState<ScheduledTask | null>(null);
+  const [editor, setEditor] = useState<{ task: ScheduledTask | null; initial?: ScheduleDraft } | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
-  const [running, setRunning] = useState<string | null>(null);
+  const [started, setStarted] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<"all" | "active" | "paused">("all");
   const [confirmDialog, confirm] = useConfirm();
   const [openAtLogin, setOpenAtLogin] = useState(false);
+  const timers = useRef(new Map<string, number>());
 
   useEffect(() => {
-    void fetchSchedules().then(() => api.getLaunchAtLogin()).then(setOpenAtLogin);
+    void fetchSchedules();
+    if (IS_TAURI) void api.getLaunchAtLogin().then(setOpenAtLogin).catch(() => {});
+    // Keep "next run" and "last ran" current while the page is open.
+    const id = window.setInterval(() => void fetchSchedules(), 60_000);
+    const t = timers.current;
+    return () => {
+      window.clearInterval(id);
+      for (const h of t.values()) window.clearTimeout(h);
+    };
   }, [fetchSchedules]);
 
   const toggleOpenAtLogin = () => {
@@ -92,45 +111,51 @@ export function ScheduledTasksPage() {
     !showFilter || filter === "all" ? true : filter === "active" ? t.enabled : !t.enabled,
   );
 
-  const openEditor = (t: ScheduledTask | null) => {
-    setEditingTask(t);
-    setModalOpen(true);
+  const runNow = async (t: ScheduledTask) => {
+    setStarted((s) => new Set(s).add(t.id));
+    await runScheduleNow(t.id);
+    // The run happens in the background; show "Started" briefly, then pick up the new "last ran".
+    window.clearTimeout(timers.current.get(t.id));
+    timers.current.set(
+      t.id,
+      window.setTimeout(() => {
+        timers.current.delete(t.id);
+        setStarted((s) => {
+          const n = new Set(s);
+          n.delete(t.id);
+          return n;
+        });
+        void fetchSchedules();
+      }, 6000),
+    );
   };
 
-  const handleRunNow = async (t: ScheduledTask) => {
-    setRunning(t.id);
-    try {
-      await runScheduleNow(t.id);
-    } finally {
-      setRunning(null);
-    }
-  };
-
-  const handleDelete = async (t: ScheduledTask) => {
+  const remove = async (t: ScheduledTask) => {
     const ok = await confirm({
       title: `Delete "${t.title}"?`,
-      body: "The task stops running. Results already in your Inbox stay there.",
+      body: "It stops running. What it already put in your Inbox stays there.",
       confirmLabel: "Delete task",
     });
     if (ok) void deleteSchedule(t.id);
   };
 
+  const newTask = (
+    <Button variant="primary" icon={<Plus />} onClick={() => setEditor({ task: null })}>
+      New task
+    </Button>
+  );
+
   return (
     <PageShell
       title="Scheduled"
       subtitle={
-        scheduledTasks.length > 0
-          ? `${activeCount} active. Results land in your Inbox.`
-          : "Tasks zWork runs on a schedule. Results land in your Inbox."
+        scheduledTasks.length === 0
+          ? "Work zWork does on its own, on a schedule. What it finds lands in your Inbox."
+          : activeCount === 0
+            ? "Everything is paused."
+            : `${activeCount} running on a schedule. What they find lands in your Inbox.`
       }
-      actions={
-        // Empty state has its own button.
-        scheduledTasks.length > 0 ? (
-          <Button variant="primary" icon={<Plus />} onClick={() => openEditor(null)}>
-            New task
-          </Button>
-        ) : undefined
-      }
+      actions={scheduledTasks.length > 0 ? newTask : undefined}
       toolbar={
         showFilter ? (
           <Segmented
@@ -139,7 +164,7 @@ export function ScheduledTasksPage() {
             onChange={setFilter}
             options={[
               { value: "all", label: "All", count: scheduledTasks.length },
-              { value: "active", label: "Active", count: activeCount },
+              { value: "active", label: "On", count: activeCount },
               { value: "paused", label: "Paused", count: pausedCount },
             ]}
           />
@@ -147,79 +172,93 @@ export function ScheduledTasksPage() {
       }
     >
       {scheduledTasks.length === 0 ? (
-        <EmptyState
-          icon={<Clock />}
-          title="No scheduled tasks yet"
-          body="Have zWork check your email, watch a page or sum up the week on a schedule. Results land in your Inbox."
-          action={
-            <Button variant="primary" icon={<Plus />} onClick={() => openEditor(null)}>
-              New task
-            </Button>
-          }
-        />
+        <>
+          <EmptyState
+            compact
+            icon={<Clock />}
+            title="Nothing scheduled yet"
+            body="Pick an idea below or write your own, like checking your email every morning."
+            action={newTask}
+          />
+          <SectionHeading
+            title="Ideas to start from"
+            description="Each one opens ready to edit, so you can change the wording or time first."
+          />
+          <ListGroup>
+            {IDEAS.map(({ icon: Icon, ...idea }) => (
+              <ListRow
+                key={idea.title}
+                icon={
+                  <IconTile>
+                    <Icon />
+                  </IconTile>
+                }
+                title={idea.title}
+                meta={idea.prompt}
+                onClick={() => setEditor({ task: null, initial: idea })}
+                trailing={<span>{describeSchedule({ interval_minutes: null, daily_time: idea.daily_time ?? null, daily_weekdays: idea.daily_weekdays ?? null })}</span>}
+              />
+            ))}
+          </ListGroup>
+        </>
       ) : (
         <ListGroup>
           {shown.map((t) => {
             const open = openId === t.id;
-            const isRunning = running === t.id;
+            const isStarted = started.has(t.id);
             return (
               <ListRow
                 key={t.id}
-                icon={
-                  <IconTile>
-                    {t.interval_minutes ? <Repeat /> : <CalendarDays />}
-                  </IconTile>
-                }
+                icon={<IconTile>{t.interval_minutes ? <Repeat /> : <CalendarDays />}</IconTile>}
                 title={t.title}
                 meta={
-                  t.enabled ? (
-                    <>
-                      {describeTrigger(t)} · Next {formatNext(t.next_run_at)}
-                      {t.last_run_at ? ` · Last run ${formatTimestamp(t.last_run_at).replace("Just now", "just now")}` : ""}
-                    </>
-                  ) : (
-                    <>Paused · {describeTrigger(t)}</>
-                  )
+                  t.enabled
+                    ? `${describeSchedule(t)} · next ${formatNext(t.next_run_at)}`
+                    : `Paused · ${describeSchedule(t)}`
                 }
                 muted={!t.enabled}
                 onClick={() => setOpenId(open ? null : t.id)}
                 expanded={open}
                 actions={
-                  <RowIconButton label="Run now" disabled={isRunning} onClick={() => void handleRunNow(t)}>
-                    {isRunning ? <Loader2 className="animate-spin" /> : <Play />}
-                  </RowIconButton>
+                  !isStarted && (
+                    <RowIconButton label="Run now" onClick={() => void runNow(t)}>
+                      <Play />
+                    </RowIconButton>
+                  )
                 }
                 trailing={
                   <>
+                    {isStarted && <Badge tone="info">Started</Badge>}
                     <Switch
                       checked={t.enabled}
-                      label={t.enabled ? `Pause ${t.title}` : `Resume ${t.title}`}
+                      label={t.enabled ? `Pause ${t.title}` : `Turn on ${t.title}`}
                       onChange={() => void updateSchedule(t.id, { enabled: !t.enabled })}
                     />
                     <OverflowMenu
                       items={[
-                        { label: "Edit", icon: <Pencil />, onSelect: () => openEditor(t) },
-                        { label: "Delete", icon: <Trash2 />, danger: true, onSelect: () => void handleDelete(t) },
+                        { label: "Run now", icon: <Play />, onSelect: () => void runNow(t) },
+                        { label: "Edit", icon: <Pencil />, onSelect: () => setEditor({ task: t }) },
+                        { label: "Delete", icon: <Trash2 />, danger: true, onSelect: () => void remove(t) },
                       ]}
                     />
                   </>
                 }
               >
                 <p className="max-w-[68ch] whitespace-pre-wrap text-[13px] leading-relaxed text-ink-soft">{t.prompt}</p>
+                <p className="mt-2 text-[12px] text-ink-faint">
+                  {t.last_run_at ? `Last ran ${formatAgo(t.last_run_at)}` : "Hasn't run yet"}
+                  {isStarted && " · running now, the result will show up in your Inbox"}
+                </p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {t.last_chat_id && (
-                    <Button variant="primary" icon={<ArrowRight />} onClick={() => openChat(t.last_chat_id!)}>
-                      Open last run
+                    <Button variant="primary" icon={<ArrowRight />} onClick={() => void openChat(t.last_chat_id!)}>
+                      See last result
                     </Button>
                   )}
-                  <Button
-                    icon={isRunning ? <Loader2 className="animate-spin" /> : <Play />}
-                    disabled={isRunning}
-                    onClick={() => void handleRunNow(t)}
-                  >
+                  <Button icon={<Play />} disabled={isStarted} onClick={() => void runNow(t)}>
                     Run now
                   </Button>
-                  <Button icon={<Pencil />} onClick={() => openEditor(t)}>
+                  <Button icon={<Pencil />} onClick={() => setEditor({ task: t })}>
                     Edit
                   </Button>
                 </div>
@@ -230,13 +269,23 @@ export function ScheduledTasksPage() {
       )}
 
       {IS_TAURI && scheduledTasks.length > 0 && (
-        <div className="mt-4 flex items-center justify-between gap-4 px-1 text-[13px] text-ink-muted">
-          <span>Open zWork when you log in. Schedules only run while zWork is open and your computer is awake.</span>
-          <Switch checked={openAtLogin} onChange={toggleOpenAtLogin} label="Open zWork when you log in" />
+        <div className="mt-6">
+          <ListGroup>
+            <ListRow
+              icon={
+                <IconTile>
+                  <LogIn />
+                </IconTile>
+              }
+              title="Open zWork when you log in"
+              meta="Scheduled tasks only run while zWork is open and your computer is awake."
+              trailing={<Switch checked={openAtLogin} onChange={toggleOpenAtLogin} label="Open zWork when you log in" />}
+            />
+          </ListGroup>
         </div>
       )}
 
-      {modalOpen && <ScheduleModal task={editingTask} onClose={() => setModalOpen(false)} />}
+      {editor && <ScheduleModal task={editor.task} initial={editor.initial} onClose={() => setEditor(null)} />}
       {confirmDialog}
     </PageShell>
   );

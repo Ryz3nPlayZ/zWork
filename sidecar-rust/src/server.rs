@@ -1198,7 +1198,9 @@ pub async fn update_project(
 }
 
 pub async fn delete_project(Path(project_id): Path<String>) -> impl IntoResponse {
-    let dir = crate::paths::project_dir(&project_id);
+    let Some(dir) = safe_project_dir(&project_id) else {
+        return Json(json!({ "ok": false, "error": "Project not found" }));
+    };
     if !dir.exists() {
         return Json(json!({ "ok": false, "error": "Project not found" }));
     }
@@ -1674,17 +1676,85 @@ pub struct UploadBody {
     pub files: Vec<UploadItem>,
 }
 
-pub async fn list_project_files(Path(project_id): Path<String>) -> impl IntoResponse {
-    let dir = crate::paths::project_dir(&project_id).join("files");
-    let mut files = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-            let size = path.metadata().map(|m| m.len()).unwrap_or(0);
-            files.push(json!({ "name": name, "size": size }));
-        }
+/// The project's folder, or None when the id could step outside the projects folder.
+fn safe_project_dir(project_id: &str) -> Option<std::path::PathBuf> {
+    let id = project_id.trim();
+    if id.is_empty() || id == "." || id == ".." || id.contains('/') || id.contains('\\') {
+        return None;
     }
+    Some(crate::paths::project_dir(id))
+}
+
+/// Just the file name from what a browser sent, so it can't point outside the folder.
+fn clean_file_name(raw: &str) -> Option<String> {
+    let base = raw.rsplit(['/', '\\']).next().unwrap_or("").trim();
+    let base: String = base.chars().filter(|c| !c.is_control()).collect();
+    if base.is_empty() || base == "." || base == ".." {
+        return None;
+    }
+    Some(base)
+}
+
+/// `name`, or `name (2).ext`, `name (3).ext`… when that's taken.
+fn free_file_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let first = dir.join(name);
+    if !first.exists() {
+        return first;
+    }
+    let (stem, ext) = match name.rfind('.') {
+        Some(i) if i > 0 => (&name[..i], &name[i..]),
+        _ => (name, ""),
+    };
+    (2..)
+        .map(|n| dir.join(format!("{stem} ({n}){ext}")))
+        .find(|p| !p.exists())
+        .unwrap_or(first)
+}
+
+/// Older uploads were saved as `<32 hex>_<name>`; show them by their real name.
+pub(crate) fn display_file_name(stored: &str) -> &str {
+    match stored.split_once('_') {
+        Some((prefix, rest))
+            if prefix.len() == 32 && !rest.is_empty() && prefix.bytes().all(|b| b.is_ascii_hexdigit()) =>
+        {
+            rest
+        }
+        _ => stored,
+    }
+}
+
+/// Files the user added to a project, sorted by name: (stored name, shown name, full path, size).
+pub(crate) fn project_files(project_id: &str) -> Vec<(String, String, std::path::PathBuf, u64)> {
+    let Some(dir) = safe_project_dir(project_id).map(|d| d.join("files")) else { return Vec::new() };
+    let mut files: Vec<_> = std::fs::read_dir(&dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let meta = path.metadata().ok()?;
+            if !meta.is_file() {
+                return None;
+            }
+            let stored = path.file_name()?.to_string_lossy().to_string();
+            if stored.starts_with('.') {
+                return None;
+            }
+            let shown = display_file_name(&stored).to_string();
+            Some((stored, shown, path, meta.len()))
+        })
+        .collect();
+    files.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
+    files
+}
+
+pub async fn list_project_files(Path(project_id): Path<String>) -> impl IntoResponse {
+    let files: Vec<_> = project_files(&project_id)
+        .into_iter()
+        .map(|(stored, shown, path, size)| {
+            json!({ "name": stored, "display_name": shown, "size": size, "path": path.to_string_lossy() })
+        })
+        .collect();
     Json(json!({ "files": files }))
 }
 
@@ -1692,39 +1762,52 @@ pub async fn upload_project_files(
     Path(project_id): Path<String>,
     Json(body): Json<UploadBody>,
 ) -> impl IntoResponse {
-    let dir = crate::paths::project_dir(&project_id).join("files");
+    let Some(dir) = safe_project_dir(&project_id).map(|d| d.join("files")) else {
+        return Json(json!({ "error": "Project not found", "files": [] }));
+    };
     let _ = std::fs::create_dir_all(&dir);
     let mut created = Vec::new();
+    let mut failed = Vec::new();
     for item in &body.files {
-        let filename = format!("{}_{}", uuid::Uuid::new_v4().simple(), item.name);
-        let path = dir.join(&filename);
-        if let Some(ref text) = item.text_content {
-            let _ = std::fs::write(&path, text);
+        let Some(name) = clean_file_name(&item.name) else {
+            failed.push(item.name.clone());
+            continue;
+        };
+        let bytes = if let Some(ref text) = item.text_content {
+            Some(text.as_bytes().to_vec())
         } else if let Some(ref data_url) = item.data_url {
-            // Decode base64 data URL
-            if let Some(b64) = data_url.split(',').nth(1) {
-                match standard_b64_decode(b64) {
-                    Ok(bytes) => { let _ = std::fs::write(&path, bytes); }
-                    Err(_) => continue,
-                }
+            data_url.split_once(',').and_then(|(_, b64)| standard_b64_decode(b64).ok())
+        } else {
+            None
+        };
+        let path = free_file_path(&dir, &name);
+        match bytes.map(|b| std::fs::write(&path, b)) {
+            Some(Ok(())) => {
+                let stored = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or(name);
+                created.push(json!({ "name": stored, "original_name": item.name, "path": path.to_string_lossy() }));
             }
+            _ => failed.push(item.name.clone()),
         }
-        created.push(json!({ "name": filename, "original_name": item.name }));
     }
-    Json(json!({ "files": created }))
+    Json(json!({ "files": created, "failed": failed }))
 }
 
 pub async fn delete_project_file(
     Path((project_id, filename)): Path<(String, String)>,
 ) -> impl IntoResponse {
-    // Prevent path traversal
-    if filename.contains('/') || filename.contains('\\') || filename.contains("..") {
+    // Only a plain name inside the project's files folder.
+    if filename.contains('/') || filename.contains('\\') || filename == "." || filename == ".." {
         return Json(json!({ "error": "Invalid filename" }));
     }
-    let path = crate::paths::project_dir(&project_id).join("files").join(&filename);
-    if path.exists() {
-        let _ = std::fs::remove_file(&path);
-        Json(json!({ "ok": true }))
+    let Some(dir) = safe_project_dir(&project_id) else {
+        return Json(json!({ "error": "Project not found" }));
+    };
+    let path = dir.join("files").join(&filename);
+    if path.is_file() {
+        match std::fs::remove_file(&path) {
+            Ok(()) => Json(json!({ "ok": true })),
+            Err(e) => Json(json!({ "error": e.to_string() })),
+        }
     } else {
         Json(json!({ "error": "File not found" }))
     }
@@ -2988,5 +3071,42 @@ mod claude_model_tests {
         assert_eq!(resolve_claude_alias("deepseek-v4-pro", none), "deepseek-v4-pro");
         let pinned = |k: &str| (k == "ANTHROPIC_DEFAULT_SONNET_MODEL").then(|| "glm-5".to_string());
         assert_eq!(resolve_claude_alias("sonnet", pinned), "glm-5");
+    }
+}
+
+#[cfg(test)]
+mod project_file_tests {
+    use super::{clean_file_name, display_file_name, free_file_path, safe_project_dir};
+
+    #[test]
+    fn upload_names_stay_inside_the_folder() {
+        assert_eq!(clean_file_name("receipts.csv").as_deref(), Some("receipts.csv"));
+        assert_eq!(clean_file_name("../../etc/passwd").as_deref(), Some("passwd"));
+        assert_eq!(clean_file_name("C:\\Users\\me\\tax.pdf").as_deref(), Some("tax.pdf"));
+        assert_eq!(clean_file_name(".."), None);
+        assert_eq!(clean_file_name("dir/"), None);
+        assert!(safe_project_dir("..").is_none());
+        assert!(safe_project_dir("a/b").is_none());
+    }
+
+    #[test]
+    fn old_hashed_names_show_the_real_name() {
+        assert_eq!(display_file_name("5745b3e87cae40f4942e66a319160c11_receipts.csv"), "receipts.csv");
+        assert_eq!(display_file_name("my_notes.txt"), "my_notes.txt");
+        assert_eq!(display_file_name("receipts.csv"), "receipts.csv");
+    }
+
+    #[test]
+    fn a_second_upload_with_the_same_name_gets_a_number() {
+        let dir = std::env::temp_dir().join(format!("zwork-pf-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(free_file_path(&dir, "a.pdf"), dir.join("a.pdf"));
+        std::fs::write(dir.join("a.pdf"), b"x").unwrap();
+        assert_eq!(free_file_path(&dir, "a.pdf"), dir.join("a (2).pdf"));
+        std::fs::write(dir.join("a (2).pdf"), b"x").unwrap();
+        assert_eq!(free_file_path(&dir, "a.pdf"), dir.join("a (3).pdf"));
+        std::fs::write(dir.join("README"), b"x").unwrap();
+        assert_eq!(free_file_path(&dir, "README"), dir.join("README (2)"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

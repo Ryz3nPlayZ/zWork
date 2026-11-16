@@ -258,7 +258,7 @@ function CodeBlock({
 }
 
 // ---- Markdown renderer with KaTeX and code blocks ----
-function AssistantMarkdown({
+export function AssistantMarkdown({
   content,
   onOpenPanel,
 }: {

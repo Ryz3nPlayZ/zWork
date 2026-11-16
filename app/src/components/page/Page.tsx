@@ -17,7 +17,7 @@ import {
   type ReactNode,
   type ButtonHTMLAttributes,
 } from "react";
-import { MoreHorizontal } from "lucide-react";
+import { MoreHorizontal, X } from "lucide-react";
 import { cn } from "../../lib/cn";
 
 // ---- Page shell ----
@@ -247,7 +247,8 @@ export function Segmented<T extends string>({
   label: string;
 }) {
   return (
-    <div role="tablist" aria-label={label} className="inline-flex rounded-lg bg-paper-raised p-0.5">
+    // bg-line/40 reads like paper-raised on a page and still shows on a raised dialog.
+    <div role="tablist" aria-label={label} className="inline-flex rounded-lg bg-line/40 p-0.5">
       {options.map((o) => (
         <button
           key={o.value}
@@ -518,6 +519,88 @@ export function OverflowMenu({ items, label = "More actions" }: { items: MenuIte
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ---- Dialog ----
+
+/** Text input / textarea styling shared by dialogs and forms on the collection pages. */
+export const inputClass =
+  "ring-focus w-full rounded-lg border border-line bg-paper px-3 py-2 text-[13px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none";
+
+export function Field({
+  label,
+  hint,
+  htmlFor,
+  optional,
+  children,
+}: {
+  label: string;
+  hint?: ReactNode;
+  htmlFor?: string;
+  optional?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div>
+      <label htmlFor={htmlFor} className="mb-1.5 block text-[12.5px] font-medium text-ink">
+        {label}
+        {optional && <span className="ml-1 font-normal text-ink-faint">(optional)</span>}
+      </label>
+      {children}
+      {hint && <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-faint">{hint}</p>}
+    </div>
+  );
+}
+
+/** A centered dialog with a title, a close button, a scrolling body and a button row. Escape closes it. */
+export function Dialog({
+  title,
+  description,
+  onClose,
+  footer,
+  width = 480,
+  children,
+}: {
+  title: string;
+  description?: ReactNode;
+  onClose: () => void;
+  footer?: ReactNode;
+  width?: number;
+  children: ReactNode;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/30 px-4 backdrop-blur-sm animate-fade-in"
+      // mousedown, not click: dragging a text selection out of the dialog shouldn't close it.
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        style={{ maxWidth: width }}
+        className="flex max-h-[85vh] w-full flex-col rounded-2xl border border-line bg-paper-raised shadow-pop"
+      >
+        <div className="flex items-start justify-between gap-3 px-5 pb-1 pt-4">
+          <div className="min-w-0">
+            <h2 className="text-[14.5px] font-semibold text-ink">{title}</h2>
+            {description && <p className="mt-0.5 text-[12.5px] leading-relaxed text-ink-muted">{description}</p>}
+          </div>
+          <RowIconButton label="Close" onClick={onClose} className="-mr-1.5 -mt-0.5 shrink-0">
+            <X />
+          </RowIconButton>
+        </div>
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">{children}</div>
+        {footer && <div className="flex items-center justify-end gap-2 px-5 pb-4">{footer}</div>}
+      </div>
     </div>
   );
 }

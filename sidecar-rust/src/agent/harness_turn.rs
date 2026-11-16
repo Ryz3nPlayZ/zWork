@@ -1735,7 +1735,27 @@ pub fn run_agent_turn(
                 .and_then(|s| serde_json::from_str::<Value>(&s).ok())
                 .and_then(|v| v.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()))
                 .unwrap_or_default();
-            let ctx = std::fs::read_to_string(dir.join("context.md")).unwrap_or_default();
+            let mut ctx = std::fs::read_to_string(dir.join("context.md")).unwrap_or_default();
+            let memory = std::fs::read_to_string(dir.join("project_memory.md")).unwrap_or_default();
+            if !memory.trim().is_empty() {
+                ctx.push_str("\n\n### Notes from earlier work in this project\n\n");
+                ctx.push_str(memory.trim());
+            }
+            // The Projects page tells the user their files are used in every chat here,
+            // so the model has to know they exist and where.
+            let files = crate::server::project_files(&project_id);
+            if !files.is_empty() {
+                ctx.push_str(
+                    "\n\n### Files in this project\n\nThe user added these files to the project. \
+                     Read the ones that matter for the request (use extract_document for PDFs and Office files):\n",
+                );
+                for (_, shown, path, _) in files.iter().take(50) {
+                    ctx.push_str(&format!("- {} ({})\n", shown, path.display()));
+                }
+                if files.len() > 50 {
+                    ctx.push_str(&format!("- …and {} more in {}\n", files.len() - 50, dir.join("files").display()));
+                }
+            }
             (name, ctx)
         } else {
             (String::new(), String::new())

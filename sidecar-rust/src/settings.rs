@@ -540,7 +540,7 @@ pub fn build_system_prompt(
             String::new()
         } else {
             let title = if project_name.trim().is_empty() { "Current project" } else { project_name.trim() };
-            format!("## Project context - {}\n\nThe active project has this project.md context. Apply it unless the user overrides it:\n\n{}", title, content)
+            format!("## Project: {}\n\nThis chat is part of the user's project. Follow its instructions unless the user says otherwise:\n\n{}", title, content)
         }
     };
 

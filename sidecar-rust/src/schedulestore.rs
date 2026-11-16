@@ -123,7 +123,7 @@ pub struct CreateParams {
 pub fn create(p: CreateParams) -> ScheduledTask {
     let mut data = load_data();
     let now = now_ms();
-    let task = ScheduledTask {
+    let mut task = ScheduledTask {
         id: uid(),
         title: p.title,
         prompt: p.prompt,
@@ -140,6 +140,10 @@ pub fn create(p: CreateParams) -> ScheduledTask {
         next_run_at: None,
         last_chat_id: None,
     };
+    // Without a next run the scheduler never picks the task up.
+    if task.enabled {
+        task.next_run_at = crate::scheduler::compute_next_run(&task, now);
+    }
     data.tasks.push(task.clone());
     save_data(&data);
     task
@@ -164,6 +168,7 @@ pub struct UpdateParams {
 pub fn update(task_id: &str, p: UpdateParams) -> Option<ScheduledTask> {
     let mut data = load_data();
     let task = data.tasks.iter_mut().find(|t| t.id == task_id)?;
+    let before = task.clone();
     if let Some(t) = p.title { task.title = t; }
     if let Some(pr) = p.prompt { task.prompt = pr; }
     if let Some(tt) = p.trigger_type { task.trigger_type = tt; }
@@ -173,10 +178,30 @@ pub fn update(task_id: &str, p: UpdateParams) -> Option<ScheduledTask> {
     if let Some(e) = p.enabled { task.enabled = e; }
     if let Some(nc) = p.notify_channel { task.notify_channel = nc; }
     if let Some(m) = p.model { task.model = m; }
-    task.updated_at = now_ms();
+    let now = now_ms();
+    // A new time or switching the task on starts the clock from now; a paused
+    // task has no next run. Renaming or rewording leaves the next run alone.
+    if timing_changed(&before, task) || before.enabled != task.enabled {
+        task.next_run_at = if task.enabled { crate::scheduler::compute_next_run(task, now) } else { None };
+    }
+    task.updated_at = now;
     let result = task.clone();
     save_data(&data);
     Some(result)
+}
+
+/// Whether an edit changed when the task runs. The app sends every timing
+/// field on each save, so compare values rather than presence.
+fn timing_changed(before: &ScheduledTask, after: &ScheduledTask) -> bool {
+    let days = |t: &ScheduledTask| {
+        let mut d = t.daily_weekdays.clone().unwrap_or_default();
+        d.sort_unstable();
+        d.dedup();
+        d
+    };
+    before.interval_minutes != after.interval_minutes
+        || before.daily_time != after.daily_time
+        || days(before) != days(after)
 }
 
 /// Record the outcome of a run and advance the schedule. Returns the updated task.
@@ -222,5 +247,46 @@ pub fn delete(task_id: &str) -> bool {
         true
     } else {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn task(interval: Option<u32>, time: Option<&str>, days: Option<Vec<u32>>) -> ScheduledTask {
+        ScheduledTask {
+            id: "t".into(),
+            title: "t".into(),
+            prompt: "p".into(),
+            trigger_type: "time".into(),
+            interval_minutes: interval,
+            daily_time: time.map(String::from),
+            daily_weekdays: days,
+            enabled: true,
+            notify_channel: "inbox".into(),
+            model: None,
+            created_at: 0,
+            updated_at: 0,
+            last_run_at: None,
+            next_run_at: None,
+            last_chat_id: None,
+        }
+    }
+
+    #[test]
+    fn resending_the_same_timing_is_not_a_change() {
+        let a = task(None, Some("09:00"), Some(vec![5, 1, 3]));
+        let b = task(None, Some("09:00"), Some(vec![1, 3, 5]));
+        assert!(!timing_changed(&a, &b));
+        assert!(!timing_changed(&task(Some(60), None, None), &task(Some(60), None, Some(vec![]))));
+    }
+
+    #[test]
+    fn a_new_time_day_or_interval_is_a_change() {
+        let a = task(None, Some("09:00"), Some(vec![1]));
+        assert!(timing_changed(&a, &task(None, Some("10:00"), Some(vec![1]))));
+        assert!(timing_changed(&a, &task(None, Some("09:00"), Some(vec![1, 2]))));
+        assert!(timing_changed(&a, &task(Some(120), None, None)));
     }
 }
