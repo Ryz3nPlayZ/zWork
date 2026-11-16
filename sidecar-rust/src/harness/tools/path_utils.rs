@@ -26,10 +26,33 @@ pub fn expand_path(input: &str) -> PathBuf {
     if let Some(rest) = s.strip_prefix("~/") {
         return home_dir().join(rest);
     }
+    if let Some(rest) = s.strip_prefix("$HOME/") {
+        return home_dir().join(rest);
+    }
     if let Some(rest) = s.strip_prefix("file://") {
         return PathBuf::from(rest);
     }
-    PathBuf::from(s)
+    rehome_dropped_home(PathBuf::from(s))
+}
+
+/// Models often drop the home folder from an absolute path ("/Desktop/a.pdf",
+/// "/Programming/zWork"). When the first folder does not exist at the disk
+/// root but does in the home folder, use the home one.
+fn rehome_dropped_home(path: PathBuf) -> PathBuf {
+    rehome_under(path, &home_dir())
+}
+
+fn rehome_under(path: PathBuf, home: &Path) -> PathBuf {
+    if !path.is_absolute() || path.starts_with(home) {
+        return path;
+    }
+    let mut comps = path.components();
+    comps.next(); // root
+    let Some(Component::Normal(first)) = comps.next() else { return path };
+    if Path::new("/").join(first).exists() || !home.join(first).exists() {
+        return path;
+    }
+    home.join(path.strip_prefix("/").unwrap_or(&path))
 }
 
 fn home_dir() -> PathBuf {
@@ -115,6 +138,19 @@ pub fn relative_posix(path: &Path, base: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn absolute_path_missing_the_home_folder_is_rehomed() {
+        let home = std::env::temp_dir().join(format!("zw-home-{}", std::process::id()));
+        std::fs::create_dir_all(home.join("Desktop")).unwrap();
+        let home = home.canonicalize().unwrap();
+        assert_eq!(rehome_under(PathBuf::from("/Desktop/a.pdf"), &home), home.join("Desktop/a.pdf"));
+        // Real root folders and unknown folders stay as written.
+        assert_eq!(rehome_under(PathBuf::from("/tmp/a"), &home), PathBuf::from("/tmp/a"));
+        assert_eq!(rehome_under(PathBuf::from("/Nope/a"), &home), PathBuf::from("/Nope/a"));
+        assert_eq!(rehome_under(home.join("Desktop"), &home), home.join("Desktop"));
+        let _ = std::fs::remove_dir_all(&home);
+    }
 
     #[test]
     fn resolves_relative_tilde_and_dots() {

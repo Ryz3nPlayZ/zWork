@@ -76,12 +76,10 @@ async function handleAction(id, action, params) {
     }
   }
 
-  // Page-level actions. `eval` runs in the page's MAIN world via the
-  // privileged chrome.scripting API (not the content script's eval()), so it
-  // is NOT subject to the page's Content Security Policy. Sites with strict
-  // CSPs (Google Forms/Docs, GitHub, etc.) block eval('...') in content
-  // scripts; executeScript with world:"MAIN" + func bypasses that because the
-  // browser serializes the function rather than evaluating a string.
+  // Page-level actions. `eval` runs in the page's MAIN world through
+  // chrome.scripting.executeScript, so the page's own script policy applies:
+  // most pages allow it, strict ones (Google Forms/Docs) refuse and the agent
+  // is told to use snapshot/click/type there instead.
   const pageActions = ["snapshot", "click", "type", "scroll", "upload", "download"];
   if (action === "eval") {
     return await evalInMainWorld(id, params);
@@ -108,7 +106,23 @@ async function sendToContentScript(id, action, params) {
     chrome.tabs.sendMessage(tabId, { id, action, params }, (response) => {
       clearTimeout(timeout);
       if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
+        const message = chrome.runtime.lastError.message || "";
+        // A click or key press that opens another page unloads the content
+        // script before it can answer. The action happened; say so instead
+        // of reporting a failure the agent would retry.
+        if (
+          ["click", "type"].includes(action) &&
+          /message channel closed|Receiving end does not exist|back\/forward cache/i.test(message)
+        ) {
+          resolve({
+            id,
+            ok: true,
+            result: { done: true, pageChanged: true },
+            note: "The page changed after this action (it probably opened a new page). Take a new snapshot before the next step.",
+          });
+          return;
+        }
+        reject(new Error(message));
         return;
       }
       resolve(
@@ -118,12 +132,32 @@ async function sendToContentScript(id, action, params) {
   });
 }
 
-// Run a JS expression in the page's MAIN world. This is the CSP-safe path: it
-// uses chrome.scripting.executeScript with a serialized function, which the
-// browser injects as a first-party script — it is NOT subject to the page's
-// script-src CSP (unlike the content script's eval(), which CSP-strict sites
-// like Google Forms block). We wrap the expression in a Function body so
-// arbitrary expressions like `document.body.innerText` work.
+// Runs inside the page (MAIN world). Declared as a plain function because
+// the extension's own policy forbids `new Function`, which made every
+// browser_eval fail. Indirect eval evaluates in global scope; a returned
+// promise is awaited. Values are made serializable here, in the page, since
+// DOM nodes don't survive the trip back.
+async function runExpressionInPage(expr) {
+  let value;
+  try {
+    value = await (0, eval)(expr);
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+  if (value === undefined) return { ok: true, value: null };
+  if (typeof Element !== "undefined" && value instanceof Element) {
+    return { ok: true, value: value.outerHTML.slice(0, 4000) };
+  }
+  if (typeof NodeList !== "undefined" && value instanceof NodeList) {
+    value = Array.from(value, (n) => (n.textContent || "").trim().slice(0, 300));
+  }
+  try {
+    return { ok: true, value: JSON.parse(JSON.stringify(value)) };
+  } catch {
+    return { ok: true, value: String(value) };
+  }
+}
+
 async function evalInMainWorld(id, params) {
   const tabId = params.tabId || (await getActiveTabId());
   const expression = params.expression;
@@ -131,16 +165,12 @@ async function evalInMainWorld(id, params) {
     return { id, ok: false, error: "eval requires a non-empty 'expression' string" };
   }
 
-  // The function runs in the MAIN world. args are passed by value, so the
-  // expression string is received as a normal parameter — no eval-in-extension.
-  const injected = new Function("expr", `"use strict"; return (eval(expr));`);
-
   let results;
   try {
     results = await chrome.scripting.executeScript({
       target: { tabId },
       world: "MAIN",
-      func: injected,
+      func: runExpressionInPage,
       args: [expression],
     });
   } catch (e) {
@@ -148,21 +178,10 @@ async function evalInMainWorld(id, params) {
   }
 
   // executeScript returns [{ frameId, result }] per injected frame.
-  const frame = results && results[0];
-  const value = frame && frame.result;
-  // Functions/DOM nodes don't serialize across worlds — JSON-stringify so the
-  // agent gets a readable string rather than "[object Object]" or undefined.
-  let serializable = value;
-  if (typeof value === "object" && value !== null) {
-    try {
-      serializable = JSON.parse(JSON.stringify(value));
-    } catch {
-      serializable = String(value);
-    }
-  } else if (typeof value === "undefined") {
-    serializable = null;
-  }
-  return { id, ok: true, result: serializable };
+  const outcome = results && results[0] && results[0].result;
+  if (!outcome) return { id, ok: true, result: null };
+  if (!outcome.ok) return { id, ok: false, error: outcome.error };
+  return { id, ok: true, result: outcome.value };
 }
 
 async function ensureContentScript(tabId) {
@@ -256,6 +275,10 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
 // ─── Helpers ──────────────────────────────────────────────────
 async function getActiveTabId() {
+  // With several Chrome windows open, `active: true` alone matches one tab
+  // per window; prefer the window the user last used.
+  const [focused] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  if (focused) return focused.id;
   const [tab] = await chrome.tabs.query({ active: true });
   if (!tab) throw new Error("No active tab");
   return tab.id;

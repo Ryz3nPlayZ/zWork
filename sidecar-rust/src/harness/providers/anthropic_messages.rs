@@ -712,9 +712,14 @@ async fn process_event(st: &mut StreamState, tx: &mpsc::Sender<AssistantMessageE
                 AssistantContent::Text(t) => AssistantMessageEvent::TextEnd { content_index: pos, content: t.text.clone(), partial: st.output.clone() },
                 AssistantContent::Thinking(t) => AssistantMessageEvent::ThinkingEnd { content_index: pos, content: t.thinking.clone(), partial: st.output.clone() },
                 AssistantContent::ToolCall(_) => {
-                    let parsed = parse_streaming_json(&st.blocks[pos].1);
-                    if let AssistantContent::ToolCall(b) = &mut st.output.content[pos] {
-                        b.arguments = if parsed.is_object() { parsed } else { json!({}) };
+                    // Some gateways send the whole input on content_block_start
+                    // and no input_json_delta; parsing the empty buffer would
+                    // wipe those arguments to `{}`.
+                    if !st.blocks[pos].1.trim().is_empty() {
+                        let parsed = parse_streaming_json(&st.blocks[pos].1);
+                        if let AssistantContent::ToolCall(b) = &mut st.output.content[pos] {
+                            b.arguments = if parsed.is_object() { parsed } else { json!({}) };
+                        }
                     }
                     let AssistantContent::ToolCall(b) = &st.output.content[pos] else { unreachable!() };
                     AssistantMessageEvent::ToolcallEnd { content_index: pos, tool_call: b.clone(), partial: st.output.clone() }
@@ -1061,6 +1066,22 @@ mod tests {
         let tc = st.output.content[1].as_tool_call().unwrap();
         assert_eq!(tc.arguments, json!({"p":"x"}));
         assert!(st.saw_message_stop);
+    }
+
+    #[tokio::test]
+    async fn tool_input_sent_whole_on_block_start_is_kept() {
+        let m = model(true);
+        let (tx, _rx) = mpsc::channel(64);
+        let mut st = StreamState { output: AssistantMessage::pending(&m), blocks: Vec::new(), saw_message_start: false, saw_message_stop: false };
+        let events = [
+            json!({"type":"message_start","message":{"id":"msg_1","model":"glm","usage":{"input_tokens":1,"output_tokens":1}}}),
+            json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"t1","name":"read","input":{"path":"a.txt"}}}),
+            json!({"type":"content_block_stop","index":0}),
+        ];
+        for e in &events {
+            process_event(&mut st, &tx, e, &m).await.unwrap();
+        }
+        assert_eq!(st.output.content[0].as_tool_call().unwrap().arguments, json!({"path":"a.txt"}));
     }
 
     #[test]

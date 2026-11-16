@@ -584,6 +584,13 @@ const STUCK_AFTER_SAME_RESULTS: u32 = 2;
 /// Identical calls in a row allowed even when results keep changing.
 const MAX_IDENTICAL_CALLS: u32 = 12;
 
+/// Tools where the same call with the same "ok" reply is still progress:
+/// pressing Tab three times moves focus three fields, scrolling twice moves
+/// the page twice. These only hit the `MAX_IDENTICAL_CALLS` cap.
+fn repeat_is_progress(name: &str) -> bool {
+    matches!(name, "desktop_key" | "desktop_scroll" | "browser_scroll" | "desktop_wait")
+}
+
 impl DoomLoopDetector {
     pub(crate) fn new() -> Self {
         Self { last_call: None, repeats: 0, last_result: None, same_results: 0, steered: 0 }
@@ -602,7 +609,9 @@ impl DoomLoopDetector {
             self.last_call = Some((name.to_string(), input.clone()));
             self.repeats = 1;
         }
-        let stuck = self.repeats > STUCK_AFTER_SAME_RESULTS && self.same_results >= STUCK_AFTER_SAME_RESULTS;
+        let stuck = !repeat_is_progress(name)
+            && self.repeats > STUCK_AFTER_SAME_RESULTS
+            && self.same_results >= STUCK_AFTER_SAME_RESULTS;
         if !stuck && self.repeats <= MAX_IDENTICAL_CALLS {
             return RepeatVerdict::Allow;
         }
@@ -874,6 +883,16 @@ mod tests {
         assert!(d.steer_reason().contains("2 times"));
         // Ignoring the nudge ends the run.
         assert_eq!(d.check("composio__GMAIL_FETCH_EMAILS", &call), RepeatVerdict::Stop);
+    }
+
+    #[test]
+    fn pressing_the_same_key_again_is_not_stuck() {
+        let mut d = DoomLoopDetector::new();
+        let tab = json!({"app": "Google Chrome", "keys": "tab"});
+        for _ in 0..5 {
+            assert_eq!(d.check("desktop_key", &tab), RepeatVerdict::Allow);
+            d.record_result("desktop_key", &tab, &json!({"ok": true}), false);
+        }
     }
 
     #[test]

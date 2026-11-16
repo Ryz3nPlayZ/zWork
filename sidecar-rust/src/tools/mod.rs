@@ -986,7 +986,10 @@ pub fn execute_tool(
                     _ => {
                         // Timed out or the sender was dropped (run cancelled).
                         crate::agent::clear_pending_question(&question_id);
-                        Err("User did not respond to the question.".to_string())
+                        // Tell the model not to guess past an unanswered
+                        // question: it should stop and leave the question
+                        // in its reply so the user can answer later.
+                        Err("The user hasn't answered yet (they may be away). Don't guess the answer or carry on with steps that depend on it: finish anything that doesn't need it, then end your reply by asking the question again in plain words.".to_string())
                     }
                 }
             }

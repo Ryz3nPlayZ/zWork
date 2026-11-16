@@ -1094,10 +1094,17 @@ async fn process_chunk(st: &mut StreamState, tx: &mpsc::Sender<AssistantMessageE
         for tc in tool_calls {
             let i = ensure_tool_call_block(st, tx, tc).await;
             let mut delta_text = String::new();
-            if let Some(args) = tc.get("function").and_then(|f| f.get("arguments")).and_then(|v| v.as_str()) {
-                delta_text = args.to_string();
+            // Most servers stream `arguments` as string pieces; a few send the
+            // whole object at once.
+            let args: Option<String> = match tc.get("function").and_then(|f| f.get("arguments")) {
+                Some(Value::String(a)) => Some(a.clone()),
+                Some(v @ Value::Object(_)) => Some(v.to_string()),
+                _ => None,
+            };
+            if let Some(args) = args {
+                delta_text = args.clone();
                 let s = st.scratch_for(i);
-                s.partial_args.push_str(args);
+                s.partial_args.push_str(&args);
                 let parsed = parse_streaming_json(&s.partial_args);
                 if let AssistantContent::ToolCall(block) = &mut st.output.content[i] {
                     block.arguments = parsed;
@@ -1553,6 +1560,26 @@ mod tests {
         assert_eq!(u.output, 50);
         assert_eq!(u.reasoning, Some(10));
         assert_eq!(u.total_tokens, 1050);
+    }
+
+    #[tokio::test]
+    async fn tool_arguments_sent_as_an_object_are_kept() {
+        let m = model("ollama", "http://localhost:11434/v1");
+        let (tx, _rx) = mpsc::channel(64);
+        let mut st = StreamState {
+            output: AssistantMessage::pending(&m),
+            text_index: None,
+            thinking_index: None,
+            by_stream_index: HashMap::new(),
+            by_id: HashMap::new(),
+            scratch: Vec::new(),
+            reasoning_details: None,
+            has_finish_reason: false,
+        };
+        let c = json!({"id":"r1","choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"read","arguments":{"path":"/x"}}}]}}]});
+        process_chunk(&mut st, &tx, &c, &m).await;
+        finish_block(&mut st, &tx, 0).await;
+        assert_eq!(st.output.content[0].as_tool_call().unwrap().arguments, json!({"path":"/x"}));
     }
 
     #[tokio::test]
