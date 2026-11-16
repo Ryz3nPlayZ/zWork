@@ -1,0 +1,10 @@
+first,last,title,company,email,city,opt_out
+Maria,Gonzalez,Dr.,Gonzalez Dental,maria@gonzalezdental.example,Austin,no
+James,O'Brien,,O'Brien Plumbing,james@obrienplumbing.example,Denver,no
+Aiko,Tanaka,,Tanaka Design,,Seattle,no
+Peter,Novak,Mr.,Novak Bakery,peter@novakbakery.example,Chicago,yes
+Sarah,Lee,Prof.,Lee Lab,sarah.lee@university.example,Boston,no
+Tom,Becker,,Becker Bikes,tom@beckerbikes.example,Portland,No
+Lena,Fischer,Ms.,Fischer Legal,lena@fischerlegal.example,Austin,YES
+ Raj , Patel ,,Patel Imports , raj@patelimports.example ,Austin ,no
+Maria,Gonzalez,Dr.,Gonzalez Dental,maria@gonzalezdental.example,Austin,no

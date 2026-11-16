@@ -1,0 +1,7 @@
+STAPLES  store 0231
+03/10/2026  14:02
+PRINTER PAPER  2 @ 8.99   17.98
+TONER 64XL               64.99
+SUBTOTAL                 82.97
+TAX                       6.85
+TOTAL                    89.82

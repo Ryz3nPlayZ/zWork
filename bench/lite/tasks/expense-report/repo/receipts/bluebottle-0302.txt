@@ -1,0 +1,6 @@
+Blue Bottle Coffee
+2026-03-02 08:14
+Latte              5.25
+Croissant          4.50
+Tax                0.78
+TOTAL            $10.53

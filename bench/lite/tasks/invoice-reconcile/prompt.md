@@ -1,0 +1,5 @@
+I need to chase unpaid invoices. `invoices.csv` is everything I've billed and `bank-statement.csv` is my business account up to 31 March 2026.
+
+- Work out what's still owed on each invoice as of 2026-03-31. Customers usually put the invoice number in the payment reference, written in all sorts of ways. If a payment has no invoice number, it pays the open invoice from that customer for exactly that amount. Part payments reduce what's owed. Anything in the statement that isn't a customer paying an invoice can be ignored.
+- Write `unpaid.csv` with the columns `invoice,client,amount_due,days_overdue` for every invoice with money still owed. `days_overdue` counts days after the due date as of 2026-03-31, and is 0 if it isn't past due yet. Sort by days_overdue, most overdue first, then by invoice number.
+- For each invoice that is past due, write a short, polite reminder email I can send, as `reminders/<invoice number>.txt`, addressed to the client and saying the invoice number and the amount still owed.

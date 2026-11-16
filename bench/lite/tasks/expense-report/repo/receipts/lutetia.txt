@@ -1,0 +1,6 @@
+Hôtel Lutetia, Paris
+Facture du 19/03/2026
+Chambre 1 nuit      380,00 EUR
+Taxe de séjour       40,00 EUR
+Total               420,00 EUR
+Carte débitée: USD 457.80 (taux 1 EUR = 1.09 USD)

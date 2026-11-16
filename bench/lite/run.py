@@ -13,8 +13,10 @@ endpoint, with the same prompt and the same wall-clock budget.
     python3 bench/lite/run.py --report bench/lite/runs/<ts>   # re-render a report
 
 Providers: `deepseek` (key from $DEEPSEEK_API_KEY, else ~/.claude/settings.json
-env.ANTHROPIC_AUTH_TOKEN when ANTHROPIC_BASE_URL points at DeepSeek) or
-`ollama` (local daemon at 127.0.0.1:11434, incl. its *-cloud models; no key).
+env.ANTHROPIC_AUTH_TOKEN when ANTHROPIC_BASE_URL points at DeepSeek),
+`ollama` (local daemon at 127.0.0.1:11434, incl. its *-cloud models; no key) or
+`zai` (GLM through the Z.AI coding plan; each harness uses the key it already
+has: zWork's from its secrets.json, opencode's from its auth.json).
 """
 
 from __future__ import annotations
@@ -56,6 +58,29 @@ def deepseek_key() -> str:
     sys.exit("No DeepSeek key: set DEEPSEEK_API_KEY")
 
 
+ZAI_URL = "https://api.z.ai/api/coding/paas/v4"
+
+
+def zai_keys() -> tuple[str, str]:
+    """(zWork's key, opencode's key) for the Z.AI coding plan. Either falls back to
+    the other, and $ZHIPU_API_KEY overrides both."""
+    if os.environ.get("ZHIPU_API_KEY"):
+        return os.environ["ZHIPU_API_KEY"], os.environ["ZHIPU_API_KEY"]
+    zk = ok = ""
+    try:
+        sec = Path.home() / "Library/Application Support/zWork/state/secrets.json"
+        zk = json.loads(sec.read_text())["api_keys"]["zai-coding-plan"]
+    except (OSError, ValueError, KeyError):
+        pass
+    try:
+        ok = json.loads((Path.home() / ".local/share/opencode/auth.json").read_text())["zai-coding-plan"]["key"]
+    except (OSError, ValueError, KeyError):
+        pass
+    if not (zk or ok):
+        sys.exit("No Z.AI key: set ZHIPU_API_KEY")
+    return zk or ok, ok or zk
+
+
 def provider_info(name: str) -> dict:
     """Endpoint + key for one provider, plus how zWork's settings name it."""
     if name == "deepseek":
@@ -65,6 +90,13 @@ def provider_info(name: str) -> dict:
         url = os.environ.get("BENCH_OLLAMA_URL", "http://127.0.0.1:11434/v1")
         return {"url": url, "key": "ollama", "default_model": "gpt-oss:120b-cloud",
                 "zwork_credential": "ollama", "zwork_base": url, "zwork_env": {}}
+    if name == "zai":
+        zk, ok = zai_keys()
+        # opencode runs through its own built-in zai-coding-plan provider (as the
+        # user has it set up); zWork through a custom model on the same endpoint.
+        return {"url": ZAI_URL, "key": ok, "default_model": "glm-5.3",
+                "zwork_credential": "zai-coding-plan", "zwork_base": ZAI_URL, "zwork_key": zk,
+                "zwork_env": {}, "opencode_provider": "zai-coding-plan", "opencode_env": {"ZHIPU_API_KEY": ok}}
     sys.exit(f"unknown provider {name}")
 
 
@@ -123,13 +155,19 @@ def run_zwork(prompt: str, work: Path, run_dir: Path, args) -> dict:
     (home / "settings.json").write_text(json.dumps({
         "default_model": "bench-ds",
         "custom_models": [{
-            "id": "bench-ds", "name": f"DeepSeek {args.model}", "shape": "openai",
+            "id": "bench-ds", "name": f"Bench {args.model}", "shape": "openai",
             "credential": args.prov["zwork_credential"], "model_id": args.model,
             "base_url_override": args.prov["zwork_base"],
         }],
         "use_claude_code_config": False,
         "telemetry_enabled": False,
+        # An empty slot tells zWork to load this credential's key from secrets.json;
+        # without it only the built-in credentials are looked up.
+        "api_keys": {args.prov["zwork_credential"]: ""},
     }))
+    if args.prov.get("zwork_key"):
+        (home / "secrets.json").write_text(json.dumps({"api_keys": {args.prov["zwork_credential"]: args.prov["zwork_key"]}}))
+        (home / "secrets.json").chmod(0o600)
     port, token = free_port(), "bench-token"
     env = {**os.environ, "PWD": str(work), "ZWORK_HOME": str(home), "ZWORK_PORT": str(port), "ZWORK_HOST": "127.0.0.1",
            "ZWORK_SIDECAR_TOKEN": token, "RUST_LOG": "warn", **args.prov["zwork_env"]}
@@ -230,15 +268,25 @@ def opencode_config_dir(prov: dict, model: str) -> Path:
     return cfg
 
 
+def opencode_env(work: Path, args) -> dict:
+    # XDG_DATA_HOME is private too, so bench sessions never land in the user's opencode history.
+    return {**os.environ, "PWD": str(work), "XDG_CONFIG_HOME": str(args.oc_config),
+            "XDG_DATA_HOME": str(args.oc_config.parent / "opencode-data"), "BENCH_API_KEY": args.prov["key"],
+            "OPENCODE_DISABLE_AUTOUPDATE": "1", **args.prov.get("opencode_env", {})}
+
+
+def opencode_model(args) -> str:
+    return f"{args.prov.get('opencode_provider', 'bench')}/{args.model}"
+
+
 def warm_opencode(args) -> None:
     """One throwaway prompt so provider/model-catalog setup isn't billed to a task."""
     work = args.work_root / "_warmup"
     work.mkdir(parents=True, exist_ok=True)
-    env = {**os.environ, "PWD": str(work), "XDG_CONFIG_HOME": str(args.oc_config), "BENCH_API_KEY": args.prov["key"],
-           "OPENCODE_DISABLE_AUTOUPDATE": "1"}
+    env = opencode_env(work, args)
     t0 = time.time()
     proc = subprocess.Popen(["opencode", "run", "--standalone", "--format", "json",
-                             "-m", f"bench/{args.model}", "Reply with the word ok."],
+                             "-m", opencode_model(args), "Reply with the word ok."],
                             cwd=work, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                             start_new_session=True)
     try:
@@ -251,10 +299,9 @@ def warm_opencode(args) -> None:
 
 
 def run_opencode(prompt: str, work: Path, run_dir: Path, args) -> dict:
-    env = {**os.environ, "PWD": str(work), "XDG_CONFIG_HOME": str(args.oc_config), "BENCH_API_KEY": args.prov["key"],
-           "OPENCODE_DISABLE_AUTOUPDATE": "1"}
+    env = opencode_env(work, args)
     cmd = ["opencode", "run", "--standalone", "--auto", "--format", "json",
-           "-m", f"bench/{args.model}", "--title", f"bench {run_dir.name}", prompt]
+           "-m", opencode_model(args), "--title", f"bench {run_dir.name}", prompt]
     res = empty_result()
     out = open(run_dir / "events.jsonl", "w")
     err = open(run_dir / "opencode-stderr.log", "w")
@@ -390,7 +437,7 @@ def main() -> None:
     ap.add_argument("--tasks", default="all")
     ap.add_argument("--reps", type=int, default=1)
     ap.add_argument("--parallel", type=int, default=4)
-    ap.add_argument("--provider", default="deepseek", choices=["deepseek", "ollama"])
+    ap.add_argument("--provider", default="deepseek", choices=["deepseek", "ollama", "zai"])
     ap.add_argument("--model", help="model id at the provider (default depends on --provider)")
     ap.add_argument("--timeout", type=int, default=600, help="wall-clock seconds per run")
     ap.add_argument("--zwork-bin", type=Path, default=DEFAULT_ZWORK_BIN)

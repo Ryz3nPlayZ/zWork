@@ -1,0 +1,5 @@
+Blue Bottle Coffee
+2026-02-27 07:55
+Drip coffee        4.25
+Muffin             2.50
+TOTAL             $6.75

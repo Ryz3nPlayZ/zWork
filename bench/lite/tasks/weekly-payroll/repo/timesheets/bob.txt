@@ -1,0 +1,7 @@
+Bob - week of 2 March
+Mon 8:15
+Tue 9:00
+Wed 7:45
+Thu 8:30
+Fri 6:00
+(hours are h:mm, already without lunch)

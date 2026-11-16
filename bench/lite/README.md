@@ -1,17 +1,19 @@
 # Lite bench: zWork vs OpenCode
 
-Twelve small, deterministic tasks that run in a few minutes with no Docker.
-Each run starts with a fresh git workdir in `$TMPDIR`, kept outside this
-checkout so an agent can't reach the hidden tests. The runner drives one
-harness headlessly on that workdir and grades the result with a script.
-Both harnesses use the same model through the same DeepSeek
-OpenAI-compatible endpoint.
+Seventeen small, deterministic tasks that run in a few minutes with no
+Docker: twelve on code and files, and five everyday office jobs (expenses,
+invoices, form letters, payroll, a contract). Each run starts with a fresh git
+workdir in `$TMPDIR`, kept outside this checkout so an agent can't reach the
+hidden tests. The runner drives one harness headlessly on that workdir and
+grades the result with a script. Both harnesses use the same model through
+the same endpoint.
 
 ```bash
 python3 bench/lite/run.py                                  # every task, both harnesses, 1 rep
 python3 bench/lite/run.py --reps 2 --parallel 6
 python3 bench/lite/run.py --harness zwork --tasks fix-pagination,csv-report
 python3 bench/lite/run.py --provider ollama                 # local Ollama (gpt-oss:120b-cloud), no key
+python3 bench/lite/run.py --provider zai                    # GLM 5.3 on the Z.ai coding plan
 python3 bench/lite/run.py --report bench/lite/runs/<ts>     # re-render a report
 ```
 
@@ -20,7 +22,14 @@ Requirements:
 - `opencode` on PATH;
 - `node` for `js-date-bug`;
 - for `--provider deepseek` (the default), a DeepSeek key in `$DEEPSEEK_API_KEY` or as `env.ANTHROPIC_AUTH_TOKEN` in `~/.claude/settings.json`;
-- for `--provider ollama`, a running Ollama daemon (`BENCH_OLLAMA_URL` overrides `http://127.0.0.1:11434/v1`, e.g. to route through a logging proxy).
+- for `--provider ollama`, a running Ollama daemon (`BENCH_OLLAMA_URL` overrides `http://127.0.0.1:11434/v1`, e.g. to route through a logging proxy);
+- for `--provider zai`, a Z.ai coding-plan key. Each harness uses the key it
+  already has: zWork's from its `secrets.json` (credential `zai-coding-plan`),
+  opencode's from its `auth.json`. If only one exists, both use it, and
+  `$ZHIPU_API_KEY` overrides both. Both talk to
+  `https://api.z.ai/api/coding/paas/v4`; opencode through its built-in
+  `zai-coding-plan` provider, zWork through a custom model on the same
+  credential, set up the way the Settings page saves one.
 
 ## Tasks
 
@@ -51,6 +60,11 @@ the agent left behind.
 | multi-bug | Three bugs, plus tests the agent must add. |
 | sqlite-query | SQL over a generated DB with refund and status traps. |
 | config-migrate | v1 → v2 JSON config migration with normalisation rules. |
+| expense-report | Thirteen receipts → a month's expense report by policy: categories, a duplicate photo, a personal purchase, other months, euro conversion with and without a printed rate. |
+| invoice-reconcile | Match a bank statement to invoices (references written different ways, a part payment, an unnumbered payment), list what's unpaid with days overdue, write reminders for the overdue ones. |
+| client-letters | Mail merge from a template and a customer list: opt-outs in mixed case, a missing email, a duplicate, titles in the greeting, stray spaces. |
+| weekly-payroll | Timesheets in three formats (start/end with breaks, h:mm, decimals, night shifts past midnight) → hours, overtime past 40 and pay. |
+| contract-summary | Read a Word contract with an amendment that changes the fee and the late interest; fill in the key terms and write a short summary. |
 
 ## Harnesses
 

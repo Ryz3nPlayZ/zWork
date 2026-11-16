@@ -1,0 +1,6 @@
+DELTA AIR LINES  -  e-ticket receipt
+Issued: March 3, 2026
+Passenger: J. Rivera
+Fare:            412.00 USD
+Taxes & fees:     56.40 USD
+Total charged:   468.40 USD
