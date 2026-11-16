@@ -309,11 +309,11 @@ pub fn build_connected_apps_block(schemas: &[Value], connected_apps: &[String]) 
     let mut examples: Vec<&str> = Vec::new();
     if lower.iter().any(|a| a == "gmail") {
         examples.extend(&[
-            "  - \"check my email\" / \"any new emails?\" → a `composio__GMAIL_FETCH_EMAILS` tool; an empty `{}` returns the latest ~25 inbox messages (metadata + snippet only)",
-            "  - to find SPECIFIC emails, pass a `query` (Gmail syntax: `from:alice`, `subject:invoice`, `is:unread`, `after:2026/08/01`, `has:attachment`) and/or `label_ids`",
-            "  - to be THOROUGH (\"did I miss anything important today?\", \"summarize everything from X\"), keep paging: re-call `GMAIL_FETCH_EMAILS` with the previous call's `page_token` until `nextPageToken` is absent. Do NOT stop after the first page.",
+            "  - \"check my email\" / \"any new emails?\" → `composio__GMAIL_FETCH_EMAILS`; with no arguments it returns the newest ~25 inbox messages (headers + snippet only)",
+            "  - to find SPECIFIC emails (a sender, a company, a subject, a date range), ALWAYS pass `query` in Gmail search syntax: `from:elsevier`, `subject:invoice`, `is:unread`, `after:2026/08/01`, `has:attachment`, or plain words like `elsevier proof`. Never scan the newest 25 hoping the email is there.",
+            "  - to be THOROUGH (\"did I miss anything important today?\", \"summarize everything from X\"), keep paging: re-call `GMAIL_FETCH_EMAILS` with the same `query` plus the previous call's `nextPageToken` as `page_token` until no `nextPageToken` comes back.",
             "  - to read one full message body, use `composio__GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID` with the messageId from a FETCH_EMAILS result",
-            "  - \"send an email to X about Y\" → a `composio__GMAIL_SEND_*` tool",
+            "  - \"send an email to X about Y\" → `composio__GMAIL_SEND_EMAIL` (recipient_email, subject, body); \"reply to that\" → `composio__GMAIL_REPLY_TO_THREAD` (thread_id, recipient_email, message_body); \"draft\" → `composio__GMAIL_CREATE_EMAIL_DRAFT`",
         ]);
     }
     if lower.iter().any(|a| a == "googlecalendar") {
@@ -356,24 +356,20 @@ pub fn build_connected_apps_block(schemas: &[Value], connected_apps: &[String]) 
     // catalogue above verbatim. This is the single most important rule for
     // Composio reliability — the model hallucinating bare names was the
     // direct cause of the beta.5 404 storm.
-    let naming_rule = "\nIMPORTANT: Composio tool names end with a per-install UUID \
-        (e.g. `NOTION_SEARCH_PAGES_f0e73709830f43f7a2837c90fefffd4a`). You MUST call them by the \
-        EXACT name listed in the tool catalogue above — never by the bare `APP_ACTION` name, which \
-        will 404. When in doubt, copy the literal name from the catalogue.\n\nCalling rules:\n  \
-        - Read/list tools (FETCH_EMAILS, GET_EVENTS, SEARCH_*) accept empty input `{}` as \
-        \"give me the latest reasonable batch\" — never re-call them with the same empty input \
-        twice; if the first result didn't answer the question, narrow the query or read a specific \
-        item by ID instead.\n  \
-        - For Gmail specifically: an empty `{}` returns at most ~25 INBOX messages with metadata \
-        and a short snippet only — no full bodies. If the response contains a `nextPageToken`, \
-        MORE messages exist beyond this page — pass it back as `page_token` (same query) to fetch \
-        the next page. KEEP PAGING until there is no `nextPageToken` whenever you need to be \
-        thorough (\"did I miss anything?\", \"summarize all of X's emails\"). To narrow to specific \
-        emails, pass a `query` (e.g. `from:alice after:2026/08/01`). Only call \
-        `GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID` for a message whose full body you actually need.\n  \
-        - Write/create tools (SEND_EMAIL, CREATE_PAGE, CREATE_EVENT, CREATE_TASK) REQUIRE real \
-        arguments. Do not call them with `{}`. Infer each required field from the user's request, \
-        and if a required field genuinely isn't knowable, ASK the user instead of calling with \
+    let naming_rule = "\nIMPORTANT: call Composio tools by the EXACT name in the tool list \
+        (copy it literally, including any suffix). A guessed or shortened name will fail.\n\nCalling rules:\n  \
+        - Read/list tools (FETCH_EMAILS, GET_EVENTS, SEARCH_*) work with no arguments and return \
+        the newest items. If that first page didn't answer the question, do NOT call it again the \
+        same way: add a search `query`, page with `page_token`, or read a specific item by id.\n  \
+        - For Gmail specifically: no-argument FETCH_EMAILS returns at most ~25 INBOX messages \
+        (headers and a short snippet, no bodies). To look for a particular email, put words from \
+        it in `query` (sender, company, subject words, `after:YYYY/MM/DD`). If the response has a \
+        `nextPageToken`, more messages match — pass it back as `page_token` with the same query \
+        whenever you need to be thorough. Only call `GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID` for a \
+        message whose full body you actually need.\n  \
+        - Write/create tools (SEND_EMAIL, REPLY_TO_THREAD, CREATE_PAGE, CREATE_EVENT, CREATE_TASK) \
+        REQUIRE real arguments. Do not call them with `{}`. Infer each required field from the \
+        user's request, and if one genuinely isn't knowable, ASK the user instead of calling with \
         empty input — an empty create call always fails.\n  \
         - Results from list tools are SUMMARY envelopes (id + headers + snippet). Call the \
         matching FETCH_*_BY_ID tool to read a full body only when you actually need it.";
@@ -421,10 +417,167 @@ pub async fn all_tool_schemas() -> Vec<Value> {
         Ok(v) => v,
         Err(_) => return Vec::new(),
     };
-    body.get("tools")
+    let tools = body
+        .get("tools")
         .and_then(|t| t.as_array())
         .cloned()
-        .unwrap_or_default()
+        .unwrap_or_default();
+    repair_tool_schemas(tools)
+}
+
+/// True when a schema advertises no parameters at all.
+fn has_empty_parameters(tool: &Value) -> bool {
+    let params = tool.get("parameters").or_else(|| tool.get("input_schema"));
+    params
+        .and_then(|p| p.get("properties"))
+        .and_then(|p| p.as_object())
+        .map_or(true, |m| m.is_empty())
+}
+
+/// Fill in what the cloud catalogue leaves out for the apps people use most.
+///
+/// The cloud proxy has shipped every Composio tool with an empty parameter
+/// list and only the first 20 tools per app (Gmail stopped at `GET_FILTER`:
+/// no send, no reply). With no `query` field the model could only ever call
+/// `GMAIL_FETCH_EMAILS` with `{}`, got the same 25 newest messages back, and
+/// tripped the repeated-action guard. So: a tool that arrives without
+/// parameters gets the known schema, and when Gmail is connected the core
+/// Gmail tools are added if missing. The execute endpoint accepts any slug,
+/// so the added tools work even when the catalogue never listed them.
+pub fn repair_tool_schemas(mut tools: Vec<Value>) -> Vec<Value> {
+    for tool in tools.iter_mut() {
+        if !has_empty_parameters(tool) {
+            continue;
+        }
+        let name = tool.get("name").and_then(|n| n.as_str()).unwrap_or("");
+        let slug = name.strip_prefix(TOOL_PREFIX).unwrap_or(name);
+        if let Some(known) = known_tool(slug) {
+            tool["parameters"] = known["parameters"].clone();
+            let desc = tool.get("description").and_then(|d| d.as_str()).unwrap_or("");
+            if desc.trim().is_empty() || desc.starts_with("Composio action:") {
+                tool["description"] = known["description"].clone();
+            }
+        }
+    }
+    let has_gmail = tools.iter().any(|t| {
+        t.get("name")
+            .and_then(|n| n.as_str())
+            .map_or(false, |n| n.starts_with("composio__GMAIL_"))
+    });
+    if has_gmail {
+        for slug in GMAIL_CORE_TOOLS {
+            let name = format!("{TOOL_PREFIX}{slug}");
+            if !tools.iter().any(|t| t.get("name").and_then(|n| n.as_str()) == Some(name.as_str())) {
+                if let Some(known) = known_tool(slug) {
+                    tools.push(known);
+                }
+            }
+        }
+    }
+    tools
+}
+
+/// Gmail tools every connected inbox should have, read and write.
+const GMAIL_CORE_TOOLS: &[&str] = &[
+    "GMAIL_FETCH_EMAILS",
+    "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID",
+    "GMAIL_FETCH_MESSAGE_BY_THREAD_ID",
+    "GMAIL_LIST_THREADS",
+    "GMAIL_SEND_EMAIL",
+    "GMAIL_REPLY_TO_THREAD",
+    "GMAIL_CREATE_EMAIL_DRAFT",
+];
+
+/// Input schemas for the core Gmail tools, copied from Composio's own
+/// definitions (version 20261105) with long descriptions shortened.
+fn known_tool(slug: &str) -> Option<Value> {
+    let str_list = |desc: &str| json!({ "type": "array", "items": { "type": "string" }, "description": desc });
+    let (description, properties, required): (&str, Value, Vec<&str>) = match slug {
+        "GMAIL_FETCH_EMAILS" => (
+            "List or search Gmail messages. Pass `query` in Gmail search syntax to find specific mail; returns ids, headers and snippets, plus `nextPageToken` when more exist.",
+            json!({
+                "query": { "type": "string", "description": "Gmail search query, e.g. `from:alice@example.com is:unread`, `subject:invoice after:2026/01/01`, `has:attachment`. Use is: for unread/starred/important, label: only for user-made labels. Omit for the newest inbox mail." },
+                "label_ids": str_list("Only messages that carry all of these label ids, e.g. [\"INBOX\"], [\"UNREAD\"], [\"SENT\"]."),
+                "max_results": { "type": "integer", "description": "Messages per page (default 25, at most 100)." },
+                "page_token": { "type": "string", "description": "The `nextPageToken` from the previous call, to get the next page of the same search." },
+                "include_payload": { "type": "boolean", "description": "Include full bodies. Leave false and read single messages by id instead." },
+                "include_spam_trash": { "type": "boolean", "description": "Also search Spam and Trash." }
+            }),
+            vec![],
+        ),
+        "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID" => (
+            "Read one Gmail message in full, by the message id from a list or search result.",
+            json!({
+                "message_id": { "type": "string", "description": "Gmail message id (hex string such as 19b11732c1b5e8f0)." },
+                "format": { "type": "string", "enum": ["full", "metadata", "minimal", "raw"], "description": "`full` (default) includes the body." }
+            }),
+            vec!["message_id"],
+        ),
+        "GMAIL_FETCH_MESSAGE_BY_THREAD_ID" => (
+            "Read every message in one Gmail conversation, by thread id.",
+            json!({
+                "thread_id": { "type": "string", "description": "Gmail thread id (hex string)." },
+                "page_token": { "type": "string", "description": "Next page of a long thread." }
+            }),
+            vec!["thread_id"],
+        ),
+        "GMAIL_LIST_THREADS" => (
+            "List or search Gmail conversations (threads).",
+            json!({
+                "query": { "type": "string", "description": "Gmail search query, same syntax as in the Gmail search box." },
+                "max_results": { "type": "integer", "description": "Threads to return (default 10)." },
+                "page_token": { "type": "string", "description": "Next page token from the previous call." },
+                "verbose": { "type": "boolean", "description": "Include message details for each thread." }
+            }),
+            vec![],
+        ),
+        "GMAIL_SEND_EMAIL" => (
+            "Send a new email from the connected Gmail account.",
+            json!({
+                "recipient_email": { "type": "string", "description": "Main recipient's email address." },
+                "subject": { "type": "string", "description": "Subject line." },
+                "body": { "type": "string", "description": "Message text (plain text, or HTML with is_html true)." },
+                "cc": str_list("Cc addresses."),
+                "bcc": str_list("Bcc addresses."),
+                "extra_recipients": str_list("More To addresses."),
+                "is_html": { "type": "boolean", "description": "True when body is HTML." }
+            }),
+            vec!["recipient_email", "body"],
+        ),
+        "GMAIL_REPLY_TO_THREAD" => (
+            "Reply inside an existing Gmail conversation.",
+            json!({
+                "thread_id": { "type": "string", "description": "Thread id of the conversation being answered." },
+                "message_body": { "type": "string", "description": "Reply text (plain text, or HTML with is_html true)." },
+                "recipient_email": { "type": "string", "description": "Who the reply goes to." },
+                "cc": str_list("Cc addresses."),
+                "bcc": str_list("Bcc addresses."),
+                "extra_recipients": str_list("More To addresses."),
+                "is_html": { "type": "boolean", "description": "True when message_body is HTML." }
+            }),
+            vec!["thread_id", "message_body", "recipient_email"],
+        ),
+        "GMAIL_CREATE_EMAIL_DRAFT" => (
+            "Save an email as a Gmail draft without sending it.",
+            json!({
+                "recipient_email": { "type": "string", "description": "Main recipient's email address." },
+                "subject": { "type": "string", "description": "Subject line." },
+                "body": { "type": "string", "description": "Message text (plain text, or HTML with is_html true)." },
+                "cc": str_list("Cc addresses."),
+                "bcc": str_list("Bcc addresses."),
+                "extra_recipients": str_list("More To addresses."),
+                "thread_id": { "type": "string", "description": "Thread id when the draft is a reply; omit for a new conversation." },
+                "is_html": { "type": "boolean", "description": "True when body is HTML." }
+            }),
+            vec![],
+        ),
+        _ => return None,
+    };
+    Some(json!({
+        "name": format!("{TOOL_PREFIX}{slug}"),
+        "description": description,
+        "parameters": { "type": "object", "properties": properties, "required": required },
+    }))
 }
 
 /// Soft cap on a single shaped Composio result. List payloads are summarized
@@ -984,6 +1137,44 @@ fn collapse_ws(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_gmail_schemas_get_real_parameters_and_core_tools() {
+        let cloud = vec![
+            json!({ "name": "composio__GMAIL_FETCH_EMAILS", "description": "Composio action: Fetch emails",
+                    "parameters": { "type": "object", "properties": {} } }),
+            json!({ "name": "composio__GMAIL_GET_FILTER", "description": "Get a filter",
+                    "parameters": { "type": "object", "properties": {} } }),
+        ];
+        let tools = repair_tool_schemas(cloud);
+        let fetch = tools.iter().find(|t| t["name"] == "composio__GMAIL_FETCH_EMAILS").unwrap();
+        assert!(fetch["parameters"]["properties"]["query"].is_object());
+        assert!(!fetch["description"].as_str().unwrap().starts_with("Composio action:"));
+        // Unknown tool stays as the cloud sent it.
+        let filter = tools.iter().find(|t| t["name"] == "composio__GMAIL_GET_FILTER").unwrap();
+        assert_eq!(filter["description"], "Get a filter");
+        // Send / reply / draft were missing from the catalogue and are added.
+        for slug in ["GMAIL_SEND_EMAIL", "GMAIL_REPLY_TO_THREAD", "GMAIL_CREATE_EMAIL_DRAFT"] {
+            let name = format!("composio__{slug}");
+            let t = tools.iter().find(|t| t["name"] == name.as_str()).unwrap_or_else(|| panic!("{slug} missing"));
+            assert!(!t["parameters"]["properties"].as_object().unwrap().is_empty());
+        }
+        assert_eq!(tools.iter().filter(|t| t["name"] == "composio__GMAIL_FETCH_EMAILS").count(), 1);
+    }
+
+    #[test]
+    fn complete_schemas_and_other_apps_are_left_alone() {
+        let real = json!({ "type": "object", "properties": { "query": { "type": "string" }, "verbose": { "type": "boolean" } } });
+        let cloud = vec![
+            json!({ "name": "composio__GMAIL_FETCH_EMAILS", "description": "d", "parameters": real.clone() }),
+            json!({ "name": "composio__SLACK_SEND_MESSAGE", "description": "s", "parameters": { "type": "object", "properties": {} } }),
+        ];
+        let tools = repair_tool_schemas(cloud);
+        assert_eq!(tools[0]["parameters"], real);
+        assert_eq!(tools[1]["parameters"]["properties"], json!({}));
+        let only_slack = repair_tool_schemas(vec![json!({ "name": "composio__SLACK_SEND_MESSAGE", "parameters": {} })]);
+        assert_eq!(only_slack.len(), 1, "Gmail tools are only added when Gmail is connected");
+    }
 
     /// Build a synthetic but realistic Gmail FETCH_EMAILS payload matching the
     /// shape that caused the beta.5 doom loop: full HTML body + attachment
