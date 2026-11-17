@@ -546,6 +546,15 @@ export const api = {
     }).then((r) => j<{ ok: boolean; chat: any }>(r));
   },
 
+  /** Edit rollback: drop a user message and everything after it. `userIndex`
+   *  + `text` locate it when the local id isn't the stored one. */
+  rewindMessage: (chatId: string, messageId: string, userIndex: number, text: string) =>
+    localFetch(`/api/chats/${chatId}/messages/${messageId}/rewind`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ user_index: userIndex, text }),
+    }).then((r) => j<{ success: boolean; error?: string; chat?: any }>(r)),
+
   forkChat: (chatId: string, atMessageId?: string, before?: boolean) =>
     localFetch(`/api/chats/${chatId}/fork`, {
       method: "POST",
@@ -1292,6 +1301,7 @@ export type StreamEvent =
   | { type: "todo_update"; todos: Array<{ id: string; content: string; status: "pending" | "in_progress" | "completed" }> }
   | { type: "queue"; items: QueuedItem[] }
   | { type: "user_message"; text: string; assistant_id?: string }
+  | { type: "message_ids"; user?: string | null; assistant?: string }
   | { type: "run_state"; live: boolean; run_id?: string; cursor?: number; started_at?: number };
 
 /** The web app's only context: who it is and the current date and time. */

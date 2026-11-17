@@ -24,8 +24,6 @@ import {
   GitCompare,
   Image as ImageIcon,
   Edit2,
-  Send,
-  X as XIcon,
   CheckCircle2,
   XCircle,
   Loader2,
@@ -373,7 +371,9 @@ export function AssistantMarkdown({
   );
 }
 
-// ---- User message bubble with inline edit ----
+// ---- User message bubble ----
+// Edit loads the message into the main composer (see ChatInput); the bubble
+// only marks itself while it's being edited.
 function UserBubble({
   message,
   attachments,
@@ -383,30 +383,12 @@ function UserBubble({
   attachments: NonNullable<Msg["attachments"]>;
   streaming: boolean;
 }) {
-  const editAndResend = useApp((s) => s.editAndResend);
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(message.content);
-
-  const startEdit = () => {
-    setDraft(message.content);
-    setEditing(true);
-  };
-
-  const cancel = () => {
-    setDraft(message.content);
-    setEditing(false);
-  };
-
-  const submit = () => {
-    const trimmed = draft.trim();
-    if (!trimmed || trimmed === message.content) { cancel(); return; }
-    setEditing(false);
-    void editAndResend(message.id, trimmed);
-  };
+  const startEditMessage = useApp((s) => s.startEditMessage);
+  const beingEdited = useApp((s) => s.editing?.messageId === message.id);
 
   return (
     <div className="group flex w-full justify-end">
-      <div className="max-w-[85%] min-w-0">
+      <div className={cn("max-w-[85%] min-w-0 transition-opacity", beingEdited && "opacity-60")}>
         {attachments.length > 0 && (
           <div className="mb-1.5 flex flex-wrap justify-end gap-1.5">
             {attachments.map((a, i) => (
@@ -428,55 +410,31 @@ function UserBubble({
           </div>
         )}
 
-        {editing ? (
-          <div className="flex flex-col gap-1.5">
-            <textarea
-              autoFocus
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
-                if (e.key === "Escape") cancel();
-              }}
-              rows={Math.min(10, draft.split("\n").length + 1)}
-              className="w-full resize-none rounded-2xl rounded-br-md border border-accent/50 bg-paper-raised px-3.5 py-2.5 text-[15px] leading-[25px] text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
-            />
-            <div className="flex items-center justify-end gap-1.5">
-              <button
-                type="button"
-                onClick={cancel}
-                className="press flex items-center gap-1 rounded-lg border border-line px-2.5 py-1 text-[11.5px] text-ink-muted hover:bg-paper-sunken"
-              >
-                <XIcon className="h-3 w-3" /> Cancel
-              </button>
-              <button
-                type="button"
-                onClick={submit}
-                className="press flex items-center gap-1 rounded-lg bg-ink px-2.5 py-1 text-[11.5px] font-medium text-paper hover:bg-ink/80"
-              >
-                <Send className="h-3 w-3" /> Send
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="relative">
-            <div className="rounded-2xl rounded-br-md bg-paper-raised border border-line px-3.5 py-2.5 text-[15px] leading-[25px] text-ink break-words whitespace-pre-wrap">
-              {message.content}
-            </div>
-            {!streaming && (
-              <button
-                type="button"
-                onClick={startEdit}
-                title="Edit message"
-                className="press absolute -left-8 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-ink-faint opacity-0 transition-opacity hover:bg-paper-sunken hover:text-ink group-hover:opacity-100"
-              >
-                <Edit2 className="h-3.5 w-3.5" />
-              </button>
+        <div className="relative">
+          <div
+            className={cn(
+              "rounded-2xl rounded-br-md bg-paper-raised border px-3.5 py-2.5 text-[15px] leading-[25px] text-ink break-words whitespace-pre-wrap",
+              beingEdited ? "border-dashed border-line-strong" : "border-line",
             )}
+          >
+            {message.content}
           </div>
-        )}
+          {!streaming && !beingEdited && (
+            <button
+              type="button"
+              onClick={() => startEditMessage(message.id)}
+              title="Edit message"
+              aria-label="Edit message"
+              className="press absolute -left-8 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-ink-faint opacity-0 transition-opacity hover:bg-paper-sunken hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
+            >
+              <Edit2 className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
 
-        <p className="mt-1 text-right text-[11px] text-ink-faint">{formatTime(message.createdAt)}</p>
+        <p className="mt-1 text-right text-[11px] text-ink-faint">
+          {beingEdited ? "Editing below" : formatTime(message.createdAt)}
+        </p>
       </div>
     </div>
   );

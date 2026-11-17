@@ -164,6 +164,29 @@ export interface MessageAttachment {
   kind: string;
   size?: number;
   previewUrl?: string;
+  /** Uploaded file path and inline data, kept so an edit can re-send it. */
+  path?: string;
+  dataUrl?: string;
+}
+
+/** An uploaded file sent with a message. */
+export interface SendAttachment {
+  client_id?: string | null;
+  name: string;
+  path: string;
+  data_url?: string;
+  mime: string;
+  kind: string;
+  size?: number;
+  previewUrl?: string;
+}
+
+/** A sent user message loaded into the composer for editing. */
+export interface EditingMessage {
+  chatId: string;
+  messageId: string;
+  text: string;
+  attachments: MessageAttachment[];
 }
 
 /**
@@ -908,23 +931,24 @@ interface AppState {
       artifactMode?: boolean;
       planMode?: boolean;
       autoApproveDestructive?: boolean;
-      attachments?: Array<{
-        client_id?: string | null;
-        name: string;
-        path: string;
-        data_url?: string;
-        mime: string;
-        kind: string;
-        size?: number;
-        previewUrl?: string;
-      }>;
+      attachments?: SendAttachment[];
     },
   ) => Promise<void>;
   retry: () => Promise<void>;
   regenerateMessage: (messageId: string) => Promise<void>;
   flagBadResponse: (messageId: string) => void;
-  /** Edit a previously sent user message and re-run the conversation from that point. */
-  editAndResend: (messageId: string, newText: string) => Promise<void>;
+  /** The sent message the composer is editing, if any. */
+  editing: EditingMessage | null;
+  /** Load a sent user message into the composer for editing. */
+  startEditMessage: (messageId: string) => void;
+  cancelEditMessage: () => void;
+  /** Edit a previously sent user message: drop it and everything after it
+   *  (in the chat and the model's history), then run the edited text fresh. */
+  editAndResend: (
+    messageId: string,
+    newText: string,
+    attachments?: SendAttachment[],
+  ) => Promise<void>;
   /** Fork the active chat at a message — ancestry copies into a new chat, which opens. */
   forkFromMessage: (messageId: string, before?: boolean) => Promise<void>;
   /** Restore a parked rewind branch as the active tail (current tail is parked in turn). */
@@ -1130,6 +1154,7 @@ export const useApp = create<AppState>((set, get) => ({
   activeChatId: null,
   _abort: null,
   draftInject: null,
+  editing: null,
   starterDraft: "",
   clearDraftInject: () => set({ draftInject: null }),
 
@@ -2200,40 +2225,66 @@ export const useApp = create<AppState>((set, get) => ({
     });
   },
 
-  editAndResend: async (messageId, newText) => {
+  startEditMessage: (messageId) => {
+    const id = get().activeChatId;
+    if (!id) return;
+    const chat = get().chats[id];
+    const msg = chat?.messages.find((m) => m.id === messageId);
+    if (!chat || !msg || msg.role !== "user" || chat.working) return;
+    set({ editing: { chatId: id, messageId, text: msg.content, attachments: msg.attachments ?? [] } });
+  },
+
+  cancelEditMessage: () => set({ editing: null }),
+
+  editAndResend: async (messageId, newText, attachments) => {
     const trimmed = newText.trim();
-    if (!trimmed) return;
+    const files = attachments ?? [];
+    set({ editing: null });
+    if (!trimmed && files.length === 0) return;
     const id = get().activeChatId;
     if (!id) return;
     const c = get().chats[id];
-    if (!c) return;
+    if (!c || c.working) return;
 
-    // Find the index of the target message.
     const idx = c.messages.findIndex((m) => m.id === messageId);
-    if (idx === -1) return;
+    if (idx === -1 || c.messages[idx].role !== "user") return;
 
-    try {
-      await api.truncateMessage(id, messageId, trimmed);
-    } catch (e) {
-      console.warn("truncateMessage failed:", e);
+    // Roll the stored history back first. If that fails, don't run the
+    // edit on top of the old history: the model would still see the
+    // message being replaced and every reply after it.
+    if (!IS_WEB && !isDemoMode() && !id.startsWith("tmp_")) {
+      const userIndex = c.messages.slice(0, idx).filter((m) => m.role === "user").length;
+      let ok = false;
+      try {
+        const res = await api.rewindMessage(id, messageId, userIndex, c.messages[idx].content);
+        ok = res.success;
+      } catch (e) {
+        console.warn("rewindMessage failed:", e);
+      }
+      if (!ok) {
+        set((s) => ({
+          chats: {
+            ...s.chats,
+            [id]: { ...s.chats[id], error: "Couldn't edit that message. Reopen the chat and try again." },
+          },
+        }));
+        return;
+      }
     }
-
-    // Drop the target user message + everything after (assistant reply, etc.)
-    const trimmedMessages = c.messages.slice(0, idx);
 
     set((s) => ({
       chats: {
         ...s.chats,
         [id]: {
           ...s.chats[id],
-          messages: trimmedMessages,
+          messages: s.chats[id].messages.slice(0, idx),
           needsSetup: false,
           error: undefined,
         },
       },
     }));
 
-    await get().send(trimmed);
+    await get().send(trimmed, files.length ? { attachments: files } : undefined);
   },
 
   forkFromMessage: async (messageId, before) => {
@@ -2319,6 +2370,8 @@ export const useApp = create<AppState>((set, get) => ({
             kind: a.kind,
             size: a.size,
             previewUrl: a.previewUrl,
+            path: a.path,
+            dataUrl: a.data_url,
           }))
         : undefined,
     };
@@ -2972,6 +3025,18 @@ export const useApp = create<AppState>((set, get) => ({
                 },
               };
             });
+          } else if (evt.type === "message_ids") {
+            // The sidecar saved this turn's rows under its own ids; adopt the
+            // user message's so edit / regenerate can address it later.
+            const storedId = evt.user;
+            if (storedId && storedId !== userMsg.id) {
+              set((s) => {
+                const c = s.chats[localId];
+                if (!c) return s;
+                const messages = c.messages.map((m) => (m.id === userMsg.id ? { ...m, id: storedId } : m));
+                return { chats: { ...s.chats, [localId]: { ...c, messages } } };
+              });
+            }
           } else if (evt.type === "user_message") {
             // A queued message (steer / follow-up / next-run) was consumed
             // and committed mid-run: it becomes a real user bubble, and the

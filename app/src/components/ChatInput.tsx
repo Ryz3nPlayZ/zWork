@@ -62,6 +62,9 @@ interface ComposerAttachment {
   previewUrl?: string;
   uploadedPath?: string;
   dataUrl?: string;
+  /** Loaded from a sent message being edited: its preview URL is still in
+   *  use by that message, so it must not be revoked here. */
+  fromEdit?: boolean;
 }
 
 function OverlayToolItem({
@@ -292,6 +295,9 @@ export function ChatInput({
   const setSecurityPreset = useApp((s) => s.setSecurityPreset);
   const openLanding = useApp((s) => s.openLanding);
   const activeChatId = useApp((s) => s.activeChatId);
+  const editing = useApp((s) => s.editing);
+  const cancelEditMessage = useApp((s) => s.cancelEditMessage);
+  const editAndResend = useApp((s) => s.editAndResend);
   const working = useApp((s) => {
     const id = s.activeChatId;
     return id ? (s.chats[id]?.working ?? false) : false;
@@ -442,6 +448,49 @@ export function ChatInput({
     clearDraftInject();
     areaRef.current?.focus();
   }, [draftInject, activeChatId, clearDraftInject, setValue]);
+
+  // Editing a sent message happens here in the composer: park whatever was
+  // being typed, load the message, and put the draft back when the edit is
+  // sent or cancelled.
+  const editingHere = !isOverlay && editing && editing.chatId === activeChatId ? editing : null;
+  const savedDraft = useRef<{ value: string; attachments: ComposerAttachment[] } | null>(null);
+  useEffect(() => {
+    if (editingHere) {
+      if (!savedDraft.current) savedDraft.current = { value, attachments };
+      setValue(editingHere.text);
+      setAttachments(
+        editingHere.attachments
+          .filter((a) => !!a.path)
+          .map((a, i) => ({
+            id: `edit-${editingHere.messageId}-${i}`,
+            name: a.name,
+            mime: a.mime,
+            kind: a.kind === "image" ? "image" : "file",
+            size: a.size ?? 0,
+            previewUrl: a.previewUrl,
+            uploadedPath: a.path,
+            dataUrl: a.dataUrl,
+            fromEdit: true,
+          })),
+      );
+      requestAnimationFrame(() => {
+        const el = areaRef.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(el.value.length, el.value.length);
+      });
+    } else if (savedDraft.current) {
+      const saved = savedDraft.current;
+      savedDraft.current = null;
+      setValue(saved.value);
+      setAttachments(saved.attachments);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingHere?.messageId]);
+  // Leaving the chat drops an unfinished edit.
+  useEffect(() => {
+    if (editing && editing.chatId !== activeChatId) cancelEditMessage();
+  }, [activeChatId, editing, cancelEditMessage]);
 
   // Close the queue action / mode menus on outside click.
   useEffect(() => {
@@ -694,6 +743,27 @@ export function ChatInput({
   const submit = () => {
     if (!canSend) return;
     const text = value;
+    if (editingHere) {
+      const ready = attachments.filter(
+        (a): a is ComposerAttachment & { uploadedPath: string } => !!a.uploadedPath,
+      );
+      setSlashState(null);
+      void editAndResend(
+        editingHere.messageId,
+        text,
+        ready.map((a) => ({
+          client_id: a.id,
+          name: a.name,
+          path: a.uploadedPath,
+          data_url: a.dataUrl,
+          mime: a.mime,
+          kind: a.kind,
+          size: a.size,
+          previewUrl: a.previewUrl,
+        })),
+      );
+      return;
+    }
     if (tryHandleSaveCommand(text)) {
       return;
     }
@@ -745,6 +815,11 @@ export function ChatInput({
         setSlashState(null);
         return;
       }
+    }
+    if (e.key === "Escape" && editingHere) {
+      e.preventDefault();
+      cancelEditMessage();
+      return;
     }
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
@@ -853,7 +928,7 @@ export function ChatInput({
             <button
               type="button"
               onClick={() => {
-                if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+                if (a.previewUrl && !a.fromEdit) URL.revokeObjectURL(a.previewUrl);
                 setAttachments((prev) => prev.filter((x) => x.id !== a.id));
               }}
               className="rounded-full p-0.5 text-ink-faint hover:bg-line/60 hover:text-ink ml-1"
@@ -1243,6 +1318,20 @@ export function ChatInput({
         </div>
       ) : (
         <>
+          {editingHere && (
+            <div className="flex items-center gap-2 border-b border-line-soft px-4 py-2 text-[12px]">
+              <PenLine className="h-3.5 w-3.5 shrink-0 text-ink-muted" aria-hidden />
+              <span className="font-medium text-ink">Editing message</span>
+              <span className="truncate text-ink-faint">Sending it replaces everything after it</span>
+              <button
+                type="button"
+                onClick={cancelEditMessage}
+                className="press ring-focus ml-auto shrink-0 rounded-md px-2 py-0.5 text-ink-muted transition-colors hover:bg-paper-sunken hover:text-ink"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
           {queueChips}
           {attachmentList}
           {slashMenu}
