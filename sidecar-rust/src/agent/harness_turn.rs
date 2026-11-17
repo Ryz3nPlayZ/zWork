@@ -342,9 +342,14 @@ impl NativeTool {
                     shared.send(evt).await;
                     // CuaDriver permission-failure recovery card (see
                     // `is_cuadriver_permission_error`).
+                    // A permission-shaped error with both grants live-confirmed
+                    // is not a permission problem: skip the card then.
+                    let lower = result_txt.to_ascii_lowercase();
                     if !result_ok
                         && self.name.starts_with("desktop_")
                         && super::is_cuadriver_permission_error(&result_txt)
+                        && (super::is_cuadriver_down_error(&lower)
+                            || crate::cua::permissions_granted_live().await != Some(true))
                     {
                         shared
                             .send(json!({

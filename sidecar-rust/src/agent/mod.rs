@@ -83,15 +83,25 @@ pub enum ErrorClass {
 /// - the driver spawn/timeout errors (`mcp_client.rs`: "did not respond
 ///   within 30s", "process exited without responding"),
 /// - the Share-Window "No content produced" / Screen-Recording errors.
+///
+/// It must NOT match on the driver's name alone: every driver error (a stale
+/// element index, a missing window, an unverifiable keystroke) mentions
+/// "cua-driver", and matching on that showed the user a permission card on
+/// ~20 ordinary failures in one run while permissions were granted.
 pub(crate) fn is_cuadriver_permission_error(message: &str) -> bool {
     let h = message.to_ascii_lowercase();
-    h.contains("cuadriver")
-        || h.contains("cua-driver")
+    h.contains("missing tcc grant")
+        || h.contains("is not granted")
         || h.contains("accessibility permission")
-        || h.contains("screen recording")
-        || h.contains("did not respond within")
-        || h.contains("process exited without responding")
+        || h.contains("screen recording permission")
         || h.contains("no content produced")
+        || is_cuadriver_down_error(&h)
+}
+
+/// The driver process itself is missing, hung or crashed (as opposed to a
+/// permission it lacks). Expects a lowercased message.
+pub(crate) fn is_cuadriver_down_error(lower: &str) -> bool {
+    lower.contains("did not respond within") || lower.contains("process exited without responding")
 }
 
 /// Build a ready-to-render user-facing message for the `permission_recovery`
@@ -665,6 +675,25 @@ mod tests {
         assert!(throttle.contains("rate limit"), "got: {throttle}");
     }
     use serde_json::json;
+
+    #[test]
+    fn ordinary_driver_errors_are_not_permission_errors() {
+        for msg in [
+            "cua-driver: window_not_found for pid 812",
+            "CuaDriver: element_index 14 requires snapshot_id",
+            "cua-driver type_text: effect unverifiable for web content",
+        ] {
+            assert!(!is_cuadriver_permission_error(msg), "matched: {msg}");
+        }
+        for msg in [
+            "Missing TCC grant(s) for this process: Accessibility",
+            "Screen Recording is NOT granted for this process.",
+            "cua-driver did not respond within 30s",
+            "CuaDriver couldn't capture this window (\"No content produced\")",
+        ] {
+            assert!(is_cuadriver_permission_error(msg), "missed: {msg}");
+        }
+    }
 
     #[test]
     fn test_classify_provider_error_transient() {

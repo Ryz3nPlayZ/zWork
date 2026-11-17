@@ -371,6 +371,14 @@ pub async fn capture(app: Option<&str>) -> Result<CaptureResult, String> {
              route (keyboard shortcuts, the browser_* tools, or bash)."
         ));
     }
+    if element_count == 0 && permissions_granted_live().await == Some(true) {
+        return Err(format!(
+            "Captured \"{app_name}\" but its accessibility tree came back empty \
+             (0 elements). Permissions are granted, so the window is either still \
+             loading or draws its own controls. Wait a second and capture again; \
+             if it stays empty, use keyboard shortcuts or the browser_* tools."
+        ));
+    }
     if element_count == 0 {
         return Err(format!(
             "Captured \"{app_name}\" but the accessibility tree came back empty \
@@ -892,6 +900,20 @@ static PERMS_WARMED: AtomicBool = AtomicBool::new(false);
 /// load. Re-reads only happen when the driver is already up (`CUA.is_some()`),
 /// so this never launches the daemon on its own.
 const PERMS_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// Are Accessibility AND Screen Recording granted right now? Asks the driver
+/// only when it is already running (never launches it), so a desktop tool
+/// that just failed can tell a real permission gap from an ordinary error.
+/// `None` when the driver is down or the read fails.
+pub async fn permissions_granted_live() -> Option<bool> {
+    if CUA.lock().await.is_none() {
+        return None;
+    }
+    read_and_cache_perms(false)
+        .await
+        .ok()
+        .map(|st| st.accessibility && st.screen_recording)
+}
 
 /// Read the driver's permission state via a live MCP `check_permissions` call
 /// and cache it. Only called from the Grant path and [`start_session`], where
