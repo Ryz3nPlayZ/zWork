@@ -1569,6 +1569,40 @@ pub async fn truncate_message(
     Json(json!({ "success": result.is_some(), "chat": result }))
 }
 
+#[derive(Deserialize, Default)]
+pub struct RewindRequest {
+    /// Position of the message among the chat's user messages (0-based) and
+    /// its text: finds the message when the app's id isn't the stored one.
+    #[serde(default)]
+    pub user_index: Option<usize>,
+    #[serde(default)]
+    pub text: Option<String>,
+}
+
+/// Edit-message rollback: drop a user message and everything after it from
+/// the chat (parked as a Versions branch), plus this chat's leftover run
+/// sessions so a restart can't resume a run from the dropped turn.
+pub async fn rewind_message(
+    Path((chat_id, message_id)): Path<(String, String)>,
+    body: Option<Json<RewindRequest>>,
+) -> impl IntoResponse {
+    if crate::agent::run_state::live_run(&chat_id).is_some() {
+        return Json(json!({ "success": false, "error": "Stop the current reply before editing." }));
+    }
+    let body = body.map(|Json(b)| b).unwrap_or_default();
+    let fallback = match (body.user_index, body.text.as_deref()) {
+        (Some(i), Some(t)) => Some((i, t)),
+        _ => None,
+    };
+    match chatstore::rewind_before_message(&chat_id, &message_id, fallback) {
+        Some(chat) => {
+            crate::agent::harness_turn::delete_chat_sessions(&chat_id);
+            Json(json!({ "success": true, "chat": chat }))
+        }
+        None => Json(json!({ "success": false, "error": "Message not found" })),
+    }
+}
+
 #[derive(Deserialize)]
 pub struct ForkChatRequest {
     pub at_message_id: Option<String>,

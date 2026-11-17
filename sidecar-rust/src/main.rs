@@ -192,6 +192,7 @@ async fn run() {
         )
         .route("/api/chats/:chat_id/messages/:message_id", patch(server::patch_message))
         .route("/api/chats/:chat_id/messages/:message_id/truncate", post(server::truncate_message))
+        .route("/api/chats/:chat_id/messages/:message_id/rewind", post(server::rewind_message))
         .route("/api/chats/:chat_id/fork", post(server::fork_chat))
         .route("/api/chats/:chat_id/branches", get(server::list_branches))
         .route(

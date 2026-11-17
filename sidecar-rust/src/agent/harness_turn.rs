@@ -1842,6 +1842,12 @@ pub fn run_agent_turn(
 
         // ── Assistant row + shared state ────────────────────────────────
         let assistant_msg_id = chatstore::append_message(&chat.id, "assistant", json!("")).map(|m| m.id).unwrap_or_default();
+        // Stored ids for this turn's rows, so the app can address them later
+        // (edit / regenerate) without reloading the chat.
+        let user_msg_id = chat.messages.last().filter(|m| m.role == "user").map(|m| m.id.clone());
+        let _ = tx
+            .send(json!({ "type": "message_ids", "user": user_msg_id, "assistant": assistant_msg_id }))
+            .await;
         let shared = Arc::new(TurnShared {
             chat_id: chat_id.clone(),
             run_id: run_id.clone(),
@@ -2405,6 +2411,20 @@ fn prune_completed_sessions(repo: &crate::harness::session::sqlite::SqliteSessio
             })
             .unwrap_or(false);
         if settled {
+            let _ = repo.delete(&meta.id);
+        }
+    }
+}
+
+/// Delete every run session this chat has on disk. Called after an edit
+/// rolls the chat back, so neither a stale finished session nor an
+/// interrupted one (which resume-on-restart would drive) outlives the
+/// turns it belonged to. Only safe when no run is live for the chat.
+pub fn delete_chat_sessions(chat_id: &str) {
+    let repo = crate::harness::session::sqlite::SqliteSessionRepo::new(crate::paths::home_dir().join("sessions"));
+    let prefix = format!("{chat_id}__");
+    for meta in repo.list().unwrap_or_default() {
+        if meta.id.starts_with(&prefix) {
             let _ = repo.delete(&meta.id);
         }
     }

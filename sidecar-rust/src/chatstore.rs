@@ -75,6 +75,7 @@ pub struct BranchRecord {
     pub id: String,
     pub created_at: u64,
     /// The message the rewind kept — the branch's messages continue after it.
+    /// Empty when the branch starts at the chat's first message.
     pub from_message_id: String,
     pub messages: Vec<ChatMessage>,
 }
@@ -540,6 +541,37 @@ pub fn truncate_at_message(chat_id: &str, message_id: &str, content: Option<Valu
     Some(c)
 }
 
+/// Roll the chat back to just before a user message: that message and
+/// everything after it leave the active history (and so the model's
+/// context — history is rebuilt from these rows on every run). The dropped
+/// tail is parked as a [`BranchRecord`] so the Versions picker can bring it
+/// back. Used by "edit message": the edited text is then sent as a fresh turn.
+///
+/// The app's local message ids can lag the stored ones, so when `message_id`
+/// isn't found, `fallback` locates the message as the Nth user message
+/// (0-based) whose text matches.
+pub fn rewind_before_message(chat_id: &str, message_id: &str, fallback: Option<(usize, &str)>) -> Option<Chat> {
+    let mut c = get(chat_id)?;
+    let pos = c.messages.iter().position(|m| m.id == message_id).or_else(|| {
+        let (ordinal, text) = fallback?;
+        let (idx, m) = c.messages.iter().enumerate().filter(|(_, m)| m.role == "user").nth(ordinal)?;
+        (content_to_text(&m.content).trim() == text.trim()).then_some(idx)
+    })?;
+    if c.messages[pos].role != "user" {
+        return None;
+    }
+    let from_message_id = if pos == 0 { String::new() } else { c.messages[pos - 1].id.clone() };
+    let tail: Vec<ChatMessage> = c.messages.split_off(pos);
+    c.branches.push(BranchRecord { id: uid(), created_at: now_ms(), from_message_id, messages: tail });
+    if c.compaction_cursor > pos as u64 {
+        c.compacted_summary.clear();
+        c.compaction_cursor = 0;
+    }
+    c.updated_at = now_ms();
+    save(&c);
+    Some(c)
+}
+
 /// Fork a chat: copy messages up to (and including, unless `before`)
 /// `at_message_id` into a new chat. The source is untouched. Usage totals
 /// are NOT copied (pi: forks start with a zeroed ledger).
@@ -578,8 +610,13 @@ pub fn restore_branch(chat_id: &str, branch_id: &str) -> Option<Chat> {
     let mut c = get(chat_id)?;
     let index = c.branches.iter().position(|b| b.id == branch_id)?;
     let branch = c.branches.remove(index);
-    let pos = c.messages.iter().position(|m| m.id == branch.from_message_id)?;
-    let tail: Vec<ChatMessage> = c.messages.split_off(pos + 1);
+    // An empty branch point means the branch starts at the first message.
+    let cut = if branch.from_message_id.is_empty() {
+        0
+    } else {
+        c.messages.iter().position(|m| m.id == branch.from_message_id)? + 1
+    };
+    let tail: Vec<ChatMessage> = c.messages.split_off(cut);
     if !tail.is_empty() {
         c.branches.push(BranchRecord {
             id: uid(),
@@ -712,6 +749,54 @@ mod tests {
         assert_eq!(c.messages[1].id, m2.id);
         assert_eq!(c.branches.len(), 1);
         assert_eq!(c.branches[0].messages.len(), 1); // the "fresh" message parked
+
+        std::env::remove_var("ZWORK_HOME");
+        if let Some(p) = prev {
+            std::env::set_var("ZWORK_HOME", p);
+        }
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Env-mutating test — same convention as above.
+    #[test]
+    fn edit_rewind_drops_the_message_and_everything_after() {
+        let _env_guard = crate::paths::HOME_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var("ZWORK_HOME").ok();
+        let home = std::env::temp_dir().join(format!("zwork-chatstore-{}", uuid::Uuid::new_v4().simple()));
+        std::env::set_var("ZWORK_HOME", &home);
+
+        let chat = create("t", "m", "");
+        let u1 = append_message(&chat.id, "user", json!("first")).unwrap();
+        let a1 = append_message(&chat.id, "assistant", json!("reply one")).unwrap();
+        let u2 = append_message(&chat.id, "user", json!("old question")).unwrap();
+        let a2 = append_message(&chat.id, "assistant", json!("old answer")).unwrap();
+        append_tool_trace(&chat.id, &a2.id, vec![tool_trace_entry("write_file", &json!({"path": "late.txt"}), true, "ok")]);
+
+        // Editing u2: it and its reply leave the history (and the tool trace
+        // that history rebuild would otherwise replay to the model).
+        let c = rewind_before_message(&chat.id, &u2.id, None).unwrap();
+        assert_eq!(c.messages.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), [u1.id.as_str(), a1.id.as_str()]);
+        assert!(render_tool_traces(&c.messages).is_none());
+        assert_eq!(c.branches.len(), 1);
+        assert_eq!(c.branches[0].from_message_id, a1.id);
+
+        // The edited text then runs as a fresh turn: history ends at it + its new reply.
+        append_message(&chat.id, "user", json!("new question")).unwrap();
+        append_message(&chat.id, "assistant", json!("new answer")).unwrap();
+        let texts: Vec<String> = get(&chat.id).unwrap().messages.iter().map(|m| content_to_text(&m.content)).collect();
+        assert_eq!(texts, ["first", "reply one", "new question", "new answer"]);
+
+        // Unknown id: found by user ordinal + matching text; mismatched text is refused.
+        assert!(rewind_before_message(&chat.id, "client-id", Some((1, "wrong text"))).is_none());
+        assert!(rewind_before_message(&chat.id, &a1.id, None).is_none(), "only user messages rewind");
+        let c = rewind_before_message(&chat.id, "client-id", Some((0, "first"))).unwrap();
+        assert!(c.messages.is_empty());
+
+        // Versions still work: the branch parked from the first message restores.
+        let first_branch = c.branches.iter().find(|b| b.from_message_id.is_empty()).unwrap().id.clone();
+        let c = restore_branch(&chat.id, &first_branch).unwrap();
+        assert_eq!(c.messages.len(), 4);
+        assert_eq!(content_to_text(&c.messages[2].content), "new question");
 
         std::env::remove_var("ZWORK_HOME");
         if let Some(p) = prev {
