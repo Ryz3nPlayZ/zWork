@@ -26,6 +26,7 @@ All notable changes to zWork are documented in this file.
 - **Settings look the same everywhere.** One hover and selected style, the same buttons, switches and status labels in every section, warnings and errors in the app's own colors, and no more boxes inside boxes.
 
 ### Fixes
+- **No more false 'grant CuaDriver access' warnings.** Any desktop step that failed for an ordinary reason (a window not found, a button that had moved) showed a permissions warning, even with every permission granted. The warning now only appears when a permission is really missing.
 - **New scheduled tasks run on time.** A task you created or changed didn't get its next run until zWork restarted, so it could sit there without running. It now gets one as soon as you save it.
 - **Project files keep their names and zWork uses them.** Files you added to a project showed up under a scrambled name, couldn't be opened from the list, and weren't mentioned to zWork in the project's chats. They now keep the name you gave them, open with a click, and zWork is told about them in every chat in the project. Adding a file with the same name as one already there keeps both.
 - **Your first job comes back as the file you asked for.** If you started while first-time setup was still running, zWork could hand back a text file instead of Excel and keep doing that on its schedule. It now waits for setup to finish. Scheduled runs also report only what they actually did.
