@@ -12,6 +12,10 @@
     {
       "comment": "arXiv drops connections from CI runners (status 0) though the page is up; flaky, not link rot.",
       "pattern": "^https://arxiv\\.org/"
+    },
+    {
+      "comment": "eWEEK returns 403 to CI runners though the page is up.",
+      "pattern": "^https://www\\.eweek\\.com/"
     }
   ],
   "replacementPatterns": [],
