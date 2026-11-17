@@ -1,0 +1,8 @@
+node_modules/
+qa/
+frames/
+chunks/
+*.wav
+*.mp4
+*.mov
+mix.*

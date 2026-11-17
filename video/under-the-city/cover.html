@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="app/bundle.js"></script>
+<script>document.write('<style>' + APP.fonts + '</style>');</script>
+<style>
+  html, body { margin: 0; width: 1200px; height: 1600px; overflow: hidden; background: #B933AD; }
+  body { position: relative; display: grid; place-items: center;
+    background: radial-gradient(900px 700px at 30% 18%, #C64BBB, transparent 70%), radial-gradient(800px 700px at 85% 85%, #A22C9B, transparent 70%), #B933AD; }
+  .grain { position: absolute; inset: 0; background-size: 22px 22px; background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1.3px); }
+  .wrap { position: relative; display: flex; flex-direction: column; align-items: center; }
+  .dots { display: flex; gap: 14px; margin-bottom: 40px; }
+  .dot { width: 86px; height: 86px; border-radius: 50%; box-sizing: border-box; border: 6px solid #fff; display: grid; place-items: center;
+    font: 800 40px 'Archivo', sans-serif; }
+  .uc { font-family: 'Archivo', sans-serif; font-weight: 800; font-stretch: 104%; letter-spacing: -0.03em; line-height: 0.9; color: #fff; font-size: 560px; }
+</style>
+</head>
+<body>
+<div class="grain"></div>
+<div class="wrap">
+  <div class="dots">
+    <div class="dot" style="background:#0039A6;color:#fff">S</div>
+    <div class="dot" style="background:#D52B1E;color:#fff">T</div>
+    <div class="dot" style="background:#FF6319;color:#1F1430">M</div>
+    <div class="dot" style="background:#6CBE45"></div>
+    <div class="dot" style="background:#FCCC0A"></div>
+    <div class="dot" style="background:#00796F;color:#fff">H</div>
+    <div class="dot" style="background:#00933C;color:#1F1430">E</div>
+    <div class="dot" style="background:#996633;color:#fff">J</div>
+  </div>
+  <div class="uc">UC</div>
+</div>
+</body>
+</html>

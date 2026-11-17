@@ -1,0 +1,94 @@
+{
+ "mapBox": {
+  "x": 16,
+  "y": 722.984375,
+  "w": 358,
+  "h": 523.265625
+ },
+ "pins": [
+  {
+   "x": 172,
+   "y": 273,
+   "w": 30,
+   "h": 30,
+   "html": "<div class=\"leaflet-marker-icon pin leaflet-zoom-animated leaflet-interactive\" title=\"Queens Public Library at Corona\" tabindex=\"0\" role=\"button\" style=\"margin-left: -15px; margin-top: -15px; width: 30px; height: 30px; transform: translate3d(172px, 273px, 0px); z-index: 273;\"><span class=\"bullet bullet--study\">S</span></div>"
+  },
+  {
+   "x": 195,
+   "y": 281,
+   "w": 30,
+   "h": 30,
+   "html": "<div class=\"leaflet-marker-icon pin leaflet-zoom-animated leaflet-interactive\" title=\"Queens Museum\" tabindex=\"0\" role=\"button\" style=\"margin-left: -15px; margin-top: -15px; width: 30px; height: 30px; transform: translate3d(195px, 281px, 0px); z-index: 281;\"><span class=\"bullet bullet--explore\">E</span></div>"
+  },
+  {
+   "x": 165,
+   "y": 258,
+   "w": 30,
+   "h": 30,
+   "html": "<div class=\"leaflet-marker-icon pin leaflet-zoom-animated leaflet-interactive\" title=\"Queens Public Library at Langston Hughes\" tabindex=\"0\" role=\"button\" style=\"margin-left: -15px; margin-top: -15px; width: 30px; height: 30px; transform: translate3d(165px, 258px, 0px); z-index: 258;\"><span class=\"bullet bullet--study\">S</span></div>"
+  },
+  {
+   "x": 150,
+   "y": 295,
+   "w": 30,
+   "h": 30,
+   "html": "<div class=\"leaflet-marker-icon pin leaflet-zoom-animated leaflet-interactive\" title=\"Queens Public Library at Elmhurst\" tabindex=\"0\" role=\"button\" style=\"margin-left: -15px; margin-top: -15px; width: 30px; height: 30px; transform: translate3d(150px, 295px, 0px); z-index: 295;\"><span class=\"bullet bullet--study\">S</span></div>"
+  },
+  {
+   "x": 159,
+   "y": 251,
+   "w": 30,
+   "h": 30,
+   "html": "<div class=\"leaflet-marker-icon pin leaflet-zoom-animated leaflet-interactive\" title=\"Queens Public Library at East Elmhurst\" tabindex=\"0\" role=\"button\" style=\"margin-left: -15px; margin-top: -15px; width: 30px; height: 30px; transform: translate3d(159px, 251px, 0px); z-index: 251;\"><span class=\"bullet bullet--study\">S</span></div>"
+  },
+  {
+   "x": 138,
+   "y": 271,
+   "w": 30,
+   "h": 30,
+   "html": "<div class=\"leaflet-marker-icon pin leaflet-zoom-animated leaflet-interactive\" title=\"Queens Public Library at Jackson Heights\" tabindex=\"0\" role=\"button\" style=\"margin-left: -15px; margin-top: -15px; width: 30px; height: 30px; transform: translate3d(138px, 271px, 0px); z-index: 271;\"><span class=\"bullet bullet--study\">S</span></div>"
+  },
+  {
+   "x": 221,
+   "y": 258,
+   "w": 30,
+   "h": 30,
+   "html": "<div class=\"leaflet-marker-icon pin leaflet-zoom-animated leaflet-interactive\" title=\"Queens Public Library at Flushing\" tabindex=\"0\" role=\"button\" style=\"margin-left: -15px; margin-top: -15px; width: 30px; height: 30px; transform: translate3d(221px, 258px, 0px); z-index: 258;\"><span class=\"bullet bullet--study\">S</span></div>"
+  },
+  {
+   "x": 103,
+   "y": 282,
+   "w": 30,
+   "h": 30,
+   "html": "<div class=\"leaflet-marker-icon pin leaflet-zoom-animated leaflet-interactive\" title=\"Queens Public Library at Woodside\" tabindex=\"0\" role=\"button\" style=\"margin-left: -15px; margin-top: -15px; width: 30px; height: 30px; transform: translate3d(103px, 282px, 0px); z-index: 282;\"><span class=\"bullet bullet--study\">S</span></div>"
+  },
+  {
+   "x": 249,
+   "y": 246,
+   "w": 30,
+   "h": 30,
+   "html": "<div class=\"leaflet-marker-icon pin leaflet-zoom-animated leaflet-interactive\" title=\"Queens Public Library at McGoldrick\" tabindex=\"0\" role=\"button\" style=\"margin-left: -15px; margin-top: -15px; width: 30px; height: 30px; transform: translate3d(249px, 246px, 0px); z-index: 246;\"><span class=\"bullet bullet--study\">S</span></div>"
+  },
+  {
+   "x": 90,
+   "y": 256,
+   "w": 30,
+   "h": 30,
+   "html": "<div class=\"leaflet-marker-icon pin leaflet-zoom-animated leaflet-interactive\" title=\"Queens Public Library at Broadway\" tabindex=\"0\" role=\"button\" style=\"margin-left: -15px; margin-top: -15px; width: 30px; height: 30px; transform: translate3d(90px, 256px, 0px); z-index: 256;\"><span class=\"bullet bullet--study\">S</span></div>"
+  },
+  {
+   "x": 268,
+   "y": 227,
+   "w": 30,
+   "h": 30,
+   "html": "<div class=\"leaflet-marker-icon pin leaflet-zoom-animated leaflet-interactive\" title=\"Queens Public Library at Auburndale\" tabindex=\"0\" role=\"button\" style=\"margin-left: -15px; margin-top: -15px; width: 30px; height: 30px; transform: translate3d(268px, 227px, 0px); z-index: 227;\"><span class=\"bullet bullet--study\">S</span></div>"
+  },
+  {
+   "x": 175,
+   "y": 278,
+   "w": 18,
+   "h": 18,
+   "html": "<div class=\"leaflet-marker-icon leaflet-zoom-animated\" title=\"Center of Corona\" tabindex=\"0\" role=\"button\" style=\"margin-left: -9px; margin-top: -9px; width: 18px; height: 18px; transform: translate3d(175px, 278px, 0px); z-index: 278;\"><span class=\"pin-origin\"></span></div>"
+  }
+ ]
+}

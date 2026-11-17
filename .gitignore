@@ -95,3 +95,4 @@ app/dist_old/
 # Large agent/browser run transcripts kept locally as reference, not committed.
 
 .planning/
+.claude/worktrees/

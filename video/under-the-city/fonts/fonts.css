@@ -1,0 +1,4 @@
+@font-face { font-family: 'Archivo'; font-style: normal; font-weight: 400 900; font-stretch: 62% 125%; src: url(fonts/Archivo-normal-400-900.woff2) format('woff2'); }
+@font-face { font-family: 'Atkinson Hyperlegible'; font-style: italic; font-weight: 400; src: url(fonts/AtkinsonHyperlegible-italic-400.woff2) format('woff2'); }
+@font-face { font-family: 'Atkinson Hyperlegible'; font-style: normal; font-weight: 400; src: url(fonts/AtkinsonHyperlegible-normal-400.woff2) format('woff2'); }
+@font-face { font-family: 'Atkinson Hyperlegible'; font-style: normal; font-weight: 700; src: url(fonts/AtkinsonHyperlegible-normal-700.woff2) format('woff2'); }

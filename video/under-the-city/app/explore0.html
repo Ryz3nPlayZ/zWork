@@ -1,0 +1,871 @@
+<div class="app">
+    <main id="main">
+
+      <!-- For you -->
+      <section class="tab" id="tab-home" data-title="For you" aria-labelledby="home-title" hidden="">
+        <header class="hero">
+          <div class="hero__bar">
+            <p class="wordmark"><span class="logo" aria-hidden="true">U</span>Under the City</p>
+            <button type="button" class="hood-chip" id="home-hood" data-goto="you" aria-label="Neighborhood: Corona. Change it"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"></path><circle cx="12" cy="10" r="2.3"></circle></svg>Corona</button>
+          </div>
+          <p class="hero__lines" id="home-lines" aria-hidden="true"><span class="bullet bullet--study">S</span><span class="bullet bullet--tutoring">T</span><span class="bullet bullet--music">M</span><span class="bullet bullet--volunteering">V</span><span class="bullet bullet--workshop">W</span><span class="bullet bullet--support">H</span><span class="bullet bullet--explore">E</span><span class="bullet bullet--jobs">J</span></p>
+          <p class="hero__when" id="home-when">Wednesday afternoon</p>
+          <h1 class="hero__title largetitle" id="home-title">21 free things to do near Corona</h1>
+          <p class="hero__sub" id="home-sub">85 sessions and open hours every week, picked for age 15.</p>
+          <button type="button" class="searchpill" data-goto="explore" data-focus="#q">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="M16 16l4.5 4.5"></path></svg>
+            Search tutoring, music, study spots
+          </button>
+        </header>
+
+        <section class="strip" id="strip-card" aria-labelledby="strip-title">
+          <div class="strip__head">
+            <h2 id="strip-title">What's on today</h2>
+            <p class="strip__hint">Tap an hour</p>
+          </div>
+          <div class="strip__scroll"><ol class="stops" id="stops" aria-label="Hours of the day"><li><button type="button" class="stop stop--now" data-stop="0" aria-pressed="true" aria-label="Now: 14 listings">
+      <span class="stop__time">Now</span><span class="stop__dot"></span><span class="stop__minis"><span class="bullet bullet--xs bullet--tutoring">T</span><span class="bullet bullet--xs bullet--tutoring">T</span><span class="bullet bullet--xs bullet--explore">E</span><span class="bullet bullet--xs bullet--explore">E</span><span class="bullet bullet--xs bullet--study">S</span><span class="stop__more">+9</span></span>
+    </button></li><li><button type="button" class="stop" data-stop="1" aria-pressed="false" aria-label="4 pm: 14 listings">
+      <span class="stop__time">4 pm</span><span class="stop__dot"></span><span class="stop__minis"><span class="bullet bullet--xs bullet--tutoring">T</span><span class="bullet bullet--xs bullet--tutoring">T</span><span class="bullet bullet--xs bullet--explore">E</span><span class="bullet bullet--xs bullet--explore">E</span><span class="bullet bullet--xs bullet--study">S</span><span class="stop__more">+9</span></span>
+    </button></li><li><button type="button" class="stop" data-stop="2" aria-pressed="false" aria-label="5 pm: 12 listings">
+      <span class="stop__time">5 pm</span><span class="stop__dot"></span><span class="stop__minis"><span class="bullet bullet--xs bullet--tutoring">T</span><span class="bullet bullet--xs bullet--tutoring">T</span><span class="bullet bullet--xs bullet--study">S</span><span class="bullet bullet--xs bullet--study">S</span><span class="bullet bullet--xs bullet--study">S</span><span class="stop__more">+7</span></span>
+    </button></li><li><button type="button" class="stop" data-stop="3" aria-pressed="false" aria-label="6 pm: 3 listings">
+      <span class="stop__time">6 pm</span><span class="stop__dot"></span><span class="stop__minis"><span class="bullet bullet--xs bullet--tutoring">T</span><span class="bullet bullet--xs bullet--tutoring">T</span><span class="bullet bullet--xs bullet--study">S</span></span>
+    </button></li><li><button type="button" class="stop" data-stop="4" aria-pressed="false" aria-label="7 pm: 2 listings">
+      <span class="stop__time">7 pm</span><span class="stop__dot"></span><span class="stop__minis"><span class="bullet bullet--xs bullet--tutoring">T</span><span class="bullet bullet--xs bullet--study">S</span></span>
+    </button></li><li><button type="button" class="stop" data-stop="5" aria-pressed="false" aria-label="8 pm: 1 listing">
+      <span class="stop__time">8 pm</span><span class="stop__dot"></span><span class="stop__minis"><span class="bullet bullet--xs bullet--tutoring">T</span></span>
+    </button></li><li><button type="button" class="stop" data-stop="6" aria-pressed="false" aria-label="9 pm: 1 listing">
+      <span class="stop__time">9 pm</span><span class="stop__dot"></span><span class="stop__minis"><span class="bullet bullet--xs bullet--tutoring">T</span></span>
+    </button></li></ol></div>
+          <h3 class="vh" id="stop-title">On now</h3>
+          <ol class="rows" id="stop-rows" aria-labelledby="stop-title" aria-live="polite"><li><button type="button" class="row" data-open="brainfuse">
+    <span class="bullet bullet--tutoring" aria-hidden="true">T</span>
+    <span><span class="row__name">Live online tutoring (Brainfuse HelpNow)</span><span class="row__meta">Until 11 pm, Online or by phone</span></span>
+    <span class="cost cost--unknown">Cost unknown</span>
+  </button></li><li><button type="button" class="row" data-open="dial-a-teacher">
+    <span class="bullet bullet--tutoring" aria-hidden="true">T</span>
+    <span><span class="row__name">Dial-A-Teacher homework help</span><span class="row__meta">Starts 4 pm, Online or by phone</span></span>
+    <span class="cost cost--free">Free</span>
+  </button></li><li><button type="button" class="row" data-open="queens-museum">
+    <span class="bullet bullet--explore" aria-hidden="true">E</span>
+    <span><span class="row__name">Queens Museum</span><span class="row__meta">Until 5 pm, Corona, about 0.7 mi</span></span>
+    <span class="cost cost--free">Free</span>
+  </button></li><li><button type="button" class="row" data-open="queens-botanical">
+    <span class="bullet bullet--explore" aria-hidden="true">E</span>
+    <span><span class="row__name">Queens Botanical Garden</span><span class="row__meta">Until 4:30 pm, Flushing, about 1.7 mi</span></span>
+    <span class="cost cost--paid">$4</span>
+  </button></li><li><button type="button" class="row" data-open="cor-library">
+    <span class="bullet bullet--study" aria-hidden="true">S</span>
+    <span><span class="row__name">Corona Library</span><span class="row__meta">Until 6 pm, Corona, about 0.2 mi</span></span>
+    <span class="cost cost--free">Free</span>
+  </button></li><li><button type="button" class="row" data-open="lh-library">
+    <span class="bullet bullet--study" aria-hidden="true">S</span>
+    <span><span class="row__name">Langston Hughes Library</span><span class="row__meta">Until 6 pm, Corona, about 0.8 mi</span></span>
+    <span class="cost cost--free">Free</span>
+  </button></li><li class="rows__more"><button type="button" class="link-btn" data-stop-more="">See all of them in Explore</button></li></ol>
+        </section>
+
+        <section class="setup-card" id="setup-card" hidden="">
+          <p><b>Make this page yours.</b> Three quick questions, and everything here fits your age, neighborhood, and interests. Answers stay on this device.</p>
+          <button type="button" class="btn btn--sun" id="setup-start">Set up For you</button>
+        </section>
+
+        <section class="rail" aria-labelledby="picked-title">
+          <div class="sechead"><h2 id="picked-title">Picked for you</h2><button type="button" class="link-btn" data-goto="explore">See all</button></div>
+          <ol class="rail__track" id="picked"><li><button type="button" class="poster k-explore" data-open="nysci-free-fridays" aria-label="New York Hall of Science free Friday hours, Place to explore, Free, Fri 2–5 pm, Corona, about 0.4 mi">
+    <span class="poster__mark">E</span>
+    <span class="poster__kind">Place to explore</span>
+    <span class="poster__sticker">Free</span>
+    <span class="poster__name">New York Hall of Science free Friday hours</span>
+    <span class="poster__when">Fri 2–5 pm</span>
+    <span class="poster__where">Corona, about 0.4 mi</span>
+  </button></li><li><button type="button" class="poster k-explore" data-open="queens-museum" aria-label="Queens Museum, Place to explore, Free, On now until 5 pm, Corona, about 0.7 mi">
+    <span class="poster__mark">E</span>
+    <span class="poster__kind">Place to explore</span>
+    <span class="poster__sticker">Free</span>
+    <span class="poster__name">Queens Museum</span>
+    <span class="poster__when">On now until 5 pm</span>
+    <span class="poster__where">Corona, about 0.7 mi</span>
+  </button></li><li><button type="button" class="poster k-tutoring" data-open="dial-a-teacher" aria-label="Dial-A-Teacher homework help, Tutoring, Free, Today 4–7 pm, Online or by phone">
+    <span class="poster__mark">T</span>
+    <span class="poster__kind">Tutoring</span>
+    <span class="poster__sticker">Free</span>
+    <span class="poster__name">Dial-A-Teacher homework help</span>
+    <span class="poster__when">Today 4–7 pm</span>
+    <span class="poster__where">Online or by phone</span>
+  </button></li><li><button type="button" class="poster k-explore" data-open="queens-botanical" aria-label="Queens Botanical Garden, Place to explore, $4, On now until 4:30 pm, Flushing, about 1.7 mi">
+    <span class="poster__mark">E</span>
+    <span class="poster__kind">Place to explore</span>
+    <span class="poster__sticker">$4</span>
+    <span class="poster__name">Queens Botanical Garden</span>
+    <span class="poster__when">On now until 4:30 pm</span>
+    <span class="poster__where">Flushing, about 1.7 mi</span>
+  </button></li><li><button type="button" class="poster k-explore" data-open="lost-battalion" aria-label="Lost Battalion Hall Recreation Center, Place to explore, Free, Hours not listed, Rego Park, about 1.1 mi">
+    <span class="poster__mark">E</span>
+    <span class="poster__kind">Place to explore</span>
+    <span class="poster__sticker">Free</span>
+    <span class="poster__name">Lost Battalion Hall Recreation Center</span>
+    <span class="poster__when">Hours not listed</span>
+    <span class="poster__where">Rego Park, about 1.1 mi</span>
+  </button></li><li><button type="button" class="poster k-tutoring" data-open="brainfuse" aria-label="Live online tutoring (Brainfuse HelpNow), Tutoring, Cost unknown, On now until 11 pm, Online or by phone">
+    <span class="poster__mark">T</span>
+    <span class="poster__kind">Tutoring</span>
+    <span class="poster__sticker">Cost unknown</span>
+    <span class="poster__name">Live online tutoring (Brainfuse HelpNow)</span>
+    <span class="poster__when">On now until 11 pm</span>
+    <span class="poster__where">Online or by phone</span>
+  </button></li><li><button type="button" class="poster k-volunteering" data-open="qpl-p2psc" aria-label="Peer-to-Peer Service Collective, Volunteering, Free, Hours not listed, Online or by phone">
+    <span class="poster__mark">V</span>
+    <span class="poster__kind">Volunteering</span>
+    <span class="poster__sticker">Free</span>
+    <span class="poster__name">Peer-to-Peer Service Collective</span>
+    <span class="poster__when">Hours not listed</span>
+    <span class="poster__where">Online or by phone</span>
+  </button></li><li><button type="button" class="poster k-study" data-open="cor-library" aria-label="Corona Library, Study space, Free, Open now until 6 pm, Corona, about 0.2 mi">
+    <span class="poster__mark">S</span>
+    <span class="poster__kind">Study space</span>
+    <span class="poster__sticker">Free</span>
+    <span class="poster__name">Corona Library</span>
+    <span class="poster__when">Open now until 6 pm</span>
+    <span class="poster__where">Corona, about 0.2 mi</span>
+  </button></li></ol>
+        </section>
+
+        <section aria-labelledby="kinds-title">
+          <div class="sechead"><h2 id="kinds-title">Browse by kind</h2></div>
+          <div class="kinds" id="kinds"><button type="button" class="kind k-study" data-kind="study">
+      <span class="bullet" aria-hidden="true">S</span>
+      <span><span class="kind__name">Study spots</span><span class="kind__count">10 places</span></span>
+    </button><button type="button" class="kind k-tutoring" data-kind="tutoring">
+      <span class="bullet" aria-hidden="true">T</span>
+      <span><span class="kind__name">Tutoring</span><span class="kind__count">2 programs</span></span>
+    </button><button type="button" class="kind k-music" data-kind="music">
+      <span class="bullet" aria-hidden="true">M</span>
+      <span><span class="kind__name">Music</span><span class="kind__count">1 program</span></span>
+    </button><button type="button" class="kind k-volunteering" data-kind="volunteering">
+      <span class="bullet" aria-hidden="true">V</span>
+      <span><span class="kind__name">Volunteering</span><span class="kind__count">3 programs</span></span>
+    </button><button type="button" class="kind k-workshop" data-kind="workshop">
+      <span class="bullet" aria-hidden="true">W</span>
+      <span><span class="kind__name">Workshops</span><span class="kind__count">2 programs</span></span>
+    </button><button type="button" class="kind k-support" data-kind="support">
+      <span class="bullet" aria-hidden="true">H</span>
+      <span><span class="kind__name">Student support</span><span class="kind__count">2 programs</span></span>
+    </button><button type="button" class="kind k-explore" data-kind="explore">
+      <span class="bullet" aria-hidden="true">E</span>
+      <span><span class="kind__name">Places to explore</span><span class="kind__count">4 places</span></span>
+    </button><button type="button" class="kind k-jobs" data-kind="jobs">
+      <span class="bullet" aria-hidden="true">J</span>
+      <span><span class="kind__name">Jobs and internships</span><span class="kind__count">1 program</span></span>
+    </button></div>
+        </section>
+
+        <section class="rail" id="apply" aria-labelledby="apply-title">
+          <div class="sechead"><h2 id="apply-title">Apply soon</h2></div>
+          <ol class="rail__track" id="apply-track"><li><button type="button" class="poster k-volunteering" data-open="qpl-p2psc" aria-label="Peer-to-Peer Service Collective, Volunteering, Free, Apply by Oct 31, 3 days left, Online or by phone">
+    <span class="poster__mark">V</span>
+    <span class="poster__kind">Volunteering</span>
+    <span class="poster__sticker">Free</span>
+    <span class="poster__name">Peer-to-Peer Service Collective</span>
+    <span class="poster__when">Apply by Oct 31, 3 days left</span>
+    <span class="poster__where">Online or by phone</span>
+  </button></li><li><button type="button" class="poster k-jobs" data-open="nysci-explainer" aria-label="NYSCI Explainer (Science Career Ladder), Jobs and internships, Free, Applications open Dec 1, Corona, about 0.4 mi">
+    <span class="poster__mark">J</span>
+    <span class="poster__kind">Jobs and internships</span>
+    <span class="poster__sticker">Free</span>
+    <span class="poster__name">NYSCI Explainer (Science Career Ladder)</span>
+    <span class="poster__when">Applications open Dec 1</span>
+    <span class="poster__where">Corona, about 0.4 mi</span>
+  </button></li></ol>
+        </section>
+
+        <section class="rail" id="weekend" aria-labelledby="weekend-title">
+          <div class="sechead"><h2 id="weekend-title">This weekend</h2></div>
+          <ol class="rail__track" id="weekend-track"><li><button type="button" class="poster k-explore" data-open="queens-botanical" aria-label="Queens Botanical Garden, Place to explore, $4, Sat 8 am–4:30 pm, Flushing, about 1.7 mi">
+    <span class="poster__mark">E</span>
+    <span class="poster__kind">Place to explore</span>
+    <span class="poster__sticker">$4</span>
+    <span class="poster__name">Queens Botanical Garden</span>
+    <span class="poster__when">Sat 8 am–4:30 pm</span>
+    <span class="poster__where">Flushing, about 1.7 mi</span>
+  </button></li><li><button type="button" class="poster k-explore" data-open="queens-museum" aria-label="Queens Museum, Place to explore, Free, Sat 11 am–5 pm, Corona, about 0.7 mi">
+    <span class="poster__mark">E</span>
+    <span class="poster__kind">Place to explore</span>
+    <span class="poster__sticker">Free</span>
+    <span class="poster__name">Queens Museum</span>
+    <span class="poster__when">Sat 11 am–5 pm</span>
+    <span class="poster__where">Corona, about 0.7 mi</span>
+  </button></li><li><button type="button" class="poster k-tutoring" data-open="brainfuse" aria-label="Live online tutoring (Brainfuse HelpNow), Tutoring, Cost unknown, Sat 2–11 pm, Online or by phone">
+    <span class="poster__mark">T</span>
+    <span class="poster__kind">Tutoring</span>
+    <span class="poster__sticker">Cost unknown</span>
+    <span class="poster__name">Live online tutoring (Brainfuse HelpNow)</span>
+    <span class="poster__when">Sat 2–11 pm</span>
+    <span class="poster__where">Online or by phone</span>
+  </button></li></ol>
+        </section>
+
+        <section id="upcoming" aria-labelledby="upcoming-title" hidden="">
+          <div class="sechead"><h2 id="upcoming-title">Coming up from your saved</h2><button type="button" class="link-btn" data-goto="saved">All saved</button></div>
+          <ol class="rows rows--card" id="upcoming-rows"></ol>
+        </section>
+
+        <p class="sample-note" hidden="">
+          The library hours here were checked against each branch's page. Programs marked “Not checked yet” are samples until their source is confirmed.
+          <button type="button" class="link-btn" data-sample-hide="">Hide</button>
+        </p>
+      </section>
+
+      <!-- Explore -->
+      <section class="tab" id="tab-explore" data-title="Explore" aria-labelledby="explore-title">
+        <h1 id="explore-title" class="largetitle">Explore</h1>
+
+        <p class="sample-note" hidden="">
+          The library hours here were checked against each branch's page. Programs marked “Not checked yet” are samples until their source is confirmed.
+          <button type="button" class="link-btn" data-sample-hide="">Hide</button>
+        </p>
+
+        <form class="search" id="search" role="search">
+          <label class="vh" for="q">What do you need?</label>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="M16 16l4.5 4.5"></path></svg>
+          <input id="q" name="q" type="search" autocomplete="off" enterkeyhint="search" placeholder="What do you need?" value="" style="">
+          <button type="submit" class="btn btn--primary">Search</button>
+        </form>
+        <button type="button" class="now" id="right-now" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 7.5V12l3 2"></path></svg>
+          <span><b>Free right now</b><small>No-cost places and programs open in the next 2 hours</small></span>
+        </button>
+        <div class="examples" id="examples">
+          <p class="examples__label">Try one:</p>
+          <div class="examples__row">
+            <button type="button" class="example">Free place to study before 5 near Jackson Heights</button>
+            <button type="button" class="example">Free physics tutoring I can get to after school</button>
+            <button type="button" class="example">Somewhere to practice piano on weekends, under $10</button>
+          </div>
+        </div>
+
+        <div class="needs" role="radiogroup" aria-label="What do you need?" id="needs"><button type="button" class="need need--all" role="radio" data-need="any" aria-checked="true">Anything</button><button type="button" class="need" role="radio" data-need="study" aria-checked="false"><span class="bullet bullet--sm bullet--study" aria-hidden="true">S</span>Study</button><button type="button" class="need" role="radio" data-need="tutoring" aria-checked="false"><span class="bullet bullet--sm bullet--tutoring" aria-hidden="true">T</span>Tutoring</button><button type="button" class="need" role="radio" data-need="music" aria-checked="false"><span class="bullet bullet--sm bullet--music" aria-hidden="true">M</span>Music</button><button type="button" class="need" role="radio" data-need="volunteering" aria-checked="false"><span class="bullet bullet--sm bullet--volunteering" aria-hidden="true">V</span>Volunteer</button><button type="button" class="need" role="radio" data-need="workshop" aria-checked="false"><span class="bullet bullet--sm bullet--workshop" aria-hidden="true">W</span>Workshops</button><button type="button" class="need" role="radio" data-need="support" aria-checked="false"><span class="bullet bullet--sm bullet--support" aria-hidden="true">H</span>Help and support</button><button type="button" class="need" role="radio" data-need="explore" aria-checked="false"><span class="bullet bullet--sm bullet--explore" aria-hidden="true">E</span>Explore</button><button type="button" class="need" role="radio" data-need="jobs" aria-checked="false"><span class="bullet bullet--sm bullet--jobs" aria-hidden="true">J</span>Jobs</button></div>
+
+        <div class="filterbar">
+          <label class="field field--inline">
+            <span>Near</span>
+            <select id="f-hood"><option value="">Anywhere</option><option value="Jackson Heights">Jackson Heights</option><option value="Elmhurst">Elmhurst</option><option value="Corona" selected="">Corona</option><option value="Woodside">Woodside</option><option value="Astoria">Astoria</option><option value="Flushing">Flushing</option></select>
+          </label>
+          <button type="button" class="btn btn--quiet" id="filters-toggle" aria-expanded="false" aria-controls="filters">
+            Filters <span class="count" id="filters-count">1</span>
+          </button>
+        </div>
+
+        <p class="basics__line" id="basics">Searches start at <b>age 15, near Corona</b>. <button type="button" class="link-btn" data-goto="you">Change</button></p>
+
+        <div class="filters" id="filters" hidden="">
+          <label class="field"><span>Day</span><select id="f-day"><option value="any" selected="">Any day</option><option value="wed">Today (Wed)</option><option value="weekend">Weekend</option><option value="mon">Monday</option><option value="tue">Tuesday</option><option value="wed">Wednesday</option><option value="thu">Thursday</option><option value="fri">Friday</option><option value="sat">Saturday</option><option value="sun">Sunday</option></select></label>
+          <label class="field"><span>Free from</span><select id="f-from"><option value="any" selected="">Any time</option><option value="420">7 am</option><option value="450">7:30 am</option><option value="480">8 am</option><option value="510">8:30 am</option><option value="540">9 am</option><option value="570">9:30 am</option><option value="600">10 am</option><option value="630">10:30 am</option><option value="660">11 am</option><option value="690">11:30 am</option><option value="720">noon</option><option value="750">12:30 pm</option><option value="780">1 pm</option><option value="810">1:30 pm</option><option value="840">2 pm</option><option value="870">2:30 pm</option><option value="900">3 pm</option><option value="930">3:30 pm</option><option value="960">4 pm</option><option value="990">4:30 pm</option><option value="1020">5 pm</option><option value="1050">5:30 pm</option><option value="1080">6 pm</option><option value="1110">6:30 pm</option><option value="1140">7 pm</option><option value="1170">7:30 pm</option><option value="1200">8 pm</option><option value="1230">8:30 pm</option><option value="1260">9 pm</option></select></label>
+          <label class="field"><span>Until</span><select id="f-to"><option value="any" selected="">Any time</option><option value="420">7 am</option><option value="450">7:30 am</option><option value="480">8 am</option><option value="510">8:30 am</option><option value="540">9 am</option><option value="570">9:30 am</option><option value="600">10 am</option><option value="630">10:30 am</option><option value="660">11 am</option><option value="690">11:30 am</option><option value="720">noon</option><option value="750">12:30 pm</option><option value="780">1 pm</option><option value="810">1:30 pm</option><option value="840">2 pm</option><option value="870">2:30 pm</option><option value="900">3 pm</option><option value="930">3:30 pm</option><option value="960">4 pm</option><option value="990">4:30 pm</option><option value="1020">5 pm</option><option value="1050">5:30 pm</option><option value="1080">6 pm</option><option value="1110">6:30 pm</option><option value="1140">7 pm</option><option value="1170">7:30 pm</option><option value="1200">8 pm</option><option value="1230">8:30 pm</option><option value="1260">9 pm</option></select></label>
+          <label class="field"><span>Budget</span><select id="f-budget"><option value="any" selected="">Any cost</option><option value="0">Free only</option><option value="5">Up to $5</option><option value="10">Up to $10</option><option value="20">Up to $20</option></select></label>
+          <label class="field"><span>Travel up to</span><select id="f-travel"><option value="any" selected="">Any distance</option><option value="0.5">About 0.5 mi</option><option value="1">About 1 mi</option><option value="2">About 2 mi</option></select></label>
+          <label class="field"><span>Your age</span><select id="f-age"><option value="any">Any age</option><option value="10">10</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="14">14</option><option value="15" selected="">15</option><option value="16">16</option><option value="17">17</option><option value="18">18</option><option value="19">19</option></select></label>
+          <button type="button" class="btn btn--quiet filters__reset" id="filters-reset">Clear all filters</button>
+        </div>
+
+        <div class="summary">
+          <p class="summary__count" id="count" aria-live="polite">25 matches near Corona</p>
+          <div class="viewtoggle" role="group" aria-label="Show results as">
+            <button type="button" data-view="list" aria-pressed="true">List</button>
+            <button type="button" data-view="map" aria-pressed="false">Map</button>
+          </div>
+        </div>
+        <ul class="chips" id="active-chips" aria-label="Active filters"><li><button type="button" class="chip" data-clear="hood" aria-label="Remove filter: Near Corona">Near Corona<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"></path></svg></button></li><li><button type="button" class="chip" data-clear="age" aria-label="Remove filter: Age 15">Age 15<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"></path></svg></button></li></ul>
+
+        <div class="results" id="results" data-view="list">
+          <ol class="cards" id="list"><li><article class="card" aria-labelledby="n-cor-library">
+    <div class="card__head">
+      <span class="bullet bullet--study" aria-hidden="true">S</span>
+      <div>
+        <button type="button" class="card__name" id="n-cor-library" data-open="cor-library">Queens Public Library at Corona</button>
+        <p class="card__type">Study space</p>
+      </div>
+      <span class="cost cost--free">Free</span>
+    </div>
+    <div class="card__facts">
+      <p>38-23 104 Street, Corona<span class="muted">, about 0.2 mi</span></p>
+      <p>Today, 10 am–6 pm</p>
+      
+    </div>
+    <p class="why">Free, open until 6 pm today, about 0.2 mi away, all ages</p>
+    <p class="card__source">Source: <a href="https://www.queenslibrary.org/about-us/locations/corona" target="_blank" rel="noopener">queenslibrary.org</a>, <span class="">Checked Oct 25</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="cor-library" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.google.com/maps/dir/?api=1&amp;destination=38-23%20104%20Street%2C%20Corona%2C%20NY%2011368" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l9.2 9.2-9.2 9.2L2.8 12z"></path><path d="M9 13.5v-2.5h5.5M12.5 8.5l2.5 2.5-2.5 2.5"></path></svg>Directions</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-qpl-p2psc">
+    <div class="card__head">
+      <span class="bullet bullet--volunteering" aria-hidden="true">V</span>
+      <div>
+        <button type="button" class="card__name" id="n-qpl-p2psc" data-open="qpl-p2psc">Peer-to-Peer Service Collective</button>
+        <p class="card__type">Volunteering</p>
+      </div>
+      <span class="cost cost--free">Free</span>
+    </div>
+    <div class="card__facts">
+      <p>Online application. Programs run at Queens Library branches.</p>
+      <p><span class="unknown">Hours: Unknown. Check the source.</span></p>
+      <p class="apply apply--soon">Apply by Oct 31, 3 days left</p>
+    </div>
+    <p class="why">Free, hours not listed, online or by phone, ages 14 to 17, grades 9 to 12</p>
+    <p class="card__source">Source: <a href="https://volunteer.queenslibrary.org/peer-to-peer-service-collective" target="_blank" rel="noopener">volunteer.queenslibrary.org</a>, <span class="">Checked Oct 26</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="qpl-p2psc" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://volunteer.queenslibrary.org/peer-to-peer-service-collective" target="_blank" rel="noopener">Open the site</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-nysci-free-fridays">
+    <div class="card__head">
+      <span class="bullet bullet--explore" aria-hidden="true">E</span>
+      <div>
+        <button type="button" class="card__name" id="n-nysci-free-fridays" data-open="nysci-free-fridays">New York Hall of Science free Friday hours</button>
+        <p class="card__type">Place to explore</p>
+      </div>
+      <span class="cost cost--free">Free</span>
+    </div>
+    <div class="card__facts">
+      <p>47-01 111th Street, Corona<span class="muted">, about 0.4 mi</span></p>
+      <p>Friday, 2–5 pm</p>
+      
+    </div>
+    <p class="why">Free, meets Fri 2–5 pm, about 0.4 mi away, all ages, under 18 with an adult</p>
+    <p class="card__source">Source: <a href="https://nysci.org/visit" target="_blank" rel="noopener">nysci.org</a>, <span class="">Checked Oct 26</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="nysci-free-fridays" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.google.com/maps/dir/?api=1&amp;destination=47-01%20111th%20Street%2C%20Corona%2C%20NY%2011368" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l9.2 9.2-9.2 9.2L2.8 12z"></path><path d="M9 13.5v-2.5h5.5M12.5 8.5l2.5 2.5-2.5 2.5"></path></svg>Directions</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-queens-museum">
+    <div class="card__head">
+      <span class="bullet bullet--explore" aria-hidden="true">E</span>
+      <div>
+        <button type="button" class="card__name" id="n-queens-museum" data-open="queens-museum">Queens Museum</button>
+        <p class="card__type">Place to explore</p>
+      </div>
+      <span class="cost cost--free">Free</span>
+    </div>
+    <div class="card__facts">
+      <p>New York City Building, Corona<span class="muted">, about 0.7 mi</span></p>
+      <p>Today, noon–5 pm</p>
+      
+    </div>
+    <p class="why">Free, meets today noon–5 pm, about 0.7 mi away, all ages</p>
+    <p class="card__source">Source: <a href="https://queensmuseum.org/visit" target="_blank" rel="noopener">queensmuseum.org</a>, <span class="">Checked Oct 26</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="queens-museum" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.google.com/maps/dir/?api=1&amp;destination=New%20York%20City%20Building%2C%20Flushing%20Meadows%20Corona%20Park%2C%20Queens%2C%20NY%2011368" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l9.2 9.2-9.2 9.2L2.8 12z"></path><path d="M9 13.5v-2.5h5.5M12.5 8.5l2.5 2.5-2.5 2.5"></path></svg>Directions</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-lh-library">
+    <div class="card__head">
+      <span class="bullet bullet--study" aria-hidden="true">S</span>
+      <div>
+        <button type="button" class="card__name" id="n-lh-library" data-open="lh-library">Queens Public Library at Langston Hughes</button>
+        <p class="card__type">Study space</p>
+      </div>
+      <span class="cost cost--free">Free</span>
+    </div>
+    <div class="card__facts">
+      <p>100-01 Northern Boulevard, Corona<span class="muted">, about 0.8 mi</span></p>
+      <p>Today, 10 am–6 pm</p>
+      
+    </div>
+    <p class="why">Free, open until 6 pm today, about 0.8 mi away, all ages</p>
+    <p class="card__source">Source: <a href="https://www.queenslibrary.org/about-us/locations/langston-hughes" target="_blank" rel="noopener">queenslibrary.org</a>, <span class="">Checked Oct 25</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="lh-library" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.google.com/maps/dir/?api=1&amp;destination=100-01%20Northern%20Boulevard%2C%20Corona%2C%20NY%2011368" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l9.2 9.2-9.2 9.2L2.8 12z"></path><path d="M9 13.5v-2.5h5.5M12.5 8.5l2.5 2.5-2.5 2.5"></path></svg>Directions</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-elm-library">
+    <div class="card__head">
+      <span class="bullet bullet--study" aria-hidden="true">S</span>
+      <div>
+        <button type="button" class="card__name" id="n-elm-library" data-open="elm-library">Queens Public Library at Elmhurst</button>
+        <p class="card__type">Study space</p>
+      </div>
+      <span class="cost cost--free">Free</span>
+    </div>
+    <div class="card__facts">
+      <p>86-07 Broadway, Elmhurst<span class="muted">, about 1.1 mi</span></p>
+      <p>Today, 10 am–6 pm</p>
+      
+    </div>
+    <p class="why">Free, open until 6 pm today, about 1.1 mi away, all ages</p>
+    <p class="card__source">Source: <a href="https://www.queenslibrary.org/about-us/locations/elmhurst" target="_blank" rel="noopener">queenslibrary.org</a>, <span class="">Checked Oct 25</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="elm-library" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.google.com/maps/dir/?api=1&amp;destination=86-07%20Broadway%2C%20Elmhurst%2C%20NY%2011373" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l9.2 9.2-9.2 9.2L2.8 12z"></path><path d="M9 13.5v-2.5h5.5M12.5 8.5l2.5 2.5-2.5 2.5"></path></svg>Directions</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-ee-library">
+    <div class="card__head">
+      <span class="bullet bullet--study" aria-hidden="true">S</span>
+      <div>
+        <button type="button" class="card__name" id="n-ee-library" data-open="ee-library">Queens Public Library at East Elmhurst</button>
+        <p class="card__type">Study space</p>
+      </div>
+      <span class="cost cost--free">Free</span>
+    </div>
+    <div class="card__facts">
+      <p>95-06 Astoria Boulevard, East Elmhurst<span class="muted">, about 1.2 mi</span></p>
+      <p>Today, 10 am–6 pm</p>
+      
+    </div>
+    <p class="why">Free, open until 6 pm today, about 1.2 mi away, all ages</p>
+    <p class="card__source">Source: <a href="https://www.queenslibrary.org/about-us/locations/east-elmhurst" target="_blank" rel="noopener">queenslibrary.org</a>, <span class="">Checked Oct 25</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="ee-library" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.google.com/maps/dir/?api=1&amp;destination=95-06%20Astoria%20Boulevard%2C%20East%20Elmhurst%2C%20NY%2011369" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l9.2 9.2-9.2 9.2L2.8 12z"></path><path d="M9 13.5v-2.5h5.5M12.5 8.5l2.5 2.5-2.5 2.5"></path></svg>Directions</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-jh-library">
+    <div class="card__head">
+      <span class="bullet bullet--study" aria-hidden="true">S</span>
+      <div>
+        <button type="button" class="card__name" id="n-jh-library" data-open="jh-library">Queens Public Library at Jackson Heights</button>
+        <p class="card__type">Study space</p>
+      </div>
+      <span class="cost cost--free">Free</span>
+    </div>
+    <div class="card__facts">
+      <p>35-51 81 Street, Jackson Heights<span class="muted">, about 1.4 mi</span></p>
+      <p>Today, 10 am–6 pm</p>
+      
+    </div>
+    <p class="why">Free, open until 6 pm today, about 1.4 mi away, all ages</p>
+    <p class="card__source">Source: <a href="https://www.queenslibrary.org/about-us/locations/jackson-heights" target="_blank" rel="noopener">queenslibrary.org</a>, <span class="">Checked Oct 25</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="jh-library" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.google.com/maps/dir/?api=1&amp;destination=35-51%2081%20Street%2C%20Jackson%20Heights%2C%20NY%2011372" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l9.2 9.2-9.2 9.2L2.8 12z"></path><path d="M9 13.5v-2.5h5.5M12.5 8.5l2.5 2.5-2.5 2.5"></path></svg>Directions</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-qpl-teen-volunteer">
+    <div class="card__head">
+      <span class="bullet bullet--volunteering" aria-hidden="true">V</span>
+      <div>
+        <button type="button" class="card__name" id="n-qpl-teen-volunteer" data-open="qpl-teen-volunteer">Teen volunteering at Queens Public Library</button>
+        <p class="card__type">Volunteering</p>
+      </div>
+      <span class="cost cost--free">Free</span>
+    </div>
+    <div class="card__facts">
+      <p>Apply online. Volunteer at a Queens Library branch.</p>
+      <p><span class="unknown">Hours: Unknown. Check the source.</span></p>
+      
+    </div>
+    <p class="why">Free, hours not listed, online or by phone, ages 14 and up</p>
+    <p class="card__source">Source: <a href="https://www.queenslibrary.org/programs-activities/teens/volunteer-job-opportunities" target="_blank" rel="noopener">queenslibrary.org</a>, <span class="">Checked Oct 26</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="qpl-teen-volunteer" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.queenslibrary.org/programs-activities/teens/volunteer-job-opportunities" target="_blank" rel="noopener">Open the site</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-dial-a-teacher">
+    <div class="card__head">
+      <span class="bullet bullet--tutoring" aria-hidden="true">T</span>
+      <div>
+        <button type="button" class="card__name" id="n-dial-a-teacher" data-open="dial-a-teacher">Dial-A-Teacher homework help</button>
+        <p class="card__type">Tutoring</p>
+      </div>
+      <span class="cost cost--free">Free</span>
+    </div>
+    <div class="card__facts">
+      <p>By phone or online</p>
+      <p>Today, 4–7 pm</p>
+      
+    </div>
+    <p class="why">Free, meets today 4–7 pm, online or by phone, grades k to 12</p>
+    <p class="card__source">Source: <a href="https://www.uft.org/dial-a-teacher" target="_blank" rel="noopener">uft.org</a>, <span class="">Checked Oct 26</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="dial-a-teacher" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.uft.org/dial-a-teacher" target="_blank" rel="noopener">Open the site</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-flushing-library">
+    <div class="card__head">
+      <span class="bullet bullet--study" aria-hidden="true">S</span>
+      <div>
+        <button type="button" class="card__name" id="n-flushing-library" data-open="flushing-library">Queens Public Library at Flushing</button>
+        <p class="card__type">Study space</p>
+      </div>
+      <span class="cost cost--free">Free</span>
+    </div>
+    <div class="card__facts">
+      <p>41-17 Main Street, Flushing<span class="muted">, about 1.8 mi</span></p>
+      <p>Today, 10 am–8 pm</p>
+      
+    </div>
+    <p class="why">Free, open until 8 pm today, about 1.8 mi away, all ages</p>
+    <p class="card__source">Source: <a href="https://www.queenslibrary.org/about-us/locations/flushing" target="_blank" rel="noopener">queenslibrary.org</a>, <span class="">Checked Oct 26</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="flushing-library" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.google.com/maps/dir/?api=1&amp;destination=41-17%20Main%20Street%2C%20Flushing%2C%20NY%2011355" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l9.2 9.2-9.2 9.2L2.8 12z"></path><path d="M9 13.5v-2.5h5.5M12.5 8.5l2.5 2.5-2.5 2.5"></path></svg>Directions</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-nysci-explainer">
+    <div class="card__head">
+      <span class="bullet bullet--jobs" aria-hidden="true">J</span>
+      <div>
+        <button type="button" class="card__name" id="n-nysci-explainer" data-open="nysci-explainer">NYSCI Explainer (Science Career Ladder)</button>
+        <p class="card__type">Jobs and internships</p>
+      </div>
+      <span class="cost cost--free">Free</span>
+    </div>
+    <div class="card__facts">
+      <p>47-01 111th Street, Corona<span class="muted">, about 0.4 mi</span></p>
+      <p>High schoolers work at least 5 hours a week on weekends, for a full year</p>
+      <p class="apply">Applications open Dec 1</p>
+    </div>
+    <p class="why">Free, about 0.4 mi away, high school and college students</p>
+    <p class="card__source">Source: <a href="https://nysci.org/become-a-nysci-explainer" target="_blank" rel="noopener">nysci.org</a>, <span class="">Checked Oct 26</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="nysci-explainer" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.google.com/maps/dir/?api=1&amp;destination=47-01%20111th%20Street%2C%20Corona%2C%20NY%2011368" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l9.2 9.2-9.2 9.2L2.8 12z"></path><path d="M9 13.5v-2.5h5.5M12.5 8.5l2.5 2.5-2.5 2.5"></path></svg>Directions</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-queens-teens">
+    <div class="card__head">
+      <span class="bullet bullet--workshop" aria-hidden="true">W</span>
+      <div>
+        <button type="button" class="card__name" id="n-queens-teens" data-open="queens-teens">Queens Teens at the Queens Museum</button>
+        <p class="card__type">Workshop</p>
+      </div>
+      <span class="cost cost--free">Free</span>
+    </div>
+    <div class="card__facts">
+      <p>New York City Building, Corona<span class="muted">, about 0.7 mi</span></p>
+      <p>Saturday afternoons, all school year</p>
+      
+    </div>
+    <p class="why">Free, about 0.7 mi away, high school students</p>
+    <p class="card__source">Source: <a href="https://www.queensmuseum.org/queens-teens" target="_blank" rel="noopener">queensmuseum.org</a>, <span class="">Checked Oct 26</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="queens-teens" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.google.com/maps/dir/?api=1&amp;destination=New%20York%20City%20Building%2C%20Flushing%20Meadows%20Corona%20Park%2C%20Queens%2C%20NY%2011368" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l9.2 9.2-9.2 9.2L2.8 12z"></path><path d="M9 13.5v-2.5h5.5M12.5 8.5l2.5 2.5-2.5 2.5"></path></svg>Directions</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-qm-open-studio">
+    <div class="card__head">
+      <span class="bullet bullet--workshop" aria-hidden="true">W</span>
+      <div>
+        <button type="button" class="card__name" id="n-qm-open-studio" data-open="qm-open-studio">Open Studio for Teens and Adults (ArtAccess)</button>
+        <p class="card__type">Workshop</p>
+      </div>
+      <span class="cost cost--free">Free</span>
+    </div>
+    <div class="card__facts">
+      <p>New York City Building, Corona<span class="muted">, about 0.7 mi</span></p>
+      <p>First Saturday and Sunday of each month, 2 to 4 pm</p>
+      
+    </div>
+    <p class="why">Free, about 0.7 mi away, teens and adults</p>
+    <p class="card__source">Source: <a href="https://queensmuseum.org/program/family-programs" target="_blank" rel="noopener">queensmuseum.org</a>, <span class="">Checked Oct 26</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="qm-open-studio" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.google.com/maps/dir/?api=1&amp;destination=New%20York%20City%20Building%2C%20Flushing%20Meadows%20Corona%20Park%2C%20Queens%2C%20NY%2011368" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l9.2 9.2-9.2 9.2L2.8 12z"></path><path d="M9 13.5v-2.5h5.5M12.5 8.5l2.5 2.5-2.5 2.5"></path></svg>Directions</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-queens-botanical">
+    <div class="card__head">
+      <span class="bullet bullet--explore" aria-hidden="true">E</span>
+      <div>
+        <button type="button" class="card__name" id="n-queens-botanical" data-open="queens-botanical">Queens Botanical Garden</button>
+        <p class="card__type">Place to explore</p>
+      </div>
+      <span class="cost cost--paid">$4 with a student ID. Free from Dec 16 to Mar 31.</span>
+    </div>
+    <div class="card__facts">
+      <p>43-50 Main Street, Flushing<span class="muted">, about 1.7 mi</span></p>
+      <p>Today, 8 am–4:30 pm</p>
+      
+    </div>
+    <p class="why">$4 with a student ID. Free from Dec 16 to Mar 31., meets today 8 am–4:30 pm, about 1.7 mi away, all ages</p>
+    <p class="card__source">Source: <a href="https://queensbotanical.org/" target="_blank" rel="noopener">queensbotanical.org</a>, <span class="">Checked Oct 26</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="queens-botanical" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.google.com/maps/dir/?api=1&amp;destination=43-50%20Main%20Street%2C%20Flushing%2C%20NY%2011355" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l9.2 9.2-9.2 9.2L2.8 12z"></path><path d="M9 13.5v-2.5h5.5M12.5 8.5l2.5 2.5-2.5 2.5"></path></svg>Directions</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-woodside-library">
+    <div class="card__head">
+      <span class="bullet bullet--study" aria-hidden="true">S</span>
+      <div>
+        <button type="button" class="card__name" id="n-woodside-library" data-open="woodside-library">Queens Public Library at Woodside</button>
+        <p class="card__type">Study space</p>
+      </div>
+      <span class="cost cost--free">Free</span>
+    </div>
+    <div class="card__facts">
+      <p>54-22 Skillman Avenue, Woodside<span class="muted">, about 2.6 mi</span></p>
+      <p>Today, 10 am–6 pm</p>
+      
+    </div>
+    <p class="why">Free, open until 6 pm today, about 2.6 mi away, all ages</p>
+    <p class="card__source">Source: <a href="https://www.queenslibrary.org/about-us/locations/woodside" target="_blank" rel="noopener">queenslibrary.org</a>, <span class="">Checked Oct 26</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="woodside-library" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.google.com/maps/dir/?api=1&amp;destination=54-22%20Skillman%20Avenue%2C%20Woodside%2C%20NY%2011377" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l9.2 9.2-9.2 9.2L2.8 12z"></path><path d="M9 13.5v-2.5h5.5M12.5 8.5l2.5 2.5-2.5 2.5"></path></svg>Directions</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-lost-battalion">
+    <div class="card__head">
+      <span class="bullet bullet--explore" aria-hidden="true">E</span>
+      <div>
+        <button type="button" class="card__name" id="n-lost-battalion" data-open="lost-battalion">Lost Battalion Hall Recreation Center</button>
+        <p class="card__type">Place to explore</p>
+      </div>
+      <span class="cost cost--free">Free</span>
+    </div>
+    <div class="card__facts">
+      <p>93-29 Queens Boulevard, Rego Park<span class="muted">, about 1.1 mi</span></p>
+      <p><span class="unknown">Hours: Unknown. Check the source.</span></p>
+      
+    </div>
+    <p class="why">Free, hours not listed, about 1.1 mi away, free under 18</p>
+    <p class="card__source">Source: <a href="https://www.nycgovparks.org/programs/recreation-centers/membership" target="_blank" rel="noopener">nycgovparks.org</a>, <span class="">Checked Oct 26</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="lost-battalion" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.google.com/maps/dir/?api=1&amp;destination=93-29%20Queens%20Boulevard%2C%20Rego%20Park%2C%20NY%2011374" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l9.2 9.2-9.2 9.2L2.8 12z"></path><path d="M9 13.5v-2.5h5.5M12.5 8.5l2.5 2.5-2.5 2.5"></path></svg>Directions</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-mcgoldrick-library">
+    <div class="card__head">
+      <span class="bullet bullet--study" aria-hidden="true">S</span>
+      <div>
+        <button type="button" class="card__name" id="n-mcgoldrick-library" data-open="mcgoldrick-library">Queens Public Library at McGoldrick</button>
+        <p class="card__type">Study space</p>
+      </div>
+      <span class="cost cost--free">Free</span>
+    </div>
+    <div class="card__facts">
+      <p>155-06 Roosevelt Avenue, Flushing<span class="muted">, about 2.9 mi</span></p>
+      <p>Today, 10 am–6 pm</p>
+      
+    </div>
+    <p class="why">Free, open until 6 pm today, about 2.9 mi away, all ages</p>
+    <p class="card__source">Source: <a href="https://www.queenslibrary.org/about-us/locations/mcgoldrick" target="_blank" rel="noopener">queenslibrary.org</a>, <span class="">Checked Oct 26</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="mcgoldrick-library" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.google.com/maps/dir/?api=1&amp;destination=155-06%20Roosevelt%20Avenue%2C%20Flushing%2C%20NY%2011354" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l9.2 9.2-9.2 9.2L2.8 12z"></path><path d="M9 13.5v-2.5h5.5M12.5 8.5l2.5 2.5-2.5 2.5"></path></svg>Directions</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-broadway-library">
+    <div class="card__head">
+      <span class="bullet bullet--study" aria-hidden="true">S</span>
+      <div>
+        <button type="button" class="card__name" id="n-broadway-library" data-open="broadway-library">Queens Public Library at Broadway</button>
+        <p class="card__type">Study space</p>
+      </div>
+      <span class="cost cost--free">Free</span>
+    </div>
+    <div class="card__facts">
+      <p>40-20 Broadway, Astoria<span class="muted">, about 3.2 mi</span></p>
+      <p>Today, 10 am–6 pm</p>
+      
+    </div>
+    <p class="why">Free, open until 6 pm today, about 3.2 mi away, all ages</p>
+    <p class="card__source">Source: <a href="https://www.queenslibrary.org/about-us/locations/broadway" target="_blank" rel="noopener">queenslibrary.org</a>, <span class="">Checked Oct 26</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="broadway-library" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.google.com/maps/dir/?api=1&amp;destination=40-20%20Broadway%2C%20Astoria%2C%20NY%2011103" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l9.2 9.2-9.2 9.2L2.8 12z"></path><path d="M9 13.5v-2.5h5.5M12.5 8.5l2.5 2.5-2.5 2.5"></path></svg>Directions</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-brainfuse">
+    <div class="card__head">
+      <span class="bullet bullet--tutoring" aria-hidden="true">T</span>
+      <div>
+        <button type="button" class="card__name" id="n-brainfuse" data-open="brainfuse">Live online tutoring (Brainfuse HelpNow)</button>
+        <p class="card__type">Tutoring</p>
+      </div>
+      <span class="cost cost--unknown">Cost unknown</span>
+    </div>
+    <div class="card__facts">
+      <p>Online, through the Queens Public Library website</p>
+      <p>Today, 2–11 pm</p>
+      
+    </div>
+    <p class="why">Cost not listed, meets today 2–11 pm, online or by phone, age range not listed</p>
+    <p class="card__source">Source: <a href="https://www.queenslibrary.org/programs-activities/teens/homework-resources" target="_blank" rel="noopener">queenslibrary.org</a>, <span class="">Checked Oct 26</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="brainfuse" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.queenslibrary.org/programs-activities/teens/homework-resources" target="_blank" rel="noopener">Open the site</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-qbg-volunteer">
+    <div class="card__head">
+      <span class="bullet bullet--volunteering" aria-hidden="true">V</span>
+      <div>
+        <button type="button" class="card__name" id="n-qbg-volunteer" data-open="qbg-volunteer">Queens Botanical Garden volunteering</button>
+        <p class="card__type">Volunteering</p>
+      </div>
+      <span class="cost cost--free">Free</span>
+    </div>
+    <div class="card__facts">
+      <p>43-50 Main Street, Flushing<span class="muted">, about 1.7 mi</span></p>
+      <p><span class="unknown">Hours: Unknown. Check the source.</span></p>
+      
+    </div>
+    <p class="why">Free, hours not listed, about 1.7 mi away, age range not listed</p>
+    <p class="card__source">Source: <a href="https://queensbotanical.org/volunteer/" target="_blank" rel="noopener">queensbotanical.org</a>, <span class="">Checked Oct 26</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="qbg-volunteer" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.google.com/maps/dir/?api=1&amp;destination=43-50%20Main%20Street%2C%20Flushing%2C%20NY%2011355" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l9.2 9.2-9.2 9.2L2.8 12z"></path><path d="M9 13.5v-2.5h5.5M12.5 8.5l2.5 2.5-2.5 2.5"></path></svg>Directions</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-flushing-college">
+    <div class="card__head">
+      <span class="bullet bullet--support" aria-hidden="true">H</span>
+      <div>
+        <button type="button" class="card__name" id="n-flushing-college" data-open="flushing-college">Free college coaching at Flushing Library Teen Center</button>
+        <p class="card__type">Student support</p>
+      </div>
+      <span class="cost cost--free">Free</span>
+    </div>
+    <div class="card__facts">
+      <p>41-17 Main Street, Flushing<span class="muted">, about 1.8 mi</span></p>
+      <p>Book a one-on-one session online. Virtual sessions too.</p>
+      
+    </div>
+    <p class="why">Free, about 1.8 mi away, students and families</p>
+    <p class="card__source">Source: <a href="https://www.queenslibrary.org/programs-activities/teens/college-and-career-readiness" target="_blank" rel="noopener">queenslibrary.org</a>, <span class="">Checked Oct 26</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="flushing-college" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.google.com/maps/dir/?api=1&amp;destination=41-17%20Main%20Street%2C%20Flushing%2C%20NY%2011355" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l9.2 9.2-9.2 9.2L2.8 12z"></path><path d="M9 13.5v-2.5h5.5M12.5 8.5l2.5 2.5-2.5 2.5"></path></svg>Directions</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-mrny-youth">
+    <div class="card__head">
+      <span class="bullet bullet--support" aria-hidden="true">H</span>
+      <div>
+        <button type="button" class="card__name" id="n-mrny-youth" data-open="mrny-youth">Youth Power Project at Make the Road New York</button>
+        <p class="card__type">Student support</p>
+      </div>
+      <span class="cost cost--unknown">Cost unknown</span>
+    </div>
+    <div class="card__facts">
+      <p>104-19 Roosevelt Avenue, Corona<span class="muted">, about 0.2 mi</span></p>
+      <p>After school, plus a six-week summer program</p>
+      
+    </div>
+    <p class="why">Cost not listed, about 0.2 mi away, age range not listed</p>
+    <p class="card__source">Source: <a href="https://maketheroadny.org/program/youth-and-school-programs/" target="_blank" rel="noopener">maketheroadny.org</a>, <span class="">Checked Oct 26</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="mrny-youth" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.google.com/maps/dir/?api=1&amp;destination=104-19%20Roosevelt%20Avenue%2C%20Corona%2C%20NY%2011368" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l9.2 9.2-9.2 9.2L2.8 12z"></path><path d="M9 13.5v-2.5h5.5M12.5 8.5l2.5 2.5-2.5 2.5"></path></svg>Directions</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-auburndale-library">
+    <div class="card__head">
+      <span class="bullet bullet--study" aria-hidden="true">S</span>
+      <div>
+        <button type="button" class="card__name" id="n-auburndale-library" data-open="auburndale-library">Queens Public Library at Auburndale</button>
+        <p class="card__type">Study space</p>
+      </div>
+      <span class="cost cost--free">Free</span>
+    </div>
+    <div class="card__facts">
+      <p>25-55 Francis Lewis Boulevard, Auburndale<span class="muted">, about 3.8 mi</span></p>
+      <p>Today, 10 am–6 pm</p>
+      
+    </div>
+    <p class="why">Free, open until 6 pm today, about 3.8 mi away, all ages</p>
+    <p class="card__source">Source: <a href="https://www.queenslibrary.org/about-us/locations/auburndale" target="_blank" rel="noopener">queenslibrary.org</a>, <span class="">Checked Oct 26</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="auburndale-library" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.google.com/maps/dir/?api=1&amp;destination=25-55%20Francis%20Lewis%20Boulevard%2C%20Flushing%2C%20NY%2011358" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l9.2 9.2-9.2 9.2L2.8 12z"></path><path d="M9 13.5v-2.5h5.5M12.5 8.5l2.5 2.5-2.5 2.5"></path></svg>Directions</a>
+    </div>
+  </article></li><li><article class="card" aria-labelledby="n-fth-jazz-jam">
+    <div class="card__head">
+      <span class="bullet bullet--music" aria-hidden="true">M</span>
+      <div>
+        <button type="button" class="card__name" id="n-fth-jazz-jam" data-open="fth-jazz-jam">Monthly Jazz Jam at Flushing Town Hall</button>
+        <p class="card__type">Music</p>
+      </div>
+      <span class="cost cost--unknown">Cost unknown</span>
+    </div>
+    <div class="card__facts">
+      <p>137-35 Northern Boulevard, Flushing<span class="muted">, about 2.0 mi</span></p>
+      <p>Next jams: Wednesday Nov 11 and Wednesday Dec 9, 2026</p>
+      
+    </div>
+    <p class="why">Cost not listed, about 2.0 mi away, age range not listed</p>
+    <p class="card__source">Source: <a href="https://www.flushingtownhall.org/monthly-jazz-jams" target="_blank" rel="noopener">flushingtownhall.org</a>, <span class="">Checked Oct 26</span></p>
+    <div class="card__actions">
+      <button type="button" class="btn btn--quiet save" data-save="fth-jazz-jam" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg>Save</button>
+      <a class="btn btn--quiet" href="https://www.google.com/maps/dir/?api=1&amp;destination=137-35%20Northern%20Boulevard%2C%20Flushing%2C%20NY%2011354" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l9.2 9.2-9.2 9.2L2.8 12z"></path><path d="M9 13.5v-2.5h5.5M12.5 8.5l2.5 2.5-2.5 2.5"></path></svg>Directions</a>
+    </div>
+  </article></li></ol>
+          <div class="empty" id="empty" hidden=""></div>
+          <div class="mapwrap"><div id="map" role="region" aria-label="Map of results"></div></div>
+        </div>
+      </section>
+
+      <!-- Saved -->
+      <section class="tab" id="tab-saved" data-title="Saved" aria-labelledby="saved-title" hidden="">
+        <section class="shared" id="shared" aria-labelledby="shared-title" hidden="">
+          <h2 id="shared-title">A friend shared places</h2>
+          <ol class="cards" id="shared-list"></ol>
+          <div class="shared__actions">
+            <button type="button" class="btn btn--sun" id="shared-save">Save all to my list</button>
+            <button type="button" class="btn btn--ghost" id="shared-dismiss">Dismiss</button>
+          </div>
+        </section>
+        <div class="pagehead">
+          <h1 id="saved-title" class="largetitle">Saved</h1>
+          <button type="button" class="btn btn--primary pagehead__action" id="share-saved" hidden="">Share list</button>
+        </div>
+        <p class="lede">Saved listings stay on this device. No account, and nothing is sent anywhere until you share a list.</p>
+        <ol class="cards" id="saved-list"></ol>
+        <div class="empty" id="saved-empty" hidden="">
+          <p class="empty__title">Nothing saved yet</p>
+          <p>Tap Save on any listing and it will show up here.</p>
+          <button type="button" class="btn btn--primary" data-goto="home">Find something</button>
+        </div>
+      </section>
+
+      <!-- You -->
+      <section class="tab" id="tab-you" data-title="You" aria-labelledby="you-title" hidden="">
+        <h1 id="you-title" class="largetitle">You</h1>
+        <p class="lede">No account. What you pick here stays in this browser and shapes what For you shows.</p>
+
+        <div class="group">
+          <h2 class="group__title" id="you-age-title">Your age</h2>
+          <div class="picks picks--ages" id="you-age" role="group" aria-labelledby="you-age-title"><button type="button" class="pick" data-you-age="10" aria-pressed="false">10</button><button type="button" class="pick" data-you-age="11" aria-pressed="false">11</button><button type="button" class="pick" data-you-age="12" aria-pressed="false">12</button><button type="button" class="pick" data-you-age="13" aria-pressed="false">13</button><button type="button" class="pick" data-you-age="14" aria-pressed="false">14</button><button type="button" class="pick" data-you-age="15" aria-pressed="true">15</button><button type="button" class="pick" data-you-age="16" aria-pressed="false">16</button><button type="button" class="pick" data-you-age="17" aria-pressed="false">17</button><button type="button" class="pick" data-you-age="18" aria-pressed="false">18</button><button type="button" class="pick" data-you-age="19" aria-pressed="false">19</button></div>
+        </div>
+        <div class="group">
+          <h2 class="group__title" id="you-hood-title">Where you hang out</h2>
+          <div class="picks" id="you-hood" role="group" aria-labelledby="you-hood-title"><button type="button" class="pick" data-you-hood="Jackson Heights" aria-pressed="false">Jackson Heights</button><button type="button" class="pick" data-you-hood="Elmhurst" aria-pressed="false">Elmhurst</button><button type="button" class="pick" data-you-hood="Corona" aria-pressed="true">Corona</button><button type="button" class="pick" data-you-hood="Woodside" aria-pressed="false">Woodside</button><button type="button" class="pick" data-you-hood="Astoria" aria-pressed="false">Astoria</button><button type="button" class="pick" data-you-hood="Flushing" aria-pressed="false">Flushing</button><button type="button" class="pick" data-you-hood="" aria-pressed="false">Somewhere else</button></div>
+          <p class="group__note">Distances start from the neighborhood's center, never your exact location.</p>
+        </div>
+        <div class="group">
+          <h2 class="group__title" id="you-into-title">What you're into</h2>
+          <div class="picks" id="you-into" role="group" aria-labelledby="you-into-title"><button type="button" class="pick" data-you-into="study" aria-pressed="false"><span class="bullet bullet--sm bullet--study" aria-hidden="true">S</span>Study spots</button><button type="button" class="pick" data-you-into="tutoring" aria-pressed="true"><span class="bullet bullet--sm bullet--tutoring" aria-hidden="true">T</span>Tutoring</button><button type="button" class="pick" data-you-into="music" aria-pressed="true"><span class="bullet bullet--sm bullet--music" aria-hidden="true">M</span>Music</button><button type="button" class="pick" data-you-into="volunteering" aria-pressed="false"><span class="bullet bullet--sm bullet--volunteering" aria-hidden="true">V</span>Volunteering</button><button type="button" class="pick" data-you-into="workshop" aria-pressed="false"><span class="bullet bullet--sm bullet--workshop" aria-hidden="true">W</span>Workshops</button><button type="button" class="pick" data-you-into="support" aria-pressed="false"><span class="bullet bullet--sm bullet--support" aria-hidden="true">H</span>Student support</button><button type="button" class="pick" data-you-into="explore" aria-pressed="true"><span class="bullet bullet--sm bullet--explore" aria-hidden="true">E</span>Places to explore</button><button type="button" class="pick" data-you-into="jobs" aria-pressed="false"><span class="bullet bullet--sm bullet--jobs" aria-hidden="true">J</span>Jobs and internships</button></div>
+        </div>
+        <div class="group group--actions">
+          <button type="button" class="btn btn--quiet btn--block" id="you-setup">Run setup again</button>
+          <button type="button" class="btn btn--quiet btn--block btn--warn" id="you-forget">Forget everything on this device</button>
+        </div>
+
+        <div class="prose">
+          <h2 class="prose__title">About Under the City</h2>
+          <p>Under the City helps New York students find free or low-cost places to study, practice, and get help, matched to their budget, schedule, and how far they can travel.</p>
+          <h3>How listings are checked</h3>
+          <p>Every listing comes from a directory we built by hand. We only add a place after opening its official page, and we copy hours, cost, and ages exactly as written there.</p>
+          <p>When a source doesn't say something, the app shows "Unknown. Check the source." instead of guessing. Each listing shows the date we last checked it and links to where the information came from.</p>
+          <h3>How results are picked</h3>
+          <p>The app removes anything that's the wrong day or time, costs too much, doesn't fit your age, or is too far. It ranks the rest by how well they match and how close they are. Distances are straight-line from the center of the neighborhood you pick, so they're shown as "about" a number of miles, not travel time.</p>
+          <p>Nothing books or registers you. Each listing tells you how to sign up on the program's own site.</p>
+          <h3>Your privacy</h3>
+          <p>The app asks for a neighborhood, never your exact location. Your age, neighborhood, interests, and saved listings stay in this browser. There are no accounts.</p>
+          <p>A shared list or invite link contains only which listings are on it, nothing about you.</p>
+          <h3>Something wrong?</h3>
+          <p>Hours change. If a listing is out of date, use "Report a problem" on that listing, or <a id="about-report" href="mailto:underthecity@example.com?subject=Under%20the%20City%3A%20correction">email us</a>.</p>
+          <p class="fineprint">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors.</p>
+        </div>
+      </section>
+    </main>
+
+    <nav class="tabbar" aria-label="Sections">
+      <button type="button" data-tab="home">
+        <span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.2 12 4.5l8 6.7V20h-5.2v-5.6H9.2V20H4z"></path></svg></span>
+        <span>For you</span>
+      </button>
+      <button type="button" data-tab="explore" aria-current="page">
+        <span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="M16 16l4.5 4.5"></path></svg></span>
+        <span>Explore</span>
+      </button>
+      <button type="button" data-tab="saved">
+        <span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 3.5h11v17l-5.5-4-5.5 4z"></path></svg></span>
+        <span>Saved</span>
+      </button>
+      <button type="button" data-tab="you">
+        <span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.5" r="3.8"></circle><path d="M4.5 20c.9-3.6 3.8-5.5 7.5-5.5s6.6 1.9 7.5 5.5"></path></svg></span>
+        <span>You</span>
+      </button>
+    </nav>
+  </div>
