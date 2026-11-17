@@ -11,6 +11,7 @@ Five notes sit in this folder. This page is the summary; the notes have the evid
 | [opencode-internals.md](opencode-internals.md) | What opencode 2.0.26 actually does on GLM 5.3, from its source |
 | [zwork-context-audit.md](zwork-context-audit.md) | How zWork builds and keeps the model's context; findings F1–F14, M1–M5 |
 | [zwork-tool-audit.md](zwork-tool-audit.md) | zWork's tool list, its cost, and the tools that break; findings B1–B8 and a grouping proposal |
+| [desktop-control-and-omp.md](desktop-control-and-omp.md) | A 2M-token run explained, the false CuaDriver permission cards, why desktop control fails, CuaDriver vs alternatives, and what to take from oh-my-pi |
 
 Every finding listed below as confirmed was checked against the code on `site/redesign` at `66636d9`. External claims spot-checked in source: Codex compacts at 90% of the window (`openai_models.rs` `auto_compact_token_limit`), and Goose at 80% capped at 225k (`context_mgmt/mod.rs`).
 
