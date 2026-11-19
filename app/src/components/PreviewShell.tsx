@@ -36,7 +36,7 @@ export function PreviewAuthShell() {
   const [screen, setScreen] = useState<"login" | "onboarding">("login");
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-paper">
+    <div className="relative h-screen w-screen overflow-hidden">
       <div className="absolute left-4 top-4 z-50 inline-flex items-center gap-1 rounded-full border border-line bg-paper-raised p-1 shadow-sm">
         <button
           type="button"

@@ -211,6 +211,50 @@ const PARCHMENT = {
   dark: { surface: "#1f1e1b", text: "#e8e4da", accent: "#d39470" },
 };
 
+/** System/Light/Dark plus the theme presets, applied on click. Onboarding shows a few of them. */
+export function ThemeTiles({
+  only,
+  className,
+  run = (fn) => fn(),
+}: {
+  only?: string[];
+  className?: string;
+  run?: (fn: () => void) => void;
+}) {
+  const { look, scheme, mode } = useLook();
+  const presets = only ? THEME_PRESETS.filter((p) => only.includes(p.id)) : THEME_PRESETS;
+  return (
+    <div className={cn("flex flex-wrap gap-x-2 gap-y-3", className)}>
+      {(["system", "light", "dark"] as const).map((m) => {
+        const p = m === "dark" ? PARCHMENT.dark : PARCHMENT.light;
+        return (
+          <Tile
+            key={m}
+            label={m === "system" ? "System" : m === "light" ? "Light" : "Dark"}
+            selected={scheme === DEFAULT_SCHEME_ID && mode === m}
+            onClick={() => run(() => applyMode(m))}
+            {...p}
+            backdrop={m === "system" ? `linear-gradient(110deg, ${PARCHMENT.light.surface} 50%, ${PARCHMENT.dark.surface} 50%)` : undefined}
+          />
+        );
+      })}
+      {presets.map((p) => {
+        const g = WALLPAPER_PRESETS.find((w) => w.id === p.look.wallpaper);
+        return (
+          <Tile
+            key={p.id}
+            label={p.label}
+            selected={look.preset === p.id}
+            onClick={() => run(() => applyPreset(p))}
+            {...p.colors}
+            backdrop={g ? gradientCss(g) : undefined}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 // ---------------- panel ----------------
 
 export function AppearanceSettings() {
@@ -309,34 +353,7 @@ export function AppearanceSettings() {
 
       {/* ---- Theme ---- */}
       <Group title="Theme" hint="Pick a starting point, then change any of it below.">
-        <div className="flex flex-wrap gap-x-2 gap-y-3 py-3.5">
-          {(["system", "light", "dark"] as const).map((m) => {
-            const p = m === "dark" ? PARCHMENT.dark : PARCHMENT.light;
-            return (
-              <Tile
-                key={m}
-                label={m === "system" ? "System" : m === "light" ? "Light" : "Dark"}
-                selected={scheme === DEFAULT_SCHEME_ID && mode === m}
-                onClick={() => guard(() => applyMode(m))}
-                {...p}
-                backdrop={m === "system" ? `linear-gradient(110deg, ${PARCHMENT.light.surface} 50%, ${PARCHMENT.dark.surface} 50%)` : undefined}
-              />
-            );
-          })}
-          {THEME_PRESETS.map((p) => {
-            const g = WALLPAPER_PRESETS.find((w) => w.id === p.look.wallpaper);
-            return (
-              <Tile
-                key={p.id}
-                label={p.label}
-                selected={look.preset === p.id}
-                onClick={() => guard(() => applyPreset(p))}
-                {...p.colors}
-                backdrop={g ? gradientCss(g) : undefined}
-              />
-            );
-          })}
-        </div>
+        <ThemeTiles className="py-3.5" run={guard} />
 
         <Row
           label="Colors"
