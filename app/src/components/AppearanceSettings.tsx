@@ -81,6 +81,7 @@ function Slider({
   unit = "%",
   disabled,
   onChange,
+  onCommit,
 }: {
   label: string;
   value: number;
@@ -90,7 +91,13 @@ function Slider({
   unit?: string;
   disabled?: boolean;
   onChange: (v: number) => void;
+  /** Called once the value settles: on release while dragging, at once for
+   *  keys. For settings that move the slider itself (interface size), so the
+   *  thumb doesn't slide out from under the pointer mid-drag. */
+  onCommit?: (v: number) => void;
 }) {
+  const dragging = useRef(false);
+  const latest = useRef(value);
   return (
     <div className={cn("flex items-center gap-3", disabled && "opacity-50")}>
       <input
@@ -101,7 +108,25 @@ function Slider({
         value={value}
         disabled={disabled}
         aria-label={label}
-        onChange={(e) => onChange(Number(e.target.value))}
+        onPointerDown={() => {
+          if (!onCommit) return;
+          dragging.current = true;
+          // Released anywhere, even off the track.
+          window.addEventListener(
+            "pointerup",
+            () => {
+              dragging.current = false;
+              onCommit(latest.current);
+            },
+            { once: true },
+          );
+        }}
+        onChange={(e) => {
+          const v = Number(e.target.value);
+          latest.current = v;
+          onChange(v);
+          if (onCommit && !dragging.current) onCommit(v);
+        }}
         className="ring-focus w-40 accent-[rgb(var(--accent))] disabled:cursor-not-allowed"
       />
       <span className="w-11 text-right text-[12px] tabular-nums text-ink-muted">
@@ -477,10 +502,8 @@ export function AppearanceSettings() {
             min={70}
             max={160}
             step={10}
-            onChange={(v) => {
-              setZoom(v);
-              void applyZoom(v / 100);
-            }}
+            onChange={setZoom}
+            onCommit={(v) => void applyZoom(v / 100)}
           />
           <Button
             disabled={zoom === 100}
