@@ -18,6 +18,7 @@ import {
   Clock,
 } from "lucide-react";
 import { cn } from "../lib/cn";
+import { GlideGroup } from "./Glide";
 import { hasTrafficLights, modShortcut } from "../lib/platform";
 import { IS_WEB } from "../lib/api";
 import { nativeVibrancySupported, useTranslucencyPref } from "../lib/translucency";
@@ -125,7 +126,7 @@ export function Sidebar() {
         </div>
 
         {/* Primary actions */}
-        <nav className="flex flex-col gap-0.5 px-2 pt-4 pb-2">
+        <GlideGroup role="navigation" className="flex flex-col gap-0.5 px-2 pt-4 pb-2" highlightClassName="rounded-md">
           <SidebarButton
             icon={<SquarePen />}
             label="New chat"
@@ -175,7 +176,7 @@ export function Sidebar() {
               active={view === "connectors"}
             />
           )}
-        </nav>
+        </GlideGroup>
 
         {/* Chat history */}
         <div className="mt-3 flex-1 overflow-x-hidden overflow-y-auto pb-3">
@@ -390,11 +391,12 @@ function SidebarButton({
 }) {
   return (
     <button
+      data-glide=""
       type="button"
       onClick={onClick}
       className={cn(
         "press group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] text-ink-muted",
-        "hover:bg-line/40 hover:text-ink",
+        "hover:text-ink",
         active && "bg-line hover:bg-line font-semibold text-ink",
       )}
     >

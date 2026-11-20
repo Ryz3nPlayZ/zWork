@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Check, ChevronDown, AlertCircle, Plus, Lock } from "lucide-react";
 import { cn } from "../lib/cn";
+import { GlideGroup } from "./Glide";
 import { IS_WEB } from "../lib/api";
 import { fetchAnalyticsSummary, getCloudToken } from "../lib/cloud";
 import { useApp, EFFORTS } from "../lib/store";
@@ -85,11 +86,11 @@ export function ModelPicker() {
       </button>
 
       {open && (
-        <div
+        <GlideGroup
           role="listbox"
           className={cn(
-            "absolute right-0 z-40 w-[320px] max-h-[min(480px,calc(50vh-32px))] overflow-y-auto animate-fade-in rounded-xl border border-line bg-paper p-1 shadow-pop",
-            dropDown ? "top-[calc(100%+8px)]" : "bottom-[calc(100%+8px)]",
+            "absolute right-0 z-40 w-[320px] max-h-[min(480px,calc(50vh-32px))] overflow-y-auto animate-menu-in rounded-xl border border-line bg-paper p-1 shadow-pop",
+            dropDown ? "top-[calc(100%+8px)] origin-top-right" : "bottom-[calc(100%+8px)] origin-bottom-right",
           )}
         >
           <div className="px-2.5 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
@@ -123,6 +124,7 @@ export function ModelPicker() {
               <button
                 key={m.id}
                 role="option"
+                data-glide=""
                 aria-selected={selected}
                 aria-disabled={disabled}
                 onClick={() => {
@@ -132,10 +134,9 @@ export function ModelPicker() {
                   setOpen(false);
                 }}
                 className={cn(
-                  "press group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left",
-                  "hover:bg-ink/5",
+                  "press group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left focus-visible:outline-none",
                   selected && "bg-ink/5",
-                  disabled && !locked && "cursor-not-allowed opacity-50 hover:bg-transparent",
+                  disabled && !locked && "cursor-not-allowed opacity-50",
                 )}
               >
                 <span className={cn("flex-1 min-w-0", locked && "opacity-55")}>
@@ -198,15 +199,16 @@ export function ModelPicker() {
             ) : (
               <button
                 type="button"
+                data-glide=""
                 onClick={() => { setOpen(false); setView("settings"); }}
-                className="press flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12px] text-ink-muted hover:bg-ink/5 hover:text-ink"
+                className="press flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12px] text-ink-muted hover:text-ink focus-visible:outline-none"
               >
                 <Plus className="h-3.5 w-3.5" />
                 Add custom model
               </button>
             )}
           </div>
-        </div>
+        </GlideGroup>
       )}
     </div>
   );
