@@ -32,5 +32,10 @@ export function isDesktopBillingReturn(): boolean {
 export function opensPlanPage(): boolean {
   if (!isBrowser()) return false;
   const path = window.location.pathname.replace(/\/+$/, "");
-  return path === "/plan" || path === "/billing" || !!readBillingReturn();
+  return isPlanPath(path) || !!readBillingReturn();
+}
+
+/** Paths that open the Plan page. */
+export function isPlanPath(path: string | null): boolean {
+  return path === "/plan" || path === "/billing";
 }

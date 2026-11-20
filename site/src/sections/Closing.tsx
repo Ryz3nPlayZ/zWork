@@ -13,6 +13,7 @@ import {
   DEMO_URL,
   DISCUSSIONS_URL,
   DOCS_URL,
+  PLAN_URL,
   INSTALL,
   ISSUES_URL,
   PLATFORMS,
@@ -27,6 +28,7 @@ import {
 } from "../lib/site";
 import { useReveal } from "./Demos";
 import { CopyCommand, GithubIcon, H2, Section } from "./ui";
+import { SlideArrowButton } from "./buttons";
 
 gsap.registerPlugin(ScrollTrigger, ScrollSmoother, useGSAP);
 
@@ -278,7 +280,7 @@ export function Pricing({ heading }: { heading?: "h1" } = {}) {
                 ))}
               </ul>
               <a
-                href={downloadUrl(platform)}
+                href={t.monthly === 0 ? downloadUrl(platform) : PLAN_URL}
                 className={cn(
                   "press mt-8 inline-flex h-11 items-center justify-center rounded-full text-[14px] font-medium",
                   t.featured ? "bg-paper text-ink hover:bg-paper/90" : "border border-line bg-paper hover:bg-paper-sunken",
@@ -290,7 +292,8 @@ export function Pricing({ heading }: { heading?: "h1" } = {}) {
           ))}
         </div>
         <p data-reveal className="mt-6 text-center text-[13px] text-ink-faint">
-          Every plan starts with the same download. Pro and Max are bought from inside the app.
+          Every plan is the same app. Get Pro or Max here by signing in on the web, or from Plan inside the desktop app; your
+          plan works in both.
         </p>
       </div>
     </Section>
@@ -429,13 +432,9 @@ export function FinalCta({ heading }: { heading?: "h1" } = {}) {
             ))}
           </div>
           <div data-reveal className="mt-6 flex flex-col items-center gap-2">
-            <a
-              href={downloadUrl(platform)}
-              className="press inline-flex h-12 items-center gap-2.5 rounded-full bg-ink px-7 text-[15px] font-medium text-paper shadow-lift hover:bg-ink/90"
-            >
-              <Download className="h-4 w-4" />
-              Download for {platform === "Mac" ? "macOS" : platform}
-            </a>
+            <SlideArrowButton href={downloadUrl(platform)} icon={<Download />} className="px-7">
+              Download for {platform}
+            </SlideArrowButton>
             <span className="text-[12.5px] text-ink-faint">{ASSET_LABEL[platform]}</span>
           </div>
           <div data-reveal className="mx-auto mt-8 max-w-[560px] text-left">
@@ -475,7 +474,15 @@ export function Footer() {
         ["Pricing", "/pricing"],
         ["Open source", "/open-source"],
         ["Download", "/download"],
+        ["What's new", "/changelog"],
         ["Try in browser", DEMO_URL],
+      ],
+    ],
+    [
+      "Account",
+      [
+        ["Sign in", DEMO_URL],
+        ["Plans and billing", PLAN_URL],
       ],
     ],
     [
@@ -548,7 +555,7 @@ export function Footer() {
   return (
     <footer ref={root} className="relative overflow-hidden border-t border-line">
       <Section className="pt-16 sm:pt-20">
-        <div className="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-3 md:grid-cols-[1.6fr_repeat(3,1fr)] md:gap-12">
+        <div className="grid grid-cols-2 gap-x-6 gap-y-10 sm:grid-cols-4 md:grid-cols-[1.4fr_repeat(4,1fr)] md:gap-12">
           <div className="col-span-full md:col-span-1">
             <p className="display max-w-[14ch] text-[34px] text-ink sm:text-[44px]">
               Your weekly paperwork, <em className="text-ink-muted">done.</em>

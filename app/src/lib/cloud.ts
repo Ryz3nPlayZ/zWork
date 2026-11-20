@@ -42,7 +42,26 @@ export function isWebAuthClient(): boolean {
  *  sets the session cookie and redirects to `callbackURL` (the app origin). */
 export function startWebGoogleSignIn() {
   const callbackURL = window.location.origin;
+  // The callback lands on the origin, so remember a deep link (the site's
+  // "Plans and billing" opens /plan) and pick it up after sign-in.
+  try {
+    const path = window.location.pathname.replace(/\/+$/, "");
+    if (path && path !== "/") sessionStorage.setItem(RETURN_PATH_KEY, path);
+  } catch { /* storage blocked: land on home */ }
   window.location.href = `${CLOUD_BASE}/api/auth/web/google?callbackURL=${encodeURIComponent(callbackURL)}`;
+}
+
+const RETURN_PATH_KEY = "zwork:return-path";
+
+/** The path the visitor was on before web sign-in, once. */
+export function takeReturnPath(): string | null {
+  try {
+    const p = sessionStorage.getItem(RETURN_PATH_KEY);
+    sessionStorage.removeItem(RETURN_PATH_KEY);
+    return p;
+  } catch {
+    return null;
+  }
 }
 
 /** Check URL for a token param from OAuth callback and store it. Returns true if token was found. */

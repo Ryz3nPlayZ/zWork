@@ -12,7 +12,7 @@ import { loadZoom, applyZoom, zoomIn, zoomOut, zoomReset } from "./lib/zoom";
 import { useTranslucencyPref, nativeVibrancySupported } from "./lib/translucency";
 import { recordTelemetry, setTelemetryEnabled, startTelemetrySession, stopTelemetrySession } from "./lib/telemetry";
 import { fallbackAppVersion, resolveAppVersion } from "./lib/appVersion";
-import { fetchCloudSession, onCloudAuthChanged, handleOAuthTokenCallback, type CloudUser } from "./lib/cloud";
+import { fetchCloudSession, onCloudAuthChanged, handleOAuthTokenCallback, takeReturnPath, type CloudUser } from "./lib/cloud";
 import { identifyPostHogUser, resetPostHogUser } from "./lib/posthog";
 import { getPreviewMode } from "./lib/preview";
 import { PreviewAppShell, PreviewAuthShell } from "./components/PreviewShell";
@@ -35,7 +35,7 @@ const ScheduledTasksPage = lazy(() => import("./components/scheduled/ScheduledTa
 const OverlayChatView = lazy(() => import("./components/OverlayChatView").then((m) => ({ default: m.OverlayChatView })));
 const ShareWindowApp = lazy(() => import("./components/ShareWindowApp").then((m) => ({ default: m.ShareWindowApp })));
 const DesktopBillingReturn = lazy(() => import("./components/DesktopBillingReturn").then((m) => ({ default: m.DesktopBillingReturn })));
-import { isDesktopBillingReturn, opensPlanPage, readBillingReturn, type BillingReturn } from "./lib/billingReturn";
+import { isDesktopBillingReturn, isPlanPath, opensPlanPage, readBillingReturn, type BillingReturn } from "./lib/billingReturn";
 import { KeybindingsModal } from "./components/KeybindingsModal";
 import { PermissionPrompt } from "./components/PermissionPrompt";
 import { BootProgress } from "./components/BootProgress";
@@ -157,6 +157,8 @@ export default function App() {
     if (typeof window !== "undefined" && !(window as any).__TAURI_INTERNALS__) {
       if (window.location.pathname === "/admin") return "admin" as const;
       if (opensPlanPage()) return "plan" as const;
+      // Signed in from /plan: Google hands the browser back to the origin.
+      if (isPlanPath(takeReturnPath())) return "plan" as const;
     }
     return null;
   });

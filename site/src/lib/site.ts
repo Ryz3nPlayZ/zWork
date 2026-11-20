@@ -10,8 +10,11 @@ export const DOCS_URL = `${REPO_URL}/blob/main/docs/WIKI.md`;
 export const CONTRIBUTING_URL = `${REPO_URL}/blob/main/CONTRIBUTING.md`;
 export const PRIVACY_URL = `${REPO_URL}/blob/main/legal/PRIVACY.md`;
 export const TERMS_URL = `${REPO_URL}/blob/main/legal/TERMS.md`;
-/** The real app, built for the web, no sign-in. See docs/INVENTORY.md. */
+/** The real app, built for the web. Signing in there is the same account as
+ *  the desktop app's, so it is also where plans are bought and managed. */
 export const DEMO_URL = "https://app.tryzwork.app";
+/** Opens the web app on its Plan page (after sign-in): upgrade, invoices, cancel. */
+export const PLAN_URL = `${DEMO_URL}/plan`;
 
 export type Platform = "Mac" | "Windows" | "Linux";
 export const PLATFORMS: Platform[] = ["Mac", "Windows", "Linux"];

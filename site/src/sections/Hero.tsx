@@ -2,14 +2,14 @@ import { useMemo, useRef, useState } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { useGSAP } from "@gsap/react";
-import { ArrowRight, Download, Menu, Moon, Sun, X } from "lucide-react";
+import { Download, Menu, Moon, Sun, X } from "lucide-react";
 import { Logo } from "../clone/Logo";
 import { LogoParticles } from "./LogoParticles";
 import { cn } from "../lib/cn";
 import { onReveal } from "../lib/intro";
 import { Link, usePath } from "../lib/router";
-import { DEMO_URL, REPO_URL, detectPlatform, downloadUrl, useRepoStats } from "../lib/site";
-import { GithubIcon } from "./ui";
+import { DEMO_URL, PLAN_URL, REPO_URL, detectPlatform, downloadUrl, useRepoStats } from "../lib/site";
+import { DotFillButton, Glide, SlideArrowButton, SparkleButton, WhatsNewButton } from "./buttons";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
 
@@ -53,7 +53,7 @@ const NAV_LINKS: [string, string][] = [
 ];
 
 export function Nav() {
-  const { stars } = useRepoStats();
+  const { stars, version } = useRepoStats();
   const [theme, toggle] = useTheme();
   const [open, setOpen] = useState(false);
   const path = usePath();
@@ -79,22 +79,26 @@ export function Nav() {
       className="group fixed inset-x-0 top-0 z-50 transition-[background-color,box-shadow,translate] duration-300 [&.is-hidden]:-translate-y-full [&.is-scrolled]:bg-paper/80 [&.is-scrolled]:shadow-[0_1px_0_rgb(var(--border-overlay)/.08)] [&.is-scrolled]:backdrop-blur-xl"
     >
       <div className="mx-auto flex h-16 max-w-[1240px] items-center justify-between gap-4 px-4 sm:px-8">
-        <Link href="/" className="flex items-center gap-2.5" aria-label="zWork home" onClick={() => setOpen(false)}>
-          <Logo size={26} className="text-ink" />
-          <span className="text-[16px] font-semibold tracking-tight text-ink">zWork</span>
-        </Link>
-        <nav aria-label="Main" className="hidden items-center gap-8 text-[14px] text-ink-muted md:flex">
+        <div className="flex items-center gap-4">
+          <Link href="/" className="flex items-center gap-2.5" aria-label="zWork home" onClick={() => setOpen(false)}>
+            <Logo size={26} className="text-ink" />
+            <span className="text-[16px] font-semibold tracking-tight text-ink">zWork</span>
+          </Link>
+          <WhatsNewButton href="/changelog" version={version} className="hidden lg:inline-flex" />
+        </div>
+        <Glide label="Main" className="hidden items-center gap-1 text-[14px] text-ink-muted md:flex">
           {NAV_LINKS.map(([label, href]) => (
             <Link
               key={href}
               href={href}
+              data-glide=""
               aria-current={path === href ? "page" : undefined}
-              className="transition-colors hover:text-ink aria-[current=page]:text-ink"
+              className="rounded-full px-3.5 py-1.5 transition-colors hover:text-ink aria-[current=page]:text-ink"
             >
               {label}
             </Link>
           ))}
-        </nav>
+        </Glide>
         <div className="flex items-center gap-1.5">
           <button
             type="button"
@@ -105,12 +109,15 @@ export function Nav() {
             <Sun className={cn("h-4 w-4", theme === "light" ? "hidden" : theme === "dark" ? "block" : "hidden dark-sys:block")} />
             <Moon className={cn("h-4 w-4", theme === "dark" ? "hidden" : theme === "light" ? "block" : "block dark-sys:hidden")} />
           </button>
-          <a
-            href={REPO_URL}
-            className="press hidden h-9 items-center gap-2 rounded-full border border-line px-3.5 text-[13px] font-medium text-ink hover:bg-paper-raised sm:inline-flex"
-          >
-            <GithubIcon className="h-4 w-4" />
+          <SparkleButton href={REPO_URL} className="hidden sm:inline-flex">
             {stars !== null ? <span className="tabular-nums">{formatStars(stars)}</span> : "GitHub"}
+            <span className="sr-only">stars on GitHub</span>
+          </SparkleButton>
+          <a
+            href={DEMO_URL}
+            className="press hidden h-9 items-center rounded-full px-3.5 text-[13px] font-medium text-ink hover:bg-ink/[0.06] md:inline-flex"
+          >
+            Sign in
           </a>
           <Link
             href="/download"
@@ -131,7 +138,7 @@ export function Nav() {
       </div>
       {open && (
         <nav aria-label="Main" className="border-t border-line bg-paper px-4 pb-5 pt-2 md:hidden">
-          {NAV_LINKS.map(([label, href]) => (
+          {[...NAV_LINKS, ["What's new", "/changelog"] as [string, string]].map(([label, href]) => (
             <Link
               key={href}
               href={href}
@@ -141,6 +148,20 @@ export function Nav() {
               {label}
             </Link>
           ))}
+          <div className="mt-5 grid grid-cols-2 gap-2">
+            <a
+              href={DEMO_URL}
+              className="press inline-flex h-11 items-center justify-center rounded-full border border-line text-[15px] font-medium text-ink"
+            >
+              Sign in
+            </a>
+            <a
+              href={PLAN_URL}
+              className="press inline-flex h-11 items-center justify-center rounded-full border border-line text-[15px] font-medium text-ink"
+            >
+              Plans and billing
+            </a>
+          </div>
         </nav>
       )}
     </header>
@@ -248,20 +269,10 @@ export function Hero() {
             job once and it does it on schedule, in real Excel and Word files, and asks before anything is sent.
           </p>
           <div className="hero-cta mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <a
-              href={downloadUrl(platform)}
-              className="press inline-flex h-12 items-center gap-2.5 rounded-full bg-ink px-6 text-[15px] font-medium text-paper shadow-lift hover:bg-ink/90"
-            >
-              <Download className="h-4 w-4" />
-              {platform ? `Download for ${platform === "Mac" ? "macOS" : platform}` : "Download zWork"}
-            </a>
-            <a
-              href={DEMO_URL}
-              className="press inline-flex h-12 items-center gap-2 rounded-full border border-line bg-paper px-6 text-[15px] font-medium text-ink hover:bg-paper-raised"
-            >
-              Try it in your browser
-              <ArrowRight className="h-4 w-4" />
-            </a>
+            <SlideArrowButton href={downloadUrl(platform)} icon={<Download />}>
+              {platform ? `Download for ${platform}` : "Download zWork"}
+            </SlideArrowButton>
+            <DotFillButton href={DEMO_URL} label="Try it in your browser" reveal="Open the web app" />
           </div>
         </div>
       </div>

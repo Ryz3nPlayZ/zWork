@@ -1,4 +1,4 @@
-import { useSyncExternalStore, type AnchorHTMLAttributes, type MouseEvent } from "react";
+import { useSyncExternalStore, type ComponentProps, type MouseEvent } from "react";
 
 /**
  * A few pages don't need a routing library: the path lives in the History
@@ -42,7 +42,7 @@ export function navigate(to: string) {
   emit();
 }
 
-export function Link({ href, onClick, ...rest }: AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) {
+export function Link({ href, onClick, ...rest }: ComponentProps<"a"> & { href: string }) {
   const handle = (e: MouseEvent<HTMLAnchorElement>) => {
     onClick?.(e);
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;

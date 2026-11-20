@@ -424,3 +424,260 @@ body {
 .horizon-caps {
   padding-top: calc(var(--drop) + 40px);
 }
+
+/* Motion buttons (sections/buttons.tsx). One easing for everything that
+   slides, a slight overshoot for the sparkle's spring. */
+:root {
+  --ease-glide: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-spring: cubic-bezier(0.34, 1.5, 0.64, 1);
+}
+
+/* Dot fill: the dot grows from its own centre until it covers the pill. */
+.dot-fill {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  height: 3rem;
+  align-items: center;
+  overflow: hidden;
+  border-radius: 9999px;
+  border: 1px solid rgb(var(--line));
+  background: rgb(var(--paper));
+  padding: 0 1.5rem 0 2.75rem;
+  font-size: 15px;
+  font-weight: 500;
+  color: rgb(var(--ink));
+  transition: border-color 300ms ease, transform 120ms ease;
+}
+.dot-fill-dot {
+  position: absolute;
+  left: 1.5rem;
+  top: 50%;
+  z-index: -1;
+  width: 7px;
+  height: 7px;
+  margin-top: -3.5px;
+  border-radius: 9999px;
+  background: rgb(var(--ink));
+  transition: scale 600ms var(--ease-glide);
+}
+.dot-fill-text {
+  display: grid;
+  overflow: hidden;
+  line-height: 1.5em;
+}
+/* Both labels share one cell, so the button is as wide as the longer one. */
+.dot-fill-text > * {
+  grid-area: 1 / 1;
+}
+.dot-fill-label,
+.dot-fill-reveal {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  white-space: nowrap;
+  transition: translate 500ms var(--ease-glide), opacity 300ms ease;
+}
+.dot-fill-reveal {
+  translate: 0 100%;
+  color: rgb(var(--paper));
+}
+@media (hover: hover) {
+  .dot-fill:hover,
+  .dot-fill:focus-visible {
+    border-color: rgb(var(--ink));
+  }
+  .dot-fill:hover .dot-fill-dot,
+  .dot-fill:focus-visible .dot-fill-dot {
+    scale: 80;
+  }
+  .dot-fill:hover .dot-fill-label,
+  .dot-fill:focus-visible .dot-fill-label {
+    translate: 0 -100%;
+    opacity: 0;
+  }
+  .dot-fill:hover .dot-fill-reveal,
+  .dot-fill:focus-visible .dot-fill-reveal {
+    translate: 0 0;
+  }
+}
+
+/* Slide arrow: the leading icon leaves to the right, an arrow follows it in. */
+.slide-arrow {
+  display: inline-flex;
+  height: 3rem;
+  align-items: center;
+  gap: 0.625rem;
+  border-radius: 9999px;
+  background: rgb(var(--ink));
+  padding: 0 1.5rem;
+  font-size: 15px;
+  font-weight: 500;
+  color: rgb(var(--paper));
+  box-shadow: var(--shadow-lift);
+  transition: scale 200ms var(--ease-glide), background-color 150ms ease;
+}
+.slide-arrow-icons {
+  position: relative;
+  width: 1rem;
+  height: 1rem;
+  overflow: hidden;
+}
+.slide-arrow-out,
+.slide-arrow-in {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  transition: translate 450ms var(--ease-glide), opacity 300ms ease;
+}
+.slide-arrow-out > svg {
+  width: 100%;
+  height: 100%;
+}
+.slide-arrow-in {
+  translate: -120% 0;
+  opacity: 0;
+}
+@media (hover: hover) {
+  .slide-arrow:hover {
+    scale: 1.02;
+    background: rgb(var(--ink) / 0.9);
+  }
+  .slide-arrow:hover .slide-arrow-out {
+    translate: 120% 0;
+    opacity: 0;
+  }
+  .slide-arrow:hover .slide-arrow-in {
+    translate: 0 0;
+    opacity: 1;
+  }
+}
+.slide-arrow:active {
+  scale: 0.96;
+}
+
+/* Sparkle: the GitHub mark swaps for a star, and a spark pops beside it. */
+.sparkle {
+  display: inline-flex;
+  height: 2.25rem;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 9999px;
+  border: 1px solid rgb(var(--line));
+  padding: 0 0.875rem;
+  font-size: 13px;
+  font-weight: 500;
+  color: rgb(var(--ink));
+}
+.sparkle-icons {
+  position: relative;
+  display: grid;
+  width: 1rem;
+  height: 1rem;
+}
+.sparkle-icons > * {
+  grid-area: 1 / 1;
+  transition: scale 380ms var(--ease-spring), rotate 380ms var(--ease-spring), opacity 160ms ease;
+}
+.sparkle-star {
+  color: rgb(var(--warning));
+  fill: rgb(var(--warning));
+  scale: 0.3;
+  rotate: -60deg;
+  opacity: 0;
+}
+.sparkle-spark {
+  position: absolute;
+  right: -5px;
+  top: -5px;
+  width: 7px;
+  height: 7px;
+  color: rgb(var(--warning));
+  scale: 0;
+  opacity: 0;
+}
+@media (hover: hover) {
+  .sparkle:hover {
+    background: rgb(var(--paper-raised));
+  }
+  .sparkle:hover .sparkle-gh {
+    scale: 0.3;
+    rotate: 60deg;
+    opacity: 0;
+  }
+  .sparkle:hover .sparkle-star {
+    scale: 1;
+    rotate: 0deg;
+    opacity: 1;
+  }
+  .sparkle:hover .sparkle-spark {
+    scale: 1;
+    opacity: 1;
+    transition-delay: 80ms;
+  }
+}
+
+/* What's new: two glows under the pill track the pointer and rise on hover. */
+.whats-new {
+  --glow-x: 50%;
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  height: 1.875rem;
+  align-items: center;
+  gap: 0.5rem;
+  overflow: hidden;
+  border-radius: 9999px;
+  border: 1px solid rgb(var(--line));
+  background: rgb(var(--paper) / 0.6);
+  padding: 0 0.75rem;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: rgb(var(--ink));
+}
+.whats-new-glow {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  translate: 0 70%;
+  opacity: 0.55;
+  filter: blur(10px);
+  background:
+    radial-gradient(40% 90% at calc(var(--glow-x) - 18%) 60%, rgb(var(--warning) / 0.55), transparent 70%),
+    radial-gradient(40% 90% at calc(var(--glow-x) + 18%) 60%, rgb(var(--info) / 0.5), transparent 70%);
+  transition: translate 500ms var(--ease-glide), opacity 400ms ease;
+}
+@media (hover: hover) {
+  .whats-new:hover .whats-new-glow {
+    translate: 0 15%;
+    opacity: 1;
+  }
+}
+
+/* Glide: the shared hover highlight for the nav. */
+.glide-hl {
+  pointer-events: none;
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: -1;
+  border-radius: 9999px;
+  background: rgb(var(--ink) / 0.06);
+  opacity: 0;
+  transition-duration: 300ms;
+  transition-timing-function: var(--ease-glide);
+}
+.glide-hl.is-on {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot-fill *,
+  .slide-arrow,
+  .slide-arrow *,
+  .sparkle *,
+  .whats-new-glow,
+  .glide-hl {
+    transition-duration: 0ms !important;
+  }
+}
