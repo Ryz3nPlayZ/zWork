@@ -41,6 +41,7 @@ import { IconButton } from "./IconButton";
 import type { Message as Msg } from "../lib/store";
 import { api } from "../lib/api";
 import { FileChip, looksLikeFile, useFileCheck } from "./FileChip";
+import { ImageCard } from "./ImageCard";
 
 function formatTime(ts: number): string {
   if (!ts) return "";
@@ -818,6 +819,9 @@ export function Message({
               chatId={chatId}
               messageId={message.id}
             />
+          )}
+          {parts.map((p) =>
+            p.kind === "tool" && p.tool === "generate_image" ? <ImageCard key={`img-${p.id}`} part={p} /> : null,
           )}
           {textEntries.map(({ part, i }, idx) => {
             const isStreamingPart = streaming && i === lastPartIdx;

@@ -96,6 +96,26 @@ pub async fn open_file(Json(body): Json<OpenFileBody>) -> impl IntoResponse {
     }
 }
 
+/// The bytes of an image zWork made, for the image card in chat. Only image
+/// files inside the workspace outputs folder are served.
+pub async fn output_image(Json(body): Json<OpenFileBody>) -> axum::response::Response {
+    let outputs = crate::paths::workspace_outputs_dir().canonicalize().ok();
+    let found = resolve(&body.path).filter(|p| outputs.as_ref().is_some_and(|o| p.starts_with(o)));
+    let mime = found.as_ref().and_then(|p| p.extension()?.to_str().map(str::to_ascii_lowercase)).and_then(|e| match e.as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "webp" => Some("image/webp"),
+        _ => None,
+    });
+    match (found, mime) {
+        (Some(p), Some(mime)) => match std::fs::read(&p) {
+            Ok(bytes) => ([(axum::http::header::CONTENT_TYPE, mime)], bytes).into_response(),
+            Err(_) => StatusCode::NOT_FOUND.into_response(),
+        },
+        _ => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
 /// Which of `paths` exist, so the UI only turns real files into chips.
 #[derive(Deserialize)]
 pub struct StatBody {

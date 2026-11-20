@@ -574,6 +574,18 @@ export const api = {
     return body as { ok: boolean; path: string; revealed: boolean };
   },
 
+  /** An image zWork made (outputs folder only), as a same-origin blob so the
+   *  WebGL reveal can draw it. */
+  outputImage: async (path: string) => {
+    const r = await localFetch("/api/files/output-image", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    });
+    if (!r.ok) throw new Error("That image isn't there anymore. It may have been moved or deleted.");
+    return r.blob();
+  },
+
   statFiles: (paths: string[]) =>
     localFetch("/api/files/stat", {
       method: "POST",
