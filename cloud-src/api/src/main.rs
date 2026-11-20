@@ -3027,6 +3027,140 @@ async fn ai_proxy(
     ))
 }
 
+/// Aspect ratios the image models accept (OpenRouter `image_config`).
+const IMAGE_ASPECTS: &[&str] = &["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
+
+/// Pull the first generated image (a data URL) out of an OpenRouter chat
+/// completion made with `modalities: ["image"]`.
+fn first_generated_image(body: &Value) -> Option<String> {
+    body.pointer("/choices/0/message/images/0/image_url/url")
+        .and_then(|v| v.as_str())
+        .filter(|u| u.starts_with("data:image/") || u.starts_with("https://"))
+        .map(str::to_string)
+}
+
+/// `POST /api/images/generate {prompt, aspect}` → `{image, model}`. The app's
+/// `generate_image` tool calls this so the OpenRouter key stays here. Signed-in
+/// users only; spend is booked like a chat request, so it counts toward the
+/// plan's allowance (the free model books $0). A failure books nothing.
+async fn image_generate(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    if !state.features.hosted_gateway {
+        return Err((StatusCode::NOT_FOUND, "hosted_gateway_disabled".to_string()));
+    }
+    let started_at = Utc::now();
+    let access = ensure_gateway_access(&state, &headers)
+        .await
+        .map_err(|status| (status, "gateway_access_denied".to_string()))?;
+    let Some(user) = resolve_app_user(&state, access)
+        .await
+        .map_err(|status| (status, "gateway_user_resolution_failed".to_string()))?
+    else {
+        return Err((StatusCode::UNAUTHORIZED, "sign_in_required".to_string()));
+    };
+
+    let prompt = body.get("prompt").and_then(|v| v.as_str()).unwrap_or("").trim();
+    if prompt.is_empty() || prompt.chars().count() > 4000 {
+        return Err((StatusCode::BAD_REQUEST, "prompt_must_be_1_to_4000_chars".to_string()));
+    }
+    let aspect = body.get("aspect").and_then(|v| v.as_str()).unwrap_or("1:1");
+    if !IMAGE_ASPECTS.contains(&aspect) {
+        return Err((StatusCode::BAD_REQUEST, format!("unsupported_aspect: {aspect}")));
+    }
+
+    let tier = hosted_tier("zwork-auto").expect("zwork-auto is in the hosted lineup");
+    // Mid-run, like a tool call: no concurrent-run check, continuation headroom.
+    enforce_usage(&state, &user, tier, RequestKind::Continuation).await?;
+
+    let Some(provider) = state
+        .gateway
+        .providers
+        .iter()
+        .find(|p| p.protocol == GatewayProtocol::OpenAi)
+        .cloned()
+    else {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "hosted_gateway_not_configured".to_string()));
+    };
+    // One setting to move off the free model when its promo ends.
+    let model = std::env::var("ZWORK_IMAGE_MODEL")
+        .ok()
+        .filter(|m| !m.trim().is_empty())
+        .unwrap_or_else(|| "recraft/recraft-v4.1-flash-v2:free".to_string());
+    let upstream_body = serde_json::json!({
+        "model": model,
+        "modalities": ["image"],
+        "messages": [{ "role": "user", "content": prompt }],
+        "image_config": { "aspect_ratio": aspect },
+    });
+
+    let run_id = run_id_from_headers(&headers);
+    let meta = GatewayRequestMeta {
+        chat_id: header_str(&headers, "x-zwork-chat-id"),
+        project_id: header_str(&headers, "x-zwork-project-id"),
+        app_version: header_str(&headers, "x-zwork-app-version"),
+        os: header_str(&headers, "x-zwork-os"),
+        request_payload: Some(upstream_body.clone()),
+        stream: Some(false),
+        model_tier: Some("image".to_string()),
+        route: Some("image".to_string()),
+        ..Default::default()
+    };
+    let request_id = insert_gateway_request(&state, &user.user_id, &run_id, RequestKind::Continuation, &meta)
+        .await
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "gateway_request_log_failed".to_string()))?;
+
+    let endpoint = format!("{}/chat/completions", provider.base_url.trim_end_matches('/'));
+    let result = state
+        .http_client
+        .post(endpoint)
+        .header("Authorization", format!("Bearer {}", provider.api_key))
+        .header("X-Title", "zWork Router")
+        .header("HTTP-Referer", "https://tryzwork.app")
+        .json(&upstream_body)
+        .send()
+        .await;
+
+    let (status, json) = match result {
+        Ok(resp) => {
+            let status = resp.status();
+            (status, resp.json::<Value>().await.unwrap_or(Value::Null))
+        }
+        Err(_) => (StatusCode::BAD_GATEWAY, Value::Null),
+    };
+    let image = status.is_success().then(|| first_generated_image(&json)).flatten();
+    // Only a delivered image is charged.
+    let cost = image.as_ref().and_then(|_| usage_cost(&json));
+    let finished = Utc::now();
+    mark_gateway_request_upstream(
+        &state, request_id, &provider.name, &model, None, None, None, None,
+        Some((finished - started_at).num_milliseconds()), cost, None, None,
+    )
+    .await;
+    finish_gateway_request(
+        &state,
+        request_id,
+        Some(status.as_u16() as i32),
+        Some(redact_image_data(&json)),
+        None,
+        Some((finished - started_at).num_milliseconds()),
+    )
+    .await;
+
+    match image {
+        Some(image) => Ok(Json(serde_json::json!({ "image": image, "model": model }))),
+        None => {
+            let detail = json
+                .pointer("/error/message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("no image in the response");
+            Err((StatusCode::BAD_GATEWAY, format!("image_generation_failed: {detail}")))
+        }
+    }
+}
+
 async fn ai_proxy_anthropic(
     State(state): State<AppState>,
     req: Request<axum::body::Body>,
@@ -7679,6 +7813,7 @@ async fn main() {
         .route("/api/chat/completions", post(ai_proxy))
         .route("/api/v1/chat/completions", post(ai_proxy))
         .route("/api/v1/messages", post(ai_proxy_anthropic))
+        .route("/api/images/generate", post(image_generate))
         .route("/api/webhooks/stripe", post(stripe_webhook))
         .route("/api/billing/checkout", post(billing_checkout))
         .route("/api/billing/portal", post(billing_portal))
@@ -7754,6 +7889,16 @@ async fn main() {
 #[cfg(test)]
 mod router_tests {
     use super::*;
+
+    #[test]
+    fn reads_generated_image_from_openrouter_response() {
+        let ok = serde_json::json!({"choices":[{"message":{"images":[{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}]}}]});
+        assert_eq!(first_generated_image(&ok).as_deref(), Some("data:image/png;base64,AAAA"));
+        let text_only = serde_json::json!({"choices":[{"message":{"content":"sorry"}}]});
+        assert_eq!(first_generated_image(&text_only), None);
+        let bad_scheme = serde_json::json!({"choices":[{"message":{"images":[{"image_url":{"url":"file:///etc/passwd"}}]}}]});
+        assert_eq!(first_generated_image(&bad_scheme), None);
+    }
 
     #[test]
     fn tiers_resolve_aliases_and_legacy_ids() {
