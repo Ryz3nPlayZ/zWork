@@ -18,6 +18,7 @@ export interface ScheduleDraft {
   daily_time?: string;
   daily_weekdays?: number[];
   interval_minutes?: number;
+  crew_id?: string;
 }
 
 function initialRepeat(src: ScheduleDraft | ScheduledTask | null | undefined): Repeat {
@@ -39,6 +40,7 @@ export function ScheduleModal({
 }) {
   const createSchedule = useApp((s) => s.createSchedule);
   const updateSchedule = useApp((s) => s.updateSchedule);
+  const crew = useApp((s) => s.crew);
   const src = task ?? initial ?? null;
 
   const [title, setTitle] = useState(src?.title ?? "");
@@ -53,6 +55,7 @@ export function ScheduleModal({
   const [unit, setUnit] = useState<Unit>(startMinutes % 60 === 0 ? "hours" : "minutes");
   const [amount, setAmount] = useState(String(startMinutes % 60 === 0 ? startMinutes / 60 : startMinutes));
   const [enabled, setEnabled] = useState(task?.enabled ?? true);
+  const [crewId, setCrewId] = useState(src?.crew_id ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
@@ -79,6 +82,7 @@ export function ScheduleModal({
           ? "Pick at least one day."
           : null;
   const canSave = title.trim().length > 0 && prompt.trim().length > 0 && !timingProblem;
+  const selectedCrewId = crew.some((member) => member.id === crewId) ? crewId : "";
 
   const toggleDay = (d: number) =>
     setDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]));
@@ -89,13 +93,13 @@ export function ScheduleModal({
     setError(null);
     try {
       if (task) {
-        await updateSchedule(task.id, { title: title.trim(), prompt: prompt.trim(), enabled, ...trigger });
+        await updateSchedule(task.id, { title: title.trim(), prompt: prompt.trim(), enabled, crew_id: selectedCrewId, ...trigger });
       } else {
         const body =
           trigger.interval_minutes !== null
             ? { interval_minutes: trigger.interval_minutes }
             : { daily_time: trigger.daily_time!, daily_weekdays: trigger.daily_weekdays! };
-        const res = await createSchedule({ title: title.trim(), prompt: prompt.trim(), enabled, ...body });
+        const res = await createSchedule({ title: title.trim(), prompt: prompt.trim(), enabled, crew_id: selectedCrewId, ...body });
         if (res?.error) {
           setError(res.error);
           return;
@@ -154,6 +158,25 @@ export function ScheduleModal({
           placeholder="Look through the emails I got since yesterday. List the ones that need a reply, who sent them and what they need."
           className={cn(inputClass, "resize-none leading-relaxed")}
         />
+      </Field>
+
+      <Field
+        label="Crew member"
+        htmlFor="schedule-crew"
+        optional
+        hint="Their instructions and app limits apply to every run of this task."
+      >
+        <select
+          id="schedule-crew"
+          value={selectedCrewId}
+          onChange={(e) => setCrewId(e.target.value)}
+          className={inputClass}
+        >
+          <option value="">No crew member</option>
+          {crew.map((member) => (
+            <option key={member.id} value={member.id}>{member.name}</option>
+          ))}
+        </select>
       </Field>
 
       <Field label="When">

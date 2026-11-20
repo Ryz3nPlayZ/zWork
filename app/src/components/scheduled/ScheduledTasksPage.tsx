@@ -33,6 +33,7 @@ import {
 } from "../page/Page";
 import { ScheduleModal, type ScheduleDraft } from "./ScheduleModal";
 import { describeSchedule, formatAgo, formatNext } from "./describe";
+import { CrewAvatar } from "../crew/CrewAvatar";
 
 /** Starting points for the empty page: recurring office chores, editable before saving. */
 const IDEAS: (ScheduleDraft & { icon: typeof Mail })[] = [
@@ -72,6 +73,7 @@ const IDEAS: (ScheduleDraft & { icon: typeof Mail })[] = [
 
 export function ScheduledTasksPage() {
   const scheduledTasks = useApp((s) => s.scheduledTasks);
+  const crew = useApp((s) => s.crew);
   const fetchSchedules = useApp((s) => s.fetchSchedules);
   const deleteSchedule = useApp((s) => s.deleteSchedule);
   const updateSchedule = useApp((s) => s.updateSchedule);
@@ -206,10 +208,11 @@ export function ScheduledTasksPage() {
           {shown.map((t) => {
             const open = openId === t.id;
             const isStarted = started.has(t.id);
+            const member = crew.find((m) => m.id === t.crew_id);
             return (
               <ListRow
                 key={t.id}
-                icon={<IconTile>{t.interval_minutes ? <Repeat /> : <CalendarDays />}</IconTile>}
+                icon={member ? <CrewAvatar member={member} size={34} /> : <IconTile>{t.interval_minutes ? <Repeat /> : <CalendarDays />}</IconTile>}
                 title={t.title}
                 meta={
                   t.enabled

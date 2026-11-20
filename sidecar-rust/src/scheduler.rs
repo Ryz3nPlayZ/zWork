@@ -208,7 +208,9 @@ async fn run_task(task: ScheduledTask) {
         .model
         .clone()
         .unwrap_or_else(|| crate::settings::load().default_model.clone());
-    let chat = crate::chatstore::create_kind(&task_title, &model, "", "automation");
+    let mut chat = crate::chatstore::create_kind(&task_title, &model, "", "automation");
+    chat.crew_id = task.crew_id.clone();
+    crate::chatstore::save(&chat);
     crate::schedulestore::set_last_chat(&task_id, &chat.id);
 
     // 2. Build the scheduled-task system-prompt block: identity, trigger
@@ -452,6 +454,7 @@ mod tests {
             enabled: true,
             notify_channel: "inbox".into(),
             model: None,
+            crew_id: String::new(),
             created_at: 0,
             updated_at: 0,
             last_run_at: None,

@@ -32,6 +32,7 @@ const AdminPage = lazy(() => import("./components/AdminPage").then((m) => ({ def
 const TasksPage = lazy(() => import("./components/tasks/TasksPage").then((m) => ({ default: m.TasksPage })));
 const InboxPage = lazy(() => import("./components/InboxPage").then((m) => ({ default: m.InboxPage })));
 const ScheduledTasksPage = lazy(() => import("./components/scheduled/ScheduledTasksPage").then((m) => ({ default: m.ScheduledTasksPage })));
+const CrewPage = lazy(() => import("./components/crew/CrewPage").then((m) => ({ default: m.CrewPage })));
 const OverlayChatView = lazy(() => import("./components/OverlayChatView").then((m) => ({ default: m.OverlayChatView })));
 const ShareWindowApp = lazy(() => import("./components/ShareWindowApp").then((m) => ({ default: m.ShareWindowApp })));
 const DesktopBillingReturn = lazy(() => import("./components/DesktopBillingReturn").then((m) => ({ default: m.DesktopBillingReturn })));
@@ -687,6 +688,10 @@ export default function App() {
           ) : view === "scheduled" ? (
             <Suspense fallback={panelFallback}>
               <ScheduledTasksPage />
+            </Suspense>
+          ) : view === "crew" ? (
+            <Suspense fallback={panelFallback}>
+              <CrewPage />
             </Suspense>
           ) : view === "admin" ? (
             <Suspense fallback={panelFallback}>

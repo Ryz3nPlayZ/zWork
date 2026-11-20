@@ -10,6 +10,8 @@ import {
   type ComposioStatus,
   type ComposioAccount,
   type ComposioApp,
+  type CrewMember,
+  type CrewMemberInput,
   type CustomModel,
   type MeResponse,
   type Project,
@@ -555,13 +557,14 @@ export interface Chat {
     options: string[];
   } | null;
   projectId?: string | null;
+  crewId?: string | null;
   /** Messages queued against the live run (steer / follow-up / next-run),
    *  rendered as chips in the composer. Authoritative copy comes from
    *  `queue` events on the stream. */
   queuedItems?: QueuedItem[];
 }
 
-export type View = "chat" | "settings" | "projects" | "analytics" | "plan" | "connectors" | "admin" | "tasks" | "inbox" | "scheduled";
+export type View = "chat" | "settings" | "projects" | "analytics" | "plan" | "connectors" | "admin" | "tasks" | "inbox" | "scheduled" | "crew";
 
 export type SettingsSection =
   | "account"
@@ -991,6 +994,17 @@ interface AppState {
   addEvent: (title: string, date: string, start_time?: string | null, end_time?: string | null) => Promise<void>;
   deleteEvent: (id: string) => Promise<void>;
 
+  // Crew
+  crew: CrewMember[];
+  crewLoading: boolean;
+  crewError: string | null;
+  newChatCrewId: string;
+  fetchCrew: () => Promise<void>;
+  createCrew: (body: CrewMemberInput) => Promise<CrewMember>;
+  updateCrew: (id: string, body: CrewMemberInput) => Promise<CrewMember>;
+  deleteCrew: (id: string) => Promise<void>;
+  setChatCrew: (crewId: string) => Promise<void>;
+
   // Scheduled Tasks + Inbox
   scheduledTasks: ScheduledTask[];
   inboxItems: InboxItem[];
@@ -1003,6 +1017,7 @@ interface AppState {
     daily_time?: string;
     daily_weekdays?: number[];
     enabled?: boolean;
+    crew_id?: string;
   }) => Promise<{ error?: string } | undefined>;
   updateSchedule: (
     id: string,
@@ -1013,6 +1028,7 @@ interface AppState {
       daily_time: string | null;
       daily_weekdays: number[] | null;
       enabled: boolean;
+      crew_id: string;
     }>,
   ) => Promise<void>;
   deleteSchedule: (id: string) => Promise<void>;
@@ -1125,6 +1141,12 @@ export const useApp = create<AppState>((set, get) => ({
   // Tasks
   tasks: [],
   events: [],
+
+  // Crew
+  crew: [],
+  crewLoading: false,
+  crewError: null,
+  newChatCrewId: "",
 
   // Scheduled Tasks + Inbox
   scheduledTasks: [],
@@ -1477,6 +1499,59 @@ export const useApp = create<AppState>((set, get) => ({
     } catch (e) { console.warn("deleteEvent failed:", e); }
   },
 
+  fetchCrew: async () => {
+    set({ crewLoading: true, crewError: null });
+    try {
+      const crew = await api.listCrew();
+      set({ crew, crewLoading: false });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Couldn't load your crew.";
+      set({ crewError: message, crewLoading: false });
+    }
+  },
+
+  createCrew: async (body) => {
+    const member = await api.createCrew(body);
+    set((s) => ({ crew: [...s.crew, member] }));
+    return member;
+  },
+
+  updateCrew: async (id, body) => {
+    const member = await api.updateCrew(id, body);
+    set((s) => ({ crew: s.crew.map((m) => (m.id === id ? member : m)) }));
+    return member;
+  },
+
+  deleteCrew: async (id) => {
+    await api.deleteCrew(id);
+    set((s) => ({
+      crew: s.crew.filter((m) => m.id !== id),
+      newChatCrewId: s.newChatCrewId === id ? "" : s.newChatCrewId,
+    }));
+  },
+
+  setChatCrew: async (crewId) => {
+    const id = get().activeChatId;
+    if (!id || id.startsWith("tmp_")) {
+      set({ newChatCrewId: crewId });
+      return;
+    }
+    const previous = get().chats[id]?.crewId ?? "";
+    set((s) => ({
+      chats: s.chats[id] ? { ...s.chats, [id]: { ...s.chats[id], crewId } } : s.chats,
+      chatSummaries: s.chatSummaries.map((c) => (c.id === id ? { ...c, crew_id: crewId } : c)),
+    }));
+    try {
+      await api.setChatCrew(id, crewId);
+    } catch (e) {
+      set((s) => ({
+        chats: s.chats[id] ? { ...s.chats, [id]: { ...s.chats[id], crewId: previous } } : s.chats,
+        chatSummaries: s.chatSummaries.map((c) => (c.id === id ? { ...c, crew_id: previous } : c)),
+      }));
+      throw e;
+    }
+  },
+
   // ─── Scheduled Tasks + Inbox ──────────────────────────────────────────────
 
   fetchSchedules: async () => {
@@ -1668,6 +1743,7 @@ export const useApp = create<AppState>((set, get) => ({
       get().refreshChats(),
       get().refreshMe(),
       get().refreshProjects(),
+      get().fetchCrew(),
       get().checkMacOSPermissions().catch(() => {}),
       // Inbox + Scheduled are polled by their own pages, but we also seed them
       // at bootstrap so the Inbox unread badge and the Scheduled sidebar state
@@ -1821,7 +1897,7 @@ export const useApp = create<AppState>((set, get) => ({
     } catch (e) { console.warn("refreshMe failed:", e) }
   },
 
-  openLanding: () => set({ activeChatId: null, view: "chat", activeProjectId: null }),
+  openLanding: () => set({ activeChatId: null, view: "chat", activeProjectId: null, newChatCrewId: "" }),
 
   openChat: async (id) => {
     const existing = get().chats[id];
@@ -1902,6 +1978,7 @@ export const useApp = create<AppState>((set, get) => ({
               artifactPanelOpen: false,
               activeArtifactId: null,
               projectId: fetchedProjectId,
+              crewId: full.crew_id || null,
               error: unfinished ? "This reply didn't finish. Send your message again to retry." : undefined,
             },
           },
@@ -2340,6 +2417,7 @@ export const useApp = create<AppState>((set, get) => ({
     const planMode = options?.planMode ?? get().planMode;
     const autoApproveDestructive = options?.autoApproveDestructive ?? get().autoApproveDestructive;
     const activeProjectId = get().activeProjectId;
+    const crewId = currentId ? get().chats[currentId]?.crewId ?? "" : get().newChatCrewId;
 
     // The web app has no server-side agent, so it sends the thread itself.
     const priorHistory = IS_WEB && currentId ? webHistory(get().chats[currentId]) : undefined;
@@ -2406,6 +2484,7 @@ export const useApp = create<AppState>((set, get) => ({
           // a reload via openChat, since the server-assigned id reconciliation
           // below spreads `...c` but never sets projectId itself.
           projectId: activeProjectId ?? null,
+          crewId: crewId || null,
         };
       return {
         chats: { ...s.chats, [localId]: chat },
@@ -2484,6 +2563,7 @@ export const useApp = create<AppState>((set, get) => ({
           model,
           artifact_mode: artifactMode,
           project_id: activeProjectId ?? undefined,
+          crew_id: crewId || undefined,
           plan_mode: planMode,
           auto_approve_destructive: autoApproveDestructive,
           attachments,

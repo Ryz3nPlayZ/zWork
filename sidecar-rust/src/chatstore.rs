@@ -40,6 +40,8 @@ pub struct Chat {
     #[serde(default)]
     pub project_id: String,
     #[serde(default)]
+    pub crew_id: String,
+    #[serde(default)]
     pub compacted_summary: String,
     #[serde(default)]
     pub compaction_cursor: u64,
@@ -111,6 +113,7 @@ pub fn create_kind(title: &str, model: &str, project_id: &str, kind: &str) -> Ch
         messages: Vec::new(),
         model: model.to_string(),
         project_id: project_id.to_string(),
+        crew_id: String::new(),
         compacted_summary: String::new(),
         compaction_cursor: 0,
         kind: kind.to_string(),
@@ -140,6 +143,7 @@ pub fn list_all() -> Vec<Value> {
                         let message_count = messages.map_or(0, |a| a.len());
                         let model = d.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
                         let project_id = d.get("project_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let crew_id = d.get("crew_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                         let kind = d.get("kind").and_then(|v| v.as_str()).unwrap_or("chat").to_string();
                         let preview = messages
                             .and_then(|a| preview_for_summary(a))
@@ -153,6 +157,7 @@ pub fn list_all() -> Vec<Value> {
                             "message_count": message_count,
                             "model": model,
                             "project_id": project_id,
+                            "crew_id": crew_id,
                             "kind": kind,
                             "preview": preview
                         }));
@@ -591,6 +596,7 @@ pub fn fork_chat(chat_id: &str, at_message_id: Option<&str>, before: bool) -> Op
         messages: source.messages[..cut].to_vec(),
         model: source.model.clone(),
         project_id: source.project_id.clone(),
+        crew_id: source.crew_id.clone(),
         compacted_summary: source.compacted_summary.clone(),
         compaction_cursor: source.compaction_cursor,
         kind: "chat".to_string(),

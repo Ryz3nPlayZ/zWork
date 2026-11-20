@@ -53,6 +53,7 @@ import { dragRegionAttrs } from "../lib/drag";
 import { ModelPicker } from "./ModelPicker";
 import { SlashMenu } from "./SlashMenu";
 import { GlideGroup } from "./Glide";
+import { CrewPicker } from "./crew/CrewPicker";
 
 interface ComposerAttachment {
   id: string;
@@ -1346,6 +1347,7 @@ export function ChatInput({
                   onClick={() => setArtifactMode((v) => !v)}
                 />
                 <SecurityPresetPicker value={securityPreset} onChange={setSecurityPreset} />
+                <CrewPicker disabled={working} />
               </>
             )}
           </div>

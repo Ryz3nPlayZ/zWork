@@ -16,6 +16,7 @@ import {
 import { useApp } from "../lib/store";
 import { api, type InboxItem } from "../lib/api";
 import { AssistantMarkdown } from "./Message";
+import { CrewAvatar } from "./crew/CrewAvatar";
 import {
   Button,
   EmptyState,
@@ -81,6 +82,8 @@ const UNDO_MS = 5000;
 export function InboxPage() {
   const inboxItems = useApp((s) => s.inboxItems);
   const scheduledTasks = useApp((s) => s.scheduledTasks);
+  const crew = useApp((s) => s.crew);
+  const chatSummaries = useApp((s) => s.chatSummaries);
   const fetchInbox = useApp((s) => s.fetchInbox);
   const fetchSchedules = useApp((s) => s.fetchSchedules);
   const markRead = useApp((s) => s.markInboxRead);
@@ -197,15 +200,18 @@ export function InboxPage() {
     const source = (item.task_id && taskName.get(item.task_id)) || meta.label;
     const pending = !!item.pending_action;
     const firstLine = preview(item.body);
+    const taskCrewId = item.task_id ? scheduledTasks.find((task) => task.id === item.task_id)?.crew_id : undefined;
+    const chatCrewId = chatSummaries.find((chat) => chat.id === item.chat_id)?.crew_id;
+    const member = crew.find((candidate) => candidate.id === (taskCrewId || chatCrewId));
 
     return (
       <ListRow
         key={item.id}
-        icon={
+        icon={member ? <CrewAvatar member={member} size={34} /> : (
           <IconTile tone={meta.tone}>
             <Icon />
           </IconTile>
-        }
+        )}
         title={item.title}
         meta={
           <>

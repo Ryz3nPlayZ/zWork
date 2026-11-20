@@ -1390,6 +1390,7 @@ fn manage_schedules(action: &str, params: &Value) -> Result<String, String> {
                 enabled: Some(enabled_new),
                 notify_channel: Some("inbox".to_string()),
                 model: None,
+                crew_id: None,
             });
 
             Ok(format!(
@@ -1464,6 +1465,7 @@ fn manage_schedules(action: &str, params: &Value) -> Result<String, String> {
                     enabled: params.get("enabled").and_then(|v| v.as_bool()),
                     notify_channel: None,
                     model: None,
+                    crew_id: None,
                 },
             )
             .ok_or_else(|| format!("Scheduled task '{}' not found", task_id))?;

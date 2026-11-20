@@ -23,12 +23,14 @@ pub struct CreateChatRequest {
     pub title: Option<String>,
     pub model: Option<String>,
     pub project_id: Option<String>,
+    pub crew_id: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub struct PatchChatRequest {
     pub title: Option<String>,
     pub project_id: Option<String>,
+    pub crew_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -46,6 +48,7 @@ pub struct ChatStreamRequest {
     pub message: String,
     pub model: Option<String>,
     pub project_id: Option<String>,
+    pub crew_id: Option<String>,
     /// Caller-provided title for a newly created chat.
     #[serde(default)]
     pub new_chat_title: Option<String>,
@@ -675,7 +678,9 @@ pub async fn create_chat(Json(req): Json<CreateChatRequest>) -> impl IntoRespons
     let model = req.model.unwrap_or_default();
     let project_id = req.project_id.unwrap_or_default();
     
-    let chat = chatstore::create(&title, &model, &project_id);
+    let mut chat = chatstore::create(&title, &model, &project_id);
+    chat.crew_id = req.crew_id.unwrap_or_default();
+    chatstore::save(&chat);
     Json(chat)
 }
 
@@ -725,6 +730,9 @@ pub async fn patch_chat(
     }
     if let Some(ref proj) = req.project_id {
         chat.project_id = proj.clone();
+    }
+    if let Some(crew_id) = req.crew_id {
+        chat.crew_id = crew_id;
     }
     
     chatstore::save(&chat);
@@ -856,11 +864,13 @@ pub async fn chat_stream_route(
 ) -> impl IntoResponse {
     let chat_id = req.chat_id.unwrap_or_else(|| {
         let title = req.new_chat_title.as_deref().unwrap_or("New chat");
-        let chat = chatstore::create(
+        let mut chat = chatstore::create(
             title,
             &req.model.clone().unwrap_or_default(),
             &req.project_id.clone().unwrap_or_default(),
         );
+        chat.crew_id = req.crew_id.clone().unwrap_or_default();
+        chatstore::save(&chat);
         chat.id
     });
 
@@ -2474,6 +2484,8 @@ pub struct ScheduleCreate {
     pub enabled: Option<bool>,
     #[serde(default)]
     pub model: Option<String>,
+    #[serde(default)]
+    pub crew_id: Option<String>,
 }
 
 pub async fn create_schedule(Json(req): Json<ScheduleCreate>) -> impl IntoResponse {
@@ -2512,6 +2524,7 @@ pub async fn create_schedule(Json(req): Json<ScheduleCreate>) -> impl IntoRespon
         enabled: Some(enabled),
         notify_channel: Some("inbox".to_string()),
         model: req.model,
+        crew_id: req.crew_id,
     });
     Json(json!({ "task": task }))
 }
@@ -2532,6 +2545,8 @@ pub struct ScheduleUpdate {
     pub enabled: Option<bool>,
     #[serde(default)]
     pub model: Option<Option<String>>,
+    #[serde(default)]
+    pub crew_id: Option<String>,
 }
 
 pub async fn update_schedule(
@@ -2566,6 +2581,7 @@ pub async fn update_schedule(
             enabled: req.enabled,
             notify_channel: None,
             model: req.model,
+            crew_id: req.crew_id,
         },
     );
     match updated {

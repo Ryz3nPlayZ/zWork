@@ -16,6 +16,7 @@ import {
   Plug,
   Inbox,
   Clock,
+  Bot,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { GlideGroup } from "./Glide";
@@ -150,6 +151,14 @@ export function Sidebar() {
               badge={inboxUnread}
               onClick={() => setView("inbox")}
               active={view === "inbox"}
+            />
+          )}
+          {!demo && (
+            <SidebarButton
+              icon={<Bot />}
+              label="Crew"
+              onClick={() => setView("crew")}
+              active={view === "crew"}
             />
           )}
           {/* Tasks (kanban) — deferred for reimplementation. The current

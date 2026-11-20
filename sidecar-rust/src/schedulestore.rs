@@ -47,6 +47,8 @@ pub struct ScheduledTask {
     /// Override model; `None` = use the default model from settings.
     #[serde(default)]
     pub model: Option<String>,
+    #[serde(default)]
+    pub crew_id: String,
     pub created_at: u64,
     pub updated_at: u64,
     #[serde(default)]
@@ -118,6 +120,7 @@ pub struct CreateParams {
     pub enabled: Option<bool>,
     pub notify_channel: Option<String>,
     pub model: Option<String>,
+    pub crew_id: Option<String>,
 }
 
 pub fn create(p: CreateParams) -> ScheduledTask {
@@ -134,6 +137,7 @@ pub fn create(p: CreateParams) -> ScheduledTask {
         enabled: p.enabled.unwrap_or(true),
         notify_channel: p.notify_channel.unwrap_or_else(default_inbox_channel),
         model: p.model,
+        crew_id: p.crew_id.unwrap_or_default(),
         created_at: now,
         updated_at: now,
         last_run_at: None,
@@ -160,6 +164,7 @@ pub struct UpdateParams {
     pub enabled: Option<bool>,
     pub notify_channel: Option<String>,
     pub model: Option<Option<String>>,
+    pub crew_id: Option<String>,
 }
 
 /// Update a scheduled task. The `Option<Option<T>>` fields let callers
@@ -178,6 +183,7 @@ pub fn update(task_id: &str, p: UpdateParams) -> Option<ScheduledTask> {
     if let Some(e) = p.enabled { task.enabled = e; }
     if let Some(nc) = p.notify_channel { task.notify_channel = nc; }
     if let Some(m) = p.model { task.model = m; }
+    if let Some(id) = p.crew_id { task.crew_id = id; }
     let now = now_ms();
     // A new time or switching the task on starts the clock from now; a paused
     // task has no next run. Renaming or rewording leaves the next run alone.
@@ -266,6 +272,7 @@ mod tests {
             enabled: true,
             notify_channel: "inbox".into(),
             model: None,
+            crew_id: String::new(),
             created_at: 0,
             updated_at: 0,
             last_run_at: None,

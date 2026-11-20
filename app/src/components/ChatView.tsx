@@ -26,6 +26,7 @@ import { hasTrafficLights, usesIntegratedTitleBar } from "../lib/platform";
 import { CAPTION_CLEARANCE } from "./TitleBar";
 import { downloadChatJson, downloadChatMarkdown } from "../lib/chatExport";
 import { cn } from "../lib/cn";
+import { CrewAvatar } from "./crew/CrewAvatar";
 
 export function ChatView() {
   const chat = useApp((s) =>
@@ -43,6 +44,7 @@ export function ChatView() {
   const sidebarOpen = useApp((s) => s.sidebarOpen);
   const resolveGate = useApp((s) => s.resolveGate);
   const planMode = useApp((s) => s.planMode);
+  const crewMember = useApp((s) => chat?.crewId ? s.crew.find((member) => member.id === chat.crewId) : undefined);
   const endRef = useRef<HTMLDivElement>(null);
   // The composer floats over the messages; pad them by its live height so the
   // todo box (and a grown draft) push the chat up instead of covering it.
@@ -222,6 +224,11 @@ export function ChatView() {
               >
                 <ArrowLeft className="h-3.5 w-3.5" />
               </button>
+            )}
+            {crewMember && (
+              <span data-no-drag title={`Crew member: ${crewMember.name}`} className="inline-flex shrink-0">
+                <CrewAvatar member={crewMember} size={28} />
+              </span>
             )}
             {editing ? (
               <div className="flex items-center gap-1" data-no-drag>

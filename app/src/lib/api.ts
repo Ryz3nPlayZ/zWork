@@ -99,6 +99,7 @@ export interface ApiChat {
   created_at: number;
   updated_at: number;
   model: string;
+  crew_id?: string;
   messages: ApiMessage[];
   /** True while a run is still writing this chat's reply. */
   running?: boolean;
@@ -112,6 +113,7 @@ export interface ApiChatSummary {
   message_count: number;
   model: string;
   project_id?: string;
+  crew_id?: string;
   /** Short plaintext snippet of the most recent message — powers content
    *  matching in SearchModal. Empty string when unavailable. */
   preview?: string;
@@ -154,6 +156,19 @@ export interface ComposioApp {
   icon: string | null;
   color: string;
 }
+
+export interface CrewMember {
+  id: string;
+  name: string;
+  avatar: string;
+  color: string;
+  instructions: string;
+  apps: string[];
+  created_at: number;
+  updated_at: number;
+}
+
+export type CrewMemberInput = Partial<Pick<CrewMember, "name" | "avatar" | "color" | "instructions" | "apps">>;
 
 export interface CredentialStatus {
   configured: boolean;
@@ -363,6 +378,7 @@ export interface ScheduledTask {
   enabled: boolean;
   notify_channel: string; // "inbox"
   model: string | null; // null = default model
+  crew_id?: string;
   created_at: number;
   updated_at: number;
   last_run_at: number | null;
@@ -687,6 +703,28 @@ export const api = {
       method: "DELETE",
     }).then((r) => j<{ ok: boolean }>(r)),
 
+  // --- Crew ---
+  listCrew: () => localFetch("/api/crew").then((r) => j<CrewMember[]>(r)),
+
+  createCrew: (body: CrewMemberInput) =>
+    localFetch("/api/crew", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => j<CrewMember>(r)),
+
+  updateCrew: (id: string, body: CrewMemberInput) =>
+    localFetch(`/api/crew/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => j<CrewMember>(r)),
+
+  deleteCrew: (id: string) =>
+    localFetch(`/api/crew/${id}`, { method: "DELETE" }).then(async (r) => {
+      if (!r.ok) throw new Error(`${r.status} ${r.statusText}: ${await r.text()}`);
+    }),
+
   // --- Scheduled Tasks ---
   getLaunchAtLogin: () => (IS_TAURI ? invoke<boolean>("get_launch_at_login") : Promise.resolve(false)),
   setLaunchAtLogin: (enabled: boolean) =>
@@ -702,6 +740,7 @@ export const api = {
     daily_weekdays?: number[];
     enabled?: boolean;
     model?: string;
+    crew_id?: string;
   }) =>
     localFetch("/api/schedules", {
       method: "POST",
@@ -719,6 +758,7 @@ export const api = {
       daily_weekdays?: number[] | null;
       enabled?: boolean;
       model?: string | null;
+      crew_id?: string;
     },
   ) =>
     localFetch(`/api/schedules/${id}`, {
@@ -932,6 +972,13 @@ export const api = {
       body: JSON.stringify({ title }),
     }).then((r) => j<ApiChat>(r));
   },
+
+  setChatCrew: (id: string, crewId: string) =>
+    localFetch(`/api/chats/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ crew_id: crewId }),
+    }).then((r) => j<ApiChat>(r)),
 
   /**
    * Persist edits to an individual stored message (content and/or activities).
@@ -1736,6 +1783,7 @@ export async function streamChat(
     model?: string;
     artifact_mode?: boolean;
     project_id?: string;
+    crew_id?: string;
     plan_mode?: boolean;
     auto_approve_destructive?: boolean;
     attachments?: Array<{

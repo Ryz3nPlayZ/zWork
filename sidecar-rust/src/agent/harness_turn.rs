@@ -1729,8 +1729,18 @@ pub fn run_agent_turn(
         let example_slug = skills.first().map(|s| s.slug.as_str()).unwrap_or("frontend-design");
         let include_desktop = crate::cua::driver_available();
 
-        let composio_schemas = crate::connectors::composio::all_tool_schemas().await;
-        let composio_apps = crate::connectors::composio::connected_apps().await;
+        let crew_member = crate::crewstore::get(&chat.crew_id);
+        let mut composio_schemas = crate::connectors::composio::all_tool_schemas().await;
+        let mut composio_apps = crate::connectors::composio::connected_apps().await;
+        if let Some(member) = &crew_member {
+            composio_schemas.retain(|schema| {
+                let name = schema["name"].as_str().unwrap_or("");
+                !name.starts_with("composio__") || crate::crewstore::allows_tool(member, name)
+            });
+            if !member.apps.is_empty() {
+                composio_apps.retain(|app| member.apps.contains(&app.to_lowercase()));
+            }
+        }
         let connected_apps_block = crate::connectors::composio::build_connected_apps_block(&composio_schemas, &composio_apps);
         let mcp = crate::connectors::mcp::toolset().await;
 
@@ -1800,6 +1810,9 @@ pub fn run_agent_turn(
         // ── Per-turn extras → latest user message (system prompt stays
         // byte-stable for prompt caching) ───────────────────────────────
         let mut turn_extras: Vec<String> = Vec::new();
+        if let Some(member) = &crew_member {
+            turn_extras.push(crate::crewstore::prompt_block(member));
+        }
         if artifact_mode {
             turn_extras.push(format!("## Artifact mode\n{}", artifact_hint(&user_message)));
         }
