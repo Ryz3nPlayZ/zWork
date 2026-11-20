@@ -108,6 +108,7 @@ mod agent;
 mod harness;
 mod taskstore;
 mod schedulestore;
+mod crewstore;
 mod inboxstore;
 mod scheduler;
 mod server;
@@ -253,6 +254,8 @@ async fn run() {
         .route("/api/tasks/:task_id/column", patch(server::update_task_column_handler))
         .route("/api/events", get(server::list_events).post(server::create_event_handler))
         .route("/api/events/:event_id", delete(server::delete_event_handler))
+        .route("/api/crew", get(crewstore::list_crew).post(crewstore::create_crew))
+        .route("/api/crew/:id", axum::routing::patch(crewstore::update_crew).delete(crewstore::delete_crew))
         .route("/api/schedules", get(server::list_schedules).post(server::create_schedule))
         .route(
             "/api/schedules/:task_id",

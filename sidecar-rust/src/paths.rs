@@ -341,3 +341,7 @@ pub fn settle_cwd() {
         let _ = env::set_current_dir(workspace_root());
     }
 }
+
+pub fn crew_path() -> PathBuf {
+    home_dir().join("crew.json")
+}
