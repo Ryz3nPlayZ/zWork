@@ -10,7 +10,7 @@ import {
   type AnalyticsDay,
   type AnalyticsSummary,
 } from "../lib/cloud";
-import { Badge, Button, EmptyState, PageShell, SectionHeading, Segmented } from "./page/Page";
+import { Badge, Button, EmptyState, PageShell, Segmented } from "./page/Page";
 
 const DAY_MS = 86_400_000;
 const number = new Intl.NumberFormat();
@@ -60,7 +60,6 @@ type Load =
   | { state: "ready"; summary: AnalyticsSummary };
 
 export function AnalyticsPage() {
-  const setView = useApp((s) => s.setView);
   const userId = useApp((s) => s.user?.id ?? null);
   const signingIn = useApp((s) => s.isLoadingAuth);
   const signInWithGoogle = useApp((s) => s.signInWithGoogle);
@@ -97,24 +96,10 @@ export function AnalyticsPage() {
     signInWithGoogle().catch(() => setSignInError(true));
   };
 
-  const summary = load.state === "ready" ? load.summary : null;
-  const tier = summary?.user?.tier ?? "free";
-  const isFree = tier === "free";
-
   return (
     <PageShell
       title="Analytics"
       subtitle="How much of your plan you've used, and when you've worked with zWork."
-      actions={
-        summary ? (
-          <>
-            <Badge>{tier === "max" ? "Max plan" : tier === "pro" ? "Pro plan" : "Free plan"}</Badge>
-            <Button variant={isFree ? "primary" : "secondary"} onClick={() => setView("plan")}>
-              {isFree ? "Upgrade" : "Manage plan"}
-            </Button>
-          </>
-        ) : undefined
-      }
     >
       {load.state === "loading" ? (
         <div className="flex flex-1 items-center justify-center py-20 text-[13px] text-ink-muted">
@@ -161,87 +146,112 @@ function Overview({
   range: "7" | "30";
   onRange: (r: "7" | "30") => void;
 }) {
+  const setView = useApp((s) => s.setView);
   const week = useMemo(() => lastDays(7, summary.past_week), [summary.past_week]);
   const month = useMemo(() => lastDays(30, summary.past_month), [summary.past_month]);
   const series = range === "7" ? week : month;
   const weekTotal = week.reduce((n, d) => n + d.messages, 0);
-  const isFree = (summary.user?.tier ?? "free") === "free";
+  // The 7 days before this week, from the 30-day series.
+  const prevWeekTotal = month.slice(16, 23).reduce((n, d) => n + d.messages, 0);
+  const tier = summary.user?.tier ?? "free";
+  const isFree = tier === "free";
   const harder =
     isFree && summary.free_escalations_left != null
       ? { left: summary.free_escalations_left, limit: summary.free_escalations_limit ?? 3 }
       : null;
 
+  const diff = weekTotal - prevWeekTotal;
+  const trend =
+    prevWeekTotal === 0 && weekTotal === 0
+      ? "Nothing yet this week."
+      : prevWeekTotal === 0
+        ? "None the week before."
+        : diff === 0
+          ? "Same as the week before."
+          : `${number.format(Math.abs(diff))} ${diff > 0 ? "more" : "fewer"} than the week before.`;
+
   return (
-    <>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <StatTile label="Messages today" value={summary.root_requests_today} />
-        <StatTile label="Last 7 days" value={weekTotal} />
-        <StatTile label="All time" value={summary.root_requests_total} />
-      </div>
+    <div className="flex flex-col gap-4">
+      {/* Activity: the headline number, then the days behind it. */}
+      <section className="rounded-2xl border border-line bg-paper-raised">
+        <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4 px-5 pb-4 pt-5">
+          <div>
+            <div className="text-[12.5px] text-ink-muted">Messages in the last 7 days</div>
+            <div className="mt-1 text-[40px] font-semibold leading-none tracking-[-0.03em] tabular-nums text-ink">
+              {formatCount(weekTotal)}
+            </div>
+            <div className="mt-2 text-[12.5px] text-ink-muted">{trend}</div>
+          </div>
+          <dl className="flex gap-8">
+            <Figure label="Today" value={summary.root_requests_today} />
+            <Figure label="All time" value={summary.root_requests_total} />
+          </dl>
+        </div>
+        <div className="border-t border-line px-5 pb-4 pt-3">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="text-[13px] font-semibold text-ink">Activity</h2>
+            <Segmented
+              label="Time range"
+              value={range}
+              onChange={onRange}
+              options={[
+                { value: "7", label: "7 days" },
+                { value: "30", label: "30 days" },
+              ]}
+            />
+          </div>
+          <ActivityChart key={range} days={series} />
+        </div>
+      </section>
 
-      <SectionHeading
-        title="Plan limits"
-        description="If one runs out, zWork waits until it frees up. Each one frees up bit by bit as older use drops off."
-      />
-      <div className="divide-y divide-line rounded-2xl border border-line bg-paper-raised">
-        <Meter label="Last 5 hours" used={summary.five_hour_used} limit={summary.five_hour_limit} />
-        <Meter label="Last 7 days" used={summary.weekly_used} limit={summary.weekly_limit} />
-        {harder && (
-          <Meter
-            label="Hard tasks, last 30 days"
-            hint={`zWork can hand ${plural(harder.left, "more hard task", "more hard tasks")} to its stronger model.`}
-            used={Math.max(0, harder.limit - harder.left)}
-            limit={harder.limit}
-            valueText={`${Math.max(0, harder.limit - harder.left)} of ${harder.limit} used`}
-          />
-        )}
-      </div>
-
-      <SectionHeading
-        title="Activity"
-        description={`${plural(series.reduce((n, d) => n + d.messages, 0), "message", "messages")} in the last ${range} days.`}
-        action={
-          <Segmented
-            label="Time range"
-            value={range}
-            onChange={onRange}
-            options={[
-              { value: "7", label: "7 days" },
-              { value: "30", label: "30 days" },
-            ]}
-          />
-        }
-      />
-      <div className="rounded-2xl border border-line bg-paper-raised p-4">
-        <ActivityChart key={range} days={series} />
-      </div>
+      {/* Plan: what's left, with the plan it belongs to. */}
+      <section className="rounded-2xl border border-line bg-paper-raised">
+        <div className="flex items-center justify-between gap-3 px-5 pt-4">
+          <div className="min-w-0">
+            <h2 className="text-[13px] font-semibold text-ink">
+              {tier === "max" ? "Max plan" : tier === "pro" ? "Pro plan" : "Free plan"}
+            </h2>
+            <p className="mt-0.5 text-[12px] text-ink-muted">
+              If a limit runs out, zWork waits until it frees up. Each frees up bit by bit as older use drops off.
+            </p>
+          </div>
+          <Button variant={isFree ? "primary" : "secondary"} onClick={() => setView("plan")}>
+            {isFree ? "Upgrade" : "Manage plan"}
+          </Button>
+        </div>
+        <div className={cn("grid grid-cols-1 gap-x-8 gap-y-5 px-5 pb-5 pt-5", harder ? "md:grid-cols-3" : "md:grid-cols-2")}>
+          <Meter label="Last 5 hours" used={summary.five_hour_used} limit={summary.five_hour_limit} />
+          <Meter label="Last 7 days" used={summary.weekly_used} limit={summary.weekly_limit} />
+          {harder && (
+            <Meter
+              label="Hard tasks, 30 days"
+              hint={`${plural(harder.left, "more goes", "more go")} to the stronger model.`}
+              used={Math.max(0, harder.limit - harder.left)}
+              limit={harder.limit}
+              valueText={`${Math.max(0, harder.limit - harder.left)} of ${harder.limit}`}
+            />
+          )}
+        </div>
+      </section>
 
       {summary.past_year && (
-        <>
-          <SectionHeading
-            title="Past year"
-            description={`${plural(
-              summary.past_year.reduce((n, d) => n + d.roots, 0),
-              "message",
-              "messages",
-            )} in the last 12 months.`}
-          />
-          <div className="rounded-2xl border border-line bg-paper-raised p-4">
-            <YearHeatmap rows={summary.past_year} />
-          </div>
-        </>
+        <section className="rounded-2xl border border-line bg-paper-raised px-5 pb-4 pt-4">
+          <YearHeatmap rows={summary.past_year} />
+        </section>
       )}
-    </>
+    </div>
   );
 }
 
-function StatTile({ label, value }: { label: string; value: number }) {
+function formatCount(n: number): string {
+  return n >= 10_000 ? compact.format(n) : number.format(n);
+}
+
+function Figure({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-2xl border border-line bg-paper-raised p-4">
-      <div className="text-[12px] text-ink-muted">{label}</div>
-      <div className="mt-1 text-[24px] font-semibold tracking-tight text-ink">
-        {value >= 10_000 ? compact.format(value) : number.format(value)}
-      </div>
+    <div>
+      <dt className="text-[12px] text-ink-muted">{label}</dt>
+      <dd className="mt-0.5 text-[20px] font-semibold tracking-tight tabular-nums text-ink">{formatCount(value)}</dd>
     </div>
   );
 }
@@ -265,27 +275,30 @@ function Meter({
     pct >= 100 ? { tone: "error", text: "Used up" } : pct >= 80 ? { tone: "warning", text: "Almost used up" } : null;
 
   return (
-    <div className="px-4 py-3.5">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="text-[13px] font-medium text-ink">{label}</span>
-          {status && <Badge tone={status.tone}>{status.text}</Badge>}
-        </div>
-        <span className="shrink-0 text-[12.5px] tabular-nums text-ink-muted">{valueText ?? `${pct}% used`}</span>
+    <div className="min-w-0">
+      <div className="flex items-center gap-2">
+        <span className="text-[12.5px] text-ink-muted">{label}</span>
+        {status && <Badge tone={status.tone}>{status.text}</Badge>}
+      </div>
+      <div className="mt-1 flex items-baseline gap-1">
+        <span className="text-[22px] font-semibold tracking-tight tabular-nums text-ink">
+          {valueText ?? `${pct}%`}
+        </span>
+        <span className="text-[12px] text-ink-faint">used</span>
       </div>
       <div
-        className="mt-2 h-2 overflow-hidden rounded-full bg-line/60"
+        className="mt-2 h-1.5 overflow-hidden rounded-full bg-ink/[0.08]"
         role="progressbar"
         aria-label={label}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={pct}
-        aria-valuetext={valueText ?? `${pct}% used`}
+        aria-valuetext={`${valueText ?? `${pct}%`} used`}
       >
         <div
           className={cn(
-            "h-full rounded-full transition-[width] duration-500",
-            status?.tone === "error" ? "bg-error" : status?.tone === "warning" ? "bg-warning" : "bg-accent/70",
+            "h-full rounded-full transition-[width] duration-500 motion-reduce:transition-none",
+            status?.tone === "error" ? "bg-error" : status?.tone === "warning" ? "bg-warning" : "bg-ink/70",
           )}
           style={{ width: `${pct}%` }}
         />
@@ -370,7 +383,7 @@ function ActivityChart({ days }: { days: Day[] }) {
           {ticks.map((t) => (
             <div
               key={t}
-              className={cn("absolute inset-x-0 border-t", t === 0 ? "border-line-strong" : "border-line/70")}
+              className={cn("absolute inset-x-0 border-t", t === 0 ? "border-line-strong" : "border-dashed border-line/70")}
               style={{ top: `${(1 - t / top) * 100}%` }}
             />
           ))}
@@ -383,8 +396,8 @@ function ActivityChart({ days }: { days: Day[] }) {
                 <div key={d.ms} className="flex flex-1 items-end justify-center px-px" onMouseEnter={() => setActive(i)}>
                   <div
                     className={cn(
-                      "w-[72%] max-w-[24px] rounded-t-[4px] transition-colors",
-                      active === i ? "bg-accent" : "bg-accent/55",
+                      "w-[72%] max-w-[28px] rounded-[4px] transition-colors",
+                      active === i ? "bg-ink/80" : i === days.length - 1 ? "bg-ink/55" : "bg-ink/20",
                     )}
                     style={{ height: h }}
                   />
@@ -456,7 +469,7 @@ function ActivityChart({ days }: { days: Day[] }) {
 }
 
 /** One cell per day, a column per week (Sunday first), one hue from light to dark. */
-const HEAT_LEVELS = ["bg-line/60", "bg-accent/25", "bg-accent/45", "bg-accent/70", "bg-accent"];
+const HEAT_LEVELS = ["bg-ink/[0.06]", "bg-ink/20", "bg-ink/35", "bg-ink/55", "bg-ink/80"];
 const WEEKS = 53;
 
 function YearHeatmap({ rows }: { rows: AnalyticsDay[] }) {
@@ -487,8 +500,22 @@ function YearHeatmap({ rows }: { rows: AnalyticsDay[] }) {
   const level = (v: number) => (v <= 0 || max === 0 ? 0 : Math.min(4, Math.ceil((v / max) * 4)));
   const grid = { gridTemplateColumns: `repeat(${WEEKS}, minmax(0, 1fr))` };
   const busiest = cells.reduce((b, c) => (c.value > b.value ? c : b), cells[0]);
+  const total = cells.reduce((n, c) => n + c.value, 0);
+  const activeDays = cells.filter((c) => c.value > 0).length;
 
   return (
+    <>
+    <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+      <h2 className="text-[13px] font-semibold text-ink">Past year</h2>
+      <p className="text-[12px] text-ink-muted">
+        {max === 0
+          ? "No messages in the last 12 months."
+          : `${plural(total, "message", "messages")} on ${plural(activeDays, "day", "days")}. Busiest was ${dayLabel(
+              busiest.ms,
+              { month: "long", day: "numeric" },
+            )}, with ${number.format(busiest.value)}.`}
+      </p>
+    </div>
     <div
       ref={wrapRef}
       className="relative"
@@ -556,5 +583,6 @@ function YearHeatmap({ rows }: { rows: AnalyticsDay[] }) {
         </Tip>
       )}
     </div>
+    </>
   );
 }
