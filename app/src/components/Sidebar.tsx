@@ -257,13 +257,6 @@ export function Sidebar() {
         {/* Footer */}
         <div className="border-t border-edge-muted px-2 py-3">
           <div className="flex flex-col gap-0.5">
-            <SidebarButton
-              icon={<Settings />}
-              label="Settings"
-              shortcut={modShortcut(",")}
-              active={view === "settings"}
-              onClick={() => setView("settings")}
-            />
             {demo ? (
               // The web app is where accounts are managed, so plan and usage
               // sit in the open rather than under More.
@@ -284,6 +277,13 @@ export function Sidebar() {
             ) : (
               <MoreMenuButton view={view} setView={setView} />
             )}
+            <SidebarButton
+              icon={<Settings />}
+              label="Settings"
+              shortcut={modShortcut(",")}
+              active={view === "settings"}
+              onClick={() => setView("settings")}
+            />
           </div>
         </div>
       </div>
@@ -292,8 +292,8 @@ export function Sidebar() {
 }
 
 /**
- * "More" — a persistent toggle that expands Analytics / Plan
- * INLINE within the sidebar footer. Previously this floated out to the right
+ * "More" — a persistent toggle above Settings that expands Analytics / Plan
+ * upward, inline within the sidebar footer. Previously this floated out to the right
  * (clipped by overflow-x-hidden) and auto-collapsed on selection. Now it stays
  * open after picking an item so the user doesn't have to re-expand it every
  * time — the chevron indicates state, and clicking the toggle row collapses it.
@@ -314,29 +314,8 @@ function MoreMenuButton({
 
   return (
     <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className={cn(
-          "press group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] text-ink-muted",
-          "hover:bg-line/60 hover:text-ink",
-          open && "bg-line/50 text-ink",
-        )}
-      >
-        <span className="flex h-5 w-5 items-center justify-center text-ink-muted group-hover:text-ink">
-          <MoreHorizontal className="h-4 w-4" />
-        </span>
-        <span className="flex-1 text-left">More</span>
-        <ChevronDown
-          className={cn(
-            "h-3.5 w-3.5 text-ink-faint transition-transform duration-150",
-            open && "rotate-180",
-          )}
-        />
-      </button>
       {open && (
-        <div className="mt-0.5 flex flex-col gap-0.5 pl-2" role="group" aria-label="More navigation">
+        <div className="mb-0.5 flex flex-col gap-0.5 pl-2" role="group" aria-label="More navigation">
           {items.map((item) => (
             <button
               key={item.id}
@@ -349,8 +328,8 @@ function MoreMenuButton({
               className={cn(
                 "press flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px]",
                 view === item.id
-                  ? "bg-line font-semibold text-ink"
-                  : "text-ink-muted hover:bg-line/40 hover:text-ink",
+                  ? "bg-ink/5 font-semibold text-ink"
+                  : "text-ink-muted hover:bg-ink/5 hover:text-ink",
               )}
             >
               {item.icon}
@@ -359,6 +338,27 @@ function MoreMenuButton({
           ))}
         </div>
       )}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className={cn(
+          "press group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] text-ink-muted",
+          "hover:bg-ink/5 hover:text-ink",
+          open && "text-ink",
+        )}
+      >
+        <span className="flex h-5 w-5 items-center justify-center text-ink-muted group-hover:text-ink">
+          <MoreHorizontal className="h-4 w-4" />
+        </span>
+        <span className="flex-1 text-left">More</span>
+        <ChevronDown
+          className={cn(
+            "h-3.5 w-3.5 text-ink-faint transition-transform duration-150",
+            !open && "rotate-180",
+          )}
+        />
+      </button>
     </div>
   );
 }
