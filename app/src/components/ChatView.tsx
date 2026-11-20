@@ -44,6 +44,17 @@ export function ChatView() {
   const resolveGate = useApp((s) => s.resolveGate);
   const planMode = useApp((s) => s.planMode);
   const endRef = useRef<HTMLDivElement>(null);
+  // The composer floats over the messages; pad them by its live height so the
+  // todo box (and a grown draft) push the chat up instead of covering it.
+  const composerRef = useRef<HTMLDivElement>(null);
+  const [composerH, setComposerH] = useState(176);
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setComposerH(el.offsetHeight + 8));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [!!chat]);
 
   // Detect the active permission gate — scan the chat's messages for the most
   // recent tool part with a pendingGate. This drives the composer's "permission"
@@ -168,9 +179,6 @@ export function ChatView() {
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col bg-paper relative">
       <div className="flex flex-1 flex-col overflow-hidden relative">
-        {/* Sticky todo/progress card — floats over the top-right of the chat.
-            Scrolling the messages doesn't move it. Collapsible. */}
-        <TodoPanel />
         {/*
           Floating chat header — title + export live on their own layer at the
           true top of the chat (the pane drops its own drag band for the
@@ -361,7 +369,7 @@ export function ChatView() {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto pb-44">
+        <div className="flex-1 overflow-y-auto" style={{ paddingBottom: composerH }}>
           <div className="mx-auto flex max-w-[960px] flex-col gap-5 px-6 pt-14 pb-8">
             {/* Plan mode indicator — shows when plan mode is active so the user
                 knows the agent is restricted to read-only tools. */}
@@ -424,8 +432,9 @@ export function ChatView() {
         {/* Composer — floating directly over the chat text. When the agent asks
             a question or needs permission, the composer morphs into an inline
             card (question/permission mode) instead of showing the textarea. */}
-        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-paper via-paper/95 to-transparent px-6 pb-5 pt-10 pointer-events-none z-10">
+        <div ref={composerRef} className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-paper via-paper/95 to-transparent px-6 pb-5 pt-10 pointer-events-none z-10">
           <div className="mx-auto max-w-[960px] pointer-events-auto">
+            <TodoPanel />
             <ChatInput
               autoFocus
               placeholder="Reply to zWork"

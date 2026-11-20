@@ -1,17 +1,15 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, ChevronDown, Circle, ListTodo, Loader2 } from "lucide-react";
+import { Check, ChevronDown, Circle, Loader2 } from "lucide-react";
 import { useApp, type AgentTodo } from "../lib/store";
 import { cn } from "../lib/cn";
 
 /**
- * TodoCard — a compact, collapsible status card that floats over the chat's
- * top-right corner. Shows the agent's live todo list (driven by `update_todos`
- * tool calls → `todo_update` SSE events). Stickied: scrolling the chat doesn't
- * move it. Consistent corner radius (`rounded-2xl`) with the rest of the UI.
- *
- * Collapses to a minimal "Status" pill on click; expands to show the full list.
- * Read-only display — the user can only collapse/expand, not edit.
+ * The agent's live todo list (from `update_todos` → `todo_update` events),
+ * as a plain box sitting right above the composer. It's in the composer's
+ * flow, and ChatView pads the messages by the composer's height, so it
+ * pushes the chat up instead of covering it. Header = current step + count;
+ * the list opens below it. Read-only.
  */
 export function TodoPanel() {
   const todos = useApp((s) => {
@@ -27,63 +25,53 @@ export function TodoPanel() {
   const completed = todos.filter((t) => t.status === "completed").length;
   const active = todos.find((t) => t.status === "in_progress");
   const collapsed = collapsedPref ?? completed === todos.length;
+  const allDone = completed === todos.length;
 
   return (
-    <div className="pointer-events-none absolute right-4 top-[52px] z-30 w-[260px]">
-      <motion.div
-        layout
-        className={cn(
-          "pointer-events-auto overflow-hidden rounded-2xl border border-line bg-paper-raised/95 backdrop-blur-xl shadow-lift",
-        )}
+    <div className="mb-2 overflow-hidden rounded-2xl border border-line bg-paper-raised">
+      <button
+        type="button"
+        aria-expanded={!collapsed}
+        onClick={() => setCollapsed(!collapsed)}
+        className="press flex w-full items-center gap-2.5 px-4 py-2.5 text-left transition-colors hover:bg-ink/5"
       >
-        {/* Header — always visible, click to collapse/expand */}
-        <button
-          type="button"
-          onClick={() => setCollapsed(!collapsed)}
-          className="press flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-ink/5"
-        >
-          <ListTodo className="h-3.5 w-3.5 shrink-0 text-ink-muted" />
-          <span className="flex-1 text-[12px] font-medium text-ink">
-            {active ? (
-              <span className="flex items-center gap-1.5">
-                <Loader2 className="h-3 w-3 animate-spin text-accent" />
-                <span className="truncate">{active.content}</span>
-              </span>
-            ) : (
-              "Status"
-            )}
-          </span>
-          <span className="rounded-full bg-line/60 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-ink-muted">
-            {completed}/{todos.length}
-          </span>
-          <ChevronDown
-            className={cn(
-              "h-3 w-3 shrink-0 text-ink-faint transition-transform duration-200",
-              collapsed && "-rotate-90",
-            )}
-          />
-        </button>
-
-        {/* Body — the todo list, collapsible */}
-        <AnimatePresence initial={false}>
-          {!collapsed && (
-            <motion.div
-              key="body"
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-              className="overflow-hidden"
-            >
-              <ol className="flex max-h-[280px] flex-col gap-0.5 overflow-y-auto px-2 pb-2">
-                {todos.map((todo, i) => (
-                  <TodoRow key={`${todo.id}-${i}`} todo={todo} />
-                ))}
-              </ol>
-            </motion.div>
+        {allDone ? (
+          <Check className="h-3.5 w-3.5 shrink-0 text-accent" />
+        ) : (
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-accent" />
+        )}
+        <span className="min-w-0 flex-1 truncate text-[13px] text-ink">
+          {allDone ? "All steps done" : active?.content ?? "Working through the steps"}
+        </span>
+        <span className="shrink-0 text-[12px] tabular-nums text-ink-muted">
+          {completed} of {todos.length}
+        </span>
+        <ChevronDown
+          className={cn(
+            "h-3.5 w-3.5 shrink-0 text-ink-faint transition-transform duration-200",
+            collapsed && "rotate-180",
           )}
-        </AnimatePresence>
-      </motion.div>
+        />
+      </button>
+
+      <AnimatePresence initial={false}>
+        {!collapsed && (
+          <motion.div
+            key="body"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+            className="overflow-hidden"
+          >
+            <ol className="flex max-h-[176px] flex-col gap-0.5 overflow-y-auto border-t border-line px-2 py-2">
+              {todos.map((todo, i) => (
+                <TodoRow key={`${todo.id}-${i}`} todo={todo} />
+              ))}
+            </ol>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -96,8 +84,8 @@ function TodoRow({ todo }: { todo: AgentTodo }) {
   return (
     <li
       className={cn(
-        "flex items-start gap-2 rounded-lg px-2 py-1.5 transition-colors",
-        inProgress && "bg-accent/10",
+        "flex items-start gap-2.5 rounded-lg px-2 py-1.5",
+        inProgress && "bg-ink/5",
       )}
     >
       <span className="mt-0.5 shrink-0">
@@ -111,7 +99,7 @@ function TodoRow({ todo }: { todo: AgentTodo }) {
       </span>
       <span
         className={cn(
-          "min-w-0 flex-1 text-[12px] leading-snug",
+          "min-w-0 flex-1 text-[13px] leading-snug",
           done ? "text-ink-faint line-through" : "text-ink",
         )}
       >
