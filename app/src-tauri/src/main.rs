@@ -440,6 +440,10 @@ fn open_macos_privacy_pane(pane: String) -> Result<(), String> {
         "screen_recording" => {
             "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
         }
+        "microphone" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone",
+        "speech_recognition" => {
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition"
+        }
         other => return Err(format!("unknown privacy pane: {other}")),
     };
     #[cfg(target_os = "macos")]

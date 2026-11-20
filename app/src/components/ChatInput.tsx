@@ -26,7 +26,11 @@ import {
   XCircle,
   Monitor,
   PenLine,
+  Mic,
 } from "lucide-react";
+import { VoiceBeam } from "voice-glow";
+import { dictationSupported, useDictation } from "../lib/dictation";
+import { useResolvedTheme } from "../lib/theme";
 import { cn } from "../lib/cn";
 import { needsLightweightRendering } from "../lib/platform";
 import { useApp } from "../lib/store";
@@ -287,6 +291,10 @@ export function ChatInput({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isOverlay = variant === "overlay";
+  const resolvedTheme = useResolvedTheme();
+  // shortcut: dictation is main-composer only; the floating overlay pill has no room for the Done state.
+  const voice = useDictation(() => areaRef.current?.value ?? "", (t) => setValue(t));
+  const canDictate = dictationSupported && !isOverlay;
 
   const send = useApp((s) => s.send);
   const stop = useApp((s) => s.stop);
@@ -805,6 +813,11 @@ export function ChatInput({
         return;
       }
     }
+    if (voice.listening && (e.key === "Escape" || (e.key === "Enter" && !e.shiftKey))) {
+      e.preventDefault();
+      voice.stop();
+      return;
+    }
     if (e.key === "Escape" && editingHere) {
       e.preventDefault();
       cancelEditMessage();
@@ -1017,6 +1030,30 @@ export function ChatInput({
     </div>
   );
 
+  const micButton = canDictate &&
+    (voice.listening ? (
+      <button
+        type="button"
+        title="Stop listening (Esc). The text stays here to review."
+        onClick={voice.stop}
+        className="press ring-focus inline-flex h-8 items-center rounded-full bg-ink px-3 text-[12.5px] font-medium text-paper hover:bg-ink/90"
+      >
+        Done
+      </button>
+    ) : (
+      <IconButton
+        icon={<Mic className="h-4 w-4" />}
+        label="Dictate"
+        tooltipSide="top"
+        variant="ghost"
+        size="md"
+        onClick={() => {
+          voice.start();
+          areaRef.current?.focus();
+        }}
+      />
+    ));
+
   // Idle send button.
   const sendButton = (
     <button
@@ -1100,6 +1137,7 @@ export function ChatInput({
         </div>
       )}
 
+      <ComposerGlow on={canDictate} active={voice.listening} stream={voice.stream} theme={resolvedTheme}>
       <div
         ref={isOverlay ? toolsRef : undefined}
         // The pill is a SINGLE drag mechanism: the declarative
@@ -1181,7 +1219,7 @@ export function ChatInput({
             ref={areaRef}
             rows={1}
             value={value}
-            placeholder={working && queueSupported ? "Queue a message while zWork works…" : placeholder}
+            placeholder={voice.listening ? "Listening…" : working && queueSupported ? "Queue a message while zWork works…" : placeholder}
             disabled={working && !queueSupported}
             onChange={(e) => {
               const next = e.target.value;
@@ -1236,7 +1274,7 @@ export function ChatInput({
             ref={areaRef}
             rows={1}
             value={value}
-            placeholder={working && queueSupported ? "Queue a message while zWork works…" : placeholder}
+            placeholder={voice.listening ? "Listening…" : working && queueSupported ? "Queue a message while zWork works…" : placeholder}
             disabled={working && !queueSupported}
             onChange={(e) => {
               const next = e.target.value;
@@ -1313,7 +1351,8 @@ export function ChatInput({
           </div>
           <div className="flex items-center gap-2">
             <ModelPicker />
-              {working ? (
+            {micButton}
+            {working ? (
               <>
                 {queueButtons}
                 {stopButton}
@@ -1385,7 +1424,62 @@ export function ChatInput({
         accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.txt,.md,.markdown,.csv,.tsv,.json,.yaml,.yml,.py,.js,.jsx,.ts,.tsx,.html,.css,.xml,.pdf,.xlsx,.xls,.xlsm,.docx,.doc,.pptx,.ppt,.odt,.ods,.odp,.rtf,.key,.numbers,.pages,.zip"
       />
     </div>
+    </ComposerGlow>
+    {voice.blocked && (
+      <div role="alert" className="mt-2 flex items-center gap-2 px-1 text-[12.5px] text-ink-muted">
+        <span className="min-w-0 flex-1">
+          {voice.blocked === "mic"
+            ? IS_WEB
+              ? "zWork can't hear you. Allow the microphone for this site in your browser."
+              : "zWork can't hear you. Allow the microphone for zWork in System Settings."
+            : "Speech recognition is off for zWork. Turn it on in System Settings."}
+        </span>
+        {!IS_WEB && (
+          <button
+            type="button"
+            onClick={() => void openPrivacyPane(voice.blocked === "mic" ? "microphone" : "speech_recognition")}
+            className="press ring-focus shrink-0 rounded-md px-2 py-0.5 font-medium text-ink hover:bg-ink/5"
+          >
+            Open settings
+          </button>
+        )}
+        <button
+          type="button"
+          aria-label="Dismiss"
+          onClick={voice.dismissBlocked}
+          className="press ring-focus shrink-0 rounded-md p-1 text-ink-faint hover:bg-ink/5 hover:text-ink"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    )}
     </>
+  );
+}
+
+async function openPrivacyPane(pane: string) {
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("open_macos_privacy_pane", { pane }).catch(() => {});
+}
+
+/** The voice glow along the composer's bottom edge. `on` never changes for a
+ *  given composer, so the textarea isn't remounted. */
+function ComposerGlow({
+  on,
+  children,
+  ...beam
+}: {
+  on: boolean;
+  children: ReactNode;
+  active: boolean;
+  stream: MediaStream | null;
+  theme: "light" | "dark";
+}) {
+  if (!on) return <>{children}</>;
+  return (
+    <VoiceBeam {...beam} className="w-full">
+      {children}
+    </VoiceBeam>
   );
 }
 
