@@ -58,7 +58,7 @@ export function ArtifactPreviewViewer({ artifact }: { artifact: Artifact }) {
         <button
           type="button"
           onClick={() => setViewport(viewport === "desktop" ? "mobile" : "desktop")}
-          className="press rounded p-1 text-ink-muted hover:bg-paper-sunken hover:text-ink"
+          className="press rounded p-1 text-ink-muted hover:bg-ink/5 hover:text-ink"
           title={viewport === "desktop" ? "Mobile view" : "Desktop view"}
         >
           {viewport === "desktop" ? (
@@ -70,7 +70,7 @@ export function ArtifactPreviewViewer({ artifact }: { artifact: Artifact }) {
         <button
           type="button"
           onClick={handleReload}
-          className="press rounded p-1 text-ink-muted hover:bg-paper-sunken hover:text-ink"
+          className="press rounded p-1 text-ink-muted hover:bg-ink/5 hover:text-ink"
           title="Reload"
         >
           <RefreshCcw className="h-3.5 w-3.5" />
@@ -82,7 +82,7 @@ export function ArtifactPreviewViewer({ artifact }: { artifact: Artifact }) {
         <button
           type="button"
           onClick={openExternal}
-          className="press rounded p-1 text-ink-muted hover:bg-paper-sunken hover:text-ink"
+          className="press rounded p-1 text-ink-muted hover:bg-ink/5 hover:text-ink"
           title="Open in browser"
         >
           <ExternalLink className="h-3.5 w-3.5" />

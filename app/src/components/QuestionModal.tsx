@@ -69,7 +69,7 @@ export function QuestionModal({ question, options, onSubmit, onDismiss }: Questi
               <button
                 type="button"
                 onClick={onDismiss}
-                className="press shrink-0 rounded-lg p-1 text-ink-faint hover:bg-paper-sunken hover:text-ink"
+                className="press shrink-0 rounded-lg p-1 text-ink-faint hover:bg-ink/5 hover:text-ink"
                 aria-label="Dismiss"
               >
                 <X className="h-4 w-4" />
@@ -129,7 +129,7 @@ export function QuestionModal({ question, options, onSubmit, onDismiss }: Questi
             <button
               type="button"
               onClick={onDismiss}
-              className="press rounded-lg px-3 py-1.5 text-[12.5px] font-medium text-ink-muted hover:bg-paper-sunken hover:text-ink transition-colors"
+              className="press rounded-lg px-3 py-1.5 text-[12.5px] font-medium text-ink-muted hover:bg-ink/5 hover:text-ink transition-colors"
             >
               Cancel
             </button>

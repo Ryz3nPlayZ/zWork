@@ -1030,7 +1030,7 @@ function IntegrationsPanel({
                 href="https://docs.anthropic.com/en/docs/claude-code"
                 target="_blank"
                 rel="noreferrer"
-                className="press ring-focus inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-line bg-paper px-3 text-[12.5px] font-medium text-ink transition-colors hover:bg-paper-sunken"
+                className="press ring-focus inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-line bg-paper px-3 text-[12.5px] font-medium text-ink transition-colors hover:bg-ink/5"
               >
                 Docs <ExternalLink className="h-3 w-3" />
               </a>
@@ -1632,7 +1632,7 @@ function TemplatesSection() {
               setShowForm(true);
             }
           }}
-          className="press ring-focus inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-line bg-paper px-3 text-[12.5px] font-medium text-ink transition-colors hover:bg-paper-sunken"
+          className="press ring-focus inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-line bg-paper px-3 text-[12.5px] font-medium text-ink transition-colors hover:bg-ink/5"
         >
           <Plus className="h-3.5 w-3.5" />
           New template
@@ -1787,7 +1787,7 @@ function AccountPanel() {
             type="button"
             disabled={isLoadingAuth}
             onClick={handleSignIn}
-            className="press ring-focus inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-line bg-paper px-4 text-[13px] font-medium text-ink transition-colors hover:bg-paper-sunken disabled:cursor-not-allowed disabled:opacity-40"
+            className="press ring-focus inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-line bg-paper px-4 text-[13px] font-medium text-ink transition-colors hover:bg-ink/5 disabled:cursor-not-allowed disabled:opacity-40"
           >
             <svg className="h-4 w-4" viewBox="0 0 24 24">
               <path

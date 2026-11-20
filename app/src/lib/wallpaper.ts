@@ -255,11 +255,16 @@ export function applyPreset(p: ThemePreset): void {
   saveLook({ ...DEFAULT_LOOK, ...p.look, preset: p.id });
 }
 
-/** System / Light / Dark: the zWork palette in that mode. Keeps the wallpaper. */
+/**
+ * System / Light / Dark: the zWork palette in that mode. A preset's wallpaper
+ * goes with it (it was picked to match the preset's colors); the user's own
+ * wallpaper stays.
+ */
 export function applyMode(mode: "system" | "light" | "dark"): void {
+  const fromPreset = !!loadLook().preset;
   setSchemePref(DEFAULT_SCHEME_ID);
   setThemePref(mode);
-  saveLook({ preset: null });
+  saveLook(fromPreset ? { ...DEFAULT_LOOK, preset: null } : { preset: null });
 }
 
 // ---------------- saved themes, import / export ----------------

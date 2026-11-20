@@ -47,7 +47,7 @@ export function Onboarding() {
           api_key: token,
           base_url: "https://api.tryzwork.app/api",
           model_id: "zwork-auto",
-          model_name: "zwork-auto · zWork",
+          model_name: "zWork",
         }
       : undefined;
     try {

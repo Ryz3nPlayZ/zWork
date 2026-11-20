@@ -647,7 +647,7 @@ export default function App() {
             onMouseDown={onDragMouseDown}
             className={cn(
               "h-[38px] shrink-0",
-              trafficLights && !sidebarOpen && "ml-[78px]",
+              trafficLights && !sidebarOpen && "ml-[86px]",
             )}
             aria-hidden="true"
           />
@@ -764,7 +764,7 @@ export default function App() {
           "absolute z-50 flex items-center gap-0.5",
           trafficLights
             // Centred on the traffic lights' row, one light-spacing after them.
-            ? "left-[72px] top-[1px]"
+            ? "left-[80px] top-[6px]"
             : cn(
                 "top-[14px] transition-[left] duration-200 ease-out",
                 sidebarOpen ? "left-[182px]" : "left-[12px]",

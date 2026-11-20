@@ -171,7 +171,7 @@ export function Landing({
                   key={chore.id}
                   type="button"
                   onClick={() => setInputValue(chore.prompt)}
-                  className="press rounded-full border border-line bg-paper-raised px-3 py-1.5 text-[13px] text-ink-soft transition-colors hover:border-line-strong hover:text-ink"
+                  className="press rounded-full border border-line px-3 py-1.5 text-[13px] text-ink-soft transition-colors hover:border-line-strong hover:bg-ink/5 hover:text-ink"
                 >
                   {chore.label}
                 </button>
@@ -185,7 +185,7 @@ export function Landing({
               href={DESKTOP_DOWNLOAD_URL}
               target="_blank"
               rel="noreferrer noopener"
-              className="press mt-6 inline-flex items-center gap-2 rounded-xl border border-line bg-paper-raised px-4 py-2 text-[13px] font-medium text-ink transition-colors hover:border-line-strong hover:bg-paper-sunken"
+              className="press mt-6 inline-flex items-center gap-2 rounded-xl border border-line bg-paper-raised px-4 py-2 text-[13px] font-medium text-ink transition-colors hover:border-line-strong hover:bg-ink/5"
             >
               <Download className="h-4 w-4" />
               Get the desktop app — it does a lot more

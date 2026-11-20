@@ -101,7 +101,7 @@ export function Button({
       className={cn(
         "press ring-focus inline-flex h-8 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-[12.5px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 [&_svg]:h-3.5 [&_svg]:w-3.5",
         variant === "primary" && "bg-ink text-paper hover:bg-ink/90",
-        variant === "secondary" && "border border-line bg-paper text-ink hover:bg-paper-sunken",
+        variant === "secondary" && "border border-line bg-paper text-ink hover:bg-ink/5",
         variant === "danger" && "border border-error/30 bg-error/10 text-error hover:bg-error/15",
         className,
       )}

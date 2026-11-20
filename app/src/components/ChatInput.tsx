@@ -26,10 +26,6 @@ import {
   XCircle,
   Monitor,
   PenLine,
-  CornerUpLeft,
-  ListPlus,
-  Play,
-  Layers,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { needsLightweightRendering } from "../lib/platform";
@@ -84,7 +80,7 @@ function OverlayToolItem({
       onClick={onClick}
       className={cn(
         "press flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-[12.5px] font-medium text-ink-soft",
-        "hover:bg-paper-sunken hover:text-ink",
+        "hover:bg-ink/5 hover:text-ink",
         active && "text-ink",
       )}
     >
@@ -148,8 +144,8 @@ function SecurityPresetPicker({
         aria-label="Security preset"
         aria-expanded={open}
         className={cn(
-          "press ring-focus inline-flex items-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-paper-sunken",
-          open && "bg-paper-sunken border-line-strong",
+          "press ring-focus inline-flex items-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-ink/5",
+          open && "bg-ink/5 border-line-strong",
         )}
       >
         <span className="text-ink-muted">{current.icon}</span>
@@ -174,8 +170,8 @@ function SecurityPresetPicker({
                 className={cn(
                   "press flex w-full items-start gap-3 rounded-xl px-2.5 py-2 text-left transition-colors",
                   active
-                    ? "bg-paper-sunken text-ink"
-                    : "text-ink-soft hover:bg-paper-sunken hover:text-ink",
+                    ? "bg-ink/5 text-ink"
+                    : "text-ink-soft hover:bg-ink/5 hover:text-ink",
                 )}
               >
                 <span className={cn("mt-0.5 text-ink-muted", active && "text-ink")}>{meta.icon}</span>
@@ -269,12 +265,6 @@ export function ChatInput({
   const [toolsOpen, setToolsOpen] = useState(false);
   const [presetOpen, setPresetOpen] = useState(false);
   const [multiline, setMultiline] = useState(false);
-  const [queueMenuOpen, setQueueMenuOpen] = useState(false);
-  const [queueModeOpen, setQueueModeOpen] = useState(false);
-  const [steeringMode, setSteeringMode] = useState<"all" | "one-at-a-time">("all");
-  const [followUpMode, setFollowUpMode] = useState<"all" | "one-at-a-time">("all");
-  const queueMenuRef = useRef<HTMLDivElement>(null);
-  const queueModeRef = useRef<HTMLDivElement>(null);
   const toolsRef = useRef<HTMLDivElement>(null);
   const presetRef = useRef<HTMLDivElement>(null);
   const areaRef = useRef<HTMLTextAreaElement>(null);
@@ -286,7 +276,6 @@ export function ChatInput({
   const stop = useApp((s) => s.stop);
   const sendWhileBusy = useApp((s) => s.sendWhileBusy);
   const cancelQueued = useApp((s) => s.cancelQueued);
-  const setQueueModes = useApp((s) => s.setQueueModes);
   const draftInject = useApp((s) => s.draftInject);
   const clearDraftInject = useApp((s) => s.clearDraftInject);
   const focusChatInput = useApp((s) => s.focusChatInput);
@@ -492,30 +481,14 @@ export function ChatInput({
     if (editing && editing.chatId !== activeChatId) cancelEditMessage();
   }, [activeChatId, editing, cancelEditMessage]);
 
-  // Close the queue action / mode menus on outside click.
-  useEffect(() => {
-    if (!queueMenuOpen && !queueModeOpen) return;
-    const onClick = (e: MouseEvent) => {
-      if (queueMenuOpen && !queueMenuRef.current?.contains(e.target as Node)) {
-        setQueueMenuOpen(false);
-      }
-      if (queueModeOpen && !queueModeRef.current?.contains(e.target as Node)) {
-        setQueueModeOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
-  }, [queueMenuOpen, queueModeOpen]);
-
   /** Send while a run is live: queue the text against the run instead of
    *  starting a new one. Default kind = follow-up (answered after the
-   *  current run); the chevron menu offers steer / next-run. */
+   *  current run); the Steer button sends kind "steer". */
   const submitQueue = (kind: QueuedItem["kind"] = "follow_up") => {
     if (!canQueue) return;
     const text = value.trim();
     setValue("");
     setSlashState(null);
-    setQueueMenuOpen(false);
     void sendWhileBusy(text, kind);
   };
 
@@ -956,87 +929,38 @@ export function ChatInput({
     />
   );
 
-  const queueKindMeta: Record<QueuedItem["kind"], { icon: typeof CornerUpLeft; label: string }> = {
-    steer: { icon: CornerUpLeft, label: "Steer" },
-    follow_up: { icon: MessageSquarePlus, label: "Queued" },
-    next_run: { icon: Play, label: "Next run" },
-    write: { icon: PenLine, label: "Write" },
+  const queueKindLabel: Record<QueuedItem["kind"], string> = {
+    steer: "Steer",
+    follow_up: "Queued",
+    next_run: "Next run",
+    write: "Write",
   };
 
-  // Queued-message chips (steer / follow-up / next-run waiting against the
-  // live run) + the mode picker. Rendered above the draft inside the pill.
+  // Queued messages waiting against the live run, above the draft. A word
+  // label instead of an icon per kind; the x cancels.
   const queueChips = queuedItems.length > 0 && (
-    <div className="flex flex-wrap items-center gap-1.5 px-5 pt-3 [scrollbar-width:none]">
+    <div className="flex flex-wrap items-center gap-1.5 px-5 pt-3">
       {queuedItems.map((item) => {
-        const meta = queueKindMeta[item.kind] ?? queueKindMeta.follow_up;
-        const Icon = meta.icon;
+        const label = queueKindLabel[item.kind] ?? "Queued";
         return (
           <span
             key={item.entry_id}
-            className="inline-flex max-w-[260px] items-center gap-1.5 rounded-full border border-line bg-paper-sunken py-1 pl-2 pr-1 text-[12px] text-ink-muted animate-fade-in"
-            title={`${meta.label}: ${item.text}`}
+            className="inline-flex max-w-[280px] items-center gap-1.5 rounded-full border border-line bg-ink/5 py-1 pl-2.5 pr-1 text-[12px] text-ink-muted animate-fade-in"
+            title={`${label}: ${item.text}`}
           >
-            <Icon className="h-3 w-3 shrink-0" />
+            <span className="shrink-0 font-medium text-ink-soft">{label}</span>
             <span className="truncate">{item.text}</span>
             <button
               type="button"
               onClick={() => void cancelQueued(item.entry_id)}
-              className="press ring-focus rounded-full p-0.5 text-ink-faint hover:bg-line/60 hover:text-ink"
-              aria-label={`Cancel ${meta.label.toLowerCase()} message`}
+              className="press ring-focus rounded-full p-0.5 text-ink-faint hover:bg-ink/10 hover:text-ink"
+              aria-label={`Cancel ${label.toLowerCase()} message`}
             >
               <X className="h-3 w-3" />
             </button>
           </span>
         );
       })}
-      <div ref={queueModeRef} className="relative">
-        <button
-          type="button"
-          onClick={() => setQueueModeOpen((v) => !v)}
-          aria-label="Queue modes"
-          className={cn(
-            "press ring-focus inline-flex h-6 w-6 items-center justify-center rounded-full text-ink-faint hover:bg-line/60 hover:text-ink",
-            queueModeOpen && "bg-line/60 text-ink",
-          )}
-        >
-          <Layers className="h-3.5 w-3.5" />
-        </button>
-        {queueModeOpen && (
-          <div className="absolute bottom-full left-0 mb-2 w-60 animate-fade-in rounded-2xl hairline bg-paper p-2 shadow-lift z-20">
-            <p className="px-1.5 pb-1.5 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
-              Queue modes
-            </p>
-            {(
-              [
-                { label: "Steering", value: steeringMode, set: (m: "all" | "one-at-a-time") => { setSteeringMode(m); void setQueueModes({ steering: m }); } },
-                { label: "Follow-ups", value: followUpMode, set: (m: "all" | "one-at-a-time") => { setFollowUpMode(m); void setQueueModes({ followUp: m }); } },
-              ] as const
-            ).map(({ label, value, set }) => (
-              <div key={label} className="flex items-center justify-between gap-2 px-1.5 py-1">
-                <span className="text-[12.5px] text-ink">{label}</span>
-                <div className="flex rounded-lg border border-line p-0.5">
-                  {(["all", "one-at-a-time"] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => set(mode)}
-                      className={cn(
-                        "press rounded-md px-2 py-0.5 text-[11.5px] font-medium",
-                        value === mode ? "bg-ink text-paper" : "text-ink-muted hover:text-ink",
-                      )}
-                    >
-                      {mode === "all" ? "All" : "One at a time"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ))}
-            <p className="px-1.5 pt-1 text-[11px] leading-4 text-ink-faint">
-              “All” sends every queued message together; “one at a time” takes the first and keeps the rest waiting.
-            </p>
-          </div>
-        )}
-      </div>
     </div>
   );
 
@@ -1054,69 +978,26 @@ export function ChatInput({
     </button>
   );
 
-  // Queue-while-busy: send button (default = follow-up), a chevron menu for
-  // steer / next-run, then Stop. Only when text can actually be queued.
+  // Queue-while-busy: two labelled choices instead of icons. Queue (Enter)
+  // waits for the run to finish; Steer joins the run at its next step.
   const queueButtons = canQueue && (
-    <div ref={queueMenuRef} className="relative flex items-center gap-1">
+    <div className="flex items-center gap-1">
       <button
         type="button"
-        aria-label="Queue message"
-        title="Queue after the current run"
+        title="Send now; zWork reads it at its next step"
+        onClick={() => submitQueue("steer")}
+        className="press ring-focus inline-flex h-8 items-center rounded-full border border-line px-3 text-[12.5px] font-medium text-ink-soft hover:border-line-strong hover:bg-ink/5 hover:text-ink"
+      >
+        Steer
+      </button>
+      <button
+        type="button"
+        title="Send when the current run finishes (Enter)"
         onClick={() => submitQueue("follow_up")}
-        className="press ring-focus inline-flex h-8 w-8 items-center justify-center rounded-full border border-line bg-paper-sunken text-ink hover:bg-paper hover:border-line-strong"
+        className="press ring-focus inline-flex h-8 items-center rounded-full bg-ink px-3 text-[12.5px] font-medium text-paper hover:bg-ink/90"
       >
-        <ListPlus className="h-4 w-4" />
+        Queue
       </button>
-      <button
-        type="button"
-        aria-label="Queue options"
-        onClick={() => setQueueMenuOpen((v) => !v)}
-        className={cn(
-          "press ring-focus inline-flex h-8 w-8 items-center justify-center rounded-full text-ink-muted hover:bg-paper-sunken hover:text-ink",
-          queueMenuOpen && "bg-paper-sunken text-ink",
-        )}
-      >
-        <ChevronDown className="h-3.5 w-3.5" />
-      </button>
-      {queueMenuOpen && (
-        <div className="absolute bottom-full right-0 mb-2 w-64 animate-fade-in rounded-2xl hairline bg-paper p-1.5 shadow-lift z-20">
-          {(
-            [
-              {
-                kind: "steer" as const,
-                icon: CornerUpLeft,
-                title: "Steer",
-                hint: "Joins the run now, at its next checkpoint",
-              },
-              {
-                kind: "follow_up" as const,
-                icon: MessageSquarePlus,
-                title: "Follow-up",
-                hint: "Answered when the current run finishes",
-              },
-              {
-                kind: "next_run" as const,
-                icon: Play,
-                title: "New run",
-                hint: "Queues an extra run after this one",
-              },
-            ]
-          ).map(({ kind, icon: Icon, title, hint }) => (
-            <button
-              key={kind}
-              type="button"
-              onClick={() => submitQueue(kind)}
-              className="press flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2 text-left hover:bg-paper-sunken"
-            >
-              <Icon className="mt-0.5 h-4 w-4 shrink-0 text-ink-muted" />
-              <span className="min-w-0">
-                <span className="block text-[13px] font-medium text-ink">{title}</span>
-                <span className="block text-[11.5px] leading-4 text-ink-faint">{hint}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 
@@ -1269,7 +1150,7 @@ export function ChatInput({
           onClick={() => setToolsOpen((v) => !v)}
           aria-label="More options"
           data-no-drag
-          className="press ring-focus inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-muted hover:bg-paper-sunken hover:text-ink"
+          className="press ring-focus inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-muted hover:bg-ink/5 hover:text-ink"
         >
           <Plus className="h-[18px] w-[18px]" />
         </button>
@@ -1326,7 +1207,7 @@ export function ChatInput({
               <button
                 type="button"
                 onClick={cancelEditMessage}
-                className="press ring-focus ml-auto shrink-0 rounded-md px-2 py-0.5 text-ink-muted transition-colors hover:bg-paper-sunken hover:text-ink"
+                className="press ring-focus ml-auto shrink-0 rounded-md px-2 py-0.5 text-ink-muted transition-colors hover:bg-ink/5 hover:text-ink"
               >
                 Cancel
               </button>
@@ -1557,7 +1438,7 @@ function QuestionCardBody({
             key={`${opt}-${i}`}
             type="button"
             onClick={() => onAnswer?.(opt)}
-            className="press ring-focus flex items-center gap-2.5 rounded-xl border border-line bg-paper px-3 py-2 text-left text-[13px] text-ink transition-colors hover:bg-paper-sunken"
+            className="press ring-focus flex items-center gap-2.5 rounded-xl border border-line bg-paper px-3 py-2 text-left text-[13px] text-ink transition-colors hover:bg-ink/5"
           >
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-line text-[10px] font-medium text-ink-muted">
               {String.fromCharCode(65 + i)}

@@ -502,9 +502,16 @@ pub async fn get_providers() -> impl IntoResponse {
             }
         };
 
+        // Hosted lineup names are fixed (same as the app's HOSTED_MODELS); older
+        // onboarding saved the slug "zwork-auto · zWork" as the name.
+        let name = match (m.credential.as_str(), m.id.as_str()) {
+            ("zwork_router", "zwork-auto") => "zWork",
+            ("zwork_router", "zwork-apex") => "Apex",
+            _ => m.name.as_str(),
+        };
         models.push(serde_json::json!({
             "id": m.id,
-            "name": m.name,
+            "name": name,
             "subtitle": subtitle,
             "shape": m.shape,
             "credential": m.credential,

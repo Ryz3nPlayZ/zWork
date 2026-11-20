@@ -172,7 +172,7 @@ export function PermissionPrompt() {
           </button>
           <button
             onClick={() => void refresh()}
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:text-ink hover:bg-paper-sunken transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-medium text-ink-muted hover:text-ink hover:bg-ink/5 transition-colors"
           >
             <RotateCw className="h-3 w-3" />
             Recheck
@@ -219,7 +219,7 @@ function PermissionRow({
         <button
           onClick={onGrant}
           disabled={busy}
-          className="inline-flex items-center gap-0.5 rounded-lg border border-line bg-paper px-2.5 py-1.5 text-[11.5px] font-medium text-ink hover:bg-paper-sunken transition-colors disabled:opacity-60"
+          className="inline-flex items-center gap-0.5 rounded-lg border border-line bg-paper px-2.5 py-1.5 text-[11.5px] font-medium text-ink hover:bg-ink/5 transition-colors disabled:opacity-60"
         >
           {busy ? "…" : "Grant"}
           {!busy && <ChevronRight className="h-3 w-3" />}

@@ -262,7 +262,7 @@ export function ArtifactCodeViewer({ artifact }: { artifact: Artifact }) {
             className={`press flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium transition-colors ${
               editing
                 ? "bg-accent/10 text-accent hover:bg-accent/15"
-                : "text-ink-muted hover:bg-paper-sunken hover:text-ink"
+                : "text-ink-muted hover:bg-ink/5 hover:text-ink"
             }`}
           >
             {editing ? (
@@ -281,7 +281,7 @@ export function ArtifactCodeViewer({ artifact }: { artifact: Artifact }) {
               className={`px-2 py-0.5 rounded text-[10.5px] font-medium transition-colors cursor-pointer ${
                 activeTab === "code"
                   ? "bg-accent/15 text-accent font-semibold"
-                  : "text-ink-muted hover:bg-paper-sunken hover:text-ink"
+                  : "text-ink-muted hover:bg-ink/5 hover:text-ink"
               }`}
             >
               Code
@@ -297,7 +297,7 @@ export function ArtifactCodeViewer({ artifact }: { artifact: Artifact }) {
               className={`px-2 py-0.5 rounded text-[10.5px] font-medium transition-colors cursor-pointer ${
                 activeTab === "preview"
                   ? "bg-accent/15 text-accent font-semibold"
-                  : "text-ink-muted hover:bg-paper-sunken hover:text-ink"
+                  : "text-ink-muted hover:bg-ink/5 hover:text-ink"
               }`}
             >
               {isPreviewable ? "Preview" : "Run Output"}
@@ -310,7 +310,7 @@ export function ArtifactCodeViewer({ artifact }: { artifact: Artifact }) {
         <button
           type="button"
           onClick={copy}
-          className="press flex items-center gap-1.5 rounded px-2 py-1 text-[11px] text-ink-muted hover:bg-paper-sunken hover:text-ink"
+          className="press flex items-center gap-1.5 rounded px-2 py-1 text-[11px] text-ink-muted hover:bg-ink/5 hover:text-ink"
         >
           {copied ? (
             <Check className="h-3 w-3 text-emerald-500" />
@@ -323,7 +323,7 @@ export function ArtifactCodeViewer({ artifact }: { artifact: Artifact }) {
         <button
           type="button"
           onClick={downloadFile}
-          className="press flex items-center gap-1.5 rounded px-2 py-1 text-[11px] text-ink-muted hover:bg-paper-sunken hover:text-ink"
+          className="press flex items-center gap-1.5 rounded px-2 py-1 text-[11px] text-ink-muted hover:bg-ink/5 hover:text-ink"
         >
           <Download className="h-3 w-3" />
           Export
@@ -336,7 +336,7 @@ export function ArtifactCodeViewer({ artifact }: { artifact: Artifact }) {
             className={`press flex items-center gap-1.5 rounded px-2 py-1 text-[11px] font-medium transition-colors ${
               showRefactor
                 ? "bg-accent/10 text-accent hover:bg-accent/15"
-                : "text-ink-muted hover:bg-paper-sunken hover:text-ink"
+                : "text-ink-muted hover:bg-ink/5 hover:text-ink"
             }`}
             title="AI Refactoring Helper"
           >
@@ -449,7 +449,7 @@ export function ArtifactCodeViewer({ artifact }: { artifact: Artifact }) {
                   setShowRefactor(false);
                   setRefactorResult(null);
                 }}
-                className="text-[10px] text-ink-faint hover:text-ink p-1 rounded-md hover:bg-paper-sunken transition-colors"
+                className="text-[10px] text-ink-faint hover:text-ink p-1 rounded-md hover:bg-ink/5 transition-colors"
               >
                 Close
               </button>

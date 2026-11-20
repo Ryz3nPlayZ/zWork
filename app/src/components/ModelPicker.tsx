@@ -76,7 +76,7 @@ export function ModelPicker() {
         className={cn(
           "press ring-focus inline-flex items-center gap-1.5 rounded-full border border-line bg-paper",
           "pl-2.5 pr-2 py-1 text-[12px] font-medium text-ink",
-          "hover:bg-paper-sunken hover:border-line-strong",
+          "hover:bg-ink/5 hover:border-line-strong",
         )}
       >
         <span className="max-w-[200px] truncate">{displayName}</span>
@@ -133,8 +133,8 @@ export function ModelPicker() {
                 }}
                 className={cn(
                   "press group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left",
-                  "hover:bg-paper-sunken",
-                  selected && "bg-paper-sunken",
+                  "hover:bg-ink/5",
+                  selected && "bg-ink/5",
                   disabled && !locked && "cursor-not-allowed opacity-50 hover:bg-transparent",
                 )}
               >
@@ -199,7 +199,7 @@ export function ModelPicker() {
               <button
                 type="button"
                 onClick={() => { setOpen(false); setView("settings"); }}
-                className="press flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12px] text-ink-muted hover:bg-paper-sunken hover:text-ink"
+                className="press flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12px] text-ink-muted hover:bg-ink/5 hover:text-ink"
               >
                 <Plus className="h-3.5 w-3.5" />
                 Add custom model

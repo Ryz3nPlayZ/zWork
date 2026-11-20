@@ -193,11 +193,11 @@ export function ChatView() {
             // When the sidebar is collapsed, the main pane slides left and the
             // chat title would slide under the window-level search + sidebar toggle.
             // Reserve a left gutter so the title stays clear. Beside macOS
-            // traffic lights the controls sit at 72px; elsewhere at 12px (58px wide).
+            // traffic lights the controls sit at 80px; elsewhere at 12px (58px wide).
             sidebarOpen
               ? "pl-5"
               : hasTrafficLights()
-                ? "pl-[138px]"
+                ? "pl-[146px]"
                 : "pl-[72px]",
           )}
         >
@@ -209,7 +209,7 @@ export function ChatView() {
                   setActiveProject(chat.projectId!);
                   setView("projects");
                 }}
-                className="press inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[12px] text-ink-muted hover:bg-paper-sunken hover:text-ink"
+                className="press inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[12px] text-ink-muted hover:bg-ink/5 hover:text-ink"
                 title="Back to project"
               >
                 <ArrowLeft className="h-3.5 w-3.5" />
@@ -228,14 +228,14 @@ export function ChatView() {
                 <button
                   type="button"
                   onClick={commitRename}
-                  className="rounded p-0.5 text-ink-muted hover:bg-paper-sunken hover:text-ink"
+                  className="rounded p-0.5 text-ink-muted hover:bg-ink/5 hover:text-ink"
                 >
                   <Check className="h-3.5 w-3.5" />
                 </button>
                 <button
                   type="button"
                   onClick={() => setEditing(false)}
-                  className="rounded p-0.5 text-ink-muted hover:bg-paper-sunken hover:text-ink"
+                  className="rounded p-0.5 text-ink-muted hover:bg-ink/5 hover:text-ink"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -247,7 +247,7 @@ export function ChatView() {
                   setTitleDraft(chat.title);
                   setEditing(true);
                 }}
-                className="press group flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 hover:bg-paper-sunken"
+                className="press group flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 hover:bg-ink/5"
                 title="Rename chat"
               >
                 <span className="truncate text-[13px] font-medium text-ink">
@@ -276,7 +276,7 @@ export function ChatView() {
               <button
                 type="button"
                 onClick={openBranchPicker}
-                className="press inline-flex items-center gap-1 rounded-md border border-line bg-paper px-2 py-1 text-[11px] font-medium text-ink hover:bg-paper-sunken"
+                className="press inline-flex items-center gap-1 rounded-md border border-line bg-paper px-2 py-1 text-[11px] font-medium text-ink hover:bg-ink/5"
                 title="Earlier versions of this chat"
               >
                 <History className="h-3 w-3" />
@@ -290,7 +290,7 @@ export function ChatView() {
                     </div>
                   )}
                   {branches.map((b) => (
-                    <div key={b.id} className="flex items-center gap-1 rounded px-2.5 py-1.5 hover:bg-paper-sunken">
+                    <div key={b.id} className="flex items-center gap-1 rounded px-2.5 py-1.5 hover:bg-ink/5">
                       <button
                         type="button"
                         onClick={async () => {
@@ -325,7 +325,7 @@ export function ChatView() {
               <button
                 type="button"
                 onClick={() => setExportOpen((v) => !v)}
-                className="press inline-flex items-center gap-1 rounded-md border border-line bg-paper px-2 py-1 text-[11px] font-medium text-ink hover:bg-paper-sunken"
+                className="press inline-flex items-center gap-1 rounded-md border border-line bg-paper px-2 py-1 text-[11px] font-medium text-ink hover:bg-ink/5"
                 title="Export chat history"
               >
                 <Download className="h-3 w-3" />
@@ -340,7 +340,7 @@ export function ChatView() {
                       exportToMarkdown();
                       setExportOpen(false);
                     }}
-                    className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-[12px] text-ink hover:bg-paper-sunken font-medium transition-colors"
+                    className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-[12px] text-ink hover:bg-ink/5 font-medium transition-colors"
                   >
                     Export as Markdown (.md)
                   </button>
@@ -350,7 +350,7 @@ export function ChatView() {
                       exportToJSON();
                       setExportOpen(false);
                     }}
-                    className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-[12px] text-ink hover:bg-paper-sunken font-medium transition-colors"
+                    className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-[12px] text-ink hover:bg-ink/5 font-medium transition-colors"
                   >
                     Export as JSON (.json)
                   </button>
@@ -404,7 +404,7 @@ export function ChatView() {
                 <button
                   type="button"
                   onClick={() => setView("settings")}
-                  className="press inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-[12.5px] font-medium text-ink hover:bg-paper-sunken"
+                  className="press inline-flex items-center gap-1.5 rounded-md border border-line px-2.5 py-1 text-[12.5px] font-medium text-ink hover:bg-ink/5"
                 >
                   <SettingsIcon className="h-3.5 w-3.5" /> Open Settings
                 </button>

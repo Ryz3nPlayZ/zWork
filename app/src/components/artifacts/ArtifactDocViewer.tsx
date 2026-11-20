@@ -392,7 +392,7 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
             <button
               onClick={handleScrapeUrl}
               disabled={scraping || !scrapeUrl.trim()}
-              className="px-2 py-0.5 text-[10.5px] font-semibold text-accent rounded hover:bg-paper-sunken disabled:opacity-50 transition-all cursor-pointer"
+              className="px-2 py-0.5 text-[10.5px] font-semibold text-accent rounded hover:bg-ink/5 disabled:opacity-50 transition-all cursor-pointer"
             >
               {scraping ? "Importing..." : "Go"}
             </button>
@@ -499,7 +499,7 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
                     {/* Add block button */}
                     <button
                       onClick={() => handleCreateBlockBelow(block.id)}
-                      className="p-0.5 rounded text-ink-faint hover:text-ink hover:bg-paper-sunken"
+                      className="p-0.5 rounded text-ink-faint hover:text-ink hover:bg-ink/5"
                       title="Add block below"
                     >
                       <Plus className="h-3.5 w-3.5" />
@@ -508,7 +508,7 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
                     <div className="relative">
                       <button
                         onClick={() => setBlockMenuId(isMenuOpen ? null : block.id)}
-                        className="p-0.5 rounded text-ink-faint hover:text-ink hover:bg-paper-sunken"
+                        className="p-0.5 rounded text-ink-faint hover:text-ink hover:bg-ink/5"
                         title="Change block type"
                       >
                         <ChevronDown className="h-3.5 w-3.5" />
@@ -518,49 +518,49 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
                         <div className="absolute left-0 top-full z-45 w-[160px] rounded-xl border border-line bg-paper-raised p-1 shadow-pop">
                           <button
                             onClick={() => handleBlockTypeChange(block.id, "p")}
-                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11.5px] hover:bg-paper-sunken text-ink"
+                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11.5px] hover:bg-ink/5 text-ink"
                           >
                             <FileText className="h-3.5 w-3.5 text-ink-muted" /> Paragraph
                           </button>
                           <button
                             onClick={() => handleBlockTypeChange(block.id, "h1")}
-                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11.5px] hover:bg-paper-sunken text-ink"
+                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11.5px] hover:bg-ink/5 text-ink"
                           >
                             <Heading1 className="h-3.5 w-3.5 text-ink-muted" /> Heading 1
                           </button>
                           <button
                             onClick={() => handleBlockTypeChange(block.id, "h2")}
-                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11.5px] hover:bg-paper-sunken text-ink"
+                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11.5px] hover:bg-ink/5 text-ink"
                           >
                             <Heading2 className="h-3.5 w-3.5 text-ink-muted" /> Heading 2
                           </button>
                           <button
                             onClick={() => handleBlockTypeChange(block.id, "h3")}
-                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11.5px] hover:bg-paper-sunken text-ink"
+                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11.5px] hover:bg-ink/5 text-ink"
                           >
                             <Heading3 className="h-3.5 w-3.5 text-ink-muted" /> Heading 3
                           </button>
                           <button
                             onClick={() => handleBlockTypeChange(block.id, "ul")}
-                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11.5px] hover:bg-paper-sunken text-ink"
+                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11.5px] hover:bg-ink/5 text-ink"
                           >
                             <List className="h-3.5 w-3.5 text-ink-muted" /> Bullet List
                           </button>
                           <button
                             onClick={() => handleBlockTypeChange(block.id, "ol")}
-                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11.5px] hover:bg-paper-sunken text-ink"
+                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11.5px] hover:bg-ink/5 text-ink"
                           >
                             <ListOrdered className="h-3.5 w-3.5 text-ink-muted" /> Numbered List
                           </button>
                           <button
                             onClick={() => handleBlockTypeChange(block.id, "todo")}
-                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11.5px] hover:bg-paper-sunken text-ink"
+                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11.5px] hover:bg-ink/5 text-ink"
                           >
                             <Square className="h-3.5 w-3.5 text-ink-muted" /> Todo list
                           </button>
                           <button
                             onClick={() => handleBlockTypeChange(block.id, "code")}
-                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11.5px] hover:bg-paper-sunken text-ink"
+                            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11.5px] hover:bg-ink/5 text-ink"
                           >
                             <FileCode className="h-3.5 w-3.5 text-ink-muted" /> Code Block
                           </button>
@@ -651,7 +651,7 @@ export function ArtifactDocViewer({ artifact }: { artifact: Artifact }) {
             </h3>
             <button
               onClick={() => setShowCheatSheet(false)}
-              className="text-[10px] text-ink-faint hover:text-ink p-1 rounded-md hover:bg-paper-sunken transition-colors"
+              className="text-[10px] text-ink-faint hover:text-ink p-1 rounded-md hover:bg-ink/5 transition-colors"
             >
               Close
             </button>

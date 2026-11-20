@@ -163,7 +163,7 @@ export function ArtifactSheetViewer({ artifact }: { artifact: Artifact }) {
         <button
           type="button"
           onClick={addRow}
-          className="press flex items-center gap-1 rounded px-2.5 py-1 text-[11px] text-ink-muted hover:bg-paper-sunken hover:text-ink font-medium transition"
+          className="press flex items-center gap-1 rounded px-2.5 py-1 text-[11px] text-ink-muted hover:bg-ink/5 hover:text-ink font-medium transition"
           title="Add row"
         >
           <Plus className="h-3 w-3" /> Row
@@ -171,7 +171,7 @@ export function ArtifactSheetViewer({ artifact }: { artifact: Artifact }) {
         <button
           type="button"
           onClick={addCol}
-          className="press flex items-center gap-1 rounded px-2.5 py-1 text-[11px] text-ink-muted hover:bg-paper-sunken hover:text-ink font-medium transition"
+          className="press flex items-center gap-1 rounded px-2.5 py-1 text-[11px] text-ink-muted hover:bg-ink/5 hover:text-ink font-medium transition"
           title="Add column"
         >
           <Plus className="h-3 w-3" /> Col
@@ -204,7 +204,7 @@ export function ArtifactSheetViewer({ artifact }: { artifact: Artifact }) {
         <button
           type="button"
           onClick={exportCSV}
-          className="press flex items-center gap-1 rounded px-2.5 py-1 text-[11px] text-ink-muted hover:bg-paper-sunken hover:text-ink font-medium transition"
+          className="press flex items-center gap-1 rounded px-2.5 py-1 text-[11px] text-ink-muted hover:bg-ink/5 hover:text-ink font-medium transition"
         >
           <Download className="h-3 w-3" /> Export CSV
         </button>
@@ -262,7 +262,7 @@ export function ArtifactSheetViewer({ artifact }: { artifact: Artifact }) {
                       className={`border border-line px-3 py-1.5 transition ${
                         isSelected
                           ? "ring-1 ring-inset ring-accent bg-accent/5"
-                          : "hover:bg-paper-sunken/50"
+                          : "hover:bg-ink/5"
                       }`}
                     >
                       {isEditing ? (

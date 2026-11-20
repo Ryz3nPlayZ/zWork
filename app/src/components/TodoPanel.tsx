@@ -40,7 +40,7 @@ export function TodoPanel() {
         <button
           type="button"
           onClick={() => setCollapsed(!collapsed)}
-          className="press flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-paper-sunken/50"
+          className="press flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-ink/5"
         >
           <ListTodo className="h-3.5 w-3.5 shrink-0 text-ink-muted" />
           <span className="flex-1 text-[12px] font-medium text-ink">

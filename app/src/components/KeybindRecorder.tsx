@@ -187,7 +187,7 @@ export function KeybindRecorder({ value, onChange, label, description }: Keybind
             <button
               type="button"
               onClick={startListening}
-              className="press ring-focus inline-flex h-8 items-center rounded-lg border border-line bg-paper px-3 text-[12.5px] font-medium text-ink transition-colors hover:bg-paper-sunken"
+              className="press ring-focus inline-flex h-8 items-center rounded-lg border border-line bg-paper px-3 text-[12.5px] font-medium text-ink transition-colors hover:bg-ink/5"
             >
               Edit
             </button>
@@ -195,7 +195,7 @@ export function KeybindRecorder({ value, onChange, label, description }: Keybind
             <button
               type="button"
               onClick={cancel}
-              className="press ring-focus inline-flex h-8 items-center rounded-lg border border-line bg-paper px-3 text-[12.5px] font-medium text-ink transition-colors hover:bg-paper-sunken"
+              className="press ring-focus inline-flex h-8 items-center rounded-lg border border-line bg-paper px-3 text-[12.5px] font-medium text-ink transition-colors hover:bg-ink/5"
             >
               Cancel
             </button>

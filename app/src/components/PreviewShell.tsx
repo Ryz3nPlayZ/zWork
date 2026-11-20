@@ -43,7 +43,7 @@ export function PreviewAuthShell() {
           onClick={() => setScreen("login")}
           className={cn(
             "press inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors",
-            screen === "login" ? "bg-ink text-paper" : "text-ink-muted hover:text-ink hover:bg-paper-sunken",
+            screen === "login" ? "bg-ink text-paper" : "text-ink-muted hover:text-ink hover:bg-ink/5",
           )}
         >
           <LogIn className="h-3.5 w-3.5" />
@@ -54,7 +54,7 @@ export function PreviewAuthShell() {
           onClick={() => setScreen("onboarding")}
           className={cn(
             "press inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-medium transition-colors",
-            screen === "onboarding" ? "bg-ink text-paper" : "text-ink-muted hover:text-ink hover:bg-paper-sunken",
+            screen === "onboarding" ? "bg-ink text-paper" : "text-ink-muted hover:text-ink hover:bg-ink/5",
           )}
         >
           <Settings2 className="h-3.5 w-3.5" />

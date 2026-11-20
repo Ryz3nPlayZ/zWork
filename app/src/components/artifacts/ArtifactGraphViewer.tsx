@@ -20,7 +20,7 @@ export function ArtifactGraphViewer({ artifact }: { artifact: Artifact }) {
         <button
           type="button"
           onClick={() => setZoom((z) => Math.min(3, z + 0.25))}
-          className="press rounded p-1 text-ink-muted hover:bg-paper-sunken hover:text-ink"
+          className="press rounded p-1 text-ink-muted hover:bg-ink/5 hover:text-ink"
           title="Zoom in"
         >
           <ZoomIn className="h-3.5 w-3.5" />
@@ -31,7 +31,7 @@ export function ArtifactGraphViewer({ artifact }: { artifact: Artifact }) {
         <button
           type="button"
           onClick={() => setZoom((z) => Math.max(0.25, z - 0.25))}
-          className="press rounded p-1 text-ink-muted hover:bg-paper-sunken hover:text-ink"
+          className="press rounded p-1 text-ink-muted hover:bg-ink/5 hover:text-ink"
           title="Zoom out"
         >
           <ZoomOut className="h-3.5 w-3.5" />
@@ -41,7 +41,7 @@ export function ArtifactGraphViewer({ artifact }: { artifact: Artifact }) {
           <button
             type="button"
             onClick={exportImage}
-            className="press flex items-center gap-1 rounded px-2 py-1 text-[11px] text-ink-muted hover:bg-paper-sunken hover:text-ink"
+            className="press flex items-center gap-1 rounded px-2 py-1 text-[11px] text-ink-muted hover:bg-ink/5 hover:text-ink"
           >
             <Download className="h-3 w-3" /> Export
           </button>

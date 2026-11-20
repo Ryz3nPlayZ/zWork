@@ -166,7 +166,7 @@ function CodeBlock({
               type="button"
               onClick={() => onOpenPanel(code, language)}
               aria-label="Open code in panel"
-              className="press rounded border border-line bg-paper px-1.5 py-0.5 text-[10px] text-ink-muted hover:bg-paper-sunken hover:text-ink cursor-pointer"
+              className="press rounded border border-line bg-paper px-1.5 py-0.5 text-[10px] text-ink-muted hover:bg-ink/5 hover:text-ink cursor-pointer"
             >
               Open
             </button>
@@ -338,7 +338,7 @@ export function AssistantMarkdown({
         },
         th({ children }) {
           return (
-            <th className="border border-line bg-paper-sunken px-3 py-1.5 text-left font-semibold">
+            <th className="border border-line bg-ink/5 px-3 py-1.5 text-left font-semibold">
               {children}
             </th>
           );
@@ -425,7 +425,7 @@ function UserBubble({
               onClick={() => startEditMessage(message.id)}
               title="Edit message"
               aria-label="Edit message"
-              className="press absolute -left-8 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-ink-faint opacity-0 transition-opacity hover:bg-paper-sunken hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
+              className="press absolute -left-8 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-ink-faint opacity-0 transition-opacity hover:bg-ink/5 hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
             >
               <Edit2 className="h-3.5 w-3.5" />
             </button>
@@ -542,7 +542,7 @@ function ProcessPanel({
           setAutoExpanded(false);
           setExpanded((v) => !v);
         }}
-        className="press flex max-w-full items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[12px] font-medium text-ink-faint hover:text-ink-muted hover:bg-paper-sunken"
+        className="press flex max-w-full items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[12px] font-medium text-ink-faint hover:text-ink-muted hover:bg-ink/5"
       >
         <ChevronDown
           className={cn(
@@ -820,7 +820,7 @@ export function Message({
                   onClick={() => onOpenArtifact?.(artifact)}
                   className={cn(
                     "press flex w-full items-center gap-3 rounded-2xl border border-line bg-paper-raised px-3.5 py-3 text-left",
-                    "hover:border-line-strong hover:bg-paper-sunken",
+                    "hover:border-line-strong hover:bg-ink/5",
                   )}
                 >
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-line bg-paper-sunken text-ink-muted">
@@ -1100,7 +1100,7 @@ function PermissionRecoveryCard({ message }: { message: string }) {
         <p className="mt-0.5 text-[12px] leading-relaxed text-ink-muted">{message}</p>
         <button
           onClick={openSettings}
-          className="mt-2 inline-flex items-center gap-1 rounded-lg border border-amber-500/40 bg-paper-raised px-2.5 py-1 text-[11.5px] font-medium text-ink hover:bg-paper-sunken transition-colors"
+          className="mt-2 inline-flex items-center gap-1 rounded-lg border border-amber-500/40 bg-paper-raised px-2.5 py-1 text-[11.5px] font-medium text-ink hover:bg-ink/5 transition-colors"
         >
           Open System Settings
         </button>
