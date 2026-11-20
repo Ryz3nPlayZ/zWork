@@ -578,6 +578,7 @@ fn step_labels(name: &str, params: &Value) -> (String, String) {
         "ls" => pair("Looking in", "Looked in", if arg("path").is_empty() { "the folder".into() } else { file("path") }),
         "update_todos" => pair("Updating the plan", "Updated the plan", String::new()),
         "web_search" => pair("Searching the web for", "Searched the web for", quoted(arg("query"))),
+        "generate_image" => pair("Making an image", "Made an image", String::new()),
         "browser_navigate" => pair("Opening", "Opened", arg("url").to_string()),
         "extract_document" => pair("Reading", "Read", file("path")),
         "spawn_agent" => pair("Handing off a subtask", "Handed off a subtask", String::new()),

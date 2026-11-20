@@ -589,6 +589,7 @@ pub fn build_system_prompt(
             "- `web_fetch(url, format?)` — fetch a web page or file by URL and read it as markdown/text.",
             "- `web_search(query?, max_results?)` — search the web; returns each result's title, URL, date and relevant page excerpts. Excerpts can be partial — to read a whole page, open its URL with `web_fetch`. Cite the URLs you rely on.",
             "- `save_memory(content, target?)` — persist information across sessions.",
+            "- `generate_image(prompt, aspect?)` — make one picture from a description and save it to the outputs folder; the user sees it in the chat. Uses their plan allowance. Not for data charts.",
             "- `ask_user(question, options)` — ask user a question with choices when preferences are ambiguous.",
             "- `read_skill(slug)` — load a skill's playbook.",
             "- `spawn_agent(description, model_id?)` — spawn a sub-agent for parallel independent work.",

@@ -6,6 +6,7 @@ use futures_util::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 
 pub mod search;
+pub mod image;
 pub mod doc_extract;
 pub mod stock;
 pub mod todos;
@@ -316,6 +317,18 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
 
     if !plan_mode {
         // Add modifying / executing tools
+        schemas.push(json!({
+            "name": "generate_image",
+            "description": "Make one picture from a description (illustration, poster, icon, photo-style scene) and save it to the outputs folder. The user sees it in the chat. Counts toward their plan allowance, so make one image per request unless asked for more. Not for charts or diagrams of data — draw those with code.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": { "type": "string", "description": "What the image shows: subject, style, colours, mood. Be concrete." },
+                    "aspect": { "type": "string", "enum": image::ASPECTS, "description": "Width:height. Default 1:1; 16:9 for slides and banners, 9:16 for phone screens and stories." }
+                },
+                "required": ["prompt"]
+            }
+        }));
         schemas.push(json!({
             "name": "save_memory",
             "description": "Save a fact to the agent's persistent memory. Use target='user' for facts about the user (preferences, style, goals, habits, job, family, constraints) and target='memory' for everything else (project facts, conventions, deadlines, things learned). Use target='task' ONLY inside a scheduled-task run to save findings for future runs of that task.",
@@ -734,6 +747,7 @@ pub fn execute_tool(
         
         let result = match name.as_str() {
             "web_search" => search::execute_web_search(&params).await,
+            "generate_image" => image::execute(&params, &chat_id).await,
             "search_papers" => {
                 let query = params.get("query").and_then(|v| v.as_str()).unwrap_or("");
                 let max_results = params.get("max_results").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
