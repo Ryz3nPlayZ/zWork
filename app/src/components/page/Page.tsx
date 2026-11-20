@@ -19,6 +19,7 @@ import {
 } from "react";
 import { MoreHorizontal, X } from "lucide-react";
 import { cn } from "../../lib/cn";
+import { GlideGroup } from "../Glide";
 
 // ---- Page shell ----
 
@@ -494,15 +495,17 @@ export function OverflowMenu({ items, label = "More actions" }: { items: MenuIte
         <MoreHorizontal />
       </RowIconButton>
       {open && (
-        <div
+        <GlideGroup
           role="menu"
-          className="absolute right-0 top-full z-30 mt-1 w-40 animate-fade-in rounded-xl border border-line-strong bg-paper-raised p-1 shadow-pop"
+          className="absolute right-0 top-full z-30 mt-1 w-40 origin-top-right animate-menu-in rounded-xl border border-line-strong bg-paper-raised p-1 shadow-pop"
+          highlightClassName="rounded-lg"
         >
           {items.map((it) => (
             <button
               key={it.label}
               type="button"
               role="menuitem"
+              data-glide=""
               onClick={(e) => {
                 e.stopPropagation();
                 setOpen(false);
@@ -510,14 +513,15 @@ export function OverflowMenu({ items, label = "More actions" }: { items: MenuIte
               }}
               className={cn(
                 "press flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] [&_svg]:h-3.5 [&_svg]:w-3.5",
-                it.danger ? "text-error hover:bg-error/10" : "text-ink hover:bg-line/40",
+                "focus-visible:outline-none",
+                it.danger ? "text-error" : "text-ink",
               )}
             >
               {it.icon}
               {it.label}
             </button>
           ))}
-        </div>
+        </GlideGroup>
       )}
     </div>
   );

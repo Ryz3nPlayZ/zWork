@@ -13,6 +13,7 @@ import {
   Upload,
 } from "lucide-react";
 import { cn } from "../lib/cn";
+import { GlideGroup } from "./Glide";
 import { useApp } from "../lib/store";
 import { ChatInput } from "./ChatInput";
 import { AssistantMarkdown } from "./Message";
@@ -433,13 +434,13 @@ function ProjectDetailBody({ project }: { project: Project }) {
           <button
             type="button"
             onClick={() => setActiveProject(null)}
-            className="press ring-focus -ml-2 mb-4 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[12.5px] text-ink-muted transition-colors hover:bg-line/40 hover:text-ink"
+            className="press ring-focus -ml-2 mb-4 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[12.5px] text-ink-muted transition-colors hover:bg-ink/5 hover:text-ink"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
             Projects
           </button>
 
-          <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="grid grid-cols-1 gap-10 xl:grid-cols-[minmax(0,1fr)_300px]">
             {/* Main column: name, composer, chats */}
             <div className="min-w-0">
               <header className="mb-5 flex items-start justify-between gap-3">
@@ -466,7 +467,7 @@ function ProjectDetailBody({ project }: { project: Project }) {
                         type="button"
                         title="Rename"
                         onClick={() => setEditing("name")}
-                        className="ring-focus -mx-1.5 max-w-full truncate rounded-md px-1.5 text-left text-[22px] font-semibold tracking-tight text-ink transition-colors hover:bg-line/25"
+                        className="ring-focus -mx-1.5 max-w-full truncate rounded-md px-1.5 text-left text-[22px] font-semibold tracking-tight text-ink transition-colors hover:bg-ink/5"
                       >
                         {project.name}
                       </button>
@@ -493,7 +494,7 @@ function ProjectDetailBody({ project }: { project: Project }) {
                     <button
                       type="button"
                       onClick={() => setEditing("description")}
-                      className="ring-focus -mx-1.5 mt-0.5 block max-w-full rounded-md px-1.5 py-0.5 text-left text-[13px] text-ink-muted transition-colors hover:bg-line/25"
+                      className="ring-focus -mx-1.5 mt-0.5 block max-w-full rounded-md px-1.5 py-0.5 text-left text-[13px] text-ink-muted transition-colors hover:bg-ink/5"
                     >
                       {project.description?.trim() || (
                         <span className="text-ink-faint">Add what this project is for</span>
@@ -540,9 +541,12 @@ function ProjectDetailBody({ project }: { project: Project }) {
 
               <SectionHeading title="Chats" count={chats.length || undefined} />
               {chats.length === 0 ? (
-                <p className="text-[12.5px] text-ink-muted">
-                  Chats you start here are saved to this project and use its instructions and files.
-                </p>
+                <div className="flex items-start gap-3 rounded-2xl border border-dashed border-line-strong px-4 py-4">
+                  <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 text-ink-faint" />
+                  <p className="text-[12.5px] leading-relaxed text-ink-muted">
+                    No chats yet. Ask something above to start one. Chats here are kept with this project and use its instructions and files.
+                  </p>
+                </div>
               ) : (
                 <ListGroup>
                   {chats.map((c) => (
@@ -564,7 +568,7 @@ function ProjectDetailBody({ project }: { project: Project }) {
             </div>
 
             {/* Side column: what zWork uses in every chat here */}
-            <aside className="flex flex-col gap-3">
+            <aside className="flex flex-col divide-y divide-line self-start border-line xl:sticky xl:top-0 xl:border-l xl:pl-8 [&>*]:py-4 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0">
               <SidePanel
                 title="Instructions"
                 action={
@@ -632,22 +636,22 @@ function ProjectDetailBody({ project }: { project: Project }) {
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
-                      className="ring-focus flex w-full flex-col items-center gap-1.5 rounded-xl border border-dashed border-line-strong px-3 py-5 text-center transition-colors hover:bg-line/20"
+                      className="ring-focus -mx-2 flex w-[calc(100%+1rem)] items-start gap-2.5 rounded-xl px-2 py-2 text-left transition-colors hover:bg-ink/5"
                     >
-                      <Upload className="h-4 w-4 text-ink-faint" />
-                      <span className="text-[12.5px] font-medium text-ink">Add files</span>
-                      <span className="text-[11.5px] leading-relaxed text-ink-muted">
-                        PDFs, spreadsheets or documents zWork should use here. You can also drop them on this box.
+                      <Upload className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-faint" />
+                      <span className="text-[12.5px] leading-relaxed text-ink-muted">
+                        <span className="font-medium text-ink">Add files</span> zWork should use here, like PDFs, spreadsheets or documents. You can also drop them here.
                       </span>
                     </button>
                   ) : (
-                    <ul className="-mx-1.5 flex max-h-[240px] flex-col overflow-y-auto">
+                    <GlideGroup className="-mx-1.5 flex max-h-[240px] flex-col overflow-y-auto">
                       {files.map((f) => {
                         const label = f.display_name ?? f.name;
                         return (
-                          <li
+                          <div
                             key={f.name}
-                            className="group flex items-center gap-2 rounded-lg px-1.5 py-1 transition-colors hover:bg-line/25"
+                            data-glide=""
+                            className="group flex items-center gap-2 rounded-lg px-1.5 py-1"
                           >
                             <FileText className="h-3.5 w-3.5 shrink-0 text-ink-faint" />
                             <button
@@ -668,10 +672,10 @@ function ProjectDetailBody({ project }: { project: Project }) {
                             >
                               <Trash2 />
                             </RowIconButton>
-                          </li>
+                          </div>
                         );
                       })}
-                    </ul>
+                    </GlideGroup>
                   )}
                   {fileError && (
                     <p role="alert" className="mt-2 text-[12px] text-error">
@@ -728,11 +732,11 @@ function SidePanel({
   return (
     <section
       className={cn(
-        "rounded-2xl border bg-paper-raised p-4 transition-colors",
-        highlighted ? "border-ink/40" : "border-line",
+        "-mx-3 rounded-xl px-3 py-1 transition-colors",
+        highlighted && "bg-ink/5 outline-dashed outline-1 outline-line-strong",
       )}
     >
-      <div className="mb-2 flex min-h-7 items-center justify-between gap-2">
+      <div className="mb-1.5 flex min-h-7 items-center justify-between gap-2">
         <h2 className="text-[13px] font-semibold text-ink">
           {title}
           {count !== undefined && <span className="ml-1.5 font-normal text-ink-faint">{count}</span>}

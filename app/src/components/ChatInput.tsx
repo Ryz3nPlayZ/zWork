@@ -48,6 +48,7 @@ import { classifyFile } from "../lib/files";
 import { dragRegionAttrs } from "../lib/drag";
 import { ModelPicker } from "./ModelPicker";
 import { SlashMenu } from "./SlashMenu";
+import { GlideGroup } from "./Glide";
 
 interface ComposerAttachment {
   id: string;
@@ -124,6 +125,9 @@ function SecurityPresetPicker({
   onChange: (preset: SecurityPreset) => void;
 }) {
   const [open, setOpen] = useState(false);
+  // The composer sits at the bottom of a chat but near the top of a project
+  // page: open toward whichever side has more room so the menu never clips.
+  const [dropDown, setDropDown] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const current = PRESET_META[value];
 
@@ -140,11 +144,15 @@ function SecurityPresetPicker({
     <div ref={ref} className="relative">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          const r = ref.current?.getBoundingClientRect();
+          if (r) setDropDown(window.innerHeight - r.bottom > r.top);
+          setOpen((v) => !v);
+        }}
         aria-label="Security preset"
         aria-expanded={open}
         className={cn(
-          "press ring-focus inline-flex items-center gap-1.5 rounded-lg border border-line bg-paper px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-ink/5",
+          "press ring-focus inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-line bg-paper px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-ink/5",
           open && "bg-ink/5 border-line-strong",
         )}
       >
@@ -155,7 +163,14 @@ function SecurityPresetPicker({
         />
       </button>
       {open && (
-        <div className="absolute bottom-full left-0 z-50 mb-2 w-64 animate-fade-in rounded-2xl border border-line bg-paper-raised p-1.5 shadow-lift">
+        <GlideGroup
+          role="menu"
+          highlightClassName="rounded-xl"
+          className={cn(
+            "absolute left-0 z-50 w-64 animate-menu-in rounded-2xl border border-line bg-paper-raised p-1.5 shadow-lift",
+            dropDown ? "top-full mt-2 origin-top-left" : "bottom-full mb-2 origin-bottom-left",
+          )}
+        >
           {(Object.keys(PRESET_META) as SecurityPreset[]).map((key) => {
             const meta = PRESET_META[key];
             const active = key === value;
@@ -163,15 +178,16 @@ function SecurityPresetPicker({
               <button
                 key={key}
                 type="button"
+                role="menuitemradio"
+                aria-checked={active}
+                data-glide=""
                 onClick={() => {
                   onChange(key);
                   setOpen(false);
                 }}
                 className={cn(
-                  "press flex w-full items-start gap-3 rounded-xl px-2.5 py-2 text-left transition-colors",
-                  active
-                    ? "bg-ink/5 text-ink"
-                    : "text-ink-soft hover:bg-ink/5 hover:text-ink",
+                  "press flex w-full items-start gap-3 rounded-xl px-2.5 py-2 text-left transition-colors focus-visible:outline-none",
+                  active ? "bg-ink/5 text-ink" : "text-ink-soft hover:text-ink",
                 )}
               >
                 <span className={cn("mt-0.5 text-ink-muted", active && "text-ink")}>{meta.icon}</span>
@@ -182,7 +198,7 @@ function SecurityPresetPicker({
               </button>
             );
           })}
-        </div>
+        </GlideGroup>
       )}
     </div>
   );

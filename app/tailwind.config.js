@@ -92,6 +92,13 @@ export default {
           "0%": { opacity: "0", transform: "translateY(2px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
+        // Menus and popovers: come into focus from a soft blur, like the
+        // highlight inside them. Pair with an origin-* class on the side the
+        // menu hangs from.
+        "menu-in": {
+          "0%": { opacity: "0", transform: "scale(.97)", filter: "blur(5px)" },
+          "100%": { opacity: "1", transform: "none", filter: "blur(0)" },
+        },
         shimmer: {
           "0%":   { "background-position": "200% 0" },
           "100%": { "background-position": "-200% 0" },
@@ -107,6 +114,7 @@ export default {
       },
       animation: {
         "fade-in": "fade-in 180ms ease-out both",
+        "menu-in": "menu-in 260ms cubic-bezier(.32,.72,0,1) both",
         shimmer:   "shimmer 2.2s linear infinite",
         "logo-spin": "logo-spin 60s linear infinite",
       },
