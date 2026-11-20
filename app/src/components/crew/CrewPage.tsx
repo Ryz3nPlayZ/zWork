@@ -262,7 +262,7 @@ export function CrewPage() {
         <div className="space-y-4">
           <section className="rounded-2xl border border-line bg-paper-raised p-5">
             <div className="flex flex-wrap items-start gap-4">
-              <CrewAvatar member={selected} size={72} />
+              <CrewAvatar member={selected} size={72} shading="fabric" />
               <div className="min-w-0 flex-1">
                 <h2 className="text-[14px] font-semibold text-ink">Instructions</h2>
                 <p className="mt-2 whitespace-pre-wrap text-[13px] leading-relaxed text-ink-soft">{selected.instructions}</p>
