@@ -1,0 +1,21 @@
+.asov_container {
+  --asov-bg: rgb(var(--ink));
+  --asov-fg: rgb(var(--paper));
+  --asov-sans: 'Inter Variable', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.asov_container {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--asov-bg, rgb(var(--ink)));
+  /* The sandbox's shader-scroll overlay is pointer-events: none; the click
+     ripple needs the container hit-testable again. */
+  pointer-events: auto;
+}
+
+.asov_container canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}

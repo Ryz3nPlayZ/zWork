@@ -1,0 +1,113 @@
+.hi_wrap {
+  --hi-bg: rgb(var(--ink));
+  --hi-fg: rgb(var(--paper));
+  --hi-grey: rgb(var(--ink-muted));
+  --hi-focus: rgb(var(--paper) / 0.35);
+  --hi-margin: clamp(20px, 2.8vw, 48px);
+  --hi-gutter: clamp(12px, 1.4vw, 24px);
+  --hi-col: calc((100% - 2 * var(--hi-margin, 40px) - 11 * var(--hi-gutter, 20px)) / 12);
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  height: 100svh;
+  min-height: 640px;
+  overflow: hidden;
+  background: var(--hi-bg, rgb(var(--ink)));
+  color: var(--hi-fg, rgb(var(--paper)));
+  font-family: 'Inter Variable', -apple-system, BlinkMacSystemFont, sans-serif;
+  letter-spacing: -0.02em;
+  -webkit-font-smoothing: antialiased;
+}
+
+.hi_label {
+  position: absolute;
+  left: var(--hi-margin, 40px);
+  top: var(--hi-margin, 40px);
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--hi-grey, rgb(var(--ink-muted)));
+}
+
+.hi_list {
+  position: absolute;
+  left: var(--hi-margin, 40px);
+  top: 50%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  transform: translateY(-50%);
+}
+
+.hi_row {
+  display: block;
+}
+
+.hi_name {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: clamp(30px, 3.6vw, 64px);
+  font-weight: 500;
+  letter-spacing: -0.035em;
+  line-height: 1.05;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0.14;
+  will-change: opacity;
+}
+
+.hi_name:focus-visible {
+  outline: 1px solid var(--hi-focus, rgb(var(--paper) / 0.35));
+  outline-offset: 2px;
+}
+
+/* Four columns ending on column 12; the JS sets top so the bottom edge meets the list's last row. */
+.hi_card {
+  position: absolute;
+  right: var(--hi-margin, 40px);
+  top: 0;
+  width: calc(4 * var(--hi-col, 95px) + 3 * var(--hi-gutter, 20px));
+  margin: 0;
+  pointer-events: none;
+}
+
+.hi_frame {
+  position: relative;
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+  border-radius: 16px;
+  background: rgb(var(--ink));
+}
+
+.hi_img {
+  --hi-clip-top: 0%;
+  --hi-clip-bottom: 0%;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  clip-path: inset(var(--hi-clip-top, 0%) 0 var(--hi-clip-bottom, 0%) 0);
+}
+
+@media (max-width: 767px) {
+  .hi_list {
+    top: calc(var(--hi-margin, 20px) * 3.2);
+    transform: none;
+  }
+
+  .hi_name {
+    font-size: 26px;
+  }
+
+  .hi_card {
+    top: auto;
+    bottom: var(--hi-margin, 20px);
+    width: 42vw;
+  }
+}

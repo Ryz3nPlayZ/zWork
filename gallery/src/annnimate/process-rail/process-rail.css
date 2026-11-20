@@ -1,0 +1,256 @@
+/* the scroll track; JS makes it tall where the stage sticks, auto elsewhere */
+.prl_wrap {
+  position: relative;
+  width: 100%;
+  height: var(--prl-track, auto);
+  --prl-bg: rgb(var(--paper));
+  --prl-tile: rgb(var(--paper-sunken));
+  --prl-tile-2: rgb(var(--paper-raised));
+  --prl-fg: rgb(var(--ink));
+  --prl-grey: rgb(var(--ink-faint));
+  --prl-line: rgb(var(--ink) / 0.12);
+  --prl-focus: rgb(var(--ink) / 0.3);
+  --prl-accent: rgb(var(--ink));
+  --prl-on-accent: rgb(var(--paper));
+  --prl-margin: clamp(20px, 2.8vw, 48px);
+  --prl-gutter: clamp(12px, 1.4vw, 24px);
+  --prl-col: calc((100% - 2 * var(--prl-margin, 40px) - 11 * var(--prl-gutter, 20px)) / 12);
+  --prl-display: clamp(40px, 4.2vw, 80px);
+  --prl-label: clamp(18px, 1.4vw, 28px);
+  --prl-sans: 'Inter Variable', -apple-system, BlinkMacSystemFont, sans-serif;
+  --prl-serif: 'Instrument Serif', Georgia, serif;
+  background: var(--prl-bg, rgb(var(--paper)));
+  color: var(--prl-fg, rgb(var(--ink)));
+  font-family: var(--prl-sans, 'Inter Variable', sans-serif);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* the visible block: CSS sticky holds it while the track scrolls past, no JS pin */
+.prl_stage {
+  position: sticky;
+  top: 0;
+  display: grid;
+  align-content: center;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100svh;
+  padding: var(--prl-margin, 40px);
+}
+
+.prl_rail {
+  position: relative;
+  align-self: center;
+  width: 100%;
+  max-width: none;
+  margin: 0 auto;
+}
+
+/* JS fits the line to the steps; the svg is a fixed-height strip above them */
+.prl_svg {
+  display: block;
+  width: 100%;
+  height: 24px;
+  overflow: visible;
+}
+
+.prl_svg_mobile {
+  display: none;
+}
+
+.prl_path,
+.prl_path_ghost {
+  fill: none;
+  stroke: var(--prl-fg, rgb(var(--ink)));
+  stroke-width: 1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.prl_path {
+  opacity: 1;
+}
+
+/* the route is a hairline underneath so the eye knows where the bead is headed */
+.prl_path_ghost {
+  stroke: var(--prl-line, rgb(var(--ink) / 0.12));
+  opacity: 1;
+}
+
+.prl_bead {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  width: var(--prl-bead, 10px);
+  height: var(--prl-bead, 10px);
+  border-radius: 50%;
+  background: var(--prl-fg, rgb(var(--ink)));
+  box-shadow: 0 0 0 calc(var(--prl-bead, 10px) * 0.5) var(--prl-bg, rgb(var(--paper)));
+  pointer-events: none;
+  will-change: transform;
+}
+
+/* equal columns: even spacing, and each step's anchor is its column's middle */
+.prl_steps {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  column-gap: var(--prl-gutter, 20px);
+  margin: 40px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.prl_step {
+  position: relative;
+  min-width: 0;
+  will-change: opacity;
+}
+
+.prl_step_btn {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.prl_step_btn:focus-visible {
+  outline: 1px solid var(--prl-focus, rgb(var(--ink) / 0.3));
+  outline-offset: 4px;
+}
+
+.prl_step_num {
+  display: block;
+  height: 1em;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--prl-grey, rgb(var(--ink-faint)));
+  font-variant-numeric: tabular-nums;
+}
+
+/* a digit is a 1em window over a strip of glyphs; overflow clip plus the
+   invisible in-flow glyph keeps the baseline where text expects it */
+.prl_col {
+  position: relative;
+  display: inline-block;
+  overflow: clip;
+  width: 0.64em;
+  height: 1em;
+  line-height: 1;
+  vertical-align: baseline;
+}
+
+.prl_col::before {
+  content: '0';
+  visibility: hidden;
+}
+
+.prl_strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  will-change: transform;
+}
+
+.prl_glyph {
+  display: block;
+  height: 1em;
+  line-height: 1;
+  text-align: center;
+}
+
+.prl_step_title {
+  display: block;
+  margin-top: 12px;
+  font-size: var(--prl-label, 20px);
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.prl_step_text {
+  display: block;
+  margin-top: 6px;
+  font-size: 15px;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+  color: var(--prl-grey, rgb(var(--ink-faint)));
+}
+
+/* the active step's image; its space is reserved so a card never changes height */
+.prl_step_media {
+  display: block;
+  width: 100%;
+  margin-top: 16px;
+  aspect-ratio: 4 / 3;
+  border-radius: 20px;
+  overflow: hidden;
+  transform-origin: 50% 0;
+  will-change: transform, opacity;
+}
+
+.prl_step_media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+@media (max-width: 767px) {
+  /* phones never stick: the stacked steps are taller than the screen */
+  .prl_stage {
+    position: relative;
+    padding: var(--prl-margin, 20px);
+  }
+
+  /* the steps stack beside a vertical line JS fits to them */
+  .prl_rail {
+    padding-left: 72px;
+    padding-bottom: 0;
+  }
+
+  .prl_svg_desktop {
+    display: none;
+  }
+
+  .prl_svg_mobile {
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 72px;
+    height: 100%;
+  }
+
+  /* equal-height rows: every step holds the room its image needs, so nothing
+     shifts when an image comes in and the bead spacing stays even */
+  .prl_steps {
+    grid-auto-flow: row;
+    grid-auto-rows: 1fr;
+    row-gap: 48px;
+    column-gap: 0;
+    margin-top: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prl_bead,
+  .prl_step,
+  .prl_strip,
+  .prl_step_media {
+    will-change: auto;
+  }
+}

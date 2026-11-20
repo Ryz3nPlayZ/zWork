@@ -1,0 +1,214 @@
+/* Image Fly-In
+   Dark full-viewport 3D depth field. Imagery flies in from deep inside the
+   page toward the viewer around a central content hole, with cursor-bend
+   parallax on the whole 3D stage. No Webflow - CSS variables and @font-face
+   allowed. */
+
+/* ---- Tokens ---- */
+.ifi_section {
+  --ifi-bg:      rgb(var(--ink));
+  --ifi-tile:    rgb(var(--ink));
+  --ifi-ink:     rgb(var(--paper));
+  --ifi-grey:    rgb(var(--ink-muted));
+  --ifi-muted:   rgb(var(--ink-muted));
+  --ifi-line:    rgb(var(--paper) / 0.14);
+  --ifi-focus:   rgb(var(--paper) / 0.35);
+  --ifi-margin:  clamp(20px, 2.8vw, 48px);
+  --ifi-gutter:  clamp(12px, 1.4vw, 24px);
+  --ifi-display: clamp(40px, 4.2vw, 80px);
+  --ifi-radius:  20px;
+  --ifi-sans:    'Inter Variable', -apple-system, BlinkMacSystemFont, sans-serif;
+  --ifi-serif:   'Instrument Serif', Georgia, serif;
+  --ifi-perspective: 1200px;
+}
+
+/* ---- Root ---- */
+.ifi_section {
+  position: relative;
+  width: 100%;
+  min-height: 100svh;
+  box-sizing: border-box;
+  background: var(--ifi-bg, rgb(var(--ink)));
+  color: var(--ifi-ink, rgb(var(--paper)));
+  letter-spacing: -0.02em;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  perspective: var(--ifi-perspective);
+  font-family: var(--ifi-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The 3D stage: preserves 3D for all card children, bent toward the cursor by
+   JS (rotationX/rotationY via quickTo). Fills the section. */
+.ifi_stage {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+/* ---- Manifesto headline block ----
+   Sits outside the rotating stage (own layer) so it stays readable; carries
+   only a small counter-tilt set directly by JS. */
+.ifi_content {
+  position: relative;
+  z-index: 2;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 24px;
+  text-align: center;
+  transform-style: preserve-3d;
+  will-change: transform;
+  pointer-events: none;
+}
+
+.ifi_headline {
+  font-family: var(--ifi-serif, Georgia, serif);
+  font-weight: 400;
+  font-size: var(--ifi-display, 60px);
+  line-height: 0.95;
+  letter-spacing: -0.035em;
+  color: var(--ifi-ink, rgb(var(--paper)));
+  margin: 0;
+  overflow-x: visible;
+  overflow-y: visible;
+}
+
+/* SplitText mask: "lines" wraps each line in its own clip box; the padding
+   grows the line box so the mask clips below descenders at tight leading. */
+.ifi_headline_line {
+  padding-bottom: 0.18em;
+}
+
+.ifi_headline_grey {
+  color: var(--ifi-grey, rgb(var(--ink-muted)));
+}
+
+.ifi_support {
+  font-family: var(--ifi-sans, 'Inter Variable', sans-serif);
+  font-weight: 400;
+  font-size: 18px;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+  color: var(--ifi-muted, rgb(var(--ink-muted)));
+  margin: 24px auto 0;
+  max-width: 380px;
+}
+
+.ifi_support b {
+  font-weight: 400;
+  color: var(--ifi-ink, rgb(var(--paper)));
+}
+
+.ifi_support_line {
+  padding-bottom: 0.18em;
+}
+
+/* ---- Image cards ----
+   Positioned at the stage centre; JS drives x/y/z/opacity per-card via
+   quickSetters. transform-origin centre so depth scaling reads naturally
+   through the perspective. Native aspect ratio per card - set inline via a
+   per-card modifier class matched to its own image's w/h so nothing crops. */
+.ifi_card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-radius: var(--ifi-radius, 20px);
+  background: var(--ifi-tile, rgb(var(--ink)));
+  overflow: hidden;
+  transform-style: preserve-3d;
+  transform-origin: 50% 50%;
+  will-change: transform, opacity;
+  opacity: 0;
+  backface-visibility: hidden;
+}
+
+.ifi_card_img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Card size registers, matched to each image's native aspect so cover never
+   mismatch-crops. Widths scale between mobile and desktop via clamp. */
+.ifi_card_portrait_sm {
+  width: clamp(90px, 8vw, 140px);
+  aspect-ratio: 3072 / 3840;
+}
+
+.ifi_card_portrait_md {
+  width: clamp(130px, 11vw, 190px);
+  aspect-ratio: 2888 / 3840;
+}
+
+.ifi_card_portrait_lg {
+  width: clamp(170px, 14vw, 260px);
+  aspect-ratio: 3072 / 3840;
+}
+
+.ifi_card_landscape_sm {
+  width: clamp(140px, 12vw, 210px);
+  aspect-ratio: 3840 / 2568;
+}
+
+.ifi_card_landscape_lg {
+  width: clamp(190px, 16vw, 260px);
+  aspect-ratio: 3840 / 2568;
+}
+
+.ifi_card_square_sm {
+  width: clamp(100px, 9vw, 150px);
+  aspect-ratio: 1 / 1;
+}
+
+.ifi_card_square_lg {
+  width: clamp(150px, 13vw, 220px);
+  aspect-ratio: 1 / 1;
+}
+
+/* ---- Responsive: deliberate mobile field, not a squashed desktop ----
+   Fewer cards, smaller scale range, no cursor parallax (handled in JS via
+   pointer:coarse guard), headline already scales via clamp. */
+@media (max-width: 767px), (pointer: coarse) {
+  .ifi_card_hide_mobile {
+    display: none;
+  }
+
+  .ifi_card_portrait_sm,
+  .ifi_card_square_sm {
+    width: clamp(70px, 20vw, 100px);
+  }
+
+  .ifi_card_portrait_md {
+    width: clamp(90px, 24vw, 120px);
+  }
+
+  .ifi_card_portrait_lg,
+  .ifi_card_landscape_lg,
+  .ifi_card_square_lg {
+    width: clamp(110px, 30vw, 160px);
+  }
+
+  .ifi_card_landscape_sm {
+    width: clamp(100px, 26vw, 140px);
+  }
+
+  .ifi_content {
+    padding: 0 20px;
+  }
+
+  .ifi_support {
+    max-width: 280px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ifi_card,
+  .ifi_stage,
+  .ifi_content {
+    will-change: auto;
+  }
+}

@@ -1,0 +1,130 @@
+.rw_page {
+  --rw-bg: rgb(var(--paper));
+  --rw-tile: rgb(var(--paper-sunken));
+  --rw-tile-2: rgb(var(--paper-raised));
+  --rw-fg: rgb(var(--ink));
+  --rw-grey: rgb(var(--ink-faint));
+  --rw-line: rgb(var(--ink) / 0.12);
+  --rw-focus: rgb(var(--ink) / 0.3);
+  --rw-accent: rgb(var(--ink));
+  --rw-on-accent: rgb(var(--paper));
+  --rw-margin: clamp(20px, 2.8vw, 48px);
+  --rw-gutter: clamp(12px, 1.4vw, 24px);
+  --rw-col: calc((100% - 2 * var(--rw-margin, 40px) - 11 * var(--rw-gutter, 20px)) / 12);
+  --rw-display: clamp(40px, 4.2vw, 80px);
+  --rw-label: clamp(18px, 1.4vw, 28px);
+  --rw-sans: 'Inter Variable', -apple-system, BlinkMacSystemFont, sans-serif;
+  --rw-serif: 'Instrument Serif', Georgia, serif;
+
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--rw-bg, rgb(var(--paper)));
+  color: var(--rw-fg, rgb(var(--ink)));
+  font-family: var(--rw-sans, 'Inter Variable', sans-serif);
+  letter-spacing: -0.02em;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scroll room for scrub mode: the stage sticks while the track scrolls past
+   (data-anm-rw-track tells the wheel to read its progress from here). */
+.rw_track {
+  height: 320vh;
+}
+
+.rw_stage {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100svh;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  padding: 0 var(--rw-margin, 40px);
+}
+
+.rw_wheel {
+  position: relative;
+  width: 100%;
+  font-family: var(--rw-serif, 'Instrument Serif', Georgia, serif);
+  font-size: var(--rw-display, 60px);
+  line-height: 1.1;
+  color: var(--rw-fg, rgb(var(--ink)));
+  -webkit-font-smoothing: antialiased;
+}
+
+.rw_list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  text-align: center;
+}
+
+.rw_item {
+  font-weight: 400;
+  letter-spacing: -0.035em;
+  white-space: nowrap;
+}
+
+/* Built: every word sits on the drum, centred on the list. The soft mask
+   fades the top and bottom of the drum into the ground. */
+.rw_is-built .rw_list {
+  position: relative;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 24%, #000 76%, transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 24%, #000 76%, transparent);
+}
+
+.rw_is-built .rw_item {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  backface-visibility: hidden;
+  will-change: transform, opacity;
+}
+
+/* Navigation: a row of dots under the wheel, one per word, each a button
+   to that word. The dot for the centre word stretches into a pill
+   (--rw-dot, set by JS). */
+.rw_nav {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 32px;
+}
+
+.rw_dot {
+  position: relative;
+  display: block;
+  width: 14px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  opacity: 0.3;
+}
+
+.rw_dot::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  /* Width, not scaleX: a scaled circle turns into an ellipse, a wider box
+     with a full radius stays a true pill. */
+  width: calc(4px * var(--rw-dot, 1));
+  height: 4px;
+  margin-top: -2px;
+  border-radius: 999px;
+  background: var(--rw-fg, rgb(var(--ink)));
+  transform: translateX(-50%);
+}
+
+.rw_dot:focus-visible {
+  outline: 1px solid var(--rw-focus, rgb(var(--ink) / 0.3));
+  outline-offset: 2px;
+}
+
+@media (max-width: 767px) {
+  .rw_page {
+    --rw-margin: 20px;
+  }
+}

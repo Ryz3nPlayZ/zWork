@@ -1,0 +1,226 @@
+.sfb_wrap {
+  --sfb-bg: rgb(var(--ink));
+  --sfb-tile: rgb(var(--ink));
+  --sfb-tile-edge: rgb(var(--paper) / 0.08);
+  --sfb-seam: rgb(var(--ink));
+  --sfb-fg: rgb(var(--paper));
+  --sfb-grey: rgb(var(--ink-muted));
+  --sfb-line: rgb(var(--paper) / 0.14);
+  --sfb-focus: rgb(var(--paper) / 0.35);
+  --sfb-accent: rgb(var(--ink));
+  --sfb-on-accent: rgb(var(--paper));
+  --sfb-margin: clamp(20px, 2.8vw, 48px);
+  --sfb-gutter: clamp(12px, 1.4vw, 24px);
+  --sfb-tile-w: 52px;
+  --sfb-tile-h: 76px;
+  --sfb-tile-gap: 6px;
+  --sfb-row-gap: 14px;
+  --sfb-font: 46px;
+  --sfb-radius: 5px;
+  --sfb-sans: 'Inter Variable', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.sfb_wrap {
+  position: relative;
+  width: 100%;
+  min-height: 100dvh;
+  padding: var(--sfb-margin, clamp(20px, 2.8vw, 48px));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--sfb-bg, rgb(var(--ink)));
+  font-family: var(--sfb-sans, 'Inter Variable', -apple-system, BlinkMacSystemFont, sans-serif);
+  letter-spacing: -0.02em;
+  color: var(--sfb-fg, rgb(var(--paper)));
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.sfb_sets {
+  display: none;
+}
+
+.sfb_stage {
+  display: contents;
+}
+
+.sfb_board {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sfb-row-gap, 14px);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sfb_board:focus-visible {
+  outline: 1px solid var(--sfb-focus, rgb(var(--paper) / 0.35));
+  outline-offset: 12px;
+}
+
+.sfb_row {
+  display: flex;
+  gap: var(--sfb-tile-gap, 6px);
+}
+
+.sfb_tile {
+  position: relative;
+  flex: none;
+  width: var(--sfb-tile-w, 52px);
+  height: var(--sfb-tile-h, 76px);
+}
+
+/* Two static halves show the resting character. Two flaps sit over them:
+   the top flap falls forward (origin at the seam) showing the outgoing
+   character, the bottom flap lands from edge-on showing the incoming one.
+   The seam between the halves is the stage colour showing through. */
+.sfb_half,
+.sfb_flap {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: calc(50% - 1px);
+  overflow: hidden;
+  background: var(--sfb-tile, rgb(var(--ink)));
+  box-shadow: inset 0 0 0 1px var(--sfb-tile-edge, rgb(var(--paper) / 0.08));
+}
+
+.sfb_half_top,
+.sfb_flap_top {
+  top: 0;
+  border-radius: var(--sfb-radius, 5px) var(--sfb-radius, 5px) 0 0;
+}
+
+.sfb_half_bottom,
+.sfb_flap_bottom {
+  bottom: 0;
+  border-radius: 0 0 var(--sfb-radius, 5px) var(--sfb-radius, 5px);
+}
+
+.sfb_flap {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  will-change: transform;
+}
+
+.sfb_flap_top {
+  transform-origin: 50% 100%;
+}
+
+.sfb_flap_bottom {
+  transform-origin: 50% 0%;
+}
+
+/* The falling top flap throws a shadow onto the bottom half; the landing
+   flap catches the light as it rebounds. */
+.sfb_shade,
+.sfb_glint {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.sfb_shade {
+  background: #000000;
+}
+
+.sfb_glint {
+  background: var(--sfb-fg, rgb(var(--paper)));
+}
+
+.sfb_char {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: var(--sfb-tile-h, 76px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--sfb-font, 46px);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  color: var(--sfb-fg, rgb(var(--paper)));
+  font-variant-numeric: tabular-nums;
+}
+
+.sfb_char_top {
+  top: 0;
+}
+
+.sfb_char_bottom {
+  top: calc(var(--sfb-tile-h, 76px) * -0.5 - 1px);
+}
+
+.sfb_pill {
+  position: absolute;
+  left: 50%;
+  bottom: var(--sfb-margin, clamp(20px, 2.8vw, 48px));
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 6px;
+  border-radius: 999px;
+  background: var(--sfb-tile, rgb(var(--ink)));
+  transform: translateX(-50%);
+}
+
+.sfb_arrow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  background: transparent;
+  color: var(--sfb-fg, rgb(var(--paper)));
+  cursor: pointer;
+  transition: background-color 0.35s cubic-bezier(0.3, 0.9, 0.1, 1), color 0.35s cubic-bezier(0.3, 0.9, 0.1, 1);
+}
+
+.sfb_arrow:hover {
+  background: var(--sfb-fg, rgb(var(--paper)));
+  color: var(--sfb-tile, rgb(var(--ink)));
+}
+
+.sfb_arrow:focus-visible {
+  outline: 1px solid var(--sfb-focus, rgb(var(--paper) / 0.35));
+  outline-offset: 2px;
+}
+
+.sfb_arrow_icon {
+  position: relative;
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.sfb_live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 767px) {
+  .sfb_wrap {
+    --sfb-tile-w: 26px;
+    --sfb-tile-h: 40px;
+    --sfb-tile-gap: 3px;
+    --sfb-row-gap: 8px;
+    --sfb-font: 24px;
+    --sfb-radius: 3px;
+  }
+
+  .sfb_pill {
+    bottom: 28px;
+  }
+}

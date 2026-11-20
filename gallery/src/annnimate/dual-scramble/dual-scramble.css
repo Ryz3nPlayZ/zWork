@@ -1,0 +1,98 @@
+[data-anm-dual-scramble] {
+  position: relative;
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.dual_scramble_sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.dual_scramble_spacer {
+  visibility: hidden;
+  white-space: nowrap;
+  display: inline;
+  pointer-events: none;
+  user-select: none;
+}
+
+.dual_scramble_layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  white-space: nowrap;
+  display: inline;
+  pointer-events: none;
+}
+
+/* Phase 1 - intermediate scramble colour */
+.dual-scramble-color-1 {
+  color: rgb(var(--ink-soft));
+}
+
+/* Phase 2 - final resolved colour */
+.dual-scramble-color-2 {
+  color: rgb(var(--paper));
+}
+
+.dual_scramble_wrap {
+  --ds-bg: rgb(var(--ink));
+  --ds-tile: rgb(var(--ink));
+  --ds-fg: rgb(var(--paper));
+  --ds-grey: rgb(var(--ink-muted));
+  --ds-line: rgb(var(--paper) / 0.14);
+  --ds-focus: rgb(var(--paper) / 0.35);
+  --ds-accent: rgb(var(--ink));
+  --ds-on-accent: rgb(var(--paper));
+  --ds-margin: clamp(20px, 2.8vw, 48px);
+  --ds-gutter: clamp(12px, 1.4vw, 24px);
+  --ds-col: calc((100% - 2 * var(--ds-margin, 40px) - 11 * var(--ds-gutter, 20px)) / 12);
+  --ds-display: clamp(40px, 4.2vw, 80px);
+  --ds-label: clamp(18px, 1.4vw, 28px);
+  --ds-sans: 'Inter Variable', -apple-system, BlinkMacSystemFont, sans-serif;
+  --ds-serif: 'Instrument Serif', Georgia, serif;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100svh;
+  padding: 6rem var(--ds-margin, 40px);
+  background-color: var(--ds-bg, rgb(var(--ink)));
+  font-family: var(--ds-sans, 'Inter Variable', sans-serif);
+  letter-spacing: -0.02em;
+  -webkit-font-smoothing: antialiased;
+  color: var(--ds-fg, rgb(var(--paper)));
+}
+
+.dual_scramble_headline {
+  font-family: var(--ds-serif, Georgia, serif);
+  font-size: var(--ds-display, 60px);
+  font-weight: 400;
+  line-height: 0.95;
+  letter-spacing: -0.035em;
+  color: var(--ds-fg, rgb(var(--paper)));
+  cursor: default;
+  margin: 0;
+}
+
+@media (max-width: 479px) {
+  .dual_scramble_headline {
+    font-size: 7.2vw;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-anm-dual-scramble] .dual_scramble_layer {
+    transition: none;
+    animation: none;
+  }
+}

@@ -89,6 +89,19 @@
         "--strictPort"
       ],
       "port": 4313
+    },
+    {
+      "name": "gallery",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "gallery",
+        "run",
+        "dev",
+        "--",
+        "--strictPort"
+      ],
+      "port": 5181
     }
   ]
 }

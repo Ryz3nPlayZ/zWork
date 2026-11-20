@@ -1,0 +1,304 @@
+.stk_section {
+  --stk-bg: rgb(var(--paper));
+  --stk-tile: rgb(var(--paper-sunken));
+  --stk-tile-2: rgb(var(--paper-raised));
+  --stk-fg: rgb(var(--ink));
+  --stk-grey: rgb(var(--ink-faint));
+  --stk-label-ink: rgb(var(--paper));
+  --stk-label: rgb(var(--paper));
+  --stk-dim: rgb(var(--ink-muted));
+  --stk-line: rgb(var(--paper) / 0.25);
+  --stk-focus: rgb(var(--paper) / 0.35);
+  --stk-pill-bg: rgb(var(--ink));
+  --stk-accent: rgb(var(--ink));
+  --stk-on-accent: rgb(var(--paper));
+  --stk-margin: clamp(20px, 2.8vw, 48px);
+  --stk-gutter: clamp(12px, 1.4vw, 24px);
+  --stk-display: clamp(40px, 4.2vw, 80px);
+  --stk-name: clamp(18px, 1.4vw, 28px);
+  --stk-sans: 'Inter Variable', -apple-system, BlinkMacSystemFont, sans-serif;
+  --stk-serif: 'Instrument Serif', Georgia, serif;
+  --stk-m: 20px;
+  --stk-radius: 4px;
+  --stk-shade: 0.5;
+  --stk-shrink: 1;
+  --stk-n: 1;
+  --stk-step: 50;
+  position: relative;
+  width: 100%;
+  height: calc(100svh + (var(--stk-n) - 1) * var(--stk-step) * 1svh);
+  background: var(--stk-bg, rgb(var(--paper)));
+  color: var(--stk-fg, rgb(var(--ink)));
+  font-family: var(--stk-sans, 'Inter Variable', sans-serif);
+  letter-spacing: -0.02em;
+  -webkit-font-smoothing: antialiased;
+}
+
+.stk_stage {
+  position: sticky;
+  top: 0;
+  height: 100svh;
+}
+
+.stk_view {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: min(calc(100% - 2 * var(--stk-m)), calc((100svh - 160px) * 1.6));
+  aspect-ratio: 8 / 5;
+  transform: translate(-50%, -50%);
+}
+
+.stk_frame {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-radius: var(--stk-radius);
+  overflow: hidden;
+}
+
+.stk_card {
+  position: absolute;
+  inset: 0;
+}
+
+/* --stk-c runs 0 -> 1 as the card is covered; the clip shape lives here, GSAP only moves the number */
+.stk_clip {
+  --stk-c: 0;
+  width: 100%;
+  height: 100%;
+  clip-path: inset(calc(var(--stk-c) * var(--stk-shrink) * 10%) calc(var(--stk-c) * var(--stk-shrink) * 10%) calc(var(--stk-c) * var(--stk-shrink) * 30%) round var(--stk-radius));
+}
+
+.stk_fig {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  border-radius: var(--stk-radius);
+}
+
+/* 1px bleed so no hairline of the stage shows at the edges while the card tilts */
+.stk_img {
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  display: block;
+  width: calc(100% + 2px);
+  height: calc(100% + 2px);
+  object-fit: cover;
+}
+
+/* legibility scrim for the label and the index over the photo */
+.stk_fig::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(to top, rgb(var(--ink) / 0.5), rgb(var(--ink) / 0) 42%),
+    linear-gradient(to bottom, rgb(var(--ink) / 0.28), rgb(var(--ink) / 0) 22%);
+  pointer-events: none;
+}
+
+/* darkens with the same --stk-c the clip uses, so a covered card ends at the full shade */
+.stk_fig::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: rgb(var(--ink));
+  opacity: calc(var(--stk-c) * var(--stk-shade));
+  pointer-events: none;
+}
+
+.stk_label {
+  position: absolute;
+  z-index: 2;
+  bottom: 62px;
+  left: 16px;
+  font-size: var(--stk-name, 20px);
+  font-weight: 500;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--stk-label-ink, rgb(var(--paper)));
+  overflow: hidden;
+  padding-bottom: 0.16em;
+}
+
+.stk_label_text {
+  display: block;
+}
+
+.stk_card_index {
+  position: absolute;
+  z-index: 2;
+  top: 14px;
+  right: 16px;
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: var(--stk-label-ink, rgb(var(--paper)));
+}
+
+/* the house control pill, pinned to the bottom of the frame above every card */
+.stk_index {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  z-index: 1;
+  display: flex;
+  width: max-content;
+  align-items: center;
+  gap: 14px;
+  padding: 6px 10px 6px 16px;
+  border-radius: 999px;
+  background: var(--stk-pill-bg, rgb(var(--ink)));
+  color: var(--stk-label, rgb(var(--paper)));
+  transform: translateX(-50%);
+}
+
+.stk_index:empty {
+  display: none;
+}
+
+.stk_count {
+  display: flex;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 20px;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* every number sits in one grid cell; only the active one is inside the mask */
+.stk_num {
+  display: grid;
+  overflow: hidden;
+}
+
+.stk_num > span {
+  grid-area: 1 / 1;
+}
+
+.stk_total {
+  margin-left: 0.3em;
+  color: var(--stk-dim, rgb(var(--ink-muted)));
+}
+
+.stk_ticks {
+  display: flex;
+}
+
+/* --stk-f is the fill, 0 -> 1 while that card slides in; the first card is already there */
+.stk_tick {
+  --stk-f: 0;
+  position: relative;
+  width: 18px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+
+.stk_tick:first-child {
+  --stk-f: 1;
+}
+
+.stk_tick::before,
+.stk_tick::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  margin-top: -1px;
+  background: var(--stk-line, rgb(var(--paper) / 0.25));
+  transition: background-color 0.2s;
+}
+
+.stk_tick::after {
+  background: var(--stk-label, rgb(var(--paper)));
+  transform: scaleX(var(--stk-f));
+  transform-origin: left center;
+}
+
+.stk_tick:hover::before {
+  background: var(--stk-dim, rgb(var(--ink-muted)));
+}
+
+.stk_tick:focus-visible {
+  outline: 1px solid var(--stk-focus, rgb(var(--paper) / 0.35));
+  outline-offset: 2px;
+}
+
+@media (min-width: 992px) {
+  .stk_section {
+    --stk-m: 40px;
+  }
+
+  .stk_view {
+    width: min(48.6vw, calc((100svh - 160px) * 1.6));
+  }
+
+  .stk_index {
+    bottom: 22px;
+  }
+
+  .stk_tick {
+    width: 24px;
+  }
+
+  .stk_label {
+    bottom: 22px;
+    left: 26px;
+  }
+
+  .stk_card_index {
+    top: 22px;
+    right: 26px;
+  }
+}
+
+.stk_is-static {
+  height: auto;
+}
+
+.stk_is-static .stk_stage {
+  position: relative;
+  height: auto;
+  padding: 64px var(--stk-m);
+}
+
+.stk_is-static .stk_view {
+  position: static;
+  width: 100%;
+  max-width: 960px;
+  aspect-ratio: auto;
+  margin: 0 auto;
+  transform: none;
+}
+
+.stk_is-static .stk_frame {
+  position: static;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow: visible;
+}
+
+.stk_is-static .stk_index {
+  display: none;
+}
+
+.stk_is-static .stk_card {
+  position: relative;
+  aspect-ratio: 8 / 5;
+}

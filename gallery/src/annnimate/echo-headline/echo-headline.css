@@ -1,0 +1,99 @@
+.eh_page {
+  --eh-bg: rgb(var(--paper));
+  --eh-tile: rgb(var(--paper-sunken));
+  --eh-tile-2: rgb(var(--paper-raised));
+  --eh-fg: rgb(var(--ink));
+  --eh-grey: rgb(var(--ink-faint));
+  --eh-line: rgb(var(--ink) / 0.12);
+  --eh-focus: rgb(var(--ink) / 0.3);
+  --eh-accent: rgb(var(--ink));
+  --eh-on-accent: rgb(var(--paper));
+  --eh-margin: clamp(20px, 2.8vw, 48px);
+  --eh-gutter: clamp(12px, 1.4vw, 24px);
+  --eh-display: clamp(40px, 4.2vw, 80px);
+  --eh-label: clamp(18px, 1.4vw, 28px);
+  --eh-sans: 'Inter Variable', -apple-system, BlinkMacSystemFont, sans-serif;
+  --eh-serif: 'Instrument Serif', Georgia, serif;
+
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--eh-bg, rgb(var(--paper)));
+  color: var(--eh-fg, rgb(var(--ink)));
+  font-family: var(--eh-sans, 'Inter Variable', sans-serif);
+  letter-spacing: -0.02em;
+  -webkit-font-smoothing: antialiased;
+}
+
+.eh_cover {
+  height: 100vh;
+  height: 100svh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.eh_stage {
+  height: 100vh;
+  height: 100svh;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--eh-margin, 40px);
+}
+
+.eh_slab {
+  position: relative;
+  font-family: var(--eh-serif, 'Instrument Serif', Georgia, serif);
+  font-size: clamp(52px, 14.5vw, 240px);
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.035em;
+  white-space: nowrap;
+  color: var(--eh-fg);
+  -webkit-font-smoothing: antialiased;
+}
+
+.eh_word {
+  position: relative;
+  margin: 0;
+  font: inherit;
+}
+
+/* JS-built copies of the word, stacked exactly on it and painted behind it. */
+.eh_echo {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  transform: rotateX(var(--eh-rx)) rotateY(var(--eh-ry)) translateZ(calc(var(--eh-depth) * var(--eh-i) * var(--eh-reach) * -1));
+  color: color-mix(in oklab, var(--eh-ink), var(--eh-ground) var(--eh-fade, 0%));
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.eh_track.eh_is-scrub {
+  height: 300vh;
+}
+
+.eh_is-scrub .eh_stage {
+  position: sticky;
+  top: 0;
+}
+
+/* The slab grows away from the word, so the word shifts back to centre both. */
+.eh_is-built .eh_slab {
+  perspective: var(--eh-perspective);
+  perspective-origin: var(--eh-vanish);
+  transform: rotate(var(--eh-rz)) translate(var(--eh-shift));
+}
+
+.eh_is-built .eh_word {
+  transform: rotateX(var(--eh-rx)) rotateY(var(--eh-ry));
+}
+
+@media (max-width: 767px) {
+  .eh_page {
+    --eh-margin: 20px;
+  }
+}

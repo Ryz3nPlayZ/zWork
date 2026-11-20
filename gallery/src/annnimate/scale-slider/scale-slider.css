@@ -1,0 +1,116 @@
+.scs_wrap {
+  --scs-bg: rgb(var(--paper));
+  --scs-tile: rgb(var(--paper-sunken));
+  --scs-fg: rgb(var(--ink));
+  --scs-grey: rgb(var(--ink-faint));
+  --scs-line: rgb(var(--ink) / 0.12);
+  --scs-focus: rgb(var(--ink) / 0.3);
+  --scs-accent: rgb(var(--ink));
+  --scs-on-accent: rgb(var(--paper));
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  background-color: var(--scs-bg, rgb(var(--paper)));
+  overflow: hidden;
+  touch-action: pan-y;
+  outline: none;
+  cursor: grab;
+}
+
+.scs_wrap:active {
+  cursor: grabbing;
+}
+
+.scs_wrap:focus-visible {
+  outline: 1px solid var(--scs-focus, rgb(var(--ink) / 0.3));
+  outline-offset: -2px;
+}
+
+.scs_scene {
+  position: absolute;
+  inset: 0;
+}
+
+.scs_card {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  display: none;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  transform-origin: 0 100%;
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
+.scs_img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 22%;
+  transform: scale(1);
+  transform-origin: center;
+  will-change: transform;
+  backface-visibility: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+}
+
+/* Optional navigation - a horizontally-centered control pill at the bottom,
+   matching the wipe-slider control (solid, circular prev/next arrows). */
+.scs_pill {
+  position: absolute;
+  left: 50%;
+  bottom: 40px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 6px;
+  border-radius: 999px;
+  background: var(--scs-fg, rgb(var(--ink)));
+  transform: translateX(-50%);
+}
+
+.scs_arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--scs-bg, rgb(var(--paper)));
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.scs_arrow:hover {
+  background: var(--scs-accent, rgb(var(--ink)));
+  color: var(--scs-on-accent, rgb(var(--paper)));
+}
+
+.scs_arrow:focus-visible {
+  outline: 1px solid var(--scs-focus, rgb(var(--ink) / 0.3));
+  outline-offset: 2px;
+}
+
+.scs_arrow_icon {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+@media (max-width: 767px) {
+  .scs_wrap {
+    height: 100svh;
+  }
+
+  .scs_pill {
+    bottom: 24px;
+  }
+}

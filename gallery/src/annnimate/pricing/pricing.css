@@ -1,0 +1,382 @@
+.prc_wrap {
+  --prc-bg: rgb(var(--ink));
+  --prc-tile: rgb(var(--ink));
+  --prc-fg: rgb(var(--paper));
+  --prc-grey: rgb(var(--ink-muted));
+  --prc-line: rgb(var(--paper) / 0.14);
+  --prc-focus: rgb(var(--paper) / 0.35);
+  --prc-accent: rgb(var(--ink));
+  --prc-on-accent: rgb(var(--paper));
+  --prc-margin: clamp(20px, 2.8vw, 48px);
+  --prc-gutter: clamp(12px, 1.4vw, 24px);
+  --prc-display: clamp(40px, 4.2vw, 80px);
+  --prc-label: clamp(18px, 1.4vw, 28px);
+  --prc-sans: 'Inter Variable', -apple-system, BlinkMacSystemFont, sans-serif;
+  --prc-serif: 'Instrument Serif', Georgia, serif;
+}
+
+.prc_wrap {
+  position: relative;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: clamp(24px, 3vw, 40px);
+  padding: var(--prc-margin, 40px);
+  background: var(--prc-bg, rgb(var(--ink)));
+  color: var(--prc-fg, rgb(var(--paper)));
+  font-family: var(--prc-sans, 'Inter Variable', sans-serif);
+  letter-spacing: -0.02em;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---- Head ---- */
+.prc_head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+}
+
+.prc_logo {
+  height: 16px;
+  width: auto;
+  opacity: 0.92;
+}
+
+.prc_title {
+  margin: 0;
+  font-family: var(--prc-serif, Georgia, serif);
+  font-size: var(--prc-display, 60px);
+  font-weight: 400;
+  line-height: 0.95;
+  letter-spacing: -0.035em;
+  color: var(--prc-fg, rgb(var(--paper)));
+}
+
+/* ---- Toggle row ---- */
+.prc_toggle_row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.prc_toggle {
+  position: relative;
+  display: flex;
+  width: 208px;
+  flex: 0 0 auto;
+  padding: 4px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--prc-tile, rgb(var(--ink)));
+  font-family: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.prc_toggle:focus {
+  outline: none;
+}
+
+.prc_toggle:focus-visible {
+  outline: 1px solid var(--prc-focus, rgb(var(--paper) / 0.35));
+  outline-offset: 2px;
+}
+
+.prc_toggle_knob {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  right: 50%;
+  border-radius: 999px;
+  background: rgb(var(--ink));
+  will-change: transform;
+}
+
+.prc_toggle_label {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 50%;
+  text-align: center;
+  padding: 11px 4px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--prc-fg, rgb(var(--paper)));
+  pointer-events: none;
+}
+
+/* ---- Savings chip ---- */
+.prc_chip {
+  position: absolute;
+  left: calc(100% + 12px);
+  top: 50%;
+  display: inline-block;
+  transform-origin: center center;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--prc-tile, rgb(var(--ink)));
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--prc-fg, rgb(var(--paper)));
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* ---- Cards ---- */
+.prc_cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--prc-gutter, 20px);
+  width: 100%;
+}
+
+.prc_card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: clamp(20px, 1.8vw, 28px);
+  border-radius: 20px;
+  background: var(--prc-tile, rgb(var(--ink)));
+  color: var(--prc-fg, rgb(var(--paper)));
+}
+
+.prc_card_popular {
+  background: var(--prc-accent, rgb(var(--ink)));
+  color: var(--prc-on-accent, rgb(var(--paper)));
+}
+
+.prc_card_badge {
+  position: absolute;
+  top: clamp(20px, 1.8vw, 28px);
+  right: clamp(20px, 1.8vw, 28px);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--prc-on-accent, rgb(var(--paper)));
+}
+
+.prc_card_badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.prc_card_name {
+  --prc-grad-b: rgb(var(--ink-muted));
+  --prc-grad-hi: rgb(var(--paper));
+  width: fit-content;
+  margin: 0 0 clamp(28px, 4vw, 64px);
+  font-size: var(--prc-label, 20px);
+  font-weight: 500;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: transparent;
+  background-image: linear-gradient(90deg,
+    var(--prc-grad-b, rgb(var(--ink-muted))) 0%,
+    var(--prc-grad-hi, rgb(var(--paper))) 25%,
+    var(--prc-grad-b, rgb(var(--ink-muted))) 50%,
+    var(--prc-grad-hi, rgb(var(--paper))) 75%,
+    var(--prc-grad-b, rgb(var(--ink-muted))) 100%);
+  background-size: 200% 100%;
+  background-position: 0% 0%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+.prc_name_silver,
+.prc_name_champagne,
+.prc_name_ice {
+  --prc-grad-b: rgb(var(--ink-muted));
+  --prc-grad-hi: rgb(var(--paper));
+}
+
+.prc_card_popular .prc_card_name {
+  --prc-grad-b: rgb(var(--ink-soft));
+  --prc-grad-hi: rgb(var(--paper));
+}
+
+.prc_card_price {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin-bottom: clamp(20px, 2.4vw, 32px);
+}
+
+.prc_price_currency {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--prc-grey, rgb(var(--ink-muted)));
+}
+
+.prc_price_value {
+  display: inline-flex;
+  align-items: baseline;
+  font-family: var(--prc-serif, Georgia, serif);
+  font-size: var(--prc-display, 60px);
+  font-weight: 400;
+  letter-spacing: -0.035em;
+  color: inherit;
+}
+
+.prc_digit_col {
+  position: relative;
+  display: inline-block;
+  overflow: clip;
+  height: 1em;
+  width: 0.6em;
+  line-height: 1;
+  vertical-align: baseline;
+}
+
+.prc_digit_col::before {
+  content: "0";
+  visibility: hidden;
+}
+
+.prc_digit_roller {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.prc_digit_face {
+  display: block;
+  height: 1em;
+  line-height: 1;
+}
+
+.prc_price_period {
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--prc-grey, rgb(var(--ink-muted)));
+}
+
+.prc_card_popular .prc_price_currency,
+.prc_card_popular .prc_price_period {
+  color: var(--prc-on-accent, rgb(var(--paper)));
+}
+
+/* ---- Two-face masked roll for the period label. ---- */
+.prc_swap {
+  position: relative;
+  display: inline-block;
+  overflow: clip;
+  height: 1em;
+  line-height: 1;
+  vertical-align: baseline;
+}
+
+.prc_swap_face {
+  display: block;
+}
+
+.prc_swap_face_next {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translateY(100%);
+}
+
+.prc_price_sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- Features ---- */
+.prc_features {
+  list-style: none;
+  margin: 0 0 clamp(20px, 2.4vw, 32px);
+  padding: 0;
+  flex: 1 1 auto;
+}
+
+.prc_feature {
+  padding: 11px 0;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--prc-grey, rgb(var(--ink-muted)));
+  border-top: 1px solid var(--prc-line, rgb(var(--paper) / 0.14));
+}
+
+.prc_card_popular .prc_feature {
+  color: var(--prc-on-accent, rgb(var(--paper)));
+  border-top-color: rgb(var(--paper) / 0.24);
+}
+
+/* ---- CTA ---- */
+.prc_cta {
+  width: 100%;
+  height: 48px;
+  padding: 0 22px;
+  border: 1px solid var(--prc-line, rgb(var(--paper) / 0.14));
+  border-radius: 999px;
+  background: transparent;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--prc-fg, rgb(var(--paper)));
+  cursor: pointer;
+  transition: background-color 0.35s cubic-bezier(0.3, 0.9, 0.1, 1), color 0.35s cubic-bezier(0.3, 0.9, 0.1, 1);
+}
+
+.prc_cta:hover {
+  background: var(--prc-fg, rgb(var(--paper)));
+  color: var(--prc-bg, rgb(var(--ink)));
+}
+
+.prc_cta:focus {
+  outline: none;
+}
+
+.prc_cta:focus-visible {
+  outline: 1px solid var(--prc-focus, rgb(var(--paper) / 0.35));
+  outline-offset: 2px;
+}
+
+.prc_card_popular .prc_cta {
+  border-color: rgb(var(--paper) / 0.4);
+}
+
+.prc_card_popular .prc_cta:hover {
+  border-color: var(--prc-fg, rgb(var(--paper)));
+}
+
+/* ---- Mobile ---- */
+@media (max-width: 767px) {
+  .prc_wrap {
+    justify-content: flex-start;
+  }
+
+  .prc_cards {
+    grid-template-columns: 1fr;
+  }
+
+  .prc_chip {
+    left: auto;
+    right: 0;
+    top: calc(100% + 12px);
+  }
+}

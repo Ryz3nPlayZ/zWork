@@ -1,0 +1,398 @@
+.fdg_stage {
+  --fdg-bg: rgb(var(--paper));
+  --fdg-tile: rgb(var(--paper-sunken));
+  --fdg-tile-2: rgb(var(--paper-raised));
+  --fdg-fg: rgb(var(--ink));
+  --fdg-grey: rgb(var(--ink-faint));
+  --fdg-line: rgb(var(--ink) / 0.12);
+  --fdg-focus: rgb(var(--ink) / 0.3);
+  --fdg-accent: rgb(var(--ink));
+  --fdg-on-accent: rgb(var(--paper));
+  --fdg-margin: clamp(20px, 2.8vw, 48px);
+  --fdg-gutter: clamp(12px, 1.4vw, 24px);
+  --fdg-display: clamp(40px, 4.2vw, 80px);
+  --fdg-label: clamp(18px, 1.4vw, 28px);
+  --fdg-sans: 'Inter Variable', -apple-system, BlinkMacSystemFont, sans-serif;
+  --fdg-serif: 'Instrument Serif', Georgia, serif;
+  --margin: var(--fdg-margin, clamp(20px, 2.8vw, 48px));
+  position: relative;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--fdg-bg, rgb(var(--paper)));
+  color: var(--fdg-fg, rgb(var(--ink)));
+  padding: 80px var(--fdg-margin, clamp(20px, 2.8vw, 48px));
+  font-family: var(--fdg-sans, 'Inter Variable', -apple-system, BlinkMacSystemFont, sans-serif);
+  letter-spacing: -0.02em;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* The orange aurora bands are retired in v3. The elements stay because the
+   timeline drifts the panel band; they simply paint nothing. */
+.fdg_gradient {
+  display: none;
+}
+
+.fdg_tile {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  width: calc((100% - 11 * var(--fdg-gutter, 20px)) / 12 * 6 + 5 * var(--fdg-gutter, 20px));
+  min-height: 340px;
+  border-radius: 20px;
+  background-color: var(--fdg-tile, rgb(var(--paper-sunken)));
+  overflow: hidden;
+  cursor: pointer;
+  outline: none;
+}
+
+.fdg_tile:focus-visible {
+  outline: 1px solid var(--fdg-focus, rgb(var(--ink) / 0.3));
+  outline-offset: 2px;
+}
+
+.fdg_tile_copy {
+  position: relative;
+  flex: 1 1 55%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 24px;
+  z-index: 1;
+}
+
+.fdg_tile_label {
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--fdg-grey, rgb(var(--ink-faint)));
+}
+
+.fdg_tile_title {
+  margin: 0;
+  font-size: var(--fdg-label, clamp(18px, 1.4vw, 28px));
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: var(--fdg-fg, rgb(var(--ink)));
+}
+
+.fdg_tile_media {
+  position: relative;
+  flex: 0 0 40%;
+  /* top clears the 48px expand button so icon and image never overlap */
+  margin: 80px 24px 24px 0;
+  border-radius: 20px;
+  background-color: #000000;
+  overflow: hidden;
+  z-index: 1;
+}
+
+.fdg_tile_img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.fdg_toggle {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: transparent;
+  color: var(--fdg-fg, rgb(var(--ink)));
+  cursor: pointer;
+  z-index: 2;
+  transition: background-color 0.35s cubic-bezier(0.3, 0.9, 0.1, 1), color 0.35s cubic-bezier(0.3, 0.9, 0.1, 1);
+}
+
+.fdg_toggle:hover {
+  background-color: var(--fdg-fg, rgb(var(--ink)));
+  color: var(--fdg-tile, rgb(var(--paper-sunken)));
+}
+
+.fdg_toggle:focus-visible {
+  outline: 1px solid var(--fdg-focus, rgb(var(--ink) / 0.3));
+  outline-offset: 2px;
+}
+
+.fdg_glyph {
+  width: 16px;
+  height: 16px;
+}
+
+/* Dark scrim: opacity stays 1 - the tint alpha and the blur radius are the
+   animated values (animating element opacity under backdrop-filter lets the
+   sharp page bleed through and the blur reads as nothing). */
+.fdg_overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgb(var(--ink) / 0);
+  backdrop-filter: blur(var(--fdg-blur, 0px));
+  -webkit-backdrop-filter: blur(var(--fdg-blur, 0px));
+  pointer-events: none;
+  z-index: 40;
+}
+
+.fdg_modal {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 48px var(--fdg-margin, clamp(20px, 2.8vw, 48px)) 0;
+  pointer-events: none;
+  z-index: 50;
+}
+
+.fdg_stage.is-open .fdg_modal {
+  pointer-events: auto;
+}
+
+.fdg_panel {
+  position: relative;
+  width: calc((100% - 11 * var(--fdg-gutter, 20px)) / 12 * 8 + 7 * var(--fdg-gutter, 20px));
+  margin: 0 auto;
+}
+
+.fdg_sheet {
+  position: relative;
+  z-index: 1;
+  border-radius: 20px 20px 0 0;
+  background-color: var(--fdg-tile, rgb(var(--paper-sunken)));
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.fdg_close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: transparent;
+  color: var(--fdg-fg, rgb(var(--ink)));
+  cursor: pointer;
+  z-index: 2;
+  transition: background-color 0.35s cubic-bezier(0.3, 0.9, 0.1, 1), color 0.35s cubic-bezier(0.3, 0.9, 0.1, 1);
+}
+
+.fdg_close:hover {
+  background-color: var(--fdg-fg, rgb(var(--ink)));
+  color: var(--fdg-tile, rgb(var(--paper-sunken)));
+}
+
+.fdg_close:focus-visible {
+  outline: 1px solid var(--fdg-focus, rgb(var(--ink) / 0.3));
+  outline-offset: 2px;
+}
+
+.fdg_sheet_inner {
+  padding: var(--fdg-margin, clamp(20px, 2.8vw, 48px));
+}
+
+.fdg_sheet_grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: clamp(24px, 3vw, 48px);
+  align-items: start;
+}
+
+.fdg_title_mask {
+  /* y-only clip: negative tracking overhangs the box and an all-axis clip chops glyph edges */
+  overflow-x: visible;
+  overflow-y: clip;
+  padding-bottom: 0.16em;
+  margin-bottom: -0.16em;
+}
+
+.fdg_sheet_title {
+  margin: 0;
+  font-family: var(--fdg-serif, 'Instrument Serif', Georgia, serif);
+  font-size: var(--fdg-display, clamp(40px, 4.2vw, 80px));
+  font-weight: 400;
+  letter-spacing: -0.035em;
+  line-height: 0.95;
+  color: var(--fdg-fg, rgb(var(--ink)));
+}
+
+.fdg_sheet_text {
+  margin: 24px 0 0;
+  max-width: 440px;
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.4;
+  letter-spacing: -0.02em;
+  color: var(--fdg-grey, rgb(var(--ink-faint)));
+}
+
+.fdg_actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.fdg_btn {
+  height: 48px;
+  padding: 0 22px;
+  border-radius: 999px;
+  font-family: var(--fdg-sans, 'Inter Variable', -apple-system, BlinkMacSystemFont, sans-serif);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  cursor: pointer;
+  transition: background-color 0.35s cubic-bezier(0.3, 0.9, 0.1, 1), color 0.35s cubic-bezier(0.3, 0.9, 0.1, 1);
+}
+
+.fdg_btn_primary {
+  border: none;
+  background-color: var(--fdg-fg, rgb(var(--ink)));
+  color: var(--fdg-bg, rgb(var(--paper)));
+}
+
+.fdg_btn_primary:hover {
+  background-color: var(--fdg-accent, rgb(var(--ink)));
+  color: var(--fdg-on-accent, rgb(var(--paper)));
+}
+
+.fdg_btn:focus-visible {
+  outline: 1px solid var(--fdg-focus, rgb(var(--ink) / 0.3));
+  outline-offset: 2px;
+}
+
+.fdg_media_row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--fdg-gutter, clamp(12px, 1.4vw, 24px));
+  margin-top: clamp(24px, 3vw, 40px);
+}
+
+.fdg_media_cell {
+  height: 320px;
+  border-radius: 20px;
+  background-color: var(--fdg-tile-2, rgb(var(--paper-raised)));
+  overflow: hidden;
+}
+
+.fdg_sheet_media {
+  margin-top: clamp(24px, 3vw, 40px);
+  height: 320px;
+  border-radius: 20px;
+  background-color: rgb(var(--ink-muted));
+  overflow: hidden;
+}
+
+.fdg_sheet_img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.fdg_stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: clamp(20px, 3vw, 40px);
+  margin-top: clamp(32px, 4vw, 56px);
+  padding-top: clamp(24px, 3vw, 40px);
+  border-top: 1px solid var(--fdg-line, rgb(var(--ink) / 0.12));
+}
+
+.fdg_stat_num {
+  font-family: var(--fdg-serif, 'Instrument Serif', Georgia, serif);
+  font-size: var(--fdg-label, clamp(18px, 1.4vw, 28px));
+  font-weight: 400;
+  letter-spacing: -0.035em;
+  line-height: 1;
+  color: var(--fdg-fg, rgb(var(--ink)));
+}
+
+.fdg_stat_label {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--fdg-grey, rgb(var(--ink-faint)));
+}
+
+.fdg_outro {
+  margin: clamp(32px, 4vw, 56px) auto 12px;
+  max-width: 520px;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.4;
+  letter-spacing: -0.02em;
+  color: var(--fdg-grey, rgb(var(--ink-faint)));
+}
+
+@media (max-width: 767px) {
+  .fdg_stage {
+    padding: 48px var(--fdg-margin, clamp(20px, 2.8vw, 48px));
+  }
+
+  .fdg_tile {
+    width: 100%;
+    flex-direction: column-reverse;
+    min-height: 0;
+  }
+
+  .fdg_tile_media {
+    height: 200px;
+    margin: 80px 16px 0;
+  }
+
+  .fdg_modal {
+    padding: 24px var(--fdg-margin, clamp(20px, 2.8vw, 48px)) 0;
+  }
+
+  .fdg_panel {
+    width: 100%;
+  }
+
+  .fdg_sheet {
+    max-height: calc(100vh - 40px);
+  }
+
+  .fdg_sheet_grid {
+    grid-template-columns: 1fr;
+  }
+
+  .fdg_sheet_media {
+    height: 220px;
+  }
+
+  .fdg_media_row {
+    grid-template-columns: 1fr;
+  }
+
+  .fdg_media_cell {
+    height: 220px;
+  }
+
+  .fdg_stats {
+    grid-template-columns: 1fr;
+  }
+}

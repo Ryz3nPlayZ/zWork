@@ -1,0 +1,178 @@
+.dia_wrap {
+  --dia-bg: rgb(var(--paper));
+  --dia-ink: rgb(var(--ink));
+  --dia-grey: rgb(var(--ink-faint));
+  --dia-margin: clamp(20px, 2.8vw, 48px);
+  --dia-gutter: clamp(12px, 1.4vw, 24px);
+  --dia-display: clamp(40px, 4.2vw, 80px);
+  --dia-h: min(64vh, 60vw);
+  --dia-h: min(64svh, 60vw);
+  /* The large photo's bottom edge lines up with the bottom of the step number. */
+  --dia-top: calc(100% - var(--dia-margin, 40px) - var(--dia-h, 600px));
+  --dia-w: calc(var(--dia-h, 600px) * 0.75);
+  --dia-length: 350vh;
+  position: relative;
+  width: 100%;
+  height: calc(100vh + var(--dia-length, 350vh));
+  background: var(--dia-bg, rgb(var(--paper)));
+  color: var(--dia-ink, rgb(var(--ink)));
+  font-family: 'Inter Variable', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14px;
+  letter-spacing: -0.02em;
+  -webkit-font-smoothing: antialiased;
+}
+
+.dia_stage {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100svh;
+  min-height: 560px;
+  overflow: hidden;
+}
+
+/* Starts on the large photo's left edge and sits a gap above it. */
+.dia_headline {
+  position: absolute;
+  left: calc(50% - var(--dia-w, 450px) / 2);
+  bottom: calc(100% - var(--dia-top, 240px) + var(--dia-gutter, 20px) * 2);
+  margin: 0;
+  font-family: 'Instrument Serif', Georgia, serif;
+  font-size: var(--dia-display, 60px);
+  font-weight: 400;
+  letter-spacing: -0.035em;
+  line-height: 0.95;
+}
+
+.dia_headline > span {
+  display: block;
+}
+
+.dia_dim {
+  color: var(--dia-grey, rgb(var(--ink-faint)));
+}
+
+/* Every photo is laid out at the large slot; the JS moves and scales it into the queue around it. */
+.dia_photo {
+  position: absolute;
+  left: calc(50% - var(--dia-w, 450px) / 2);
+  top: var(--dia-top, 240px);
+  width: var(--dia-w, 450px);
+  height: var(--dia-h, 600px);
+  margin: 0;
+  overflow: hidden;
+  border-radius: 20px;
+  will-change: transform;
+}
+
+.dia_img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.dia_copy {
+  position: absolute;
+  left: calc(50% + var(--dia-w, 450px) / 2 + var(--dia-gutter, 20px) * 1.5);
+  top: var(--dia-top, 240px);
+  width: min(300px, calc(50% - var(--dia-w, 450px) / 2 - var(--dia-margin, 40px) - var(--dia-gutter, 20px) * 1.5));
+}
+
+.dia_title,
+.dia_text {
+  margin: 0;
+  overflow: clip;
+  padding-bottom: 0.16em;
+  margin-bottom: -0.16em;
+}
+
+.dia_title {
+  font-size: clamp(18px, 1.4vw, 28px);
+  font-weight: 500;
+  line-height: 1.15;
+}
+
+.dia_text {
+  margin-top: 12px;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--dia-grey, rgb(var(--ink-faint)));
+}
+
+.dia_text b {
+  font-weight: 400;
+  color: var(--dia-ink, rgb(var(--ink)));
+}
+
+.dia_line {
+  display: block;
+}
+
+.dia_count {
+  position: absolute;
+  left: var(--dia-margin, 40px);
+  bottom: var(--dia-margin, 40px);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0;
+}
+
+.dia_number {
+  display: inline-flex;
+  font-family: 'Instrument Serif', Georgia, serif;
+  font-size: clamp(64px, 7vw, 128px);
+  font-weight: 400;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  /* Drops the line box by the space under the digits, so the glyphs sit on the photo's bottom edge. */
+  margin-bottom: -0.125em;
+}
+
+/* One digit column per place: a 1em window over a stack of 0-9 that rolls. */
+.dia_digit {
+  display: inline-block;
+  height: 1em;
+  overflow: clip;
+}
+
+.dia_digit_col {
+  display: block;
+  will-change: transform;
+}
+
+.dia_digit_col > span {
+  display: block;
+  height: 1em;
+}
+
+.dia_total {
+  font-size: 14px;
+  color: var(--dia-grey, rgb(var(--ink-faint)));
+}
+
+@media (max-width: 767px) {
+  .dia_wrap {
+    --dia-h: min(44vh, 76vw);
+    --dia-h: min(44svh, 76vw);
+    --dia-top: calc(50% - var(--dia-h, 400px) / 2);
+  }
+
+  .dia_copy {
+    left: var(--dia-margin, 20px);
+    right: var(--dia-margin, 20px);
+    top: calc(var(--dia-top, 200px) + var(--dia-h, 400px) + 20px);
+    width: auto;
+  }
+
+  .dia_count {
+    display: none;
+  }
+
+  .dia_headline {
+    left: var(--dia-margin, 20px);
+    top: calc(var(--dia-margin, 20px) * 1.5);
+    bottom: auto;
+  }
+}

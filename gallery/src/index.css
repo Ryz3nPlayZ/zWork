@@ -1,0 +1,194 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+
+@custom-variant dark-sys (@media (prefers-color-scheme: dark));
+
+@font-face {
+  font-family: "Instrument Serif";
+  src: url("/fonts/instrument-serif-regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Instrument Serif";
+  src: url("/fonts/instrument-serif-italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* The app's own tokens (app/src/index.css), as RGB triplets so alpha
+   modifiers work. Light first; dark follows the OS unless the visitor picks. */
+:root {
+  --paper: 242 240 232;
+  --paper-soft: 238 236 228;
+  --paper-raised: 234 232 224;
+  --paper-sunken: 246 244 236;
+  --paper-sidebar: 236 234 226;
+  --ink: 48 46 40;
+  --ink-soft: 80 76 68;
+  --ink-muted: 110 106 96;
+  --ink-faint: 155 150 138;
+  --line: 218 214 202;
+  --line-soft: 228 224 212;
+  --line-strong: 200 196 184;
+  --accent: 48 46 40;
+  --shadow: 30 28 24;
+  --success: 16 185 129;
+  --warning: 245 158 11;
+  --error: 239 68 68;
+  --info: 59 130 246;
+  --border-overlay: 0 0 0;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: 22 22 24;
+    --paper-soft: 26 26 29;
+    --paper-raised: 31 31 34;
+    --paper-sunken: 18 18 20;
+    --paper-sidebar: 20 20 22;
+    --ink: 236 236 234;
+    --ink-soft: 213 213 211;
+    --ink-muted: 160 160 157;
+    --ink-faint: 108 108 106;
+    --line: 45 45 49;
+    --line-soft: 40 40 44;
+    --line-strong: 62 62 66;
+    --accent: 236 236 234;
+    --shadow: 0 0 0;
+    --success: 52 211 153;
+    --warning: 251 191 36;
+    --error: 248 113 113;
+    --info: 96 165 250;
+    --border-overlay: 255 255 255;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: 22 22 24;
+  --paper-soft: 26 26 29;
+  --paper-raised: 31 31 34;
+  --paper-sunken: 18 18 20;
+  --paper-sidebar: 20 20 22;
+  --ink: 236 236 234;
+  --ink-soft: 213 213 211;
+  --ink-muted: 160 160 157;
+  --ink-faint: 108 108 106;
+  --line: 45 45 49;
+  --line-soft: 40 40 44;
+  --line-strong: 62 62 66;
+  --accent: 236 236 234;
+  --shadow: 0 0 0;
+  --success: 52 211 153;
+  --warning: 251 191 36;
+  --error: 248 113 113;
+  --info: 96 165 250;
+  --border-overlay: 255 255 255;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-paper: rgb(var(--paper));
+  --color-paper-soft: rgb(var(--paper-soft));
+  --color-paper-raised: rgb(var(--paper-raised));
+  --color-paper-sunken: rgb(var(--paper-sunken));
+  --color-paper-sidebar: rgb(var(--paper-sidebar));
+  --color-ink: rgb(var(--ink));
+  --color-ink-soft: rgb(var(--ink-soft));
+  --color-ink-muted: rgb(var(--ink-muted));
+  --color-ink-faint: rgb(var(--ink-faint));
+  --color-line: rgb(var(--line));
+  --color-line-soft: rgb(var(--line-soft));
+  --color-line-strong: rgb(var(--line-strong));
+  --color-accent: rgb(var(--accent));
+  --color-success: rgb(var(--success));
+  --color-warning: rgb(var(--warning));
+  --color-error: rgb(var(--error));
+  --color-info: rgb(var(--info));
+  --color-cream: rgb(var(--cream));
+  --color-edge: rgb(var(--border-overlay) / 0.1);
+  --color-edge-strong: rgb(var(--border-overlay) / 0.2);
+  --color-edge-muted: rgb(var(--border-overlay) / 0.06);
+
+  --font-sans: "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
+  --font-mono: "SF Mono", ui-monospace, Menlo, Monaco, "Cascadia Mono", Consolas, monospace;
+
+  --shadow-pop: 0 1px 2px rgb(var(--shadow) / 0.05), 0 12px 32px rgb(var(--shadow) / 0.1);
+  --shadow-lift: 0 0.125rem 0.25rem -0.125rem rgb(var(--shadow) / 0.07), 0 0.5rem 0.75rem -0.375rem rgb(var(--shadow) / 0.06),
+    0 1.25rem 1.75rem -0.875rem rgb(var(--shadow) / 0.06), 0 2.25rem 3rem -1.75rem rgb(var(--shadow) / 0.04);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: auto;
+}
+body {
+  margin: 0;
+  background: rgb(var(--paper));
+  color: rgb(var(--ink));
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+::selection {
+  background: rgb(var(--ink) / 0.14);
+}
+
+.display {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 0.98;
+}
+
+/* Keyboard focus that shows on paper and on ink. */
+:where(a, button, [tabindex]):focus-visible {
+  outline: 2px solid rgb(var(--ink));
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* Index rows: the arrow slides in, the row doesn't jump. */
+.row-go {
+  transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 200ms;
+  transform: translateX(-6px);
+  opacity: 0;
+}
+.row:hover .row-go,
+.row:focus-visible .row-go {
+  transform: none;
+  opacity: 1;
+}
+
+/* A demo gets the whole width; its own CSS decides its height. */
+.stage {
+  position: relative;
+  isolation: isolate;
+  overflow-x: clip;
+}
+.stage-fit {
+  min-height: min(760px, 88svh);
+  display: grid;
+  place-items: center;
+  padding: 64px 16px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row-go {
+    transition: none;
+  }
+}
+
+/* Demos that size to their content get a centred box to sit in. */
+.demo-container {
+  width: 100%;
+  min-height: min(760px, 88svh);
+  display: grid;
+  place-items: center;
+}

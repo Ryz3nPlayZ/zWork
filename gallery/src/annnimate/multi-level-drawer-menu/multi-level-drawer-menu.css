@@ -1,0 +1,650 @@
+.mldm_wrap {
+  --mldm-bg: rgb(var(--paper));
+  --mldm-tile: rgb(var(--paper-sunken));
+  --mldm-tile-2: rgb(var(--paper-raised));
+  --mldm-fg: rgb(var(--ink));
+  --mldm-grey: rgb(var(--ink-faint));
+  --mldm-line: rgb(var(--ink) / 0.12);
+  --mldm-focus: rgb(var(--ink) / 0.3);
+  --mldm-accent: rgb(var(--ink));
+  --mldm-on-accent: rgb(var(--paper));
+  --mldm-margin: clamp(20px, 2.8vw, 48px);
+  --mldm-gutter: clamp(12px, 1.4vw, 24px);
+  --mldm-col: calc((100% - 2 * var(--mldm-margin, 40px) - 11 * var(--mldm-gutter, 20px)) / 12);
+  --mldm-display: clamp(40px, 4.2vw, 80px);
+  --mldm-label: clamp(18px, 1.4vw, 28px);
+  --mldm-sans: 'Inter Variable', -apple-system, BlinkMacSystemFont, sans-serif;
+  --mldm-serif: 'Instrument Serif', Georgia, serif;
+  --mldm-ease: cubic-bezier(0.3, 0.9, 0.1, 1);
+
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+  background-color: var(--mldm-bg, rgb(var(--paper)));
+  font-family: var(--mldm-sans, 'Inter Variable', sans-serif);
+  letter-spacing: -0.02em;
+  -webkit-font-smoothing: antialiased;
+  color: var(--mldm-fg, rgb(var(--ink)));
+}
+
+.mldm_page {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background-color: var(--mldm-bg, rgb(var(--paper)));
+  overflow: hidden;
+}
+
+.mldm_page_hero {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding: 7rem var(--mldm-margin, 40px) 4rem var(--mldm-margin, 40px);
+  box-sizing: border-box;
+  display: flex;
+  align-items: stretch;
+}
+
+.mldm_page_inner {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  column-gap: var(--mldm-gutter, 20px);
+  width: 100%;
+  align-items: end;
+}
+
+.mldm_page_text {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  grid-column: 1 / 6;
+}
+
+.mldm_page_eyebrow {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--mldm-grey, rgb(var(--ink-faint)));
+}
+
+.mldm_page_heading {
+  margin: 0;
+  font-family: var(--mldm-serif, Georgia, serif);
+  font-size: var(--mldm-display, 60px);
+  font-weight: 400;
+  letter-spacing: -0.035em;
+  line-height: 0.95;
+  color: var(--mldm-fg, rgb(var(--ink)));
+}
+
+.mldm_page_heading_line {
+  display: block;
+}
+
+.mldm_page_heading_dim {
+  color: var(--mldm-grey, rgb(var(--ink-faint)));
+}
+
+.mldm_page_sub {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+  color: var(--mldm-grey, rgb(var(--ink-faint)));
+  max-width: 36ch;
+  line-height: 1.35;
+}
+
+.mldm_page_sub b {
+  font-weight: 400;
+  color: var(--mldm-fg, rgb(var(--ink)));
+}
+
+.mldm_page_poster {
+  position: relative;
+  align-self: end;
+  grid-column: 7 / 13;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 20px;
+  overflow: hidden;
+  background-color: var(--mldm-tile-2, rgb(var(--paper-raised)));
+}
+
+.mldm_page_poster_img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 60%;
+  display: block;
+}
+
+.mldm_logo {
+  position: absolute;
+  top: 1.75rem;
+  left: var(--mldm-margin, 40px);
+  z-index: 50;
+  display: inline-block;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  color: var(--mldm-fg, rgb(var(--ink)));
+  white-space: nowrap;
+  pointer-events: none;
+  will-change: color;
+}
+
+.mldm_toggle {
+  position: absolute;
+  top: 1.75rem;
+  right: var(--mldm-margin, 40px);
+  z-index: 200;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+  background-color: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+  color: var(--mldm-fg, rgb(var(--ink)));
+  will-change: color;
+}
+
+.mldm_toggle_label_wrap {
+  position: relative;
+  display: block;
+  width: 3em;
+  height: 1em;
+  font-size: 15px;
+  line-height: 1;
+  overflow: hidden;
+  text-align: left;
+}
+
+.mldm_toggle_label_track {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  will-change: transform;
+}
+
+.mldm_toggle_label {
+  display: block;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  height: 1em;
+  white-space: nowrap;
+  user-select: none;
+  color: inherit;
+}
+
+.mldm_toggle_icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  pointer-events: none;
+}
+
+.mldm_toggle_line {
+  position: absolute;
+  display: block;
+  width: 1rem;
+  height: 1.5px;
+  background-color: currentColor;
+  border-radius: 2px;
+  transform-origin: center;
+  will-change: transform, background-color;
+}
+
+.mldm_overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background-color: transparent;
+  pointer-events: none;
+}
+
+.mldm_overlay[aria-hidden="false"] {
+  pointer-events: auto;
+}
+
+/* Dim - darkens the page underneath; sits below trigger + panels. Click closes. */
+.mldm_scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background-color: rgb(var(--ink) / 0.55);
+  border: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  opacity: 0;
+  will-change: opacity;
+}
+
+.mldm_panel {
+  position: absolute;
+  z-index: 3;
+  top: 1rem;
+  bottom: 1rem;
+  background-color: var(--mldm-tile, rgb(var(--paper-sunken)));
+  border-radius: 8px;
+  overflow: hidden;
+  clip-path: inset(0% 100% 0% 0% round 8px);
+  will-change: clip-path;
+}
+
+.mldm_panel_inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding: 2.5rem 2.5rem 2.5rem 2.5rem;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.mldm_panel_primary {
+  left: var(--mldm-margin, 40px);
+  width: 420px;
+}
+
+.mldm_panel_secondary {
+  left: calc(var(--mldm-margin, 40px) + 420px + 0.5rem);
+  width: 280px;
+}
+
+.mldm_back {
+  display: none;
+  position: absolute;
+  top: 1.5rem;
+  left: 2.5rem;
+  z-index: 5;
+  align-items: center;
+  gap: 0.5rem;
+  background-color: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem 0;
+  font-family: inherit;
+  color: var(--mldm-fg, rgb(var(--ink)));
+}
+
+.mldm_back_icon {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-top: 1.25px solid currentColor;
+  border-left: 1.25px solid currentColor;
+  transform: rotate(-45deg);
+  flex-shrink: 0;
+  margin-right: 0.25rem;
+}
+
+.mldm_back_label {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.mldm_list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mldm_item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--mldm-line, rgb(var(--ink) / 0.12));
+  counter-increment: mldm-i;
+}
+
+.mldm_item::after {
+  content: counter(mldm-i, decimal-leading-zero);
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: var(--mldm-grey, rgb(var(--ink-faint)));
+}
+
+.mldm_list {
+  counter-reset: mldm-i;
+}
+
+.mldm_primary_nav {
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+}
+
+.mldm_primary_nav .mldm_list {
+  gap: 0;
+}
+
+.mldm_primary_nav .mldm_item {
+  padding: 14px 0;
+}
+
+.mldm_primary {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  background-color: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: var(--mldm-grey, rgb(var(--ink-faint)));
+  text-align: left;
+  font-family: inherit;
+}
+
+.mldm_primary_dot {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background-color: var(--mldm-fg, rgb(var(--ink)));
+  transform: translate(0, -50%) scale(0);
+  transform-origin: center;
+  will-change: transform;
+  pointer-events: none;
+}
+
+.mldm_primary_label {
+  display: inline-block;
+  font-family: var(--mldm-serif, Georgia, serif);
+  font-size: 28px;
+  font-weight: 400;
+  letter-spacing: -0.035em;
+  line-height: 1.05;
+  color: inherit;
+  will-change: transform, color;
+}
+
+.mldm_primary:hover {
+  color: var(--mldm-fg, rgb(var(--ink)));
+}
+
+.mldm_explore {
+  display: inline-block;
+  margin-top: 0.5rem;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--mldm-fg, rgb(var(--ink)));
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  transition: color 0.35s var(--mldm-ease, cubic-bezier(0.3, 0.9, 0.1, 1));
+}
+
+.mldm_explore:hover {
+  color: var(--mldm-grey, rgb(var(--ink-faint)));
+}
+
+.mldm_cards {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: auto;
+  margin-bottom: auto;
+}
+
+.mldm_card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  text-decoration: none;
+  color: var(--mldm-fg, rgb(var(--ink)));
+}
+
+.mldm_card_media {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  border-radius: 12px;
+  background-color: var(--mldm-tile-2, rgb(var(--paper-raised)));
+}
+
+.mldm_card_img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+  will-change: transform;
+}
+
+.mldm_card_label {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--mldm-fg, rgb(var(--ink)));
+}
+
+.mldm_footer_nav {
+  display: flex;
+  gap: 1.25rem;
+}
+
+.mldm_footer_link {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--mldm-grey, rgb(var(--ink-faint)));
+  text-decoration: none;
+  transition: color 0.35s var(--mldm-ease, cubic-bezier(0.3, 0.9, 0.1, 1));
+}
+
+.mldm_footer_link:hover {
+  color: var(--mldm-fg, rgb(var(--ink)));
+}
+
+.mldm_sublist_stack {
+  position: relative;
+  width: 100%;
+  flex: 1;
+}
+
+.mldm_sublist {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.mldm_sublist_active {
+  visibility: visible;
+  pointer-events: auto;
+  position: relative;
+}
+
+.mldm_sublist .mldm_list {
+  gap: 0;
+}
+
+.mldm_sublist .mldm_item {
+  padding: 6px 0;
+}
+
+.mldm_sublink {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  background-color: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem 0;
+  color: var(--mldm-grey, rgb(var(--ink-faint)));
+  text-align: left;
+  font-family: inherit;
+  flex: 1;
+}
+
+.mldm_sublink_dot {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  display: inline-block;
+  width: 0.4375rem;
+  height: 0.4375rem;
+  border-radius: 50%;
+  background-color: var(--mldm-fg, rgb(var(--ink)));
+  transform: translate(0, -50%) scale(0);
+  transform-origin: center;
+  will-change: transform;
+  pointer-events: none;
+}
+
+.mldm_sublink_label {
+  display: inline-block;
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+  color: inherit;
+  will-change: transform, color;
+}
+
+.mldm_sublink:hover {
+  color: var(--mldm-fg, rgb(var(--ink)));
+}
+
+.mldm_sub_explore {
+  display: inline-block;
+  margin-top: 1.5rem;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  color: var(--mldm-fg, rgb(var(--ink)));
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  transition: color 0.35s var(--mldm-ease, cubic-bezier(0.3, 0.9, 0.1, 1));
+}
+
+.mldm_sub_explore:hover {
+  color: var(--mldm-grey, rgb(var(--ink-faint)));
+}
+
+.mldm_toggle:focus-visible,
+.mldm_back:focus-visible,
+.mldm_primary:focus-visible,
+.mldm_sublink:focus-visible,
+.mldm_explore:focus-visible,
+.mldm_sub_explore:focus-visible,
+.mldm_card:focus-visible,
+.mldm_footer_link:focus-visible {
+  outline: 1px solid var(--mldm-focus, rgb(var(--ink) / 0.3));
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mldm_card_img {
+    transition: none;
+  }
+}
+
+@media (max-width: 1023px) {
+  .mldm_panel_primary {
+    width: 360px;
+  }
+
+  .mldm_panel_secondary {
+    left: calc(var(--mldm-margin, 20px) + 360px + 0.5rem);
+    width: 240px;
+  }
+
+  .mldm_primary_label {
+    font-size: 26px;
+  }
+
+  .mldm_sublink_label {
+    font-size: 18px;
+  }
+
+  .mldm_page_hero {
+    padding: 6rem var(--mldm-margin, 20px) 2rem var(--mldm-margin, 20px);
+  }
+}
+
+@media (max-width: 767px) {
+  /* Push panels below the fixed header so the logo + trigger don't overlap */
+  .mldm_panel {
+    top: 5rem;
+  }
+
+  /* Both panels share the exact same left/right/width on mobile.
+     Panel 2 sits on top of panel 1 (higher z-index) as a drill-down overlay. */
+  .mldm_panel_primary {
+    left: var(--mldm-margin, 20px);
+    right: var(--mldm-margin, 20px);
+    width: auto;
+    max-width: none;
+    z-index: 3;
+  }
+
+  .mldm_panel_secondary {
+    left: var(--mldm-margin, 20px);
+    right: var(--mldm-margin, 20px);
+    width: auto;
+    /* slide-in initial state - shift by full viewport width so panel 2 is
+       guaranteed fully off-screen regardless of viewport size (translateX 100%
+       alone would leave a 1rem sliver visible due to the left offset) */
+    clip-path: inset(0% 0% 0% 0% round 8px);
+    transform: translateX(100vw);
+    z-index: 20;
+  }
+
+  .mldm_panel_secondary .mldm_panel_inner {
+    padding-top: 4.5rem;
+  }
+
+  .mldm_back {
+    display: inline-flex;
+  }
+
+  .mldm_page_hero {
+    padding: 5rem var(--mldm-margin, 20px) 1.5rem var(--mldm-margin, 20px);
+  }
+
+  .mldm_page_inner {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 2rem;
+  }
+
+  .mldm_page_text,
+  .mldm_page_poster {
+    grid-column: 1;
+  }
+
+  .mldm_logo {
+    top: 1.25rem;
+  }
+
+  .mldm_toggle {
+    top: 1.25rem;
+  }
+}

@@ -1,0 +1,172 @@
+[data-anm-scroll-text-reveal] {
+  /* Hide initially to prevent FOUC - GSAP will set visibility when ready */
+  visibility: hidden;
+  /* GPU acceleration */
+  transform: translateZ(0);
+  will-change: transform, opacity;
+}
+
+/* Ensure text wrapping is preserved */
+[data-anm-scroll-text-reveal] {
+  display: block;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+}
+
+/* Split text word/char containers */
+[data-anm-scroll-text-reveal] .split-line {
+  display: block;
+  overflow: hidden;
+}
+
+[data-anm-scroll-text-reveal] .split-word,
+[data-anm-scroll-text-reveal] .split-char {
+  display: inline-block;
+  transform: translateZ(0);
+  will-change: transform, opacity;
+}
+
+/* Preserve whitespace between words */
+[data-anm-scroll-text-reveal] .split-word {
+  margin-right: 0.25em;
+}
+
+[data-anm-scroll-text-reveal] .split-word:last-child {
+  margin-right: 0;
+}
+
+/* Words type - default spacing */
+[data-anm-scroll-text-reveal][data-anm-type="words"] .split-word {
+  /* Animation handled by JS */
+}
+
+/* Characters type - tighter control */
+[data-anm-scroll-text-reveal][data-anm-type="chars"] .split-char {
+  /* Animation handled by JS */
+}
+
+/* Reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  [data-anm-scroll-text-reveal] {
+    /* Disable animations */
+    animation: none !important;
+    transition: none !important;
+    will-change: auto !important;
+  }
+
+  /* Ensure content is visible */
+  [data-anm-scroll-text-reveal] .split-word,
+  [data-anm-scroll-text-reveal] .split-char {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+/* Contain paint for better performance */
+[data-anm-scroll-text-reveal] {
+  contain: layout style paint;
+}
+
+/* Ensure smooth rendering */
+[data-anm-scroll-text-reveal] .split-word,
+[data-anm-scroll-text-reveal] .split-char {
+  backface-visibility: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+[data-anm-markers="true"] {
+  /* Visual indicator when markers are enabled */
+  outline: 1px dashed rgb(var(--warning) / 0.5);
+  outline-offset: 4px;
+}
+
+/* Container styling */
+.text_reveal_wrap {
+  --tr-bg: rgb(var(--paper));
+  --tr-tile: rgb(var(--paper-sunken));
+  --tr-tile-2: rgb(var(--paper-raised));
+  --tr-fg: rgb(var(--ink));
+  --tr-grey: rgb(var(--ink-faint));
+  --tr-line: rgb(var(--ink) / 0.12);
+  --tr-focus: rgb(var(--ink) / 0.3);
+  --tr-accent: rgb(var(--ink));
+  --tr-on-accent: rgb(var(--paper));
+  --tr-margin: clamp(20px, 2.8vw, 48px);
+  --tr-gutter: clamp(12px, 1.4vw, 24px);
+  --tr-display: clamp(36px, 3.4vw, 64px);
+  --tr-label: clamp(18px, 1.4vw, 28px);
+  --tr-sans: 'Inter Variable', -apple-system, BlinkMacSystemFont, sans-serif;
+  --tr-serif: 'Instrument Serif', Georgia, serif;
+
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  column-gap: var(--tr-gutter, 20px);
+  align-content: center;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100svh;
+  padding: var(--tr-margin, 40px);
+  background: var(--tr-bg, rgb(var(--paper)));
+  color: var(--tr-fg, rgb(var(--ink)));
+  font-family: var(--tr-sans, 'Inter Variable', sans-serif);
+  letter-spacing: -0.02em;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Text element visual styling */
+.text_reveal_text {
+  grid-column: 1 / span 9;
+  margin: 0;
+  padding-bottom: 0.16em;
+  font-family: var(--tr-serif, Georgia, serif);
+  font-size: var(--tr-display, 54px);
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.035em;
+  color: var(--tr-grey, rgb(var(--ink-faint)));
+  text-align: left;
+}
+
+/* Strong/emphasized text - ink */
+.text_reveal_text strong {
+  color: var(--tr-fg, rgb(var(--ink)));
+  font-weight: 400;
+}
+
+[data-anm-scroll-text-reveal] .split-line {
+  padding-bottom: 0.16em;
+  margin-bottom: -0.16em;
+}
+
+/* Mobile optimizations */
+@media (max-width: 767px) {
+  [data-anm-scroll-text-reveal] {
+    /* Reduce will-change on mobile for performance */
+    will-change: transform;
+  }
+
+  [data-anm-scroll-text-reveal] .split-word,
+  [data-anm-scroll-text-reveal] .split-char {
+    will-change: transform;
+  }
+
+  .text_reveal_text {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Print styles */
+@media print {
+  [data-anm-scroll-text-reveal] {
+    /* Ensure content is visible when printing */
+    opacity: 1 !important;
+  }
+
+  [data-anm-scroll-text-reveal] .split-word,
+  [data-anm-scroll-text-reveal] .split-char {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
