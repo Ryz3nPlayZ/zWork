@@ -71,7 +71,10 @@ function CodeBlock({
   onOpenPanel?: (code: string, lang: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState<"code" | "preview">("code");
+  // Diagrams and pages open on their rendered view; people read the result, not the source.
+  const [activeTab, setActiveTab] = useState<"code" | "preview">(() =>
+    ["mermaid", "html", "svg"].includes((language || "").toLowerCase()) ? "preview" : "code",
+  );
   const [runOutput, setRunOutput] = useState<{ stdout: string; stderr: string } | null>(null);
   const [running, setRunning] = useState(false);
   // Pick the syntax theme for the live (resolved) color scheme so code blocks
@@ -86,7 +89,8 @@ function CodeBlock({
   }, [code]);
 
   const langLower = (language || "").toLowerCase();
-  const isPreviewable = ["html", "svg"].includes(langLower);
+  const isMermaid = langLower === "mermaid";
+  const isPreviewable = ["html", "svg", "mermaid"].includes(langLower);
   const isExecutable = ["javascript", "js", "python", "py"].includes(langLower);
   const hasPreviewTab = isPreviewable || isExecutable;
 
@@ -155,7 +159,7 @@ function CodeBlock({
                     : "text-ink-muted hover:bg-paper hover:text-ink"
                 )}
               >
-                {isPreviewable ? "Preview" : "Run Output"}
+                {isMermaid ? "Diagram" : isPreviewable ? "Preview" : "Run Output"}
               </button>
             </div>
           )}
@@ -199,7 +203,9 @@ function CodeBlock({
         </SyntaxHighlighter>
       ) : (
         <div className="bg-paper p-4 overflow-auto min-h-[150px] max-h-[400px]">
-          {isPreviewable ? (
+          {isMermaid ? (
+            <MermaidDiagram code={code} dark={resolvedTheme === "dark"} />
+          ) : isPreviewable ? (
             <iframe
               srcDoc={
                 langLower === "svg"
@@ -253,6 +259,35 @@ function CodeBlock({
       )}
     </div>
   );
+}
+
+let mermaidSeq = 0;
+
+/** Renders a ```mermaid block as SVG. Mermaid (~1 MB) loads on the first diagram only. */
+function MermaidDiagram({ code, dark }: { code: string; dark: boolean }) {
+  const [svg, setSvg] = useState("");
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    // Debounced: while a reply streams, the source changes every token and is invalid mid-way.
+    const t = setTimeout(async () => {
+      const { default: mermaid } = await import("mermaid");
+      mermaid.initialize({ startOnLoad: false, theme: dark ? "dark" : "neutral", securityLevel: "strict" });
+      try {
+        if (!(await mermaid.parse(code, { suppressErrors: true }))) throw new Error("invalid");
+        const out = await mermaid.render(`zw-mermaid-${++mermaidSeq}`, code);
+        if (live) { setSvg(out.svg); setFailed(false); }
+      } catch {
+        if (live) setFailed(true);
+      }
+    }, 300);
+    return () => { live = false; clearTimeout(t); };
+  }, [code, dark]);
+
+  if (failed) return <p className="text-[12.5px] text-ink-muted">This diagram couldn't be drawn. The Code tab shows its source.</p>;
+  if (!svg) return <p className="text-[12.5px] text-ink-faint">Drawing the diagram…</p>;
+  // securityLevel "strict" runs mermaid's DOMPurify pass, so the SVG is safe to inject.
+  return <div className="flex justify-center [&_svg]:h-auto [&_svg]:max-w-full" dangerouslySetInnerHTML={{ __html: svg }} />;
 }
 
 // ---- Markdown renderer with KaTeX and code blocks ----

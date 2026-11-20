@@ -21,6 +21,7 @@
     "framer-motion": "^12.38.0",
     "katex": "^0.16.45",
     "lucide-react": "^0.453.0",
+    "mermaid": "^11.17.2",
     "ogl": "^1.0.11",
     "posthog-js": "^1.372.5",
     "postprocessing": "^6.39.1",
