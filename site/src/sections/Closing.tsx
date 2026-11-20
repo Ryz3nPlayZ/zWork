@@ -474,7 +474,7 @@ export function Footer() {
         ["Pricing", "/pricing"],
         ["Open source", "/open-source"],
         ["Download", "/download"],
-        ["What's new", "/changelog"],
+        ["Changelog", "/changelog"],
         ["Try in browser", DEMO_URL],
       ],
     ],

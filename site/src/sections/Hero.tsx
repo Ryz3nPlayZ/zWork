@@ -9,7 +9,7 @@ import { cn } from "../lib/cn";
 import { onReveal } from "../lib/intro";
 import { Link, usePath } from "../lib/router";
 import { DEMO_URL, PLAN_URL, REPO_URL, detectPlatform, downloadUrl, useRepoStats } from "../lib/site";
-import { DotFillButton, Glide, SlideArrowButton, SparkleButton, WhatsNewButton } from "./buttons";
+import { DotFillButton, Glide, SlideArrowButton, SparkleButton } from "./buttons";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
 
@@ -50,10 +50,11 @@ const NAV_LINKS: [string, string][] = [
   ["Features", "/features"],
   ["Pricing", "/pricing"],
   ["Open source", "/open-source"],
+  ["Changelog", "/changelog"],
 ];
 
 export function Nav() {
-  const { stars, version } = useRepoStats();
+  const { stars } = useRepoStats();
   const [theme, toggle] = useTheme();
   const [open, setOpen] = useState(false);
   const path = usePath();
@@ -84,7 +85,6 @@ export function Nav() {
             <Logo size={26} className="text-ink" />
             <span className="text-[16px] font-semibold tracking-tight text-ink">zWork</span>
           </Link>
-          <WhatsNewButton href="/changelog" version={version} className="hidden lg:inline-flex" />
         </div>
         <Glide label="Main" className="hidden items-center gap-1 text-[14px] text-ink-muted md:flex">
           {NAV_LINKS.map(([label, href]) => (
@@ -138,7 +138,7 @@ export function Nav() {
       </div>
       {open && (
         <nav aria-label="Main" className="border-t border-line bg-paper px-4 pb-5 pt-2 md:hidden">
-          {[...NAV_LINKS, ["What's new", "/changelog"] as [string, string]].map(([label, href]) => (
+          {NAV_LINKS.map(([label, href]) => (
             <Link
               key={href}
               href={href}

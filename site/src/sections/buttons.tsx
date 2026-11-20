@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { ArrowRight, Star } from "lucide-react";
 import { cn } from "../lib/cn";
 import { Link } from "../lib/router";
@@ -86,27 +86,6 @@ export function SparkleButton({ href, children, className }: { href: string; chi
       </span>
       {children}
     </A>
-  );
-}
-
-/**
- * Pill that links to the changelog. Two soft glows, amber and blue, sit below
- * it and follow the pointer across; on hover they rise into the pill.
- */
-export function WhatsNewButton({ href, version, className }: { href: string; version?: string | null; className?: string }) {
-  const ref = useRef<HTMLAnchorElement>(null);
-  const move = useCallback((e: React.PointerEvent) => {
-    const el = ref.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    el.style.setProperty("--glow-x", `${(((e.clientX - r.left) / r.width) * 100).toFixed(1)}%`);
-  }, []);
-  return (
-    <Link ref={ref} href={href} onPointerMove={move} className={cn("whats-new press", className)}>
-      <span aria-hidden="true" className="whats-new-glow" />
-      <span className="relative">What's new</span>
-      {version && <span className="relative tabular-nums text-ink-faint">v{version}</span>}
-    </Link>
   );
 }
 

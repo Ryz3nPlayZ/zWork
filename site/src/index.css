@@ -617,43 +617,6 @@ body {
   }
 }
 
-/* What's new: two glows under the pill track the pointer and rise on hover. */
-.whats-new {
-  --glow-x: 50%;
-  position: relative;
-  isolation: isolate;
-  display: inline-flex;
-  height: 1.875rem;
-  align-items: center;
-  gap: 0.5rem;
-  overflow: hidden;
-  border-radius: 9999px;
-  border: 1px solid rgb(var(--line));
-  background: rgb(var(--paper) / 0.6);
-  padding: 0 0.75rem;
-  font-size: 12.5px;
-  font-weight: 500;
-  color: rgb(var(--ink));
-}
-.whats-new-glow {
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  translate: 0 70%;
-  opacity: 0.55;
-  filter: blur(10px);
-  background:
-    radial-gradient(40% 90% at calc(var(--glow-x) - 18%) 60%, rgb(var(--warning) / 0.55), transparent 70%),
-    radial-gradient(40% 90% at calc(var(--glow-x) + 18%) 60%, rgb(var(--info) / 0.5), transparent 70%);
-  transition: translate 500ms var(--ease-glide), opacity 400ms ease;
-}
-@media (hover: hover) {
-  .whats-new:hover .whats-new-glow {
-    translate: 0 15%;
-    opacity: 1;
-  }
-}
-
 /* Glide: the shared hover highlight for the nav. */
 .glide-hl {
   pointer-events: none;
@@ -676,7 +639,6 @@ body {
   .slide-arrow,
   .slide-arrow *,
   .sparkle *,
-  .whats-new-glow,
   .glide-hl {
     transition-duration: 0ms !important;
   }

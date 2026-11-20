@@ -22,7 +22,7 @@ const ROUTES: Record<string, { page: ComponentType; title: string }> = {
   "/pricing": { page: PricingPage, title: "Pricing · zWork" },
   "/open-source": { page: OpenSourcePage, title: "Open source · zWork" },
   "/download": { page: DownloadPage, title: "Download · zWork" },
-  "/changelog": { page: ChangelogPage, title: "What's new · zWork" },
+  "/changelog": { page: ChangelogPage, title: "Changelog · zWork" },
 };
 const NOT_FOUND = { page: NotFound, title: "Not found · zWork" };
 
