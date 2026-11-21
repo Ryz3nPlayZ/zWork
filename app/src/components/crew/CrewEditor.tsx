@@ -108,7 +108,10 @@ export function CrewEditor({
       {/* The light the member stands in; its colour eases to each new pick. */}
       <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
         <div
-          className="absolute left-1/2 top-[30%] h-[70vmin] w-[70vmin] -translate-x-1/2 -translate-y-1/2 rounded-full opacity-40 blur-[90px] transition-[background-color] duration-700 md:left-[32%] md:top-1/2"
+          className={cn(
+            "absolute left-1/2 top-[30%] h-[70vmin] w-[70vmin] -translate-x-1/2 -translate-y-1/2 rounded-full opacity-40 blur-[90px] transition-[background-color,left,top] duration-700 ease-[cubic-bezier(.32,.72,0,1)] md:top-1/2",
+            arrived ? "top-1/2" : "md:left-[32%]",
+          )}
           style={{ backgroundColor: color }}
         />
       </div>
@@ -118,7 +121,7 @@ export function CrewEditor({
       </RowIconButton>
 
       {/* Stage */}
-      <section className="relative flex shrink-0 flex-col items-center justify-center px-6 pb-2 pt-10 md:min-h-0 md:flex-1 md:pb-10">
+      <section className={cn("relative flex shrink-0 flex-col items-center justify-center px-6 pb-2 pt-10 md:min-h-0 md:flex-1 md:pb-10", arrived && "max-md:flex-1")}>
         <div className="flex items-center gap-2 md:gap-6">
           <StageArrow label="Previous look" hidden={step !== 0 || arrived} onClick={() => cycle(-1)}>
             <ChevronLeft />
@@ -170,8 +173,10 @@ export function CrewEditor({
       {/* Briefing panel */}
       <section
         className={cn(
-          "relative flex min-h-0 flex-1 flex-col border-line bg-paper-raised/85 backdrop-blur-xl transition-[opacity,transform] duration-500 max-md:rounded-t-3xl max-md:border-t md:w-[420px] md:flex-none md:border-l",
-          arrived && "pointer-events-none translate-y-4 opacity-0 md:translate-x-6 md:translate-y-0",
+          // On arrival the panel folds its width away so the stage re-centres on the new member;
+          // children keep 420px so nothing reflows while it closes.
+          "relative flex min-h-0 flex-1 flex-col overflow-hidden border-line bg-paper-raised/85 backdrop-blur-xl transition-[opacity,width,flex-grow] duration-700 ease-[cubic-bezier(.32,.72,0,1)] max-md:rounded-t-3xl max-md:border-t md:w-[420px] md:flex-none md:border-l md:[&>*]:w-[420px] md:[&>*]:shrink-0",
+          arrived && "pointer-events-none opacity-0 max-md:flex-none max-md:h-0 md:w-0 md:border-l-0",
         )}
       >
         <nav aria-label="Steps" className="flex gap-1 px-6 pt-5 md:pt-14">
