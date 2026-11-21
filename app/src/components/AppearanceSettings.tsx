@@ -28,6 +28,9 @@ import {
   applyTheme as applySavedTheme,
   encodeWallpaper,
   exportTheme,
+  GLOW_STYLES,
+  MESSAGE_FONTS,
+  type MessageFont,
   gradientCss,
   importTheme,
   notifyLookChanged,
@@ -514,6 +517,28 @@ export function AppearanceSettings() {
           >
             Reset
           </Button>
+        </Row>
+      </Group>
+
+      {/* ---- Replies and voice ---- */}
+      <Group title="Replies and voice">
+        <Row label="Reply font" hint="The typeface zWork answers in.">
+          <Select label="Reply font" value={look.messageFont} onChange={(messageFont) => patch({ messageFont, preset: look.preset })}>
+            {(Object.keys(MESSAGE_FONTS) as MessageFont[]).map((f) => (
+              <option key={f} value={f}>
+                {MESSAGE_FONTS[f].label}
+              </option>
+            ))}
+          </Select>
+        </Row>
+        <Row label="Voice glow" hint="The light around the message box while you dictate. Match theme is rainbow on plain themes and the accent on colored ones.">
+          <Select label="Voice glow" value={look.glow} onChange={(glow) => patch({ glow, preset: look.preset })}>
+            {GLOW_STYLES.map((g) => (
+              <option key={g} value={g}>
+                {g === "auto" ? "Match theme" : g === "accent" ? "Accent color" : g[0]!.toUpperCase() + g.slice(1)}
+              </option>
+            ))}
+          </Select>
         </Row>
       </Group>
 

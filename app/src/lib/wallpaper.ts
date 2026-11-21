@@ -61,9 +61,24 @@ export interface Look {
   pane: number; // 50–100 % panel opacity
   paneBlur: number; // 0–40 px
   surface: "flat" | "3d";
+  /** The voice glow's colours; "auto" is rainbow on neutral themes, the accent on coloured ones. */
+  glow: GlowStyle;
+  /** The typeface zWork's replies are set in. */
+  messageFont: MessageFont;
   /** The THEME_PRESETS entry this look came from; null once edited. */
   preset: string | null;
 }
+
+export const GLOW_STYLES = ["auto", "rainbow", "accent", "ocean", "sunset", "forest", "candy", "ice", "gold"] as const;
+export type GlowStyle = (typeof GLOW_STYLES)[number];
+
+export const MESSAGE_FONTS = {
+  sans: { label: "Inter", css: "'Inter Variable', Inter, ui-sans-serif, system-ui, sans-serif" },
+  system: { label: "System", css: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" },
+  serif: { label: "Serif", css: "'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, ui-serif, serif" },
+  mono: { label: "Mono", css: "ui-monospace, 'SF Mono', Menlo, Consolas, monospace" },
+} as const;
+export type MessageFont = keyof typeof MESSAGE_FONTS;
 
 export const DEFAULT_LOOK: Look = {
   wallpaper: "none",
@@ -84,6 +99,8 @@ export const DEFAULT_LOOK: Look = {
   pane: 85,
   paneBlur: 24,
   surface: "flat",
+  glow: "auto",
+  messageFont: "sans",
   preset: null,
 };
 
@@ -183,6 +200,8 @@ export function sanitizeLook(raw: unknown): Look {
     pane: clamp(r.pane, 50, 100, d.pane),
     paneBlur: clamp(r.paneBlur, 0, 40, d.paneBlur),
     surface: r.surface === "3d" ? "3d" : "flat",
+    glow: GLOW_STYLES.includes(r.glow) ? r.glow : d.glow,
+    messageFont: Object.keys(MESSAGE_FONTS).includes(r.messageFont) ? (r.messageFont as MessageFont) : d.messageFont,
     preset: typeof r.preset === "string" ? r.preset : null,
   };
 }
@@ -252,7 +271,9 @@ export function setThemeColors(colors: ThemeColors): void {
 export function applyPreset(p: ThemePreset): void {
   saveCustomColors(p.colors);
   setSchemePref(CUSTOM_SCHEME_ID);
-  saveLook({ ...DEFAULT_LOOK, ...p.look, preset: p.id });
+  // The glow and message font are the person's, not the preset's.
+  const { glow, messageFont } = loadLook();
+  saveLook({ ...DEFAULT_LOOK, ...p.look, glow, messageFont, preset: p.id });
 }
 
 /**
@@ -387,6 +408,7 @@ let resizeHooked = false;
 
 export function applyWallpaper(look: Look = loadLook()): void {
   const root = document.documentElement;
+  root.style.setProperty("--message-font", MESSAGE_FONTS[look.messageFont].css);
   // The floating overlay window has no sidebar or pane to sit behind.
   if (root.classList.contains("overlay-window")) return;
   root.classList.toggle("surface-3d", look.surface === "3d");

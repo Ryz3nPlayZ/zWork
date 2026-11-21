@@ -27,6 +27,8 @@ import {
   Mic,
 } from "lucide-react";
 import { VoiceBeam } from "voice-glow";
+import { glowProps } from "../lib/glow";
+import { useLook } from "../lib/wallpaper";
 import { dictationSupported, useDictation } from "../lib/dictation";
 import { useResolvedTheme } from "../lib/theme";
 import { cn } from "../lib/cn";
@@ -1409,6 +1411,7 @@ function ComposerGlow({
   level: () => number;
   theme: "light" | "dark";
 }) {
+  const { look } = useLook();
   if (!on) return <>{children}</>;
   const dark = beam.theme === "dark";
   return (
@@ -1416,13 +1419,15 @@ function ComposerGlow({
     // its menus; only clip while listening, when the glow needs it.
     <VoiceBeam
       {...beam}
-      // Louder than the defaults: a quiet voice should still lift it visibly.
-      idle={0.35}
+      {...glowProps(look.glow)}
+      // A high floor and a low ceiling: a quiet voice still lifts it visibly,
+      // a loud one doesn't blow it up.
+      idle={0.45}
       attack={0.12}
       release={0.55}
-      reach={dark ? 2 : 2.4}
-      spread={1.25}
-      brightness={dark ? 1.4 : 1.1}
+      reach={dark ? 1.4 : 1.55}
+      spread={1.1}
+      brightness={dark ? 1.25 : 1.05}
       saturation={dark ? 1.5 : 1.7}
       glowSize={1.3}
       innerHeight={1.4}

@@ -318,25 +318,25 @@ export function AssistantMarkdown({
           return <>{children}</>;
         },
         p({ children }) {
-          return <p className="mb-3 last:mb-0 leading-[1.65]">{children}</p>;
+          return <p className="mb-4 last:mb-0 leading-[1.7]">{children}</p>;
         },
         h1({ children }) {
           return <h1 className="mb-2 mt-5 text-[19px] font-bold text-ink">{children}</h1>;
         },
         h2({ children }) {
-          return <h2 className="mb-2 mt-4 text-[16px] font-semibold text-ink">{children}</h2>;
+          return <h2 className="mb-2 mt-6 text-[17px] font-semibold text-ink first:mt-0">{children}</h2>;
         },
         h3({ children }) {
-          return <h3 className="mb-1.5 mt-3 text-[14.5px] font-semibold text-ink">{children}</h3>;
+          return <h3 className="mb-1.5 mt-5 text-[15px] font-semibold text-ink first:mt-0">{children}</h3>;
         },
         ul({ children }) {
-          return <ul className="mb-3 list-disc space-y-1 pl-5">{children}</ul>;
+          return <ul className="mb-4 list-disc space-y-1.5 pl-5 marker:text-ink-faint">{children}</ul>;
         },
         ol({ children }) {
-          return <ol className="mb-3 list-decimal space-y-1 pl-5">{children}</ol>;
+          return <ol className="mb-4 list-decimal space-y-1.5 pl-5 marker:text-ink-faint">{children}</ol>;
         },
         li({ children }) {
-          return <li className="leading-[1.6]">{children}</li>;
+          return <li className="pl-0.5 leading-[1.7]">{children}</li>;
         },
         blockquote({ children }) {
           return (
@@ -404,7 +404,7 @@ function UserBubble({
 
   return (
     <div className="group flex w-full justify-end">
-      <div className={cn("max-w-[85%] min-w-0 transition-opacity", beingEdited && "opacity-60")}>
+      <div className={cn("max-w-[75%] min-w-0 transition-opacity", beingEdited && "opacity-60")}>
         {attachments.length > 0 && (
           <div className="mb-1.5 flex flex-wrap justify-end gap-2">
             {attachments.map((a, i) => (
@@ -423,8 +423,8 @@ function UserBubble({
         <div className="relative">
           <div
             className={cn(
-              "rounded-2xl rounded-br-md bg-paper-raised border px-3.5 py-2.5 text-[15px] leading-[25px] text-ink break-words whitespace-pre-wrap",
-              beingEdited ? "border-dashed border-line-strong" : "border-line",
+              "rounded-[20px] bg-state-selected px-4 py-2.5 text-[15px] leading-[24px] text-ink break-words whitespace-pre-wrap",
+              beingEdited && "outline-dashed outline-1 outline-line-strong",
             )}
           >
             {message.content}
@@ -765,8 +765,8 @@ export function Message({
   return (
     <div className="group flex w-full gap-3 justify-start">
       <AssistantMark orbState={streaming ? orbStateForParts(parts) : null} />
-      <div className="min-w-0 flex-1 max-w-[92%]">
-        <div className="text-[15px] leading-[25px] text-ink">
+      <div className="min-w-0 flex-1 max-w-[min(92%,660px)]">
+        <div className="font-[family-name:var(--message-font)] text-[15px] leading-[26px] text-ink">
           {hasProcess && (
             <ProcessPanel
               parts={parts}
