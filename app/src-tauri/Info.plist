@@ -2,6 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!-- Light, dark and tinted icon from icons/Assets.car (compiled from icons/AppIcon.icon by scripts/build-app-icon.sh); macOS before 26 uses icon.icns. -->
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>zWork listens while you dictate a message.</string>
     <key>NSSpeechRecognitionUsageDescription</key>

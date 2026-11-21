@@ -77,7 +77,10 @@
     "active": true,
     "createUpdaterArtifacts": true,
     "macOS": {
-      "minimumSystemVersion": "10.13"
+      "minimumSystemVersion": "10.13",
+      "files": {
+        "Resources/Assets.car": "icons/Assets.car"
+      }
     },
     "externalBin": [
       "binaries/zwork-backend"

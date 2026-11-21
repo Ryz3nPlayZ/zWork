@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Rounded-square app tile -->
+
+  <!-- Six petal-blades arranged around the center, matching the web logo spinner -->
+  <g transform="translate(512 512)" fill="#171716">
+    <g transform="rotate(0)   translate(0 -300)"><rect x="-52" y="-140" width="104" height="280" rx="40" transform="skewX(-18)"/></g>
+    <g transform="rotate(60)  translate(0 -300)"><rect x="-52" y="-140" width="104" height="280" rx="40" transform="skewX(-18)"/></g>
+    <g transform="rotate(120) translate(0 -300)"><rect x="-52" y="-140" width="104" height="280" rx="40" transform="skewX(-18)"/></g>
+    <g transform="rotate(180) translate(0 -300)"><rect x="-52" y="-140" width="104" height="280" rx="40" transform="skewX(-18)"/></g>
+    <g transform="rotate(240) translate(0 -300)"><rect x="-52" y="-140" width="104" height="280" rx="40" transform="skewX(-18)"/></g>
+    <g transform="rotate(300) translate(0 -300)"><rect x="-52" y="-140" width="104" height="280" rx="40" transform="skewX(-18)"/></g>
+  </g>
+</svg>
