@@ -202,9 +202,14 @@ export function CrewPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [confirmDialog, confirm] = useConfirm();
 
+  const fetchSchedules = useApp((s) => s.fetchSchedules);
   useEffect(() => {
     void fetchCrew();
-  }, [fetchCrew]);
+    // Scheduled runs happen in the background; poll so avatars show who is working.
+    void fetchSchedules();
+    const id = window.setInterval(() => void fetchSchedules(), 15_000);
+    return () => window.clearInterval(id);
+  }, [fetchCrew, fetchSchedules]);
 
   const selected = crew.find((m) => m.id === selectedId) ?? null;
   const newMember = (

@@ -6,8 +6,9 @@ import { cn } from "../../lib/cn";
 
 /** Working while one of their chats is running; sleeping while they wait on a schedule. */
 function useCrewState(id: string): BotAvatarState {
-  // shortcut: a scheduled run in progress isn't in the chat store, so it reads as sleeping; add a running flag to schedules if that matters.
-  const working = useApp((s) => Object.values(s.chats).some((c) => c.crewId === id && c.working));
+  const working = useApp((s) =>
+    Object.values(s.chats).some((c) => c.crewId === id && c.working) ||
+    s.scheduledTasks.some((t) => t.crew_id === id && t.running));
   const scheduled = useApp((s) => s.scheduledTasks.some((t) => t.crew_id === id && t.enabled));
   return working ? "working" : scheduled ? "sleeping" : "default";
 }

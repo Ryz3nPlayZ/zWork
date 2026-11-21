@@ -83,7 +83,10 @@ pub fn thinking_budget_for_level(level: ThinkingLevel) -> u64 {
         ThinkingLevel::Off | ThinkingLevel::Minimal => 1024,
         ThinkingLevel::Low => 2048,
         ThinkingLevel::Medium => 8192,
-        ThinkingLevel::High | ThinkingLevel::Xhigh | ThinkingLevel::Max => 16384,
+        ThinkingLevel::High => 16384,
+        // adjust_max_tokens_for_thinking fits these under the model's ceiling.
+        ThinkingLevel::Xhigh => 32768,
+        ThinkingLevel::Max => 63999,
     }
 }
 

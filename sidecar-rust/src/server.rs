@@ -2466,7 +2466,16 @@ pub async fn delete_event_handler(Path(event_id): Path<String>) -> impl IntoResp
 // HTTP endpoints back the dashboard UI (list / edit / toggle / delete / run).
 
 pub async fn list_schedules() -> impl IntoResponse {
-    let tasks = crate::schedulestore::get_all();
+    let running = crate::scheduler::running_ids().await;
+    let tasks: Vec<Value> = crate::schedulestore::get_all()
+        .into_iter()
+        .map(|t| {
+            let busy = running.contains(&t.id);
+            let mut v = json!(t);
+            v["running"] = json!(busy);
+            v
+        })
+        .collect();
     Json(json!({ "tasks": tasks }))
 }
 

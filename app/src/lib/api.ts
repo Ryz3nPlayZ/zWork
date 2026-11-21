@@ -385,6 +385,8 @@ export interface ScheduledTask {
   next_run_at: number | null;
   /** The most recent run's automation chat id (deep-link target). */
   last_chat_id: string | null;
+  /** A run is in progress right now. */
+  running?: boolean;
 }
 
 /** A message the agent pushes to the user unprompted. */

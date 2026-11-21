@@ -66,6 +66,7 @@ export function ModelPicker() {
 
   const models = providers?.models ?? [];
   const current = models.find((m) => m.id === model);
+  const thinksOnOnly = current?.credential === "zai" || /api\.z\.ai|open\.bigmodel\.cn/.test(current?.base_url_override ?? "");
   const displayName = current?.name ?? (models.length === 0 ? "No models" : "Choose model");
   const effortLabel = EFFORTS.find((e) => e.id === effort)?.label ?? "Medium";
 
@@ -165,7 +166,8 @@ export function ModelPicker() {
             );
           })}
 
-          <div className="mt-1 border-t border-line px-2.5 pt-2.5 pb-2">
+          {/* z.ai's own API only switches thinking on or off, so every level would do the same. */}
+          {!thinksOnOnly && <div className="mt-1 border-t border-line px-2.5 pt-2.5 pb-2">
             <div className="pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
               Effort
             </div>
@@ -189,7 +191,7 @@ export function ModelPicker() {
             <div className="pt-1.5 text-[10.5px] leading-4 text-ink-faint">
               Higher effort thinks longer and uses more of your allowance.
             </div>
-          </div>
+          </div>}
 
           <div className="border-t border-line pt-1">
             {IS_WEB ? (

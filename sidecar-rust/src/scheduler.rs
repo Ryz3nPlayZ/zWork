@@ -28,6 +28,11 @@ fn running() -> &'static Mutex<HashSet<String>> {
     RUNNING.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
+/// Ids of the tasks running right now.
+pub async fn running_ids() -> HashSet<String> {
+    running().lock().await.clone()
+}
+
 /// Free-tier limits. These bound the per-user monthly cost the operator
 /// subsidizes. Pro/Max tiers lift the task cap; the min-interval floor still
 /// applies to protect against a single runaway task.
