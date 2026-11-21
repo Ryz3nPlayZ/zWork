@@ -370,28 +370,10 @@ fn extract_upstream_detail(raw: Option<&str>) -> Option<String> {
         .or_else(|| Some(json_str.trim_end_matches('}').to_string()))
 }
 
-/// Keyword-detect the kind of artifact a message likely wants and return the
-/// steering instruction the Python backend appended to the prompt. Mirrors
-/// `server._artifact_hint`.
-fn artifact_hint(message: &str) -> String {
-    let t = message.to_lowercase();
-    let hint = if ["document", "doc", "brief", "report", "note", "summary", "outline", "write a", "draft a", "make a document"]
-        .iter().any(|k| t.contains(k)) {
-        "The user's request clearly wants a document. Create a sidebar document of kind doc. Do not wrap it in code fences. Do not emit the words Text, Open, or undefined."
-    } else if ["table", "sheet", "spreadsheet", "csv", "tsv", "rows", "columns"]
-        .iter().any(|k| t.contains(k)) {
-        "The user's request clearly wants a table or spreadsheet. Create a sidebar document of kind sheet. Do not wrap it in code fences. Do not emit the words Text, Open, or undefined."
-    } else if ["chart", "graph", "plot", "visualization", "visualise", "visualize"]
-        .iter().any(|k| t.contains(k)) {
-        "The user's request clearly wants a graph. Create a sidebar document of kind graph. Do not wrap it in code fences. Do not emit the words Text, Open, or undefined."
-    } else if ["code snippet", "script", "example code", "runnable example"]
-        .iter().any(|k| t.contains(k)) {
-        "The user's request clearly wants a code snippet. Create a sidebar document of kind code. Do not wrap it in code fences. Do not emit the words Text, Open, or undefined."
-    } else {
-        "The user's request may or may not want a document. If the output is best represented as an editable deliverable, create one. If you create one, do not wrap it in code fences and do not emit the words Text, Open, or undefined."
-    };
-    hint.to_string()
-}
+/// Per-turn note on sidebar documents. It offers the option and never picks a
+/// kind for the model: keyword guesses misfired ("photograph" read as a graph
+/// and overrode an image request).
+pub(crate) const ARTIFACT_NOTE: &str = "A sidebar document (doc, sheet, graph or code) is available when the answer is an editable deliverable the user will keep working on. It is optional: answer in chat when that serves the request better, and use the matching tool for images, files or actions. If you create one, do not wrap it in code fences.";
 
 pub fn approve_gate(gate_id: &str) -> bool {
     run_state::resolve_gate(gate_id, true)

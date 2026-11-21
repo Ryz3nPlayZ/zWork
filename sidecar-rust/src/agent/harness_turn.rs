@@ -37,7 +37,7 @@ use crate::tools::{evaluate_tool_risk, execute_tool, get_tool_schemas, Risk};
 use crate::{chatstore, settings};
 
 use super::{
-    artifact_hint, classify_provider_error_with_raw, friendly_upstream_error, is_command_approved, llm_trace,
+    classify_provider_error_with_raw, ARTIFACT_NOTE, friendly_upstream_error, is_command_approved, llm_trace,
     log_agent_event, orientation, prompts, router_real_model,
     run_state, DoomLoopDetector, ErrorClass, RepeatVerdict, RunGuard,
 };
@@ -1838,7 +1838,7 @@ pub fn run_agent_turn(
             turn_extras.push(crate::crewstore::prompt_block(member));
         }
         if artifact_mode {
-            turn_extras.push(format!("## Artifact mode\n{}", artifact_hint(&user_message)));
+            turn_extras.push(format!("## Sidebar documents\n{ARTIFACT_NOTE}"));
         }
         if !attachments.is_empty() {
             let listing =
