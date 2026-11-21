@@ -8,7 +8,6 @@ import { cn } from "../lib/cn";
 const ChatView = lazy(() => import("./ChatView").then((m) => ({ default: m.ChatView })));
 const SettingsPage = lazy(() => import("./Settings").then((m) => ({ default: m.SettingsPage })));
 const ProjectView = lazy(() => import("./ProjectView").then((m) => ({ default: m.ProjectView })));
-const ArtifactPanel = lazy(() => import("./ArtifactPanel").then((m) => ({ default: m.ArtifactPanel })));
 const SearchModal = lazy(() => import("./SearchModal").then((m) => ({ default: m.SearchModal })));
 const AnalyticsPage = lazy(() => import("./AnalyticsPage").then((m) => ({ default: m.AnalyticsPage })));
 const PlanPage = lazy(() => import("./PlanPage").then((m) => ({ default: m.PlanPage })));
@@ -73,8 +72,6 @@ export function PreviewAppShell() {
   const bootstrap = useApp((s) => s.bootstrap);
   const view = useApp((s) => s.view);
   const active = useApp((s) => s.activeChatId);
-  const chat = useApp((s) => (s.activeChatId ? s.chats[s.activeChatId] : undefined));
-  const artifactPanelOpen = !!(view === "chat" && active && chat?.artifactPanelOpen);
   const openLanding = useApp((s) => s.openLanding);
   const setView = useApp((s) => s.setView);
   const setSearchOpen = useApp((s) => s.setSearchOpen);
@@ -131,7 +128,6 @@ export function PreviewAppShell() {
                 {showLanding && <Landing />}
               </>
             )}
-            {artifactPanelOpen && <ArtifactPanel />}
             <SearchModal />
           </Suspense>
         </main>

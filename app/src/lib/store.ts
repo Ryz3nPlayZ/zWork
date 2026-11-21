@@ -23,7 +23,7 @@ import { fetchCloudSession, getCloudToken, logoutCloudSession, startDesktopGoogl
 import { isDemoMode } from "./preview";
 import { isMacOS } from "./platform";
 import { invoke } from "@tauri-apps/api/core";
-import { setTelemetryEnabled, trackError, trackArtifactCreated, recordTelemetry } from "./telemetry";
+import { setTelemetryEnabled, trackError, recordTelemetry } from "./telemetry";
 import {
   emitChatListChanged,
   registerWindowSync,
@@ -349,10 +349,13 @@ export function normalizeToParts(msg: {
     parts.push({
       kind: "tool",
       id: a.id,
-      tool: a.label,
+      tool: a.tool ?? a.label,
       label: a.label,
       icon: a.icon,
       done: a.done,
+      input: a.input,
+      result: a.result,
+      ok: a.ok,
     });
   }
   return parts;
@@ -450,6 +453,11 @@ export interface Activity {
   label: string;
   icon?: string;
   done: boolean;
+  /** Saved only for calls whose card needs them after a reload (generate_image). */
+  tool?: string;
+  input?: unknown;
+  result?: string;
+  ok?: boolean;
 }
 
 /**
@@ -545,9 +553,6 @@ export interface Chat {
   needsSetup?: boolean;
   /** Last user message in this chat, used for the retry button. */
   lastUserMessage?: string;
-  /** Chat-scoped artifact panel state. */
-  artifactPanelOpen?: boolean;
-  activeArtifactId?: string | null;
   /** Chat-scoped agent todo list + panel open state (driven by `todo_update` events). */
   todos?: AgentTodo[];
   todoPanelOpen?: boolean;
@@ -576,115 +581,13 @@ export type SettingsSection =
 
 export type ChatBucket = "Today" | "This week" | "Earlier";
 
-// ---- Artifacts ----
-
-export type ArtifactKind = "code" | "diff" | "doc" | "sheet" | "graph" | "preview";
-
-export interface Artifact {
-  id: string;
-  kind: ArtifactKind;
-  title: string;
-  language?: string;
-  content: string;
-  /** For diff artifacts: the original content. */
-  original?: string;
-  /** For sheet artifacts: parsed row/col data. */
-  rows?: string[][];
-  /** For graph/preview artifacts: an image URL or HTML src. */
-  src?: string;
-  createdAt: number;
-  sourceMessageId?: string;
-}
-
-function parseArtifactAttributes(src: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  const re = /(\w+)=("([^"]*)"|'([^']*)'|[^\s]+)/g;
-  for (const match of src.matchAll(re)) {
-    const key = match[1];
-    const value = match[3] ?? match[4] ?? match[2] ?? "";
-    out[key] = String(value).trim();
-  }
-  return out;
-}
-
-function extractArtifacts(text: string, sourceMessageId?: string): { cleaned: string; artifacts: Artifact[] } {
-  const re = /\[\[(?:ARTIFACT|DOCUMENT)\s+([^\]]+)\]\]([\s\S]*?)\[\[\/(?:ARTIFACT|DOCUMENT)\]\]/g;
-  const artifacts: Artifact[] = [];
-  let cleaned = text;
-  for (const match of text.matchAll(re)) {
-    const attrs = parseArtifactAttributes(match[1] || "");
-    const kind = (attrs.kind || "doc") as ArtifactKind;
-    const title = attrs.title || {
-      doc: "Document",
-      sheet: "Sheet",
-      graph: "Graph",
-      code: "Code",
-      diff: "Diff",
-      preview: "Preview",
-    }[kind] || "Artifact";
-    const body = (match[2] || "").trim();
-    const artifact: Artifact = {
-      id: uid(),
-      kind,
-      title,
-      content: body,
-      createdAt: Date.now(),
-      sourceMessageId,
-    };
-    if (kind === "sheet") {
-      artifact.rows = body
-        .split("\n")
-        .filter((line) => line.trim().length > 0)
-        .map((line) => line.split("\t"));
-    }
-    if (kind === "graph" && body.startsWith("data:image/")) {
-      artifact.src = body;
-    }
-    artifacts.push(artifact);
-    cleaned = cleaned.replace(match[0], "").trim();
-  }
-  cleaned = cleaned.replace(/\n{3,}/g, "\n\n").trim();
-  cleaned = stripArtifactJunk(cleaned);
-  return { cleaned, artifacts };
-}
-
-function inferArtifactKind(text: string): ArtifactKind | null {
-  const t = text.toLowerCase();
-  // Only trigger sheet for explicit creation requests or data export
-  if (/(create|make|write|generate|build|export)\s+(a\s+)?(spreadsheet|table|sheet|csv|tsv)/.test(t)) return "sheet";
-  if (/export\s+(to\s+)?(csv|tsv|spreadsheet)/.test(t)) return "sheet";
-  // Graphs are inherently artifact-worthy
-  if (/(create|make|generate|build|plot|show)\s+(a\s+)?(chart|graph|visualization)/.test(t)) return "graph";
-  if (/(chart|graph|plot|visualization|visualise|visualize)\s+(of|for|showing)/.test(t)) return "graph";
-  // Code artifacts for explicit runnable code requests
-  if (/(create|write|generate)\s+(a\s+)?(runnable\s+)?(script|code\s+snippet|example)/.test(t)) return "code";
-  // Docs only for explicit document creation with intent indicators
-  if (/(create|write|draft|make|generate)\s+(a\s+)?(document|doc|brief|report)(\s+for|\s+about|\s+titled|\s+called)?/.test(t)) return "doc";
-  return null;
-}
-
-function sanitizeArtifactContent(text: string): string {
-  return stripArtifactJunk(text)
-    .replace(/^Created artifact:.*$/gim, "")
-    .replace(/^Created a .* artifact in the sidebar\.$/gim, "")
-    .replace(/`?\.sidecar\/[^`\s]+`?/g, "")
-    .replace(/Created\s+\w+\s+artifact:?\s*/gim, "")
-    .trim()
-    .replace(/\n{3,}/g, "\n\n");
-}
-
-function stripArtifactJunk(text: string): string {
-  let out = (text || "").trim();
-  out = out.replace(/^\s*```(?:text|plain|plaintext|markdown)?\s*\n([\s\S]*?)\n```\s*$/i, "$1").trim();
-  out = out.replace(/^```(?:text|plain|plaintext|markdown)?\s*/i, "").replace(/\n```\s*$/i, "").trim();
-  out = out
-    .split("\n")
-    .filter((line) => !/^\s*(text|open|undefined)\s*$/i.test(line))
-    .join("\n")
+/** Older replies wrapped documents in [[ARTIFACT …]]…[[/ARTIFACT]] tags for a
+ *  sidebar that's gone; show what was inside them as ordinary text. */
+function inlineArtifactTags(text: string): string {
+  return text
+    .replace(/\[\[(?:ARTIFACT|DOCUMENT)\s+[^\]]*\]\]([\s\S]*?)\[\[\/(?:ARTIFACT|DOCUMENT)\]\]/g, (_, body: string) => body.trim())
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
-  out = out.replace(/^here(?:'|’)s the artifact:?\s*$/i, "Here's the artifact:");
-  out = out.replace(/\n{3,}/g, "\n\n").trim();
-  return out;
 }
 
 /** Prior turns of a chat as plain text, for the web app's stateless calls. */
@@ -830,12 +733,6 @@ interface AppState {
   // Abort for an in-flight stream
   _abort: AbortController | null;
 
-  // Artifacts
-  artifacts: Artifact[];
-  openArtifact: (a: Artifact) => void;
-  closeArtifactPanel: () => void;
-  clearArtifacts: () => void;
-  updateArtifact: (id: string, patch: Partial<Artifact>) => Promise<void>;
 
   // Agent todo panel (chat-scoped, driven by `todo_update` events)
   closeTodoPanel: () => void;
@@ -858,8 +755,6 @@ interface AppState {
   saveMemory: (content: string) => Promise<void>;
   refreshUserMd: () => Promise<void>;
   saveUserMd: (content: string) => Promise<void>;
-  artifactMode: boolean;
-  setArtifactMode: (v: boolean) => void;
 
   // Chat harness options
   planMode: boolean;
@@ -931,7 +826,6 @@ interface AppState {
   send: (
     text: string,
     options?: {
-      artifactMode?: boolean;
       planMode?: boolean;
       autoApproveDestructive?: boolean;
       attachments?: SendAttachment[];
@@ -1180,45 +1074,6 @@ export const useApp = create<AppState>((set, get) => ({
   starterDraft: "",
   clearDraftInject: () => set({ draftInject: null }),
 
-  artifacts: [],
-  openArtifact: (a) => {
-    set((s) => {
-      const chatId = s.activeChatId;
-      if (!chatId) return s;
-      const exists = s.artifacts.find((x) => x.id === a.id);
-      const artifacts = exists ? s.artifacts : [...s.artifacts, a];
-      const chat = s.chats[chatId];
-      if (!chat) return { artifacts };
-      return {
-        artifacts,
-        chats: {
-          ...s.chats,
-          [chatId]: {
-            ...chat,
-            artifactPanelOpen: true,
-            activeArtifactId: a.id,
-          },
-        },
-      };
-    });
-  },
-  closeArtifactPanel: () =>
-    set((s) => {
-      const chatId = s.activeChatId;
-      if (!chatId) return s;
-      const chat = s.chats[chatId];
-      if (!chat) return s;
-      return {
-        chats: {
-          ...s.chats,
-          [chatId]: {
-            ...chat,
-            artifactPanelOpen: false,
-            activeArtifactId: null,
-          },
-        },
-      };
-    }),
   closeTodoPanel: () =>
     set((s) => {
       const chatId = s.activeChatId;
@@ -1245,24 +1100,11 @@ export const useApp = create<AppState>((set, get) => ({
         },
       };
     }),
-  clearArtifacts: () =>
-    set((s) => ({
-      artifacts: [],
-      chats: Object.fromEntries(
-        Object.entries(s.chats).map(([id, chat]) => [
-          id,
-          { ...chat, artifactPanelOpen: false, activeArtifactId: null },
-        ]),
-      ),
-    })),
-
   projects: [],
   activeProjectId: null,
   setActiveProject: (id) => set({ activeProjectId: id }),
   memoryContent: "",
   userMdContent: "",
-  artifactMode: false,
-  setArtifactMode: (v) => set({ artifactMode: v }),
 
   // Chat harness options
   planMode: SECURITY_PRESET_META[INITIAL_PRESET].planMode,
@@ -1943,19 +1785,10 @@ export const useApp = create<AppState>((set, get) => ({
             } as Message;
           });
         const latestActivities = [...messages].reverse().find((m) => m.role === "assistant" && (m.activities || []).length > 0)?.activities || [];
-        // Extract artifacts from loaded messages so they appear in the
-        // artifact panel after app restart — otherwise raw [[ARTIFACT...]]
-        // tags leak into the displayed text.
-        const loadedArtifacts: Artifact[] = [];
         for (let i = 0; i < messages.length; i++) {
           const m = messages[i];
           if (m.role === "assistant" && /\[\[(ARTIFACT|DOCUMENT)\s/.test(m.content)) {
-            const { cleaned, artifacts } = extractArtifacts(m.content, m.id);
-            if (artifacts.length > 0) {
-              const replacement = cleaned || (artifacts.length === 1 ? "Here's the document:" : "Here are the documents:");
-              messages[i] = withParts(m, replaceTextParts(m.parts, replacement));
-              loadedArtifacts.push(...artifacts);
-            }
+            messages[i] = withParts(m, replaceTextParts(m.parts, inlineArtifactTags(m.content)));
           }
         }
         const fetchedProjectId = (full as any).project_id || null;
@@ -1966,7 +1799,6 @@ export const useApp = create<AppState>((set, get) => ({
         set((s) => ({
           activeProjectId: fetchedProjectId,
           view: "chat",
-          artifacts: [...s.artifacts, ...loadedArtifacts],
           chats: {
             ...s.chats,
             [id]: {
@@ -1975,8 +1807,6 @@ export const useApp = create<AppState>((set, get) => ({
               updatedAt: full.updated_at,
               messages,
               activities: latestActivities,
-              artifactPanelOpen: false,
-              activeArtifactId: null,
               projectId: fetchedProjectId,
               crewId: full.crew_id || null,
               error: unfinished ? "This reply didn't finish. Send your message again to retry." : undefined,
@@ -2006,8 +1836,6 @@ export const useApp = create<AppState>((set, get) => ({
               messages: [],
               error: String(e),
               activities: [],
-              artifactPanelOpen: false,
-              activeArtifactId: null,
             },
           },
         }));
@@ -2412,8 +2240,6 @@ export const useApp = create<AppState>((set, get) => ({
     set({ subagents: [] });
 
     const model = pickAvailableModel(get().providers, get().model);
-    const inferredArtifactKind = inferArtifactKind(trimmed);
-    const artifactMode = (options?.artifactMode ?? get().artifactMode) || !!inferredArtifactKind;
     const planMode = options?.planMode ?? get().planMode;
     const autoApproveDestructive = options?.autoApproveDestructive ?? get().autoApproveDestructive;
     const activeProjectId = get().activeProjectId;
@@ -2477,8 +2303,6 @@ export const useApp = create<AppState>((set, get) => ({
           status: "Thinking",
           lastUserMessage: userMsgText || chatTitle,
           activities: [],
-          artifactPanelOpen: false,
-          activeArtifactId: null,
           // Preserve the project context so the "back to project" arrow in
           // ChatView renders immediately — without this it only appears after
           // a reload via openChat, since the server-assigned id reconciliation
@@ -2561,7 +2385,6 @@ export const useApp = create<AppState>((set, get) => ({
           run_id: runId,
           message: trimmed,
           model,
-          artifact_mode: artifactMode,
           project_id: activeProjectId ?? undefined,
           crew_id: crewId || undefined,
           plan_mode: planMode,
@@ -3198,75 +3021,15 @@ export const useApp = create<AppState>((set, get) => ({
           },
         };
       });
-      const { cleaned, artifacts } = extractArtifacts(assistantContent, activeAsstId);
-      if (artifacts.length > 0) {
-        for (const artifact of artifacts) {
-          get().openArtifact(artifact);
-          trackArtifactCreated(artifact.kind, artifact.content?.length);
-        }
+      if (/\[\[(ARTIFACT|DOCUMENT)\s/.test(assistantContent)) {
         set((s) => {
           const c = s.chats[localId];
           if (!c) return s;
-          const replacement = cleaned || (artifacts.length === 1 ? "Here's the artifact:" : "Here are the artifacts:");
           const msgs = c.messages.map((m) =>
-            m.id === activeAsstId ? withParts(m, replaceTextParts(m.parts, replacement)) : m,
+            m.id === activeAsstId ? withParts(m, replaceTextParts(m.parts, inlineArtifactTags(assistantContent))) : m,
           );
-          return {
-            chats: {
-              ...s.chats,
-              [localId]: { ...c, messages: msgs },
-            },
-          };
+          return { chats: { ...s.chats, [localId]: { ...c, messages: msgs } } };
         });
-      } else if (artifactMode) {
-        const assistantContent = get().chats[localId]?.messages.find((m) => m.id === activeAsstId)?.content || "";
-        if (inferredArtifactKind && assistantContent.trim()) {
-          const title = userMsgText
-            .replace(/^(create|write|draft|make|generate|build)\s+(a|an|the)?\s*/i, "")
-            .replace(/\b(document|doc|table|sheet|spreadsheet|chart|graph|report|brief|note|summary)\b/i, "")
-            .trim()
-            .slice(0, 40) || {
-              doc: "Document",
-              sheet: "Sheet",
-              graph: "Graph",
-              code: "Code",
-              diff: "Diff",
-              preview: "Preview",
-            }[inferredArtifactKind];
-          const artifact: Artifact = {
-            id: uid(),
-            kind: inferredArtifactKind,
-            title: title || "Artifact",
-            content: sanitizeArtifactContent(assistantContent),
-            createdAt: Date.now(),
-            sourceMessageId: activeAsstId,
-          };
-          if (artifact.kind === "sheet") {
-            artifact.rows = assistantContent
-              .split("\n")
-              .filter((line) => line.trim().length > 0)
-              .map((line) => line.split("\t"));
-          }
-          if (artifact.kind === "graph" && assistantContent.startsWith("data:image/")) {
-            artifact.src = assistantContent.trim();
-          }
-          get().openArtifact(artifact);
-          trackArtifactCreated(artifact.kind, artifact.content?.length);
-          set((s) => {
-            const c = s.chats[localId];
-            if (!c) return s;
-            const replacement = cleaned || "Here's the artifact:";
-            const msgs = c.messages.map((m) =>
-              m.id === activeAsstId ? withParts(m, replaceTextParts(m.parts, replacement)) : m,
-            );
-            return {
-              chats: {
-                ...s.chats,
-                [localId]: { ...c, messages: msgs },
-              },
-            };
-          });
-        }
       }
     } catch (e) {
       const isAbort = e instanceof DOMException && e.name === "AbortError";
@@ -3310,54 +3073,6 @@ export const useApp = create<AppState>((set, get) => ({
     await Promise.all([get().refreshProviders(), get().refreshSettings()]);
   },
 
-  updateArtifact: async (id, patch) => {
-    // 1. Apply patch to in-memory state and capture the updated artifact list.
-    let updatedArtifact: Artifact | undefined;
-    set((s) => {
-      const artifacts = s.artifacts.map((a) => {
-        if (a.id !== id) return a;
-        updatedArtifact = { ...a, ...patch };
-        return updatedArtifact;
-      });
-      return { artifacts };
-    });
-
-    if (!updatedArtifact?.sourceMessageId) return;
-
-    // 2. Rebuild the raw message content so the backend stores the
-    //    updated artifact body inside [[ARTIFACT ...]] blocks.
-    const { activeChatId, chats, artifacts } = get();
-    const chatId = activeChatId;
-    const msgId = updatedArtifact.sourceMessageId;
-    if (!chatId) return;
-
-    const chat = chats[chatId];
-    if (!chat) return;
-
-    const baseMsg = chat.messages.find((m) => m.id === msgId);
-    if (!baseMsg) return;
-
-    // Collect all artifacts that belong to this message (after applying patch).
-    const msgArtifacts = artifacts.map((a) =>
-      a.id === id ? (updatedArtifact as Artifact) : a
-    ).filter((a) => a.sourceMessageId === msgId);
-
-    // Serialize each artifact back into [[ARTIFACT ...]] wire format.
-    const blocks = msgArtifacts
-      .map((a) => {
-        const titleAttr = a.title ? ` title="${a.title.replace(/"/g, "'")}"`  : "";
-        const langAttr = a.language ? ` language="${a.language}"` : "";
-        return `[[DOCUMENT kind=${a.kind}${titleAttr}${langAttr}]]\n${a.content}\n[[/DOCUMENT]]`;
-      })
-      .join("\n\n");
-
-    const rawContent = blocks
-      ? `${baseMsg.content}\n\n${blocks}`.trim()
-      : baseMsg.content;
-
-    // 3. Fire-and-forget PATCH; failures are non-fatal.
-    api.patchMessage(chatId, msgId, { content: rawContent }).catch(() => {});
-  },
 }));
 
 if (typeof window !== "undefined") {

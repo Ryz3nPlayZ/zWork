@@ -498,13 +498,22 @@ impl GatedTool {
             let _ = shared.tx.try_send(json!({ "type": "status", "text": "Finishing first-time setup. This only happens once." }));
             crate::runtime::wait_for_setup().await;
         }
+        // A picture's card is rebuilt from its call when the chat is reopened.
+        let image_input = (name == "generate_image").then(|| params.clone());
         let outcome = self.inner.execute(tc_id, params, signal, forward).await;
 
         let (ok, text) = match &outcome {
             Ok(r) => (true, r.text_content()),
             Err(e) => (false, e.clone()),
         };
-        shared.upsert_activity(json!({ "id": activity_id, "label": finished, "done": true }));
+        let mut done_entry = json!({ "id": activity_id, "label": finished, "done": true });
+        if let Some(input) = image_input {
+            done_entry["tool"] = json!(name);
+            done_entry["input"] = input;
+            done_entry["result"] = json!(text);
+            done_entry["ok"] = json!(ok);
+        }
+        shared.upsert_activity(done_entry);
         shared.persist().await;
         shared
             .send(json!({ "type": "activity", "id": activity_id, "label": finished, "done": true, "tool_use_id": tc_id }))

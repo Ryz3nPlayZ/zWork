@@ -9,6 +9,7 @@ import { api } from "../lib/api";
 import { useApp, type MessagePart } from "../lib/store";
 import { useResolvedTheme } from "../lib/theme";
 import { IconButton } from "./IconButton";
+import { Lightbox } from "./Lightbox";
 
 const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
@@ -37,6 +38,7 @@ export function ImageCard({ part }: { part: Extract<MessagePart, { kind: "tool" 
   const [blob, setBlob] = useState<Blob | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     if (!path) return;
@@ -92,7 +94,7 @@ export function ImageCard({ part }: { part: Extract<MessagePart, { kind: "tool" 
   // shortcut: Try again asks the agent in a new message rather than re-running the call in place; add a direct endpoint if people use it a lot.
   const tryAgain = () => void send(input.prompt ? `Make that image again: ${input.prompt}` : "Make that image again.");
 
-  const frame = "w-full max-w-[440px] rounded-xl border border-line bg-paper-sunken";
+  const frame = "w-full rounded-xl bg-paper-sunken";
 
   if (failed) {
     return (
@@ -114,7 +116,11 @@ export function ImageCard({ part }: { part: Extract<MessagePart, { kind: "tool" 
       </div>
     );
   } else if (src && !animate) {
-    picture = <img src={src} alt={alt} className={`${frame} block object-cover`} style={{ aspectRatio: ratio }} />;
+    picture = (
+      <button type="button" aria-label="View full size" onClick={() => setExpanded(true)} className="ring-focus block w-full cursor-zoom-in rounded-xl">
+        <img src={src} alt={alt} className={`${frame} block object-cover`} style={{ aspectRatio: ratio }} />
+      </button>
+    );
   } else if (still) {
     picture = (
       <div className={`${frame} flex items-center justify-center text-[12.5px] text-ink-faint`} style={{ aspectRatio: ratio }}>
@@ -123,24 +129,27 @@ export function ImageCard({ part }: { part: Extract<MessagePart, { kind: "tool" 
     );
   } else {
     picture = (
-      <ImageGeneration ref={fxRef} preset="pixels-organic" theme={theme} images={src ? [src] : []} className="block w-full max-w-[440px]">
+      <ImageGeneration ref={fxRef} preset="pixels-organic" theme={theme} images={src ? [src] : []} className="block w-full">
         <div role="img" aria-label={src ? alt : "Making the image…"} className={frame} style={{ aspectRatio: ratio }} />
       </ImageGeneration>
     );
   }
 
   return (
-    <figure className="my-3">
+    <figure className="my-3 w-full max-w-[440px] rounded-2xl border border-line bg-paper-raised p-1.5">
       {picture}
       {path && (
-        <figcaption className="mt-1.5 flex items-center gap-0.5">
+        <figcaption className="flex items-center gap-0.5 pl-1.5 pt-1">
+          <span className="mr-auto min-w-0 truncate text-[12px] text-ink-muted" title={input.prompt}>
+            {note && src ? note : input.prompt}
+          </span>
           <IconButton size="sm" icon={<ExternalLink />} label="Open" onClick={() => run(() => api.openFile(path))} />
           <IconButton size="sm" icon={copied ? <Check /> : <Copy />} label={copied ? "Copied" : "Copy"} disabled={!blob} onClick={copy} />
           <IconButton size="sm" icon={<FolderOpen />} label="Show in folder" onClick={() => run(() => api.openFile(path, true))} />
           <IconButton size="sm" icon={<RotateCcw />} label="Try again" onClick={tryAgain} />
-          {note && src && <span className="ml-2 text-[12px] text-ink-muted">{note}</span>}
         </figcaption>
       )}
+      {expanded && src && <Lightbox src={src} alt={alt} caption={input.prompt} onClose={() => setExpanded(false)} />}
     </figure>
   );
 }

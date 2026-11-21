@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pencil, Check, X, AlertCircle, Settings as SettingsIcon, RefreshCcw, Download, ChevronDown, ArrowLeft, NotebookPen, History } from "lucide-react";
 import { useApp } from "../lib/store";
 import { api } from "../lib/api";
@@ -36,8 +36,6 @@ export function ChatView() {
   const retry = useApp((s) => s.retry);
   const setView = useApp((s) => s.setView);
   const setActiveProject = useApp((s) => s.setActiveProject);
-  const artifacts = useApp((s) => s.artifacts);
-  const openArtifact = useApp((s) => s.openArtifact);
   const regenerateMessage = useApp((s) => s.regenerateMessage);
   const forkFromMessage = useApp((s) => s.forkFromMessage);
   const flagBadResponse = useApp((s) => s.flagBadResponse);
@@ -157,12 +155,6 @@ export function ChatView() {
     }
   }, [chat?.messages.length, chat?.working, chat?.status]);
 
-  const handleOpenArtifact = useCallback(
-    (artifact: Parameters<typeof openArtifact>[0]) => {
-      openArtifact(artifact);
-    },
-    [openArtifact],
-  );
 
   if (!chat) return null;
 
@@ -277,7 +269,7 @@ export function ChatView() {
               // Only a cost means anything to a non-developer; token counts
               // stay in the tooltip.
               const u = chatUsageSummary(chat.messages);
-              if (!u || u.costUsd <= 0 || chat.artifactPanelOpen) return null;
+              if (!u || u.costUsd <= 0) return null;
               return (
                 <span
                   className="text-[11px] text-ink-faint tabular-nums mr-1"
@@ -397,8 +389,6 @@ export function ChatView() {
                 <Message
                   key={m.id}
                   message={m}
-                  onOpenArtifact={handleOpenArtifact}
-                  artifacts={artifacts}
                   streaming={isStreaming}
                   activities={activities}
                   status={isStreaming ? chat.status : undefined}

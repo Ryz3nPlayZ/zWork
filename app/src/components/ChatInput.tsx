@@ -270,7 +270,6 @@ export function ChatInput({
   };
 
   const [focused, setFocused] = useState(false);
-  const [artifactMode, setArtifactMode] = useState(false);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [composing, setComposing] = useState(false);
@@ -776,7 +775,6 @@ export function ChatInput({
     setSlashState(null);
     onSend?.(text);
     void send(text, {
-      artifactMode,
       attachments: readyAttachments.map((a) => ({
         client_id: a.id,
         name: a.name,
@@ -1333,19 +1331,9 @@ export function ChatInput({
               size="md"
               onClick={() => fileInputRef.current?.click()}
             />
-            {/* Documents and permissions are agent features; the web app is
-                a plain chat. */}
+            {/* Permissions and crew are agent features; the web app is a plain chat. */}
             {!IS_WEB && (
               <>
-                <IconButton
-                  icon={<FileText className="h-4 w-4" />}
-                  label={artifactMode ? "Make a document: on" : "Make a document"}
-                  tooltipSide="top"
-                  variant="ghost"
-                  size="md"
-                  active={artifactMode}
-                  onClick={() => setArtifactMode((v) => !v)}
-                />
                 <SecurityPresetPicker value={securityPreset} onChange={setSecurityPreset} />
                 <CrewPicker disabled={working} />
               </>
@@ -1383,12 +1371,6 @@ export function ChatInput({
               setToolsOpen(false);
               void openShareWindow();
             }}
-          />
-          <OverlayToolItem
-            icon={<FileText className="h-4 w-4" />}
-            label={artifactMode ? "Make a document: on" : "Make a document"}
-            active={artifactMode}
-            onClick={() => setArtifactMode((v) => !v)}
           />
           <div className="my-1 h-px bg-line" />
           <OverlayToolItem

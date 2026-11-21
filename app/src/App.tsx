@@ -24,7 +24,6 @@ const ChatView = lazy(loadChatView);
 const SettingsPage = lazy(() => import("./components/Settings").then((m) => ({ default: m.SettingsPage })));
 const SearchModal = lazy(() => import("./components/SearchModal").then((m) => ({ default: m.SearchModal })));
 const ProjectView = lazy(() => import("./components/ProjectView").then((m) => ({ default: m.ProjectView })));
-const ArtifactPanel = lazy(() => import("./components/ArtifactPanel").then((m) => ({ default: m.ArtifactPanel })));
 const AnalyticsPage = lazy(() => import("./components/AnalyticsPage").then((m) => ({ default: m.AnalyticsPage })));
 const PlanPage = lazy(() => import("./components/PlanPage").then((m) => ({ default: m.PlanPage })));
 const ConnectorsPage = lazy(() => import("./components/ConnectorsPage").then((m) => ({ default: m.ConnectorsPage })));
@@ -169,8 +168,6 @@ export default function App() {
   const view = useApp((s) => s.view);
   const settings = useApp((s) => s.settings);
   const active = useApp((s) => s.activeChatId);
-  const chat = useApp((s) => (active ? s.chats[active] : undefined));
-  const artifactPanelOpen = !!(view === "chat" && active && chat?.artifactPanelOpen);
   const openLanding = useApp((s) => s.openLanding);
   const toggleSidebar = useApp((s) => s.toggleSidebar);
   const setView = useApp((s) => s.setView);
@@ -748,11 +745,6 @@ export default function App() {
                 </button>
               </div>
             </div>
-          )}
-          {artifactPanelOpen && (
-            <Suspense fallback={null}>
-              <ArtifactPanel />
-            </Suspense>
           )}
         </div>
       </main>

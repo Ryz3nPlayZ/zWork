@@ -16,12 +16,7 @@ import {
   RefreshCcw,
   ThumbsDown,
   ChevronDown,
-  Code2,
   FileText,
-  Table2,
-  BarChart3,
-  Globe,
-  GitCompare,
   Image as ImageIcon,
   Edit2,
   CheckCircle2,
@@ -34,7 +29,7 @@ import { cn } from "../lib/cn";
 import { protectCurrency } from "../lib/markdown";
 import { ThinkingOrb, type OrbState } from "thinking-orbs";
 import { getIcon } from "./ActivityBlocks";
-import type { Activity, Artifact, MessagePart, MessageUsage } from "../lib/store";
+import type { Activity, MessagePart, MessageUsage } from "../lib/store";
 import { useApp } from "../lib/store";
 import { Logo } from "./Logo";
 import { IconButton } from "./IconButton";
@@ -66,11 +61,9 @@ function UsageCaption({ usage }: { usage: MessageUsage }) {
 function CodeBlock({
   language,
   code,
-  onOpenPanel,
 }: {
   language: string;
   code: string;
-  onOpenPanel?: (code: string, lang: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
   // Diagrams and pages open on their rendered view; people read the result, not the source.
@@ -167,16 +160,6 @@ function CodeBlock({
           )}
         </div>
         <div className="flex items-center gap-1.5">
-          {onOpenPanel && (
-            <button
-              type="button"
-              onClick={() => onOpenPanel(code, language)}
-              aria-label="Open code in panel"
-              className="press rounded border border-line bg-paper px-1.5 py-0.5 text-[10px] text-ink-muted hover:bg-ink/5 hover:text-ink cursor-pointer"
-            >
-              Open
-            </button>
-          )}
           <button
             type="button"
             onClick={copy}
@@ -295,10 +278,8 @@ function MermaidDiagram({ code, dark }: { code: string; dark: boolean }) {
 // ---- Markdown renderer with KaTeX and code blocks ----
 export function AssistantMarkdown({
   content,
-  onOpenPanel,
 }: {
   content: string;
-  onOpenPanel?: (code: string, lang: string) => void;
 }) {
   // Inline `path/to/file.xlsx` spans that exist on disk render as file chips.
   const candidates = useMemo(
@@ -321,7 +302,6 @@ export function AssistantMarkdown({
               <CodeBlock
                 language={language}
                 code={codeStr}
-                onOpenPanel={onOpenPanel}
               />
             );
           }
@@ -724,22 +704,18 @@ function TypewriterText({ text, active }: { text: string; active: boolean }) {
 // ---- Main Message component ----
 export function Message({
   message,
-  onOpenArtifact,
   onRetry,
   onBadResponse,
   onFork,
-  artifacts,
   streaming,
   activities,
   status,
 }: {
   message: Msg;
-  onOpenArtifact?: (artifact: Artifact) => void;
   onRetry?: (messageId: string) => void;
   onBadResponse?: (messageId: string) => void;
   /** Fork the chat with this message as the branch point. */
   onFork?: (messageId: string) => void;
-  artifacts?: Artifact[];
   streaming?: boolean;
   activities?: Activity[];
   status?: string;
@@ -793,20 +769,6 @@ export function Message({
   const trailingIsText = parts.length > 0 && parts[lastPartIdx].kind === "text";
   const hasProcess = parts.some((p) => p.kind === "thinking" || p.kind === "narration" || p.kind === "tool");
 
-  const openArtifactFromCode = onOpenArtifact
-    ? (code: string, lang: string) => {
-        onOpenArtifact({
-          id: `code-${Date.now()}`,
-          kind: "code",
-          title: lang || "Untitled code",
-          language: lang,
-          content: code,
-          createdAt: Date.now(),
-          sourceMessageId: message.id,
-        });
-      }
-    : undefined;
-
   return (
     <div className="group flex w-full gap-3 justify-start">
       <AssistantMark orbState={streaming ? orbStateForParts(parts) : null} />
@@ -821,9 +783,6 @@ export function Message({
               messageId={message.id}
             />
           )}
-          {parts.map((p) =>
-            p.kind === "tool" && p.tool === "generate_image" ? <ImageCard key={`img-${p.id}`} part={p} /> : null,
-          )}
           {textEntries.map(({ part, i }, idx) => {
             const isStreamingPart = streaming && i === lastPartIdx;
             const trimmed = part.text.trim();
@@ -837,52 +796,21 @@ export function Message({
             }
             return (
               <div key={`text-${i}`} className={cn(idx > 0 && "mt-2")}>
-                <AssistantMarkdown content={trimmed} onOpenPanel={openArtifactFromCode} />
+                <AssistantMarkdown content={trimmed} />
               </div>
             );
           })}
           {streaming && trailingIsText && (
             <span className="inline-block h-[1em] w-[2px] align-middle bg-ink animate-typing-cursor ml-0.5" />
           )}
+          {/* Pictures land under the reply that talks about them. */}
+          {parts.map((p) =>
+            p.kind === "tool" && p.tool === "generate_image" ? <ImageCard key={`img-${p.id}`} part={p} /> : null,
+          )}
           {recoveryEntries.map((r) => (
             <PermissionRecoveryCard key={r.id} message={r.message} />
           ))}
         </div>
-
-        {artifacts && artifacts.length > 0 && (
-          <div className="mt-3 flex flex-col gap-2">
-            {artifacts
-              .filter((artifact) => artifact.sourceMessageId === message.id)
-              .map((artifact) => (
-                <button
-                  key={artifact.id}
-                  type="button"
-                  onClick={() => onOpenArtifact?.(artifact)}
-                  className={cn(
-                    "press flex w-full items-center gap-3 rounded-2xl border border-line bg-paper-raised px-3.5 py-3 text-left",
-                    "hover:border-line-strong hover:bg-ink/5",
-                  )}
-                >
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-line bg-paper-sunken text-ink-muted">
-                    {artifact.kind === "doc" && <FileText className="h-4 w-4" />}
-                    {artifact.kind === "sheet" && <Table2 className="h-4 w-4" />}
-                    {artifact.kind === "graph" && <BarChart3 className="h-4 w-4" />}
-                    {artifact.kind === "code" && <Code2 className="h-4 w-4" />}
-                    {artifact.kind === "preview" && <Globe className="h-4 w-4" />}
-                    {artifact.kind === "diff" && <GitCompare className="h-4 w-4" />}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13.5px] font-medium text-ink">
-                      {artifact.title}
-                    </div>
-                    <div className="mt-0.5 text-[12px] text-ink-muted">
-                      Click to open in the sidebar
-                    </div>
-                  </div>
-                </button>
-              ))}
-          </div>
-        )}
 
         <div className={cn(
           "mt-1 flex items-center gap-0.5 transition-opacity",
