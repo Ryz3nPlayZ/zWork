@@ -1834,7 +1834,9 @@ pub fn run_agent_turn(
         if !attachments.is_empty() {
             let listing =
                 attachments.iter().map(|a| format!("- {} → {}", a.name, a.path_or_url())).collect::<Vec<_>>().join("\n");
-            turn_extras.push(format!("## Current interaction context\nThe user attached:\n{listing}"));
+            turn_extras.push(format!(
+                "## Current interaction context\nThe user attached:\n{listing}\n\nRead PDFs, Word, Excel and PowerPoint files with `extract_document`, not a script."
+            ));
         }
         if let Some(extra) = &extra_system_prompt {
             if !extra.trim().is_empty() {

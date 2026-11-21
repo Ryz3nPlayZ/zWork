@@ -302,7 +302,7 @@ const DEEPSEEK_FLASH: &str = "deepseek/deepseek-v4.1-flash:floor";
 const DEEPSEEK_1017: &str = "deepseek/deepseek-v4.1-flash-1017:floor";
 const MIMO_PRO: &str = "xiaomi/mimo-v2.6-pro:floor";
 const GEMINI_FLASH: &str = "google/gemini-3.8-flash:floor";
-const GPT_SOL: &str = "openai/gpt-6.1-sol:floor";
+const GPT_SOL: &str = "openai/gpt-6.2-sol:floor";
 const GPT_LUNA: &str = "openai/gpt-6-luna:floor";
 const GLM_FLASH: &str = "z-ai/glm-5.3-flash:floor";
 
@@ -2355,7 +2355,7 @@ fn estimate_cost(model: &str, input: Option<i64>, output: Option<i64>) -> Option
         "xiaomi/mimo-v2.6-pro" => (0.435, 0.87),
         "z-ai/glm-5.3" => (0.5625, 2.5),
         "google/gemini-3.8-flash" => (0.375, 1.875),
-        "openai/gpt-6.1-sol" => (1.0, 5.0),
+        "openai/gpt-6.2-sol" => (1.0, 5.0),
         _ => return None,
     };
     match (input, output) {
@@ -7998,7 +7998,7 @@ mod router_tests {
 
     #[test]
     fn estimate_cost_strips_floor_suffix() {
-        let c = estimate_cost("openai/gpt-6.1-sol:floor", Some(1_000_000), Some(0)).unwrap();
+        let c = estimate_cost("openai/gpt-6.2-sol:floor", Some(1_000_000), Some(0)).unwrap();
         assert!((c - 1.0).abs() < 1e-9);
     }
 }

@@ -301,7 +301,7 @@ function sleep(ms: number) {
 export function whitelabelModelName(upstreamId: string | null | undefined): string | undefined {
   if (!upstreamId) return undefined;
   const id = upstreamId.toLowerCase();
-  if (id === "zwork-apex" || id.includes("gpt-6.1-sol")) return "zwork-apex";
+  if (id === "zwork-apex" || /gpt-[\d.]+-sol/.test(id)) return "zwork-apex";
   if (id.startsWith("zwork-") || /gemini|luna|glm|deepseek|mimo/.test(id)) return "zwork-auto";
   return undefined;
 }

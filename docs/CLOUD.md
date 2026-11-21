@@ -65,7 +65,7 @@ OpenRouter id with `:floor` routing.
 | App id | Name | Plans | Served by |
 |---|---|---|---|
 | `zwork-auto` | zWork | all | the auto router, below |
-| `zwork-apex` | ?????? | Pro, Max | `openai/gpt-6.1-sol` |
+| `zwork-apex` | ?????? | Pro, Max | `openai/gpt-6.2-sol` |
 
 The auto router picks a route on a run's first call and stores it on every
 request (`gateway_requests.route`, with the reason in `routing_decision.why`).
