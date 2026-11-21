@@ -469,7 +469,7 @@ function ActivityChart({ days }: { days: Day[] }) {
 }
 
 /** One cell per day, a column per week (Sunday first), one hue from light to dark. */
-const HEAT_LEVELS = ["bg-ink/[0.06]", "bg-ink/20", "bg-ink/35", "bg-ink/55", "bg-ink/80"];
+const HEAT_LEVELS = ["bg-state-hover", "bg-ink/20", "bg-ink/35", "bg-ink/55", "bg-ink/80"];
 const WEEKS = 53;
 
 function YearHeatmap({ rows }: { rows: AnalyticsDay[] }) {

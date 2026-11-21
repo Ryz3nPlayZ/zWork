@@ -102,7 +102,7 @@ function CaptionButton({
             ? "group-hover:bg-[#c42b1c] group-hover:text-white"
             // ink at low alpha adapts to the theme: light overlay on dark
             // surfaces, dark overlay on light ones.
-            : "group-hover:bg-ink/[0.06] group-hover:text-ink",
+            : "group-hover:bg-state-hover group-hover:text-ink",
         )}
       >
         {children}

@@ -179,7 +179,7 @@ export function ScheduleModal({
                     onClick={() => toggleDay(i)}
                     className={cn(
                       "press ring-focus h-7 rounded-full px-2.5 text-[12px] font-medium transition-colors",
-                      days.includes(i) ? "bg-ink text-paper" : "text-ink-muted hover:bg-ink/5 hover:text-ink",
+                      days.includes(i) ? "bg-ink text-paper" : "text-ink-muted hover:bg-state-hover hover:text-ink",
                     )}
                   >
                     {d}
@@ -235,7 +235,7 @@ export function ScheduleModal({
 }
 
 const quietSelect =
-  "ring-focus rounded-lg bg-transparent px-2 py-1 text-[13px] text-ink-soft transition-colors hover:bg-ink/5 hover:text-ink focus:outline-none";
+  "ring-focus rounded-lg bg-transparent px-2 py-1 text-[13px] text-ink-soft transition-colors hover:bg-state-hover hover:text-ink focus:outline-none";
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (

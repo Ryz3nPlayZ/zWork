@@ -263,7 +263,7 @@ export function OverlayChatView() {
                 pinned so the pill doesn't move. */}
             <div
               onMouseDown={onResizeMouseDown}
-              className="h-1.5 w-full shrink-0 cursor-ns-resize hover:bg-ink/5"
+              className="h-1.5 w-full shrink-0 cursor-ns-resize hover:bg-state-hover"
               title="Drag to resize"
               aria-label="Resize handle"
             />

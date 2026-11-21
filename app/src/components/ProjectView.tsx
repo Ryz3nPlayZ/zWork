@@ -434,7 +434,7 @@ function ProjectDetailBody({ project }: { project: Project }) {
           <button
             type="button"
             onClick={() => setActiveProject(null)}
-            className="press ring-focus -ml-2 mb-4 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[12.5px] text-ink-muted transition-colors hover:bg-ink/5 hover:text-ink"
+            className="press ring-focus -ml-2 mb-4 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[12.5px] text-ink-muted transition-colors hover:bg-state-hover hover:text-ink"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
             Projects
@@ -467,7 +467,7 @@ function ProjectDetailBody({ project }: { project: Project }) {
                         type="button"
                         title="Rename"
                         onClick={() => setEditing("name")}
-                        className="ring-focus -mx-1.5 max-w-full truncate rounded-md px-1.5 text-left text-[22px] font-semibold tracking-tight text-ink transition-colors hover:bg-ink/5"
+                        className="ring-focus -mx-1.5 max-w-full truncate rounded-md px-1.5 text-left text-[22px] font-semibold tracking-tight text-ink transition-colors hover:bg-state-hover"
                       >
                         {project.name}
                       </button>
@@ -494,7 +494,7 @@ function ProjectDetailBody({ project }: { project: Project }) {
                     <button
                       type="button"
                       onClick={() => setEditing("description")}
-                      className="ring-focus -mx-1.5 mt-0.5 block max-w-full rounded-md px-1.5 py-0.5 text-left text-[13px] text-ink-muted transition-colors hover:bg-ink/5"
+                      className="ring-focus -mx-1.5 mt-0.5 block max-w-full rounded-md px-1.5 py-0.5 text-left text-[13px] text-ink-muted transition-colors hover:bg-state-hover"
                     >
                       {project.description?.trim() || (
                         <span className="text-ink-faint">Add what this project is for</span>
@@ -636,7 +636,7 @@ function ProjectDetailBody({ project }: { project: Project }) {
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
-                      className="ring-focus -mx-2 flex w-[calc(100%+1rem)] items-start gap-2.5 rounded-xl px-2 py-2 text-left transition-colors hover:bg-ink/5"
+                      className="ring-focus -mx-2 flex w-[calc(100%+1rem)] items-start gap-2.5 rounded-xl px-2 py-2 text-left transition-colors hover:bg-state-hover"
                     >
                       <Upload className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-faint" />
                       <span className="text-[12.5px] leading-relaxed text-ink-muted">

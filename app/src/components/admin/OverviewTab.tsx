@@ -341,7 +341,7 @@ function AttentionPanel({ items, onOpen, loading }: { items: Attention[]; onOpen
             <button
               type="button"
               onClick={() => onOpen(it.tab)}
-              className="ring-focus group flex w-full items-center gap-2.5 px-4 py-2 text-left text-[12.5px] hover:bg-line/25"
+              className="ring-focus group flex w-full items-center gap-2.5 px-4 py-2 text-left text-[12.5px] hover:bg-state-hover"
             >
               <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", it.tone === "error" ? "bg-error" : "bg-warning")} />
               <span className="min-w-0 flex-1 text-ink">{it.text}</span>

@@ -650,7 +650,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="press rounded-lg p-1.5 text-ink-muted hover:bg-line/40 hover:text-ink"
+            className="press rounded-lg p-1.5 text-ink-muted hover:bg-state-hover hover:text-ink"
           >
             <X className="h-4 w-4" />
           </button>

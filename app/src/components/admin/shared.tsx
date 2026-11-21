@@ -766,7 +766,7 @@ function TableRow<T>({
         className={cn(
           "border-b border-line/60 last:border-0",
           onToggle && "cursor-pointer",
-          open ? "bg-line/20" : "hover:bg-line/25",
+          open ? "bg-state-hover" : "hover:bg-state-hover",
         )}
       >
         {columns.map((c) => {

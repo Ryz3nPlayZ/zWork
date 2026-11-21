@@ -104,7 +104,7 @@ export function KeybindingsModal() {
           </div>
           <button
             onClick={() => setOpen(false)}
-            className="press absolute -top-1 right-0 rounded-lg p-1.5 text-ink-faint hover:bg-line/50 hover:text-ink transition-colors"
+            className="press absolute -top-1 right-0 rounded-lg p-1.5 text-ink-faint hover:bg-state-hover hover:text-ink transition-colors"
             aria-label="Close shortcuts modal"
           >
             <X className="h-4 w-4" />

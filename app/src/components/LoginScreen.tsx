@@ -186,7 +186,7 @@ export function LoginScreen() {
                 onClick={handleGoogleSignIn}
                 className={cn(
                   "press inline-flex w-full items-center justify-center gap-2.5 rounded-xl border border-line bg-paper-raised px-4 py-3 text-[14px] font-medium text-ink transition-colors",
-                  "hover:border-line-strong hover:bg-ink/5",
+                  "hover:border-line-strong hover:bg-state-hover",
                   "disabled:cursor-not-allowed disabled:opacity-60",
                 )}
               >

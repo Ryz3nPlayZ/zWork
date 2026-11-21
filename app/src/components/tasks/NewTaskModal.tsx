@@ -165,7 +165,7 @@ export function NewTaskModal({
           <button
             type="button"
             onClick={onClose}
-            className="press rounded-md p-1 text-ink-faint hover:bg-ink/5 hover:text-ink"
+            className="press rounded-md p-1 text-ink-faint hover:bg-state-hover hover:text-ink"
           >
             <X className="h-4 w-4" />
           </button>
@@ -275,7 +275,7 @@ export function NewTaskModal({
                         <button
                           type="button"
                           onClick={() => setPickerMonth((m) => addMonths(m, -1))}
-                          className="press rounded-md p-1 text-ink-faint hover:text-ink hover:bg-ink/5"
+                          className="press rounded-md p-1 text-ink-faint hover:text-ink hover:bg-state-hover"
                         >
                           <ChevronLeft className="h-3.5 w-3.5" />
                         </button>
@@ -285,7 +285,7 @@ export function NewTaskModal({
                         <button
                           type="button"
                           onClick={() => setPickerMonth((m) => addMonths(m, 1))}
-                          className="press rounded-md p-1 text-ink-faint hover:text-ink hover:bg-ink/5"
+                          className="press rounded-md p-1 text-ink-faint hover:text-ink hover:bg-state-hover"
                         >
                           <ChevronRight className="h-3.5 w-3.5" />
                         </button>
@@ -310,7 +310,7 @@ export function NewTaskModal({
                               className={cn(
                                 "press flex h-7 items-center justify-center rounded-md text-[11px]",
                                 !day.current && "text-ink-faint/50",
-                                day.current && !selected && "text-ink hover:bg-ink/5",
+                                day.current && !selected && "text-ink hover:bg-state-hover",
                                 selected && "bg-ink text-paper",
                                 isToday && !selected && "font-bold text-accent"
                               )}
@@ -340,7 +340,7 @@ export function NewTaskModal({
                               "press text-left rounded-md px-2 py-1 text-[11.5px] transition-colors",
                               dueDate && opt.date && isSameDay(opt.date, new Date(`${dueDate}T00:00:00`))
                                 ? "bg-ink text-paper"
-                                : "text-ink-muted hover:bg-ink/5 hover:text-ink"
+                                : "text-ink-muted hover:bg-state-hover hover:text-ink"
                             )}
                           >
                             {opt.label}
@@ -376,7 +376,7 @@ export function NewTaskModal({
           <button
             type="button"
             onClick={onClose}
-            className="press rounded-md border border-line px-3 py-1.5 text-[12.5px] font-medium text-ink hover:bg-ink/5"
+            className="press rounded-md border border-line px-3 py-1.5 text-[12.5px] font-medium text-ink hover:bg-state-hover"
           >
             Cancel
           </button>

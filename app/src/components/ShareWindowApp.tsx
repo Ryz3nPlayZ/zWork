@@ -165,7 +165,7 @@ export function ShareWindowApp() {
         <button
           type="button"
           onClick={close}
-          className="press rounded-full p-1 text-ink-faint hover:bg-ink/5 hover:text-ink"
+          className="press rounded-full p-1 text-ink-faint hover:bg-state-hover hover:text-ink"
           aria-label="Close"
         >
           <X className="h-4 w-4" />
@@ -211,7 +211,7 @@ export function ShareWindowApp() {
                   onClick={() => void onPick(w.window_id)}
                   className={cn(
                     "flex w-full items-center gap-3 rounded-xl border border-line bg-paper px-3 py-2 text-left transition-colors",
-                    "hover:bg-ink/5 disabled:cursor-not-allowed disabled:opacity-60",
+                    "hover:bg-state-hover disabled:cursor-not-allowed disabled:opacity-60",
                   )}
                 >
                   <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-paper-sunken text-ink-muted">
@@ -253,7 +253,7 @@ function PermissionPanel({ onOpenSettings }: { onOpenSettings: () => void }) {
       <button
         type="button"
         onClick={onOpenSettings}
-        className="press mt-3 rounded-lg border border-line bg-paper px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-ink/5"
+        className="press mt-3 rounded-lg border border-line bg-paper px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-state-hover"
       >
         Open System Settings
       </button>

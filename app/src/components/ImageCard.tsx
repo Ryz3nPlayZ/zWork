@@ -100,7 +100,7 @@ export function ImageCard({ part }: { part: Extract<MessagePart, { kind: "tool" 
     return (
       <div role="alert" className="my-3 flex max-w-[440px] items-center gap-3 rounded-xl border border-line bg-paper-raised px-3.5 py-2.5 text-[13px] text-ink-muted">
         <span className="flex-1">{part.result?.trim() || "The image couldn't be made. Nothing was charged."}</span>
-        <button type="button" onClick={tryAgain} className="press shrink-0 rounded-md px-2 py-1 font-medium text-ink hover:bg-ink/5">
+        <button type="button" onClick={tryAgain} className="press shrink-0 rounded-md px-2 py-1 font-medium text-ink hover:bg-state-hover">
           Try again
         </button>
       </div>

@@ -385,7 +385,7 @@ function PricingCard({
           type="button"
           onClick={onManage}
           disabled={busy}
-          className="press ring-focus mb-6 w-full rounded-xl border border-line bg-paper px-4 py-3 text-[13px] font-semibold text-ink hover:bg-ink/5 disabled:opacity-40"
+          className="press ring-focus mb-6 w-full rounded-xl border border-line bg-paper px-4 py-3 text-[13px] font-semibold text-ink hover:bg-state-hover disabled:opacity-40"
         >
           Manage billing
         </button>
@@ -406,7 +406,7 @@ function PricingCard({
             "press ring-focus mb-6 w-full rounded-xl px-4 py-3 text-[13px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
             tier.highlight
               ? "bg-ink text-paper hover:bg-ink/90"
-              : "border border-line bg-paper text-ink hover:bg-ink/5"
+              : "border border-line bg-paper text-ink hover:bg-state-hover"
           )}
         >
           {busy ? "Opening…" : (

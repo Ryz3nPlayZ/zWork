@@ -446,7 +446,7 @@ export function AppearanceSettings() {
                   <button
                     type="button"
                     onClick={() => guard(() => { applySavedTheme(t); setNote(`Applied “${t.name}”.`); })}
-                    className="press ring-focus flex h-full items-center gap-2 rounded-l-lg pl-2 pr-2.5 text-[12.5px] text-ink hover:bg-ink/5"
+                    className="press ring-focus flex h-full items-center gap-2 rounded-l-lg pl-2 pr-2.5 text-[12.5px] text-ink hover:bg-state-hover"
                   >
                     <span
                       className="h-4 w-4 rounded-full border border-line"
@@ -458,7 +458,7 @@ export function AppearanceSettings() {
                     type="button"
                     aria-label={`Remove ${t.name}`}
                     onClick={() => guard(() => removeSaved(i))}
-                    className="press ring-focus flex h-full w-7 items-center justify-center rounded-r-lg border-l border-line text-ink-faint hover:bg-ink/5 hover:text-ink"
+                    className="press ring-focus flex h-full w-7 items-center justify-center rounded-r-lg border-l border-line text-ink-faint hover:bg-state-hover hover:text-ink"
                   >
                     <X className="h-3 w-3" />
                   </button>

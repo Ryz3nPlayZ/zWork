@@ -85,7 +85,7 @@ function OverlayToolItem({
       onClick={onClick}
       className={cn(
         "press flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-[12.5px] font-medium text-ink-soft",
-        "hover:bg-ink/5 hover:text-ink",
+        "hover:bg-state-hover hover:text-ink",
         active && "text-ink",
       )}
     >
@@ -975,7 +975,7 @@ export function ChatInput({
       type="button"
       aria-label="Stop"
       onClick={stop}
-      className="press ring-focus inline-flex h-8 w-8 items-center justify-center rounded-full bg-paper-sunken text-ink transition-colors hover:bg-line/70"
+      className="press ring-focus inline-flex h-8 w-8 items-center justify-center rounded-full bg-paper-sunken text-ink transition-colors hover:bg-state-hover"
     >
       <Square className="h-3 w-3 fill-ink" />
     </button>
@@ -989,7 +989,7 @@ export function ChatInput({
         type="button"
         title="Send now; zWork reads it at its next step"
         onClick={() => submitQueue("steer")}
-        className="press ring-focus inline-flex h-8 items-center rounded-full border border-line px-3 text-[12.5px] font-medium text-ink-soft hover:border-line-strong hover:bg-ink/5 hover:text-ink"
+        className="press ring-focus inline-flex h-8 items-center rounded-full border border-line px-3 text-[12.5px] font-medium text-ink-soft hover:border-line-strong hover:bg-state-hover hover:text-ink"
       >
         Steer
       </button>
@@ -1153,7 +1153,7 @@ export function ChatInput({
           onClick={() => setToolsOpen((v) => !v)}
           aria-label="More options"
           data-no-drag
-          className="press ring-focus inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-muted hover:bg-ink/5 hover:text-ink"
+          className="press ring-focus inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-muted hover:bg-state-hover hover:text-ink"
         >
           <Plus className="h-[18px] w-[18px]" />
         </button>
@@ -1210,7 +1210,7 @@ export function ChatInput({
               <button
                 type="button"
                 onClick={cancelEditMessage}
-                className="press ring-focus ml-auto shrink-0 rounded-md px-2 py-0.5 text-ink-muted transition-colors hover:bg-ink/5 hover:text-ink"
+                className="press ring-focus ml-auto shrink-0 rounded-md px-2 py-0.5 text-ink-muted transition-colors hover:bg-state-hover hover:text-ink"
               >
                 Cancel
               </button>
@@ -1372,7 +1372,7 @@ export function ChatInput({
           <button
             type="button"
             onClick={() => void openPrivacyPane(voice.blocked === "mic" ? "microphone" : "speech_recognition")}
-            className="press ring-focus shrink-0 rounded-md px-2 py-0.5 font-medium text-ink hover:bg-ink/5"
+            className="press ring-focus shrink-0 rounded-md px-2 py-0.5 font-medium text-ink hover:bg-state-hover"
           >
             Open settings
           </button>
@@ -1381,7 +1381,7 @@ export function ChatInput({
           type="button"
           aria-label="Dismiss"
           onClick={voice.dismissBlocked}
-          className="press ring-focus shrink-0 rounded-md p-1 text-ink-faint hover:bg-ink/5 hover:text-ink"
+          className="press ring-focus shrink-0 rounded-md p-1 text-ink-faint hover:bg-state-hover hover:text-ink"
         >
           <X className="h-3.5 w-3.5" />
         </button>
@@ -1500,7 +1500,7 @@ function QuestionCardBody({
             key={`${opt}-${i}`}
             type="button"
             onClick={() => onAnswer?.(opt)}
-            className="press ring-focus flex items-center gap-2.5 rounded-xl border border-line bg-paper px-3 py-2 text-left text-[13px] text-ink transition-colors hover:bg-ink/5"
+            className="press ring-focus flex items-center gap-2.5 rounded-xl border border-line bg-paper px-3 py-2 text-left text-[13px] text-ink transition-colors hover:bg-state-hover"
           >
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-line text-[10px] font-medium text-ink-muted">
               {String.fromCharCode(65 + i)}

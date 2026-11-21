@@ -37,6 +37,12 @@ export default {
           strong: "rgb(var(--border-overlay) / 0.20)",
           muted: "rgb(var(--border-overlay) / 0.06)",
         },
+        // One hover and one selected fill for every row, item and card: an
+        // overlay of the text colour, so dark themes lighten and light themes darken.
+        state: {
+          hover: "rgb(var(--ink) / 0.06)",
+          selected: "rgb(var(--ink) / 0.1)",
+        },
         success: {
           DEFAULT: "rgb(var(--success) / <alpha-value>)",
           fg: "rgb(var(--success-fg) / <alpha-value>)",

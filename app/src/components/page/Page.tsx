@@ -102,7 +102,7 @@ export function Button({
       className={cn(
         "press ring-focus inline-flex h-8 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-[12.5px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 [&_svg]:h-3.5 [&_svg]:w-3.5",
         variant === "primary" && "bg-ink text-paper hover:bg-ink/90",
-        variant === "secondary" && "border border-line bg-paper text-ink hover:bg-ink/5",
+        variant === "secondary" && "border border-line bg-paper text-ink hover:bg-state-hover",
         variant === "danger" && "border border-error/30 bg-error/10 text-error hover:bg-error/15",
         className,
       )}
@@ -127,7 +127,7 @@ export function RowIconButton({
       aria-label={label}
       title={label}
       className={cn(
-        "press ring-focus inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-faint transition-colors hover:bg-line/50 hover:text-ink disabled:opacity-40 [&_svg]:h-3.5 [&_svg]:w-3.5",
+        "press ring-focus inline-flex h-7 w-7 items-center justify-center rounded-md text-ink-faint transition-colors hover:bg-state-hover hover:text-ink disabled:opacity-40 [&_svg]:h-3.5 [&_svg]:w-3.5",
         className,
       )}
       {...rest}
@@ -248,8 +248,8 @@ export function Segmented<T extends string>({
   label: string;
 }) {
   return (
-    // bg-line/40 reads like paper-raised on a page and still shows on a raised dialog.
-    <div role="tablist" aria-label={label} className="inline-flex rounded-lg bg-line/40 p-0.5">
+    // An ink overlay, so it reads on a page and on a raised dialog alike.
+    <div role="tablist" aria-label={label} className="inline-flex rounded-lg bg-state-selected p-0.5">
       {options.map((o) => (
         <button
           key={o.value}
@@ -340,7 +340,7 @@ export function ListRow({
     </>
   );
   return (
-    <li className={cn("group transition-colors", !expanded && "hover:bg-line/25", expanded && "bg-line/20")}>
+    <li className={cn("group transition-colors", !expanded && "hover:bg-state-hover", expanded && "bg-state-hover")}>
       <div className="flex items-center gap-3 px-3.5 py-2.5">
         {onClick ? (
           <button

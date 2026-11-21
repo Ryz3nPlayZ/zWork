@@ -135,7 +135,7 @@ function CrewEditor({
               onClick={() => setAvatar(type)}
               className={cn(
                 "press ring-focus flex aspect-square items-center justify-center rounded-xl border",
-                avatar === type ? "border-ink bg-ink/5" : "border-transparent hover:bg-ink/5",
+                avatar === type ? "border-ink bg-ink/5" : "border-transparent hover:bg-state-hover",
               )}
             >
               <BotAvatar type={type} color={color} size={30} theme={theme} interactive={false} aria-hidden />
@@ -175,7 +175,7 @@ function CrewEditor({
         {restrictApps && (
           <div className="mt-2 grid max-h-44 gap-1 overflow-y-auto rounded-xl border border-line bg-paper p-2 sm:grid-cols-2">
             {apps.map((app) => (
-              <label key={app.id} className="flex min-h-9 cursor-pointer items-center gap-2 rounded-lg px-2 text-[12.5px] text-ink hover:bg-ink/5">
+              <label key={app.id} className="flex min-h-9 cursor-pointer items-center gap-2 rounded-lg px-2 text-[12.5px] text-ink hover:bg-state-hover">
                 <input
                   type="checkbox"
                   checked={selectedApps.includes(app.id)}

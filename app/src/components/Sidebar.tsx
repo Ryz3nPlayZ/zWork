@@ -218,14 +218,14 @@ export function Sidebar() {
                               void openChat(c.id);
                             }}
                             className={cn(
-                              "press flex w-full items-center rounded-md px-2 py-1.5 text-left text-[12.5px] text-ink-muted",
-                              "hover:bg-line/40 hover:text-ink",
+                              "press flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] text-ink-muted",
+                              "hover:bg-state-hover hover:text-ink",
                               isActive &&
-                              "bg-line hover:bg-line font-semibold text-ink",
+                              "bg-state-selected hover:bg-state-selected font-semibold text-ink",
                             )}
                           >
                             {crewById.get(c.crew_id ?? "") && (
-                              <CrewAvatar member={crewById.get(c.crew_id!)!} size={16} className="mr-1.5 shrink-0" />
+                              <CrewAvatar member={crewById.get(c.crew_id!)!} size={18} className="shrink-0" />
                             )}
                             <span className="truncate pr-6">{c.title}</span>
                           </button>
@@ -344,8 +344,8 @@ function MoreMenuButton({
               className={cn(
                 "press flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px]",
                 view === item.id
-                  ? "bg-ink/5 font-semibold text-ink"
-                  : "text-ink-muted hover:bg-ink/5 hover:text-ink",
+                  ? "bg-state-selected font-semibold text-ink"
+                  : "text-ink-muted hover:bg-state-hover hover:text-ink",
               )}
             >
               {item.icon}
@@ -360,7 +360,7 @@ function MoreMenuButton({
         aria-expanded={open}
         className={cn(
           "press group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] text-ink-muted",
-          "hover:bg-ink/5 hover:text-ink",
+          "hover:bg-state-hover hover:text-ink",
           open && "text-ink",
         )}
       >
@@ -382,7 +382,7 @@ function MoreMenuButton({
 function SectionLabel({ title }: { title: string }) {
   return (
     <div className="flex items-center justify-between px-2">
-      <span className="text-[10.5px] font-semibold uppercase tracking-wider text-ink-faint">
+      <span className="text-[11.5px] font-medium text-ink-faint">
         {title}
       </span>
     </div>
@@ -412,7 +412,7 @@ function SidebarButton({
       className={cn(
         "press group flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] text-ink-muted",
         "hover:text-ink",
-        active && "bg-line hover:bg-line font-semibold text-ink",
+        active && "bg-state-selected hover:bg-state-selected font-semibold text-ink",
       )}
     >
       <span className="flex h-5 w-5 items-center justify-center text-ink-muted group-hover:text-ink [&_svg]:h-[16px] [&_svg]:w-[16px]">

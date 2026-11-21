@@ -33,7 +33,7 @@ export function TodoPanel() {
         type="button"
         aria-expanded={!collapsed}
         onClick={() => setCollapsed(!collapsed)}
-        className="press flex w-full items-center gap-2.5 px-4 py-2.5 text-left transition-colors hover:bg-ink/5"
+        className="press flex w-full items-center gap-2.5 px-4 py-2.5 text-left transition-colors hover:bg-state-hover"
       >
         {allDone ? (
           <Check className="h-3.5 w-3.5 shrink-0 text-accent" />

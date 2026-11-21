@@ -187,7 +187,7 @@ export function InboxPage() {
           <button
             type="button"
             onClick={() => undo(item.id)}
-            className="press ring-focus shrink-0 rounded-md px-2 py-0.5 font-medium text-ink hover:bg-line/40"
+            className="press ring-focus shrink-0 rounded-md px-2 py-0.5 font-medium text-ink hover:bg-state-hover"
           >
             Undo
           </button>

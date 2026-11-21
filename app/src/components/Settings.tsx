@@ -225,8 +225,8 @@ export function SettingsPage() {
                   className={cn(
                     "press flex items-center gap-2.5 whitespace-nowrap px-4 py-3 text-left text-[13px] font-medium transition-colors lg:rounded-lg lg:px-3 lg:py-2",
                     isActive
-                      ? "text-ink border-b-2 border-ink lg:border-b-0 lg:bg-line"
-                      : "text-ink-muted border-b-2 border-transparent hover:text-ink lg:border-b-0 lg:hover:bg-line/40",
+                      ? "text-ink border-b-2 border-ink lg:border-b-0 lg:bg-state-selected"
+                      : "text-ink-muted border-b-2 border-transparent hover:text-ink lg:border-b-0 lg:hover:bg-state-hover",
                   )}
                 >
                   <span className={cn("flex h-5 w-5 shrink-0 items-center justify-center", isActive ? "text-ink" : "text-ink-faint")}>
@@ -376,7 +376,7 @@ function ProviderPicker({
         onClick={() => pick(id)}
         className={cn(
           "flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left text-[12.5px] transition-colors",
-          id === value ? "bg-line font-medium text-ink" : "text-ink hover:bg-line/40",
+          id === value ? "bg-state-selected font-medium text-ink" : "text-ink hover:bg-state-hover",
         )}
       >
         <span className="flex min-w-0 items-center gap-2">
@@ -681,7 +681,7 @@ function ModelsPanel({
                 <button
                   type="button"
                   onClick={() => startEdit(m.id)}
-                  className="press ring-focus rounded-md px-2 py-1 text-[12px] text-ink-muted hover:bg-line/40 hover:text-ink"
+                  className="press ring-focus rounded-md px-2 py-1 text-[12px] text-ink-muted hover:bg-state-hover hover:text-ink"
                 >
                   Edit
                 </button>
@@ -806,7 +806,7 @@ function ModelsPanel({
                       <button
                         type="button"
                         onClick={() => pickModel(m.id, m.name)}
-                        className="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left hover:bg-line/40"
+                        className="flex w-full items-center justify-between gap-3 rounded-md px-2.5 py-1.5 text-left hover:bg-state-hover"
                       >
                         <span className="min-w-0">
                           <span className="block truncate text-[12.5px] text-ink">{m.name}</span>
@@ -867,8 +867,8 @@ function ModelsPanel({
                           className={cn(
                             "press rounded-md border px-2 py-1 font-mono text-[11px] transition-colors",
                             form.model_id === m.id
-                              ? "border-line-strong bg-line text-ink"
-                              : "border-line bg-paper text-ink-muted hover:bg-line/40 hover:text-ink",
+                              ? "border-line-strong bg-state-selected text-ink"
+                              : "border-line bg-paper text-ink-muted hover:bg-state-hover hover:text-ink",
                           )}
                         >
                           {m.id}
@@ -1030,7 +1030,7 @@ function IntegrationsPanel({
                 href="https://docs.anthropic.com/en/docs/claude-code"
                 target="_blank"
                 rel="noreferrer"
-                className="press ring-focus inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-line bg-paper px-3 text-[12.5px] font-medium text-ink transition-colors hover:bg-ink/5"
+                className="press ring-focus inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-line bg-paper px-3 text-[12.5px] font-medium text-ink transition-colors hover:bg-state-hover"
               >
                 Docs <ExternalLink className="h-3 w-3" />
               </a>
@@ -1632,7 +1632,7 @@ function TemplatesSection() {
               setShowForm(true);
             }
           }}
-          className="press ring-focus inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-line bg-paper px-3 text-[12.5px] font-medium text-ink transition-colors hover:bg-ink/5"
+          className="press ring-focus inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-line bg-paper px-3 text-[12.5px] font-medium text-ink transition-colors hover:bg-state-hover"
         >
           <Plus className="h-3.5 w-3.5" />
           New template
@@ -1664,7 +1664,7 @@ function TemplatesSection() {
                 <button
                   type="button"
                   onClick={() => startEdit(tpl)}
-                  className="press ring-focus rounded-md px-2 py-1 text-[12px] text-ink-muted hover:bg-line/40 hover:text-ink"
+                  className="press ring-focus rounded-md px-2 py-1 text-[12px] text-ink-muted hover:bg-state-hover hover:text-ink"
                 >
                   Edit
                 </button>
@@ -1787,7 +1787,7 @@ function AccountPanel() {
             type="button"
             disabled={isLoadingAuth}
             onClick={handleSignIn}
-            className="press ring-focus inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-line bg-paper px-4 text-[13px] font-medium text-ink transition-colors hover:bg-ink/5 disabled:cursor-not-allowed disabled:opacity-40"
+            className="press ring-focus inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-line bg-paper px-4 text-[13px] font-medium text-ink transition-colors hover:bg-state-hover disabled:cursor-not-allowed disabled:opacity-40"
           >
             <svg className="h-4 w-4" viewBox="0 0 24 24">
               <path

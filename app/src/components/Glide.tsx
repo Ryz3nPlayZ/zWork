@@ -100,7 +100,7 @@ export function GlideGroup({
         aria-hidden="true"
         style={style}
         className={cn(
-          "pointer-events-none absolute left-0 top-0 -z-10 rounded-lg bg-ink/[0.06] duration-300 ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:duration-0",
+          "pointer-events-none absolute left-0 top-0 -z-10 rounded-lg bg-state-hover duration-300 ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:duration-0",
           visible && box ? "opacity-100" : "opacity-0",
           highlightClassName,
         )}

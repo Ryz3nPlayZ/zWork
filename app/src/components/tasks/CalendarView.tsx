@@ -160,15 +160,15 @@ export function CalendarView({ tasks, events, onTaskClick }: Props) {
           <button
             type="button"
             onClick={goToday}
-            className="press rounded-lg border border-line bg-paper px-2.5 py-1 text-[12px] font-medium text-ink hover:bg-ink/5"
+            className="press rounded-lg border border-line bg-paper px-2.5 py-1 text-[12px] font-medium text-ink hover:bg-state-hover"
           >
             Today
           </button>
           <div className="inline-flex rounded-lg border border-line bg-paper">
-            <button type="button" onClick={goPrev} className="press rounded-l-lg p-1 text-ink-faint hover:text-ink hover:bg-ink/5">
+            <button type="button" onClick={goPrev} className="press rounded-l-lg p-1 text-ink-faint hover:text-ink hover:bg-state-hover">
               <ChevronLeft className="h-4 w-4" />
             </button>
-            <button type="button" onClick={goNext} className="press rounded-r-lg p-1 text-ink-faint hover:text-ink hover:bg-ink/5">
+            <button type="button" onClick={goNext} className="press rounded-r-lg p-1 text-ink-faint hover:text-ink hover:bg-state-hover">
               <ChevronRight className="h-4 w-4" />
             </button>
           </div>

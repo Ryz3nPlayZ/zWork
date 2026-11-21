@@ -259,7 +259,7 @@ export function SearchModal() {
                   onClick={() => selectAt(i)}
                   className={cn(
                     "press flex w-full items-start gap-3 px-4 py-2.5 text-left transition-colors",
-                    active ? "bg-accent/8 text-ink" : "text-ink hover:bg-ink/5",
+                    active ? "bg-accent/8 text-ink" : "text-ink hover:bg-state-hover",
                   )}
                 >
                   <span className={cn("shrink-0", active ? "text-accent" : "text-ink-muted")}>

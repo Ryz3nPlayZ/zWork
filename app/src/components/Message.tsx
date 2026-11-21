@@ -435,7 +435,7 @@ function UserBubble({
               onClick={() => startEditMessage(message.id)}
               title="Edit message"
               aria-label="Edit message"
-              className="press absolute -left-8 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-ink-faint opacity-0 transition-opacity hover:bg-ink/5 hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
+              className="press absolute -left-8 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-ink-faint opacity-0 transition-opacity hover:bg-state-hover hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
             >
               <Edit2 className="h-3.5 w-3.5" />
             </button>
@@ -552,7 +552,7 @@ function ProcessPanel({
           setAutoExpanded(false);
           setExpanded((v) => !v);
         }}
-        className="press flex max-w-full items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[12px] font-medium text-ink-faint hover:text-ink-muted hover:bg-ink/5"
+        className="press flex max-w-full items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[12px] font-medium text-ink-faint hover:text-ink-muted hover:bg-state-hover"
       >
         <ChevronDown
           className={cn(
@@ -1068,7 +1068,7 @@ function PermissionRecoveryCard({ message }: { message: string }) {
         <p className="mt-0.5 text-[12px] leading-relaxed text-ink-muted">{message}</p>
         <button
           onClick={openSettings}
-          className="mt-2 inline-flex items-center gap-1 rounded-lg border border-amber-500/40 bg-paper-raised px-2.5 py-1 text-[11.5px] font-medium text-ink hover:bg-ink/5 transition-colors"
+          className="mt-2 inline-flex items-center gap-1 rounded-lg border border-amber-500/40 bg-paper-raised px-2.5 py-1 text-[11.5px] font-medium text-ink hover:bg-state-hover transition-colors"
         >
           Open System Settings
         </button>

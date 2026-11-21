@@ -59,7 +59,7 @@ export function SlashMenu({
                 onClick={() => onSelect(tpl)}
                 className={cn(
                   "press flex w-full items-center gap-3 px-3 py-2 text-left",
-                  active ? "bg-ink/5" : "hover:bg-ink/5",
+                  active ? "bg-ink/5" : "hover:bg-state-hover",
                 )}
               >
                 <div className="min-w-0 flex-1">
@@ -92,7 +92,7 @@ export function SlashMenu({
         <button
           type="button"
           onClick={onManage}
-          className="press ring-focus flex w-full items-center justify-between px-3 py-2 text-left text-[11.5px] font-medium text-ink-muted hover:bg-ink/5"
+          className="press ring-focus flex w-full items-center justify-between px-3 py-2 text-left text-[11.5px] font-medium text-ink-muted hover:bg-state-hover"
         >
           <span>Manage templates</span>
           <kbd className="rounded border border-line bg-paper px-1.5 py-px font-mono text-[10px] text-ink-faint">⏎</kbd>

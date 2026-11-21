@@ -72,7 +72,7 @@ export function FileChip({ path }: { path: string }) {
         type="button"
         onClick={() => open(false)}
         title={`Open ${path}`}
-        className="press inline-flex min-w-0 items-center gap-1.5 rounded-l-md border border-line bg-paper-raised py-0.5 pl-1.5 pr-2 text-[13px] font-medium text-ink hover:bg-ink/5"
+        className="press inline-flex min-w-0 items-center gap-1.5 rounded-l-md border border-line bg-paper-raised py-0.5 pl-1.5 pr-2 text-[13px] font-medium text-ink hover:bg-state-hover"
       >
         <Icon className="h-3.5 w-3.5 shrink-0 text-ink-muted" />
         <span className="truncate">{name}</span>
@@ -82,7 +82,7 @@ export function FileChip({ path }: { path: string }) {
         onClick={() => open(true)}
         title="Show in folder"
         aria-label={`Show ${name} in folder`}
-        className="press inline-flex items-center self-stretch rounded-r-md border border-l-0 border-line bg-paper-raised px-1.5 text-ink-faint hover:bg-ink/5 hover:text-ink"
+        className="press inline-flex items-center self-stretch rounded-r-md border border-l-0 border-line bg-paper-raised px-1.5 text-ink-faint hover:bg-state-hover hover:text-ink"
       >
         <FolderOpen className="h-3.5 w-3.5" />
       </button>

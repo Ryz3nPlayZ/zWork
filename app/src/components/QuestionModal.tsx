@@ -69,7 +69,7 @@ export function QuestionModal({ question, options, onSubmit, onDismiss }: Questi
               <button
                 type="button"
                 onClick={onDismiss}
-                className="press shrink-0 rounded-lg p-1 text-ink-faint hover:bg-ink/5 hover:text-ink"
+                className="press shrink-0 rounded-lg p-1 text-ink-faint hover:bg-state-hover hover:text-ink"
                 aria-label="Dismiss"
               >
                 <X className="h-4 w-4" />
@@ -93,8 +93,8 @@ export function QuestionModal({ question, options, onSubmit, onDismiss }: Questi
                 className={cn(
                   "press flex items-center justify-between rounded-lg px-3 py-2.5 text-left text-[13px] transition-colors",
                   isActive
-                    ? "bg-line/40 text-ink font-medium"
-                    : "text-ink-muted hover:bg-line/30 hover:text-ink",
+                    ? "bg-state-selected text-ink font-medium"
+                    : "text-ink-muted hover:bg-state-hover hover:text-ink",
                 )}
               >
                 <span>{opt}</span>
@@ -129,7 +129,7 @@ export function QuestionModal({ question, options, onSubmit, onDismiss }: Questi
             <button
               type="button"
               onClick={onDismiss}
-              className="press rounded-lg px-3 py-1.5 text-[12.5px] font-medium text-ink-muted hover:bg-ink/5 hover:text-ink transition-colors"
+              className="press rounded-lg px-3 py-1.5 text-[12.5px] font-medium text-ink-muted hover:bg-state-hover hover:text-ink transition-colors"
             >
               Cancel
             </button>

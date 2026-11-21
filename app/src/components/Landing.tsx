@@ -169,7 +169,7 @@ export function Landing({
               href={DESKTOP_DOWNLOAD_URL}
               target="_blank"
               rel="noreferrer noopener"
-              className="press mt-6 inline-flex items-center gap-2 rounded-xl border border-line bg-paper-raised px-4 py-2 text-[13px] font-medium text-ink transition-colors hover:border-line-strong hover:bg-ink/5"
+              className="press mt-6 inline-flex items-center gap-2 rounded-xl border border-line bg-paper-raised px-4 py-2 text-[13px] font-medium text-ink transition-colors hover:border-line-strong hover:bg-state-hover"
             >
               <Download className="h-4 w-4" />
               Get the desktop app — it does a lot more
@@ -226,7 +226,7 @@ export function Landing({
                     <button
                       type="button"
                       onClick={onDismissUpdate}
-                      className="press rounded-lg p-1 text-ink-faint hover:text-ink hover:bg-line/40 transition-colors"
+                      className="press rounded-lg p-1 text-ink-faint hover:text-ink hover:bg-state-hover transition-colors"
                     >
                       <span className="sr-only">Dismiss</span>
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>

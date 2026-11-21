@@ -215,12 +215,6 @@ html.sidebar-translucent body {
 html.sidebar-translucent aside.native-glass {
   border-right-color: rgb(var(--line) / 0.1);
 }
-/* Hover/active backgrounds: translucent instead of opaque */
-html.sidebar-translucent aside.native-glass .bg-line\/40,
-html.sidebar-translucent aside.native-glass .bg-line\/50,
-html.sidebar-translucent aside.native-glass .bg-line\/60 {
-  background-color: rgb(var(--line) / 0.12);
-}
 /* Raised surfaces (dropdown menus, popovers): keep readable but translucent */
 html.sidebar-translucent aside.native-glass .bg-paper-raised {
   background-color: rgb(var(--paper-raised) / 0.5);
@@ -277,6 +271,17 @@ html.has-wallpaper .app-pane {
    show instead. Popovers (they carry a shadow-*) stay opaque. */
 html.has-wallpaper .app-pane :is(.h-full, .flex-1, .min-h-0).bg-paper:not([class*="shadow"]) {
   background-color: transparent;
+}
+
+/* Over a wallpaper the pane is see-through, so an opaque card reads as a grey
+   slab on top of it. Raised surfaces lift toward the text colour instead
+   (lighter on dark themes, darker on light ones) and sunken ones toward the
+   paper. Popovers and dialogs carry a shadow-* and stay opaque. */
+html.has-wallpaper :is(.app-pane, .app-base aside) .bg-paper-raised:not([class*="shadow"]) {
+  background-color: rgb(var(--ink) / 0.05);
+}
+html.has-wallpaper :is(.app-pane, .app-base aside) .bg-paper-sunken:not([class*="shadow"]) {
+  background-color: rgb(var(--paper) / 0.45);
 }
 
 /* Settings search: the setting you picked lights up briefly. */

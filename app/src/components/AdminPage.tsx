@@ -332,7 +332,7 @@ export function AdminPage({ standalone = false }: { standalone?: boolean }) {
                           aria-current={active ? "page" : undefined}
                           className={cn(
                             "ring-focus group flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-[12.5px] font-medium transition-colors",
-                            active ? "bg-ink/5 text-ink" : "text-ink-muted hover:bg-ink/5 hover:text-ink",
+                            active ? "bg-ink/5 text-ink" : "text-ink-muted hover:bg-state-hover hover:text-ink",
                           )}
                         >
                           <t.icon className="h-3.5 w-3.5 shrink-0" />
@@ -407,7 +407,7 @@ function HeaderButton({ label, onClick, children }: { label: string; onClick: ()
       onClick={onClick}
       title={label}
       aria-label={label}
-      className="press ring-focus rounded-lg p-1.5 text-ink-muted hover:bg-ink/5 hover:text-ink"
+      className="press ring-focus rounded-lg p-1.5 text-ink-muted hover:bg-state-hover hover:text-ink"
     >
       {children}
     </button>
