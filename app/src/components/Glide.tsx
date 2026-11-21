@@ -47,8 +47,9 @@ export function GlideGroup({
     const sx = root.offsetWidth ? r.width / root.offsetWidth : 1;
     const sy = root.offsetHeight ? r.height / root.offsetHeight : 1;
     setBox({
-      x: (b.left - r.left) / sx + root.scrollLeft,
-      y: (b.top - r.top) / sy + root.scrollTop,
+      // Absolute children sit inside the border, so drop its width too.
+      x: (b.left - r.left) / sx - root.clientLeft + root.scrollLeft,
+      y: (b.top - r.top) / sy - root.clientTop + root.scrollTop,
       w: b.width / sx,
       h: b.height / sy,
     });

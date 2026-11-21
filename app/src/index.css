@@ -259,6 +259,11 @@ html.has-wallpaper .app-base {
   background-color: rgb(var(--paper-sidebar) / max(0, calc(var(--pane-alpha, 0.85) - 0.45)));
   backdrop-filter: blur(calc(var(--pane-blur, 24px) * 0.75)) saturate(1.2);
 }
+/* Dithered wallpapers are high-contrast pixel noise that blur can't smooth
+   enough; the sidebar needs a denser tint for its text to stay readable. */
+html.has-wallpaper:has(#app-wallpaper .dithered) .app-base {
+  background-color: rgb(var(--paper-sidebar) / max(0.8, var(--pane-alpha, 0.85)));
+}
 /* The sidebar paints its own fill; the base layer above is the tint instead. */
 html.has-wallpaper .app-base aside {
   background-color: transparent;

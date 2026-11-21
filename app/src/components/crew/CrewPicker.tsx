@@ -66,7 +66,7 @@ export function CrewPicker({ disabled = false }: { disabled?: boolean }) {
         )}
       >
         {selected ? <CrewAvatar member={selected} size={22} /> : <Bot className="h-4 w-4 text-ink-muted" aria-hidden />}
-        <span className="truncate">{selected ? selected.name : "Ask…"}</span>
+        <span className="truncate">{selected ? selected.name : "Crew"}</span>
         <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 text-ink-muted transition-transform", open && "rotate-180")} aria-hidden />
       </button>
       {open && (
