@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, Bot, MessageSquarePlus, Pencil, Plus, Trash2 } from "lucide-react";
-import { botAvatarTypes, type BotAvatarType } from "bot-avatars";
+import { BotAvatar, botAvatarTypes, type BotAvatarType } from "bot-avatars";
+import { useResolvedTheme } from "../../lib/theme";
 import { useApp } from "../../lib/store";
 import type { CrewMember } from "../../lib/api";
 import { cn } from "../../lib/cn";
@@ -35,7 +36,10 @@ function CrewEditor({
   const apps = useApp((s) => s.composioApps);
   const [name, setName] = useState(member?.name ?? "");
   const [instructions, setInstructions] = useState(member?.instructions ?? "");
-  const [avatar, setAvatar] = useState(member?.avatar || "clover");
+  const [avatar, setAvatar] = useState<BotAvatarType>(
+    botAvatarTypes.includes(member?.avatar as BotAvatarType) ? (member!.avatar as BotAvatarType) : "clover",
+  );
+  const theme = useResolvedTheme();
   const [color, setColor] = useState(member?.color || COLORS[0]);
   const [selectedApps, setSelectedApps] = useState<string[]>(member?.apps ?? []);
   const [restrictApps, setRestrictApps] = useState((member?.apps.length ?? 0) > 0);
@@ -82,15 +86,62 @@ function CrewEditor({
         </>
       }
     >
-      <Field label="Name" htmlFor="crew-name">
-        <input
-          id="crew-name"
-          autoFocus
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Research assistant"
-          className={inputClass}
-        />
+      <div className="flex items-center gap-4">
+        <div className="flex h-[88px] w-[88px] shrink-0 items-center justify-center rounded-2xl border border-line bg-paper-sunken">
+          <BotAvatar type={avatar} color={color} size={64} shading="fabric" theme={theme} interactive={false} role="img" aria-label="Preview" />
+        </div>
+        <div className="min-w-0 flex-1 space-y-3">
+          <Field label="Name" htmlFor="crew-name">
+            <input
+              id="crew-name"
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Research assistant"
+              className={inputClass}
+            />
+          </Field>
+          <div className="flex gap-1.5" role="radiogroup" aria-label="Colour">
+            {COLORS.map((value) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={color === value}
+                aria-label={`Colour ${value}`}
+                onClick={() => setColor(value)}
+                className={cn(
+                  "press ring-focus h-7 w-7 rounded-full border-2 p-[3px]",
+                  color === value ? "border-ink" : "border-transparent hover:border-line-strong",
+                )}
+              >
+                <span className="block h-full w-full rounded-full" style={{ backgroundColor: value }} />
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <Field label="Look">
+        <div className="grid grid-cols-6 gap-1 sm:grid-cols-9" role="radiogroup" aria-label="Look">
+          {botAvatarTypes.map((type) => (
+            <button
+              key={type}
+              type="button"
+              role="radio"
+              aria-checked={avatar === type}
+              aria-label={type[0].toUpperCase() + type.slice(1)}
+              title={type[0].toUpperCase() + type.slice(1)}
+              onClick={() => setAvatar(type)}
+              className={cn(
+                "press ring-focus flex aspect-square items-center justify-center rounded-xl border",
+                avatar === type ? "border-ink bg-ink/5" : "border-transparent hover:bg-ink/5",
+              )}
+            >
+              <BotAvatar type={type} color={color} size={30} theme={theme} interactive={false} aria-hidden />
+            </button>
+          ))}
+        </div>
       </Field>
 
       <Field
@@ -107,41 +158,6 @@ function CrewEditor({
           className={cn(inputClass, "resize-none leading-relaxed")}
         />
       </Field>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Avatar" htmlFor="crew-avatar">
-          <select
-            id="crew-avatar"
-            value={avatar}
-            onChange={(e) => setAvatar(e.target.value as BotAvatarType)}
-            className={inputClass}
-          >
-            {botAvatarTypes.map((type) => (
-              <option key={type} value={type}>{type}</option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Colour">
-          <div className="flex flex-wrap gap-2 pt-1" role="radiogroup" aria-label="Avatar colour">
-            {COLORS.map((value) => (
-              <button
-                key={value}
-                type="button"
-                role="radio"
-                aria-checked={color === value}
-                aria-label={`Colour ${value}`}
-                onClick={() => setColor(value)}
-                className={cn(
-                  "press ring-focus h-9 w-9 rounded-lg border-2 bg-paper p-1",
-                  color === value ? "border-ink" : "border-line",
-                )}
-              >
-                <span className="block h-full w-full rounded-md" style={{ backgroundColor: value }} />
-              </button>
-            ))}
-          </div>
-        </Field>
-      </div>
 
       <Field
         label="Connected apps"
