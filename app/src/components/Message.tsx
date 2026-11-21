@@ -37,6 +37,7 @@ import { FileChip, looksLikeFile, useFileCheck } from "./FileChip";
 import { ImageCard } from "./ImageCard";
 import { CrewAvatar } from "./crew/CrewAvatar";
 import { AttachmentChip } from "./AttachmentChip";
+import { Lightbox } from "./Lightbox";
 
 function formatTime(ts: number): string {
   if (!ts) return "";
@@ -287,6 +288,7 @@ export function AssistantMarkdown({
   );
   const isFile = useFileCheck(candidates);
   return (
+    <div className="sel-hug">
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkMath]}
       rehypePlugins={[rehypeKatex]}
@@ -318,16 +320,16 @@ export function AssistantMarkdown({
           return <>{children}</>;
         },
         p({ children }) {
-          return <p className="mb-4 last:mb-0 leading-[1.7]">{children}</p>;
+          return <p className="mb-4 last:mb-0 leading-[1.7]"><span className="sel-text">{children}</span></p>;
         },
         h1({ children }) {
-          return <h1 className="mb-2 mt-5 text-[19px] font-bold text-ink">{children}</h1>;
+          return <h1 className="mb-2 mt-5 text-[19px] font-bold text-ink"><span className="sel-text">{children}</span></h1>;
         },
         h2({ children }) {
-          return <h2 className="mb-2 mt-6 text-[17px] font-semibold text-ink first:mt-0">{children}</h2>;
+          return <h2 className="mb-2 mt-6 text-[17px] font-semibold text-ink first:mt-0"><span className="sel-text">{children}</span></h2>;
         },
         h3({ children }) {
-          return <h3 className="mb-1.5 mt-5 text-[15px] font-semibold text-ink first:mt-0">{children}</h3>;
+          return <h3 className="mb-1.5 mt-5 text-[15px] font-semibold text-ink first:mt-0"><span className="sel-text">{children}</span></h3>;
         },
         ul({ children }) {
           return <ul className="mb-4 list-disc space-y-1.5 pl-5 marker:text-ink-faint">{children}</ul>;
@@ -336,7 +338,7 @@ export function AssistantMarkdown({
           return <ol className="mb-4 list-decimal space-y-1.5 pl-5 marker:text-ink-faint">{children}</ol>;
         },
         li({ children }) {
-          return <li className="pl-0.5 leading-[1.7]">{children}</li>;
+          return <li className="pl-0.5 leading-[1.7]"><span className="sel-text">{children}</span></li>;
         },
         blockquote({ children }) {
           return (
@@ -355,12 +357,12 @@ export function AssistantMarkdown({
         th({ children }) {
           return (
             <th className="border border-line bg-ink/5 px-3 py-1.5 text-left font-semibold">
-              {children}
+              <span className="sel-text">{children}</span>
             </th>
           );
         },
         td({ children }) {
-          return <td className="border border-line px-3 py-1.5">{children}</td>;
+          return <td className="border border-line px-3 py-1.5"><span className="sel-text">{children}</span></td>;
         },
         a({ href, children }) {
           return (
@@ -380,16 +382,38 @@ export function AssistantMarkdown({
         hr() {
           return <hr className="my-4 border-line" />;
         },
+        img({ src, alt }) {
+          return typeof src === "string" ? <MarkdownImage src={src} alt={alt ?? ""} /> : null;
+        },
       }}
     >
       {protectCurrency(content)}
     </ReactMarkdown>
+    </div>
   );
 }
 
 // ---- User message bubble ----
 // Edit loads the message into the main composer (see ChatInput); the bubble
 // only marks itself while it's being edited.
+// A picture inside a reply: shown at reading width, opens full size on click.
+function MarkdownImage({ src, alt }: { src: string; alt: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        aria-label={alt ? `View ${alt}` : "View image"}
+        onClick={() => setOpen(true)}
+        className="ring-focus my-2 block cursor-zoom-in overflow-hidden rounded-xl border border-line bg-paper-sunken"
+      >
+        <img src={src} alt={alt} loading="lazy" className="block max-h-[360px] max-w-full object-contain" />
+      </button>
+      {open && <Lightbox src={src} alt={alt || "Image"} caption={alt || undefined} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
 function UserBubble({
   message,
   attachments,
@@ -403,7 +427,7 @@ function UserBubble({
   const beingEdited = useApp((s) => s.editing?.messageId === message.id);
 
   return (
-    <div className="group flex w-full justify-end">
+    <div className="sel-hug group flex w-full justify-end">
       <div className={cn("max-w-[75%] min-w-0 transition-opacity", beingEdited && "opacity-60")}>
         {attachments.length > 0 && (
           <div className="mb-1.5 flex flex-wrap justify-end gap-2">
@@ -427,7 +451,7 @@ function UserBubble({
               beingEdited && "outline-dashed outline-1 outline-line-strong",
             )}
           >
-            {message.content}
+            <span className="sel-text">{message.content.trim()}</span>
           </div>
           {!streaming && !beingEdited && (
             <button
@@ -443,7 +467,7 @@ function UserBubble({
         </div>
 
         <p className="mt-1 text-right text-[11px] text-ink-faint">
-          {beingEdited ? "Editing below" : formatTime(message.createdAt)}
+          <span className="sel-text">{beingEdited ? "Editing below" : formatTime(message.createdAt)}</span>
         </p>
       </div>
     </div>

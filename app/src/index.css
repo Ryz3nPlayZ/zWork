@@ -330,6 +330,25 @@ html.dark.surface-3d .app-pane {
   color: rgb(var(--paper));
 }
 
+/* WebKit paints selection "gaps" (line ends, padding, space between blocks) in
+   each block's ::selection colour, so a selection in a bubble or reply floods
+   past the words. Inside .sel-hug, blocks paint no gap and the .sel-text spans
+   that hold the words keep the highlight. */
+.sel-hug::selection,
+.sel-hug :is(div, p, ul, ol, li, blockquote, pre, h1, h2, h3, h4, table, thead, tbody, tr, td, th)::selection,
+:root.dark .sel-hug::selection,
+:root.dark .sel-hug :is(div, p, ul, ol, li, blockquote, pre, h1, h2, h3, h4, table, thead, tbody, tr, td, th)::selection {
+  background-color: transparent;
+}
+.sel-hug .sel-text::selection,
+.sel-hug .sel-text ::selection {
+  background-color: rgb(var(--ink) / 0.18);
+}
+:root.dark .sel-hug .sel-text::selection,
+:root.dark .sel-hug .sel-text ::selection {
+  background-color: rgb(var(--ink) / 0.28);
+}
+
 /* Firefox uses ::-moz-selection; mirror the same tokens. */
 ::-moz-selection {
   background-color: rgb(var(--ink) / 0.18);
