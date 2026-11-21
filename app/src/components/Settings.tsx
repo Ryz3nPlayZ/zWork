@@ -43,7 +43,7 @@ import {
 import { IconButton } from "./IconButton";
 import { api, IS_WEB, type CatalogModel, type CatalogProvider, type Integration, type RuntimeStatus } from "../lib/api";
 import { KeybindRecorder } from "./KeybindRecorder";
-import { COMPANION_CREW_KEY, COMPANION_KEY, configureCompanion } from "../lib/companionBus";
+import { COMPANION_CREW_KEY, COMPANION_ENABLED, COMPANION_KEY, configureCompanion } from "../lib/companionBus";
 import { GlideGroup } from "./Glide";
 import { Badge, Button, EmptyState, Switch } from "./page/Page";
 
@@ -1432,7 +1432,7 @@ function GeneralPanel({
       </section>
 
       {/* Desktop companion + its keyboard shortcut */}
-      {IS_TAURI && !IS_WEB && (
+      {COMPANION_ENABLED && IS_TAURI && !IS_WEB && (
         <>
           <CompanionSection />
           <GlobalShortcutSection />

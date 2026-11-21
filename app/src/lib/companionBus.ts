@@ -6,6 +6,9 @@
  */
 import { useApp } from "./store";
 
+// shortcut: the companion is hidden until it's finished (opaque window, can't type to it, card too big); flip to true to work on it. Mirrors COMPANION_ENABLED in main.rs.
+export const COMPANION_ENABLED = false;
+
 /** localStorage: "off" hides the companion; the crew member it shows. */
 export const COMPANION_KEY = "zwork:companion";
 export const COMPANION_CREW_KEY = "zwork:companion-crew";

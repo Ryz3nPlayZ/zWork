@@ -19,6 +19,9 @@ use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri_plugin_process::init as process_init;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 
+// shortcut: the desktop companion is hidden until it's finished; mirrors COMPANION_ENABLED in companionBus.ts.
+const COMPANION_ENABLED: bool = false;
+
 /// Currently registered overlay shortcut.
 fn overlay_shortcut() -> &'static Mutex<Option<Shortcut>> {
     static INSTANCE: OnceLock<Mutex<Option<Shortcut>>> = OnceLock::new();
@@ -1228,12 +1231,14 @@ fn main() {
             // Check for user-configured shortcut in localStorage first
             let default_shortcut_str = "Control+Alt+Space".to_string();
             let shortcut: Shortcut = default_shortcut_str.parse().unwrap();
-            match app.global_shortcut().register(shortcut) {
-                Ok(_) => {
-                    *overlay_shortcut().lock().unwrap() = Some(shortcut);
-                    println!("zWork: registered global overlay shortcut: {}", default_shortcut_str);
+            if COMPANION_ENABLED {
+                match app.global_shortcut().register(shortcut) {
+                    Ok(_) => {
+                        *overlay_shortcut().lock().unwrap() = Some(shortcut);
+                        println!("zWork: registered global overlay shortcut: {}", default_shortcut_str);
+                    }
+                    Err(e) => eprintln!("zWork: failed to register global shortcut {}: {e}", default_shortcut_str),
                 }
-                Err(e) => eprintln!("zWork: failed to register global shortcut {}: {e}", default_shortcut_str),
             }
 
             // System tray

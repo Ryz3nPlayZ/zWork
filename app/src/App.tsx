@@ -9,7 +9,7 @@ import { cn } from "./lib/cn";
 import { dragRegionAttrs, onDragMouseDown } from "./lib/drag";
 import { hasTrafficLights, IS_TAURI, modShortcut, usesIntegratedTitleBar } from "./lib/platform";
 import { IS_WEB } from "./lib/api";
-import { startCompanionBridge } from "./lib/companionBus";
+import { COMPANION_ENABLED, startCompanionBridge } from "./lib/companionBus";
 import { loadZoom, applyZoom, zoomIn, zoomOut, zoomReset } from "./lib/zoom";
 import { useTranslucencyPref, nativeVibrancySupported } from "./lib/translucency";
 import { recordTelemetry, setTelemetryEnabled, startTelemetrySession, stopTelemetrySession } from "./lib/telemetry";
@@ -124,6 +124,7 @@ export default function App() {
   // (violating this causes React error #300). Previously this was an async
   // state that flipped false→true mid-lifecycle, skipping later hooks.
   if (isOverlayWindow()) {
+    if (!COMPANION_ENABLED) return null;
     return (
       <Suspense fallback={<div className="h-screen w-screen bg-transparent" />}>
         <CompanionView />
@@ -259,7 +260,7 @@ export default function App() {
   }, [bootstrap]);
 
   // Tell the desktop companion when chats here start and finish.
-  useEffect(() => (IS_TAURI && !IS_WEB ? startCompanionBridge() : undefined), []);
+  useEffect(() => (COMPANION_ENABLED && IS_TAURI && !IS_WEB ? startCompanionBridge() : undefined), []);
 
   // Re-register the saved overlay shortcut on every main-window launch.
   // Rust can't read webview localStorage, so the Tauri boot path hardcodes the
@@ -268,7 +269,7 @@ export default function App() {
   // it). Running this on the main window's boot means the saved shortcut works
   // from the moment the app launches, regardless of which view is shown.
   useEffect(() => {
-    if (!(window as any).__TAURI_INTERNALS__) return;
+    if (!COMPANION_ENABLED || !(window as any).__TAURI_INTERNALS__) return;
     const saved = localStorage.getItem("zwork:overlay-shortcut");
     if (!saved) return;
     (async () => {
