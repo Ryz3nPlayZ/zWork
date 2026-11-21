@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, AlertCircle, Plus, Lock } from "lucide-react";
 import { cn } from "../lib/cn";
+import { MENU_PANEL, MENU_TRIGGER, menuPlacement, type MenuPlacement } from "../lib/menu";
 import { GlideGroup } from "./Glide";
 import { IS_WEB } from "../lib/api";
 import { fetchAnalyticsSummary, getCloudToken } from "../lib/cloud";
@@ -29,16 +30,10 @@ export function ModelPicker() {
   const plan = PLAN_RANK[useApp((s) => s.user?.tier) ?? "free"];
 
   const [open, setOpen] = useState(false);
-  const [dropDown, setDropDown] = useState(false);
+  const [place, setPlace] = useState<MenuPlacement>({ dropDown: false, maxHeight: 480 });
   const [freeEscalationsLeft, setFreeEscalationsLeft] = useState<number | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
-  const updateDirection = useCallback(() => {
-    if (!ref.current) return;
-    const rect = ref.current.getBoundingClientRect();
-    // Open toward whichever side has more room; the list scrolls past that.
-    setDropDown(window.innerHeight - rect.bottom > rect.top);
-  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -74,14 +69,10 @@ export function ModelPicker() {
     <div ref={ref} className="relative">
       <button
         type="button"
-        onClick={() => { updateDirection(); setOpen((v) => !v); }}
-        className={cn(
-          "press ring-focus inline-flex items-center gap-1.5 rounded-full border border-line bg-paper",
-          "pl-2.5 pr-2 py-1 text-[12px] font-medium text-ink",
-          "hover:bg-ink/5 hover:border-line-strong",
-        )}
+        onClick={() => { setPlace(menuPlacement(ref.current)); setOpen((v) => !v); }}
+        className={cn(MENU_TRIGGER, open && "bg-ink/5 text-ink")}
       >
-        <span className="max-w-[200px] truncate">{displayName}</span>
+        <span className="max-w-[200px] truncate text-ink">{displayName}</span>
         <span className="hidden text-ink-faint sm:inline">{effortLabel}</span>
         <ChevronDown className={cn("h-3.5 w-3.5 text-ink-muted transition-transform", open && "rotate-180")} />
       </button>
@@ -89,14 +80,13 @@ export function ModelPicker() {
       {open && (
         <GlideGroup
           role="listbox"
+          style={{ maxHeight: Math.min(480, place.maxHeight) }}
           className={cn(
-            "absolute right-0 z-40 w-[320px] max-h-[min(480px,calc(50vh-32px))] overflow-y-auto animate-menu-in rounded-xl border border-line bg-paper p-1 shadow-pop",
-            dropDown ? "top-[calc(100%+8px)] origin-top-right" : "bottom-[calc(100%+8px)] origin-bottom-right",
+            MENU_PANEL,
+            "right-0 w-[320px]",
+            place.dropDown ? "top-[calc(100%+8px)] origin-top-right" : "bottom-[calc(100%+8px)] origin-bottom-right",
           )}
         >
-          <div className="px-2.5 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
-            Model
-          </div>
 
           {models.length === 0 && (
             <div className="px-3 py-4 text-center text-[12px] text-ink-muted">
@@ -168,9 +158,7 @@ export function ModelPicker() {
 
           {/* z.ai's own API only switches thinking on or off, so every level would do the same. */}
           {!thinksOnOnly && <div className="mt-1 border-t border-line px-2.5 pt-2.5 pb-2">
-            <div className="pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-ink-faint">
-              Effort
-            </div>
+            <div className="pb-1.5 text-[12px] font-medium text-ink-muted">Effort</div>
             <div role="radiogroup" aria-label="Effort" className="grid grid-cols-5 gap-0.5 rounded-lg bg-paper-sunken p-0.5">
               {EFFORTS.map((e) => (
                 <button

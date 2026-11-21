@@ -6,7 +6,6 @@ import { useResolvedTheme } from "../lib/theme";
 import { needsLightweightRendering } from "../lib/platform";
 import { isDemoMode } from "../lib/preview";
 import { cn } from "../lib/cn";
-import { CHORES } from "../lib/chores";
 import type { UpdateCardState, UpdateProgress } from "../lib/update";
 import LightRays from "./LightRays";
 
@@ -163,21 +162,6 @@ export function Landing({
               }}
             />
           </div>
-
-          {!isDemoMode() && !inputValue && (
-            <div className="mt-4 flex flex-wrap justify-center gap-2">
-              {CHORES.map((chore) => (
-                <button
-                  key={chore.id}
-                  type="button"
-                  onClick={() => setInputValue(chore.prompt)}
-                  className="press rounded-full border border-line px-3 py-1.5 text-[13px] text-ink-soft transition-colors hover:border-line-strong hover:bg-ink/5 hover:text-ink"
-                >
-                  {chore.label}
-                </button>
-              ))}
-            </div>
-          )}
 
           {/* Public web demo only: prompt visitors toward the full desktop app. */}
           {isDemoMode() && (

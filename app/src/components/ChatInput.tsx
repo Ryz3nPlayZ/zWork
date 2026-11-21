@@ -30,6 +30,7 @@ import { VoiceBeam } from "voice-glow";
 import { dictationSupported, useDictation } from "../lib/dictation";
 import { useResolvedTheme } from "../lib/theme";
 import { cn } from "../lib/cn";
+import { MENU_PANEL, MENU_TRIGGER, menuPlacement, type MenuPlacement } from "../lib/menu";
 import { needsLightweightRendering } from "../lib/platform";
 import { useApp } from "../lib/store";
 import type { SecurityPreset } from "../lib/store";
@@ -130,7 +131,7 @@ function SecurityPresetPicker({
   const [open, setOpen] = useState(false);
   // The composer sits at the bottom of a chat but near the top of a project
   // page: open toward whichever side has more room so the menu never clips.
-  const [dropDown, setDropDown] = useState(false);
+  const [place, setPlace] = useState<MenuPlacement>({ dropDown: false, maxHeight: 400 });
   const ref = useRef<HTMLDivElement>(null);
   const current = PRESET_META[value];
 
@@ -148,16 +149,12 @@ function SecurityPresetPicker({
       <button
         type="button"
         onClick={() => {
-          const r = ref.current?.getBoundingClientRect();
-          if (r) setDropDown(window.innerHeight - r.bottom > r.top);
+          setPlace(menuPlacement(ref.current));
           setOpen((v) => !v);
         }}
         aria-label="Security preset"
         aria-expanded={open}
-        className={cn(
-          "press ring-focus inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-line bg-paper px-2.5 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-ink/5",
-          open && "bg-ink/5 border-line-strong",
-        )}
+        className={cn(MENU_TRIGGER, open && "bg-ink/5 text-ink")}
       >
         <span className="text-ink-muted">{current.icon}</span>
         <span className="hidden sm:inline">{current.label}</span>
@@ -168,10 +165,12 @@ function SecurityPresetPicker({
       {open && (
         <GlideGroup
           role="menu"
-          highlightClassName="rounded-xl"
+          highlightClassName="rounded-lg"
+          style={{ maxHeight: place.maxHeight }}
           className={cn(
-            "absolute left-0 z-50 w-64 animate-menu-in rounded-2xl border border-line bg-paper-raised p-1.5 shadow-lift",
-            dropDown ? "top-full mt-2 origin-top-left" : "bottom-full mb-2 origin-bottom-left",
+            MENU_PANEL,
+            "left-0 w-64",
+            place.dropDown ? "top-full mt-2 origin-top-left" : "bottom-full mb-2 origin-bottom-left",
           )}
         >
           {(Object.keys(PRESET_META) as SecurityPreset[]).map((key) => {
@@ -189,7 +188,7 @@ function SecurityPresetPicker({
                   setOpen(false);
                 }}
                 className={cn(
-                  "press flex w-full items-start gap-3 rounded-xl px-2.5 py-2 text-left transition-colors focus-visible:outline-none",
+                  "press flex w-full items-start gap-3 rounded-lg px-2.5 py-2 text-left transition-colors focus-visible:outline-none",
                   active ? "bg-ink/5 text-ink" : "text-ink-soft hover:text-ink",
                 )}
               >
@@ -1043,8 +1042,8 @@ export function ChatInput({
             ? "bg-ink text-paper hover:bg-ink/90"
             : "bg-paper-sunken text-ink-faint cursor-not-allowed"
           : canSend
-            ? "bg-paper-sunken text-ink hover:bg-paper hover:border-line-strong border border-line"
-            : "bg-paper-sunken text-ink-faint cursor-not-allowed border border-line",
+            ? "bg-ink text-paper hover:bg-ink/90"
+            : "bg-ink/[0.07] text-ink-faint cursor-not-allowed",
       )}
     >
       <ArrowUp className="h-4 w-4" />
@@ -1273,7 +1272,7 @@ export function ChatInput({
         </div>
       ) : (
         <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5 pt-1">
-          <div className="flex items-center gap-1.5">
+          <div className="flex min-w-0 items-center gap-0.5">
             <IconButton
               icon={<Plus className="h-4 w-4" />}
               label="Attach file"
@@ -1290,7 +1289,7 @@ export function ChatInput({
               </>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <ModelPicker />
             {micButton}
             {working ? (

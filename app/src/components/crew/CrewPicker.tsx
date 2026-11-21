@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Bot, Check, ChevronDown } from "lucide-react";
 import { useApp } from "../../lib/store";
 import { cn } from "../../lib/cn";
+import { MENU_PANEL, MENU_TRIGGER, menuPlacement, type MenuPlacement } from "../../lib/menu";
 import { CrewAvatar } from "./CrewAvatar";
 
 export function CrewPicker({ disabled = false }: { disabled?: boolean }) {
@@ -13,6 +14,7 @@ export function CrewPicker({ disabled = false }: { disabled?: boolean }) {
   const setView = useApp((s) => s.setView);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [place, setPlace] = useState<MenuPlacement>({ dropDown: false, maxHeight: 400 });
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const crewId = activeChatId ? chatCrewId || "" : newChatCrewId;
@@ -55,22 +57,25 @@ export function CrewPicker({ disabled = false }: { disabled?: boolean }) {
         disabled={disabled}
         onClick={() => {
           setError(null);
+          setPlace(menuPlacement(ref.current));
           setOpen((value) => !value);
         }}
         aria-label={selected ? `Crew member: ${selected.name}` : "Choose a crew member"}
         aria-haspopup="menu"
         aria-expanded={open}
-        className={cn(
-          "press ring-focus inline-flex h-8 max-w-40 shrink-0 items-center gap-1.5 rounded-lg border border-line bg-paper px-2 text-[12px] font-medium text-ink transition-colors hover:bg-ink/5 disabled:cursor-not-allowed disabled:opacity-40",
-          open && "border-line-strong bg-ink/5",
-        )}
+        className={cn(MENU_TRIGGER, "max-w-40", open && "bg-ink/5 text-ink")}
       >
-        {selected ? <CrewAvatar member={selected} size={22} /> : <Bot className="h-4 w-4 text-ink-muted" aria-hidden />}
+        {selected ? <CrewAvatar member={selected} size={20} /> : <Bot className="h-4 w-4 text-ink-muted" aria-hidden />}
         <span className="truncate">{selected ? selected.name : "Crew"}</span>
         <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 text-ink-muted transition-transform", open && "rotate-180")} aria-hidden />
       </button>
       {open && (
-        <div role="menu" aria-label="Crew members" className="absolute bottom-full left-0 z-50 mb-2 w-64 rounded-xl border border-line bg-paper-raised p-1.5 shadow-lift">
+        <div
+          role="menu"
+          aria-label="Crew members"
+          style={{ maxHeight: place.maxHeight }}
+          className={cn(MENU_PANEL, "left-0 w-64", place.dropDown ? "top-full mt-2 origin-top-left" : "bottom-full mb-2 origin-bottom-left")}
+        >
           <button
             type="button"
             role="menuitemradio"
