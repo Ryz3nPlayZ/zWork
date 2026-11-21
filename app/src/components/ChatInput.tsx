@@ -1479,7 +1479,9 @@ function ComposerGlow({
 }) {
   if (!on) return <>{children}</>;
   return (
-    <VoiceBeam {...beam} className="w-full">
+    // voice-glow clips its box, which hides the composer's outer ring and cuts off
+    // its menus; only clip while listening, when the glow needs it.
+    <VoiceBeam {...beam} className={beam.active ? "w-full" : "w-full !overflow-visible"}>
       {children}
     </VoiceBeam>
   );
