@@ -539,3 +539,11 @@ textarea {
   animation: typing-cursor 1s step-end infinite;
 }
 
+
+/* Crew editor stage: the member rises into its light once, and pops on each new look. */
+@keyframes crew-stage-rise { from { opacity: 0; transform: translateY(28px) scale(.92); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes crew-stage-pop { 0% { transform: scale(.86); opacity: .4; } 60% { transform: scale(1.04); opacity: 1; } 100% { transform: none; } }
+.crew-stage { animation: fade-in 260ms ease-out both; }
+.crew-stage-rise { animation: crew-stage-rise 700ms cubic-bezier(.22,1,.36,1) both; }
+.crew-stage-pop { animation: crew-stage-pop 380ms cubic-bezier(.32,.72,0,1) both; }
+@media (prefers-reduced-motion: reduce) { .crew-stage, .crew-stage-rise, .crew-stage-pop { animation: none; } }
