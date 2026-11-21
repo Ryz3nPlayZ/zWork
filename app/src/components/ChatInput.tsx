@@ -1107,7 +1107,7 @@ export function ChatInput({
         </div>
       )}
 
-      <ComposerGlow on={canDictate} active={voice.listening} stream={voice.stream} theme={resolvedTheme}>
+      <ComposerGlow on={canDictate} active={voice.listening} level={voice.level} theme={resolvedTheme}>
       <div
         ref={isOverlay ? toolsRef : undefined}
         // The pill is a SINGLE drag mechanism: the declarative
@@ -1406,14 +1406,30 @@ function ComposerGlow({
   on: boolean;
   children: ReactNode;
   active: boolean;
-  stream: MediaStream | null;
+  level: () => number;
   theme: "light" | "dark";
 }) {
   if (!on) return <>{children}</>;
+  const dark = beam.theme === "dark";
   return (
     // voice-glow clips its box, which hides the composer's outer ring and cuts off
     // its menus; only clip while listening, when the glow needs it.
-    <VoiceBeam {...beam} className={beam.active ? "w-full" : "w-full !overflow-visible"}>
+    <VoiceBeam
+      {...beam}
+      // Louder than the defaults: a quiet voice should still lift it visibly.
+      idle={0.35}
+      attack={0.12}
+      release={0.55}
+      reach={dark ? 2 : 2.4}
+      spread={1.25}
+      brightness={dark ? 1.4 : 1.1}
+      saturation={dark ? 1.5 : 1.7}
+      glowSize={1.3}
+      innerHeight={1.4}
+      bloomHeight={1.6}
+      strength={1}
+      className={beam.active ? "w-full" : "w-full !overflow-visible"}
+    >
       {children}
     </VoiceBeam>
   );
