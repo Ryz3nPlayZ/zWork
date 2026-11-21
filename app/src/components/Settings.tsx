@@ -43,6 +43,7 @@ import {
 import { IconButton } from "./IconButton";
 import { api, IS_WEB, type CatalogModel, type CatalogProvider, type Integration, type RuntimeStatus } from "../lib/api";
 import { KeybindRecorder } from "./KeybindRecorder";
+import { GlideGroup } from "./Glide";
 import { Badge, Button, EmptyState, Switch } from "./page/Page";
 
 type Section = "account" | "appearance" | "general" | "memory" | "models" | "integrations";
@@ -213,6 +214,7 @@ export function SettingsPage() {
             {hits.length === 0 && (
               <p className="px-4 py-3 text-[12px] text-ink-muted lg:px-3 lg:py-2">Nothing matches “{query.trim()}”.</p>
             )}
+            <GlideGroup className="flex flex-row lg:flex-col lg:gap-0.5" highlightClassName="rounded-md">
             {hits.map((hit) => {
               const key = hit.page;
               const meta = SECTION_META[key];
@@ -220,16 +222,18 @@ export function SettingsPage() {
               return (
                 <button
                   key={key}
+                  data-glide=""
                   type="button"
                   onClick={() => openHit(hit)}
                   className={cn(
-                    "press flex items-center gap-2.5 whitespace-nowrap px-4 py-3 text-left text-[13px] font-medium transition-colors lg:rounded-lg lg:px-3 lg:py-2",
+                    // Same row as the main sidebar: one sliding hover fill, selected = state-selected.
+                    "press group flex items-center gap-2.5 whitespace-nowrap px-4 py-3 text-left text-[13px] transition-colors lg:rounded-md lg:px-2 lg:py-1.5",
                     isActive
-                      ? "text-ink border-b-2 border-ink lg:border-b-0 lg:bg-state-selected"
-                      : "text-ink-muted border-b-2 border-transparent hover:text-ink lg:border-b-0 lg:hover:bg-state-hover",
+                      ? "font-semibold text-ink border-b-2 border-ink lg:border-b-0 lg:bg-state-selected"
+                      : "text-ink-muted border-b-2 border-transparent hover:text-ink lg:border-b-0",
                   )}
                 >
-                  <span className={cn("flex h-5 w-5 shrink-0 items-center justify-center", isActive ? "text-ink" : "text-ink-faint")}>
+                  <span className={cn("flex h-5 w-5 shrink-0 items-center justify-center", isActive ? "text-ink" : "text-ink-muted group-hover:text-ink")}>
                     {meta.icon}
                   </span>
                   <span className="min-w-0">
@@ -239,6 +243,7 @@ export function SettingsPage() {
                 </button>
               );
             })}
+            </GlideGroup>
           </nav>
 
           {/* Content area — only this scrolls */}
