@@ -1487,6 +1487,21 @@ fn clean_title(raw: &str) -> Option<String> {
     Some(line.to_string())
 }
 
+/// The model an unattended run should use: `preferred` when it has
+/// credentials, else the default model, else the first model the user has a
+/// key for. `None` when nothing is set up (signed out, no keys).
+pub fn usable_model(preferred: Option<&str>) -> Option<String> {
+    let s = settings::load();
+    let default = if s.default_model.is_empty() { "zwork-auto" } else { s.default_model.as_str() };
+    let found = preferred
+        .into_iter()
+        .chain([default])
+        .chain(s.custom_models.iter().map(|m| m.id.as_str()))
+        .find(|id| resolve_model(id, &s).configured)
+        .map(str::to_string);
+    found
+}
+
 pub async fn complete_text(system: &str, prompt: &str, max_tokens: u64) -> Result<String, String> {
     complete_text_on(None, system, prompt, max_tokens).await
 }

@@ -203,11 +203,28 @@ async fn run_task(task: ScheduledTask) {
 
     let started_at = now_ms();
 
-    // 1. Create a dedicated automation chat for this run.
-    let model = task
-        .model
-        .clone()
-        .unwrap_or_else(|| crate::settings::load().default_model.clone());
+    // 1. Create a dedicated automation chat for this run. A fresh install's
+    //    default is the zWork router, which needs sign-in; fall back to any
+    //    model that can actually run rather than ending silently.
+    let Some(model) = crate::agent::harness_turn::usable_model(task.model.as_deref()) else {
+        warn!("scheduler: task {} skipped (no model set up)", task_id);
+        // One unread notice per task, not one per tick.
+        let already = crate::inboxstore::get_all(true)
+            .iter()
+            .any(|i| i.kind == "error" && i.task_id.as_deref() == Some(task_id.as_str()) && i.body == NO_MODEL);
+        if !already {
+            crate::inboxstore::create(crate::inboxstore::CreateParams {
+                task_id: Some(task_id.clone()),
+                kind: Some("error".to_string()),
+                title: format!("“{}” didn't run", task_title),
+                body: Some(NO_MODEL.to_string()),
+                ..Default::default()
+            });
+        }
+        advance_schedule(&task, now_ms());
+        release_task(task_id).await;
+        return;
+    };
     let mut chat = crate::chatstore::create_kind(&task_title, &model, "", "automation");
     chat.crew_id = task.crew_id.clone();
     crate::chatstore::save(&chat);
@@ -297,6 +314,11 @@ async fn run_task(task: ScheduledTask) {
                     posted_to_inbox = true;
                 }
             }
+            // Belt and braces: the turn found no credentials after all.
+            Some("needs_setup") => {
+                had_error = true;
+                error_text = "needs_setup".to_string();
+            }
             Some("error") => {
                 had_error = true;
                 if let Some(t) = val.get("text").and_then(|v| v.as_str()) {
@@ -373,7 +395,12 @@ async fn run_task(task: ScheduledTask) {
 
 /// The inbox is read by non-technical users: say what happened and what
 /// happens next, not the raw error. The full text stays in the transcript.
+const NO_MODEL: &str = "zWork has no AI model to use yet. Sign in, or add an API key in Settings, and it will run at the next scheduled time.";
+
 fn friendly_error(raw: &str) -> String {
+    if raw == "needs_setup" {
+        return NO_MODEL.to_string();
+    }
     let lower = raw.to_lowercase();
     let what = if lower.contains("sending request") || lower.contains("timed out") || lower.contains("connect") {
         "zWork couldn't reach the AI service (no internet, or the service was down)."
@@ -534,5 +561,6 @@ mod friendly_error_tests {
         assert!(friendly_error("request failed: error sending request for url (https://x)").starts_with("zWork couldn't reach"));
         assert!(friendly_error("Stopped a repeated-action loop before it ran away.").contains("stuck"));
         assert!(friendly_error("").starts_with("Something went wrong"));
+        assert!(friendly_error("needs_setup").contains("Sign in, or add an API key"));
     }
 }
