@@ -641,7 +641,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="w-full max-w-[520px] rounded-2xl border border-line bg-paper-raised p-6 shadow-pop"
+        className="w-full max-w-[520px] rounded-2xl border border-line bg-paper-raised p-6 shadow-pop max-h-[calc(100vh-32px)] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between gap-3">

@@ -58,7 +58,7 @@ export function QuestionModal({ question, options, onSubmit, onDismiss }: Questi
       />
 
       {/* Card */}
-      <div className="relative z-10 w-full max-w-[440px] mx-4 animate-fade-in rounded-2xl hairline bg-paper-raised shadow-lift overflow-hidden">
+      <div className="relative z-10 w-full max-w-[440px] mx-4 animate-fade-in rounded-2xl hairline bg-paper-raised shadow-pop max-h-[calc(100vh-32px)] overflow-y-auto">
         {/* Question header */}
         <div className="px-5 pt-5 pb-3">
           <div className="flex items-start justify-between gap-3">

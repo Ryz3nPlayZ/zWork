@@ -484,7 +484,7 @@ function RowMenu({
       />
       {open && (
         <div
-          className="absolute right-0 top-full z-[300] mt-1 w-[150px] animate-fade-in rounded-xl hairline bg-paper-raised p-1 shadow-lift"
+          className="absolute right-0 top-full z-[300] mt-1 w-[150px] animate-fade-in rounded-xl border border-line bg-paper-raised p-1 shadow-pop"
           role="menu"
           aria-label="Chat actions"
           onClick={(e) => e.stopPropagation()}

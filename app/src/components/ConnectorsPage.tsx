@@ -224,7 +224,7 @@ export function ConnectorsPage() {
             role="dialog"
             aria-modal="true"
             aria-label={expandedAppData.name}
-            className="w-full max-w-[400px] rounded-2xl border border-line bg-paper-raised p-5 shadow-pop"
+            className="w-full max-w-[400px] rounded-2xl border border-line bg-paper-raised p-5 shadow-pop max-h-[calc(100vh-32px)] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3">

@@ -98,12 +98,9 @@ export function PermissionPrompt() {
 
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 backdrop-blur-[3px] p-4">
-      <div className="w-full max-w-[380px] rounded-2xl border border-line bg-paper-raised shadow-2xl overflow-hidden">
+      <div className="w-full max-w-[380px] rounded-2xl border border-line bg-paper-raised shadow-pop max-h-[calc(100vh-32px)] overflow-y-auto">
         {/* Header */}
         <div className="px-5 pt-5 pb-4">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-ink-faint mb-1">
-            System Access
-          </div>
           <h2 className="text-[16px] font-semibold text-ink leading-tight">
             {driverOk === false ? "Install CuaDriver" : "Grant permissions to CuaDriver"}
           </h2>

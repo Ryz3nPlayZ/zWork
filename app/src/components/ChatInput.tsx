@@ -1305,7 +1305,7 @@ export function ChatInput({
       )}
 
       {isOverlay && toolsOpen && (
-        <div data-no-drag className="absolute bottom-full left-0 mb-2 w-56 animate-fade-in rounded-2xl hairline bg-paper p-1.5 shadow-lift">
+        <div data-no-drag className="absolute bottom-full left-0 mb-2 w-56 animate-fade-in rounded-xl border border-line bg-paper-raised p-1 shadow-pop">
           <OverlayToolItem
             icon={<Plus className="h-4 w-4" />}
             label="Attach file"

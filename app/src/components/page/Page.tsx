@@ -497,7 +497,7 @@ export function OverflowMenu({ items, label = "More actions" }: { items: MenuIte
       {open && (
         <GlideGroup
           role="menu"
-          className="absolute right-0 top-full z-30 mt-1 w-40 origin-top-right animate-menu-in rounded-xl border border-line-strong bg-paper-raised p-1 shadow-pop"
+          className="absolute right-0 top-full z-30 mt-1 w-40 origin-top-right animate-menu-in rounded-xl border border-line bg-paper-raised p-1 shadow-pop"
           highlightClassName="rounded-lg"
         >
           {items.map((it) => (
@@ -660,7 +660,7 @@ export function useConfirm(): [ReactNode, (o: ConfirmOptions) => Promise<boolean
         role="alertdialog"
         aria-modal="true"
         aria-label={pending.title}
-        className="w-full max-w-[380px] rounded-2xl border border-line bg-paper-raised p-5 shadow-pop"
+        className="w-full max-w-[380px] rounded-2xl border border-line bg-paper-raised p-5 shadow-pop max-h-[calc(100vh-32px)] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-[14.5px] font-semibold text-ink">{pending.title}</h2>
