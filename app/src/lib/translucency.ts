@@ -54,10 +54,9 @@ async function setNativeEffect(on: boolean): Promise<void> {
     const { getCurrentWindow, EffectState, Effect } = await import("@tauri-apps/api/window");
     const win = getCurrentWindow();
     // Translucency is a window-wide NSVisualEffectView. Applying it to the
-    // borderless overlay window fills the entire surface behind the chatbar —
-    // a frosted-glass "box around the pill". Translucency is a main-window
-    // feature (sidebar only); skip it here so the overlay stays a true
-    // floating pill.
+    // borderless overlay window fills the entire surface behind the companion —
+    // a frosted-glass box around it. Translucency is a main-window
+    // feature (sidebar only); skip it here so the companion floats on its own.
     if (win.label === "overlay") return;
     if (on) {
       // Sidebar (NSVisualEffectMaterial.sidebar) is the most-muted material —

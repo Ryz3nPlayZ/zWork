@@ -26,7 +26,7 @@ applyWallpaper();
 // global `body { @apply bg-paper }` paints an opaque background; the
 // `overlay-window` <html> class overrides html/body/#root to transparent (see
 // index.css). Adding it here (rather than in a React useEffect inside
-// OverlayChatView) eliminates the opaque "box around the pill" that flashed on
+// CompanionView) eliminates the opaque box around the companion that flashed on
 // every summon: the effect ran after first paint, so macOS showed the bg-paper
 // body for at least one frame — and window.show() can retrigger that repaint.
 // The window label is constant for the process lifetime (injected by Tauri

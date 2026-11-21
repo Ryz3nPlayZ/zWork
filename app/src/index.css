@@ -188,7 +188,7 @@ body {
 /* Overlay window: force a fully transparent chrome so only the chat UI is
    visible. The global `body { @apply bg-paper }` would otherwise paint an
    opaque rectangle behind the transparent Tauri window (the "dark rectangle").
-   `OverlayChatView` adds `overlay-window` to <html>. */
+   main.tsx adds `overlay-window` to <html> in the companion window. */
 html.overlay-window,
 html.overlay-window body,
 html.overlay-window #root {

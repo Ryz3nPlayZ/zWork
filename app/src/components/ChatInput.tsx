@@ -214,7 +214,7 @@ interface Props {
   onSend?: (text: string) => void;
   value?: string;
   onChange?: (val: string) => void;
-  /** Compact, Gemini-style chatbar for the overlay window. */
+  /** Compact composer for the desktop companion's chat card. */
   variant?: "default" | "overlay";
   className?: string;
   /** Called when the overlay should close (overlay variant only). */
@@ -370,7 +370,7 @@ export function ChatInput({
   // Consume an image pushed from the standalone Share Window picker (its own OS
   // window) via the store. Drain it into the local attachment list so it shows
   // up as a thumbnail the user can send. Any model switch is done by the
-  // emitter (OverlayChatView); here we just attach the bytes.
+  // emitter (CompanionView); here we just attach the bytes.
   useEffect(() => {
     if (!pendingShareImage) return;
     const { dataUrl, mime, name } = pendingShareImage;
@@ -868,9 +868,8 @@ export function ChatInput({
    * Open the standalone Share Window picker (its own OS window, label "share").
    * The picker handles permission preflight, window listing, and capture; on a
    * successful capture it emits a "share-window-captured" event, which the
-   * overlay (OverlayChatView) listens for to inject the image + switch to the
-   * vision model. This keeps the overlay's geometry untouched — the picker no
-   * longer lives inside the 76px-tall overlay frame.
+   * companion (CompanionView) listens for to open its chat with the image
+   * attached.
    */
   const openShareWindow = async () => {
     setToolsOpen(false);

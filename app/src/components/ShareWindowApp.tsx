@@ -14,8 +14,8 @@
  *  3. On pick: capture the window in-process (zWork's own grant), emit the
  *     result to the overlay via a Tauri event, then hide this window.
  *
- * The overlay listens for the event (OverlayChatView) and injects the image
- * as an attachment + switches to the vision model.
+ * The companion listens for the event (CompanionView), opens its chat and
+ * attaches the image.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
