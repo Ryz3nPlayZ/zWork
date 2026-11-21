@@ -15,6 +15,7 @@
     "windows": [
       {
         "label": "main",
+        "dragDropEnabled": false,
         "title": "zWork",
         "width": 1180,
         "height": 760,
@@ -31,6 +32,7 @@
       },
       {
         "label": "overlay",
+        "dragDropEnabled": false,
         "title": "zWork Overlay",
         "width": 720,
         "height": 76,

@@ -16,8 +16,6 @@ import {
   RefreshCcw,
   ThumbsDown,
   ChevronDown,
-  FileText,
-  Image as ImageIcon,
   Edit2,
   CheckCircle2,
   XCircle,
@@ -38,6 +36,7 @@ import { api } from "../lib/api";
 import { FileChip, looksLikeFile, useFileCheck } from "./FileChip";
 import { ImageCard } from "./ImageCard";
 import { CrewAvatar } from "./crew/CrewAvatar";
+import { AttachmentChip } from "./AttachmentChip";
 
 function formatTime(ts: number): string {
   if (!ts) return "";
@@ -407,22 +406,16 @@ function UserBubble({
     <div className="group flex w-full justify-end">
       <div className={cn("max-w-[85%] min-w-0 transition-opacity", beingEdited && "opacity-60")}>
         {attachments.length > 0 && (
-          <div className="mb-1.5 flex flex-wrap justify-end gap-1.5">
+          <div className="mb-1.5 flex flex-wrap justify-end gap-2">
             {attachments.map((a, i) => (
-              <div
+              <AttachmentChip
                 key={`${message.id}-att-${i}`}
-                className="flex items-center gap-2 rounded-full border border-line bg-paper px-2.5 py-1 text-[11.5px] text-ink-muted"
-                title={a.name}
-              >
-                {a.kind === "image" && a.previewUrl ? (
-                  <img src={a.previewUrl} alt="" className="h-4 w-4 rounded object-cover" />
-                ) : a.kind === "image" ? (
-                  <ImageIcon className="h-3.5 w-3.5" />
-                ) : (
-                  <FileText className="h-3.5 w-3.5" />
-                )}
-                <span className="max-w-[180px] truncate">{a.name}</span>
-              </div>
+                name={a.name}
+                kind={a.kind}
+                size={a.size}
+                src={a.previewUrl ?? a.dataUrl}
+                large
+              />
             ))}
           </div>
         )}

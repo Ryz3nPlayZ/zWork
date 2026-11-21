@@ -13,8 +13,6 @@ import {
   Plus,
   Square,
   X,
-  FileText,
-  Image as ImageIcon,
   Upload,
   ChevronDown,
   Hand,
@@ -48,7 +46,7 @@ import {
   type PromptTemplate,
 } from "../lib/templates";
 import { IconButton } from "./IconButton";
-import { classifyFile } from "../lib/files";
+import { AttachmentChip } from "./AttachmentChip";
 import { dragRegionAttrs } from "../lib/drag";
 import { ModelPicker } from "./ModelPicker";
 import { SlashMenu } from "./SlashMenu";
@@ -274,7 +272,6 @@ export function ChatInput({
   const [uploading, setUploading] = useState(false);
   const [composing, setComposing] = useState(false);
   const [dragOver, setDragOver] = useState(false);
-  const dragCounter = useRef(0);
   const [templates, setTemplates] = useState<PromptTemplate[]>(() => loadTemplates());
   const [commands, setCommands] = useState<Awaited<ReturnType<typeof api.commands>>["commands"]>([]);
   const slashItems = useMemo(() => mergeCommands(templates, commands), [templates, commands]);
@@ -673,6 +670,15 @@ export function ChatInput({
     }
   };
 
+  // Files dragged anywhere over the window open the drop layer, not just over the box.
+  useEffect(() => {
+    const enter = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes("Files")) setDragOver(true);
+    };
+    window.addEventListener("dragenter", enter);
+    return () => window.removeEventListener("dragenter", enter);
+  }, []);
+
   const refreshSlashState = (next: string, caret: number) => {
     if (composing) {
       setSlashState(null);
@@ -896,50 +902,20 @@ export function ChatInput({
 
   const attachmentList = attachments.length > 0 && (
     <div className={cn("flex flex-wrap gap-2", isOverlay ? "px-3 py-1.5" : "px-4 pt-3")}>
-      {attachments.map((a) => {
-        const classification = classifyFile(a.name, a.mime);
-        return (
-          <div
-            key={a.id}
-            className="flex items-center gap-2 rounded-xl border border-line bg-paper px-3 py-1.5 text-[12px] text-ink-muted transition-all"
-          >
-            {a.kind === "image" && a.previewUrl ? (
-              <img
-                src={a.previewUrl}
-                alt={a.name}
-                className="h-12 w-12 rounded-lg object-cover border border-line"
-              />
-            ) : a.kind === "image" ? (
-              <ImageIcon className="h-3.5 w-3.5 text-blue-500" />
-            ) : (
-              <FileText className="h-3.5 w-3.5 text-ink-faint" />
-            )}
-            <span className="max-w-[180px] truncate font-medium">{a.name}</span>
-
-            <span
-              className={cn(
-                "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[9px] font-bold uppercase tracking-wider select-none",
-                classification.colorClass,
-                classification.bgClass,
-              )}
-            >
-              <span>{classification.category}</span>
-            </span>
-
-            <button
-              type="button"
-              onClick={() => {
-                if (a.previewUrl && !a.fromEdit) URL.revokeObjectURL(a.previewUrl);
-                setAttachments((prev) => prev.filter((x) => x.id !== a.id));
-              }}
-              className="rounded-full p-0.5 text-ink-faint hover:bg-line/60 hover:text-ink ml-1"
-              aria-label={`Remove ${a.name}`}
-            >
-              <X className="h-3 w-3" />
-            </button>
-          </div>
-        );
-      })}
+      {attachments.map((a) => (
+        <AttachmentChip
+          key={a.id}
+          name={a.name}
+          kind={a.kind}
+          size={a.size}
+          src={a.previewUrl ?? a.dataUrl}
+          busy={!IS_WEB && !a.uploadedPath}
+          onRemove={() => {
+            if (a.previewUrl && !a.fromEdit) URL.revokeObjectURL(a.previewUrl);
+            setAttachments((prev) => prev.filter((x) => x.id !== a.id));
+          }}
+        />
+      ))}
     </div>
   );
 
@@ -1111,16 +1087,12 @@ export function ChatInput({
               ? "bg-ink/20"
               : "bg-ink/10 backdrop-blur-sm",
           )}
-          onDragLeave={(e) => {
-            e.preventDefault();
-            dragCounter.current -= 1;
-            if (dragCounter.current <= 0) setDragOver(false);
-          }}
+          // Its card ignores the pointer, so leaving this layer means leaving the window.
+          onDragLeave={(e) => e.target === e.currentTarget && setDragOver(false)}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault();
             setDragOver(false);
-            dragCounter.current = 0;
             if (e.dataTransfer.files.length > 0) void uploadFiles(e.dataTransfer.files);
           }}
           role="dialog"
@@ -1130,7 +1102,7 @@ export function ChatInput({
             <Upload className="h-10 w-10 text-ink-muted" />
             <div className="text-center">
               <p className="text-[18px] font-medium text-ink">Drop files to attach</p>
-              <p className="mt-1 text-[13px] text-ink-muted">Images, documents, code, and more</p>
+              <p className="mt-1 text-[13px] text-ink-muted">PDFs, spreadsheets, photos and more</p>
             </div>
           </div>
         </div>
@@ -1173,29 +1145,8 @@ export function ChatInput({
                 focused && "focus-ring",
               )
             : cn("bg-paper rounded-2xl", focused ? "focus-ring" : ""),
-          dragOver && "ring-2 ring-ink/30 border-dashed",
           className,
         )}
-        onDragEnter={(e) => {
-          e.preventDefault();
-          dragCounter.current += 1;
-          if (dragCounter.current === 1) setDragOver(true);
-        }}
-        onDragOver={(e) => e.preventDefault()}
-        onDragLeave={(e) => {
-          e.preventDefault();
-          dragCounter.current -= 1;
-          if (dragCounter.current <= 0) {
-            dragCounter.current = 0;
-            setDragOver(false);
-          }
-        }}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragOver(false);
-          dragCounter.current = 0;
-          if (e.dataTransfer.files.length > 0) void uploadFiles(e.dataTransfer.files);
-        }}
       >
       {isOverlay && (
         <button
