@@ -328,9 +328,14 @@ export async function fetchCloudSession(): Promise<CloudUser | null> {
 
 export async function logoutCloudSession() {
   const token = getToken();
-  if (!token) return;
   try {
-    await cloudFetch("/api/desktop/auth/logout", { method: "POST" });
+    if (token) await cloudFetch("/api/desktop/auth/logout", { method: "POST" }).catch(() => undefined);
+    // On the web, Google sign-in leaves a Better Auth session cookie (HttpOnly,
+    // so we can't see or delete it here). Without ending it on the server the
+    // next /api/session call signs the user straight back in.
+    if (!IS_TAURI) {
+      await cloudFetch("/api/auth/sign-out", { method: "POST", body: "{}" }, "").catch(() => undefined);
+    }
   } finally {
     clearCloudToken();
   }
