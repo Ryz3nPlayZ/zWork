@@ -1,24 +1,32 @@
-import { useRef, type ReactNode } from "react";
-import Accordion from "./annnimate/accordion/accordion.jsx";
-import AsciiOverlay from "./annnimate/ascii-overlay/ascii-overlay.jsx";
-import CurtainSlider from "./annnimate/curtain-slider/curtain-slider.jsx";
-import DiagonalGallery from "./annnimate/diagonal-gallery/diagonal-gallery.jsx";
-import DualScramble from "./annnimate/dual-scramble/dual-scramble.jsx";
-import EchoHeadline from "./annnimate/echo-headline/echo-headline.jsx";
-import ElasticDivider from "./annnimate/elastic-divider/elastic-divider.jsx";
-import FeatureDialog from "./annnimate/feature-dialog/feature-dialog.jsx";
-import FloatingNavbar from "./annnimate/floating-navbar/floating-navbar.jsx";
-import HoverIndex from "./annnimate/hover-index/hover-index.jsx";
-import ImageFlyIn from "./annnimate/image-fly-in/image-fly-in.jsx";
-import MagneticTagCloud from "./annnimate/magnetic-tag-cloud/magnetic-tag-cloud.jsx";
-import MultiLevelDrawerMenu from "./annnimate/multi-level-drawer-menu/multi-level-drawer-menu.jsx";
-import Pricing from "./annnimate/pricing/pricing.jsx";
-import ProcessRail from "./annnimate/process-rail/process-rail.jsx";
-import RotatingWords from "./annnimate/rotating-words/rotating-words.jsx";
-import ScaleSlider from "./annnimate/scale-slider/scale-slider.jsx";
-import SplitFlapBoard from "./annnimate/split-flap-board/split-flap-board.jsx";
-import StackingCards from "./annnimate/stacking-cards/stacking-cards.jsx";
-import TextReveal from "./annnimate/text-reveal/text-reveal.jsx";
+import { lazy, useRef, type ComponentType, type ReactNode } from "react";
+
+const lazyDemo = (loader: () => Promise<{ default: ComponentType<any> }>) => lazy(loader);
+
+const Accordion = Object.assign(lazyDemo(() => import("./annnimate/accordion/accordion.jsx")), {
+  Item: lazyDemo(async () => {
+    const { default: Component } = await import("./annnimate/accordion/accordion.jsx");
+    return { default: Component.Item };
+  }),
+});
+const AsciiOverlay = lazyDemo(() => import("./annnimate/ascii-overlay/ascii-overlay.jsx"));
+const CurtainSlider = lazyDemo(() => import("./annnimate/curtain-slider/curtain-slider.jsx"));
+const DiagonalGallery = lazyDemo(() => import("./annnimate/diagonal-gallery/diagonal-gallery.jsx"));
+const DualScramble = lazyDemo(() => import("./annnimate/dual-scramble/dual-scramble.jsx"));
+const EchoHeadline = lazyDemo(() => import("./annnimate/echo-headline/echo-headline.jsx"));
+const ElasticDivider = lazyDemo(() => import("./annnimate/elastic-divider/elastic-divider.jsx"));
+const FeatureDialog = lazyDemo(() => import("./annnimate/feature-dialog/feature-dialog.jsx"));
+const FloatingNavbar = lazyDemo(() => import("./annnimate/floating-navbar/floating-navbar.jsx"));
+const HoverIndex = lazyDemo(() => import("./annnimate/hover-index/hover-index.jsx"));
+const ImageFlyIn = lazyDemo(() => import("./annnimate/image-fly-in/image-fly-in.jsx"));
+const MagneticTagCloud = lazyDemo(() => import("./annnimate/magnetic-tag-cloud/magnetic-tag-cloud.jsx"));
+const MultiLevelDrawerMenu = lazyDemo(() => import("./annnimate/multi-level-drawer-menu/multi-level-drawer-menu.jsx"));
+const Pricing = lazyDemo(() => import("./annnimate/pricing/pricing.jsx"));
+const ProcessRail = lazyDemo(() => import("./annnimate/process-rail/process-rail.jsx"));
+const RotatingWords = lazyDemo(() => import("./annnimate/rotating-words/rotating-words.jsx"));
+const ScaleSlider = lazyDemo(() => import("./annnimate/scale-slider/scale-slider.jsx"));
+const SplitFlapBoard = lazyDemo(() => import("./annnimate/split-flap-board/split-flap-board.jsx"));
+const StackingCards = lazyDemo(() => import("./annnimate/stacking-cards/stacking-cards.jsx"));
+const TextReveal = lazyDemo(() => import("./annnimate/text-reveal/text-reveal.jsx"));
 
 /**
  * Every component in the gallery: what it does, where zWork would use it,

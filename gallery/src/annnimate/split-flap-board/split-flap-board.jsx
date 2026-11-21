@@ -419,6 +419,7 @@ const SplitFlapBoard = forwardRef(function SplitFlapBoard({
         <div
           className="sfb_board"
           ref={boardRef}
+          style={{ '--sfb-columns': columnCount }}
           role="group"
           aria-label="Results board"
           tabIndex={0}

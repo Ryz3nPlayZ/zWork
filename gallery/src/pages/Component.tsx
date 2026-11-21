@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { ENTRIES } from "../content";
 import { ArrowLeft, ArrowRight } from "../lib/icons";
 import { Link } from "../lib/router";
@@ -36,7 +37,9 @@ export function ComponentPage({ index }: { index: number }) {
       </div>
 
       <section aria-label={`${e.name} demo`} className={e.fit ? "stage stage-fit border-y border-line" : "stage border-y border-line"}>
-        <Demo />
+        <Suspense fallback={<div role="status" className="grid min-h-60 place-items-center text-[14px] text-ink-muted">Loading demo…</div>}>
+          <Demo />
+        </Suspense>
       </section>
 
       <nav aria-label="More components" className="mx-auto grid max-w-[1200px] grid-cols-2 gap-4 px-4 py-14 sm:px-8 sm:py-20">

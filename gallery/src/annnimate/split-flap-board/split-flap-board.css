@@ -216,8 +216,22 @@
     --sfb-tile-h: 40px;
     --sfb-tile-gap: 3px;
     --sfb-row-gap: 8px;
-    --sfb-font: 24px;
+    --sfb-font: clamp(12px, 4.8vw, 24px);
     --sfb-radius: 3px;
+  }
+
+  .sfb_board {
+    width: 100%;
+  }
+
+  .sfb_row {
+    display: grid;
+    grid-template-columns: repeat(var(--sfb-columns), minmax(0, 1fr));
+  }
+
+  .sfb_tile {
+    width: auto;
+    min-width: 0;
   }
 
   .sfb_pill {

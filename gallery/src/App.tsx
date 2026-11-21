@@ -1,10 +1,11 @@
-import { useLayoutEffect } from "react";
+import { lazy, Suspense, useLayoutEffect } from "react";
 import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { ENTRIES, bySlug } from "./content";
 import { Link, usePath } from "./lib/router";
-import { Home } from "./pages/Home";
-import { ComponentPage } from "./pages/Component";
+
+const Home = lazy(() => import("./pages/Home").then((module) => ({ default: module.Home })));
+const ComponentPage = lazy(() => import("./pages/Component").then((module) => ({ default: module.ComponentPage })));
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -34,7 +35,11 @@ export default function App() {
           </a>
         </div>
       </header>
-      <main key={path}>{entry ? <ComponentPage index={index} /> : <Home />}</main>
+      <main key={path}>
+        <Suspense fallback={<div role="status" className="grid min-h-[50vh] place-items-center text-[14px] text-ink-muted">Loading…</div>}>
+          {entry ? <ComponentPage index={index} /> : <Home />}
+        </Suspense>
+      </main>
     </>
   );
 }
