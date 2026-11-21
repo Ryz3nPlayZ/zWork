@@ -42,6 +42,7 @@ import type { Message as Msg } from "../lib/store";
 import { api } from "../lib/api";
 import { FileChip, looksLikeFile, useFileCheck } from "./FileChip";
 import { ImageCard } from "./ImageCard";
+import { CrewAvatar } from "./crew/CrewAvatar";
 
 function formatTime(ts: number): string {
   if (!ts) return "";
@@ -1056,9 +1057,16 @@ function hashLabel(s: string): number {
  *  progress, the bare zWork logo once it is done. One fixed 28px slot so
  *  nothing shifts when the orb hands over to the logo. */
 function AssistantMark({ orbState }: { orbState: OrbState | null }) {
+  // A crew chat answers as that member: their avatar (it animates while working) stands in for orb and logo.
+  const member = useApp((s) => {
+    const id = s.activeChatId ? s.chats[s.activeChatId]?.crewId : s.newChatCrewId;
+    return id ? s.crew.find((m) => m.id === id) : undefined;
+  });
   return (
     <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center" aria-hidden="true">
-      {orbState ? (
+      {member ? (
+        <CrewAvatar member={member} size={28} />
+      ) : orbState ? (
         // The package's small presets draw sub-pixel dots that vanish at
         // inline scale; the denser 64px design shown at 32px stays legible.
         <ThinkingOrb state={orbState} size={64} style={{ width: 32, height: 32 }} className="shrink-0" />

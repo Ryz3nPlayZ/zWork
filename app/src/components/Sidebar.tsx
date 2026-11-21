@@ -25,6 +25,7 @@ import { IS_WEB } from "../lib/api";
 import { nativeVibrancySupported, useTranslucencyPref } from "../lib/translucency";
 import { Logo } from "./Logo";
 import { IconButton } from "./IconButton";
+import { CrewAvatar } from "./crew/CrewAvatar";
 import { useApp, bucketFor, type ChatBucket, type View } from "../lib/store";
 
 export function Sidebar() {
@@ -37,6 +38,8 @@ export function Sidebar() {
   const useNativeGlass = translucentOn && nativeVibrancySupported();
   const open = useApp((s) => s.sidebarOpen);
   const summaries = useApp((s) => s.chatSummaries);
+  const crew = useApp((s) => s.crew);
+  const crewById = useMemo(() => new Map(crew.map((m) => [m.id, m])), [crew]);
   const active = useApp((s) => s.activeChatId);
   const openChat = useApp((s) => s.openChat);
   const deleteChat = useApp((s) => s.deleteChat);
@@ -221,6 +224,9 @@ export function Sidebar() {
                               "bg-line hover:bg-line font-semibold text-ink",
                             )}
                           >
+                            {crewById.get(c.crew_id ?? "") && (
+                              <CrewAvatar member={crewById.get(c.crew_id!)!} size={16} className="mr-1.5 shrink-0" />
+                            )}
                             <span className="truncate pr-6">{c.title}</span>
                           </button>
                           <div
