@@ -453,7 +453,8 @@ export function ChatInput({
   // Stop hands unconsumed queued messages back to the composer — consume the
   // injected draft (non-destructively: appended under anything already typed).
   useEffect(() => {
-    if (!draftInject || draftInject.chatId !== activeChatId) return;
+    // chatId "" is the new-chat composer.
+    if (!draftInject || draftInject.chatId !== (activeChatId ?? "")) return;
     const text = draftInject.text;
     setValue((prev) => (prev.trim() ? `${prev}\n\n${text}` : text));
     clearDraftInject();
