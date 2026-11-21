@@ -63,13 +63,17 @@ export function GlideGroup({
     setVisible(false);
   }, []);
 
+  // Placed with left/top and faded with its colour, not transform/opacity: WebKit puts
+  // a transform or opacity transition on its own layer and then lifts every row it
+  // passes under onto one too, redrawing their text a fraction of a pixel off.
   const style: CSSProperties | undefined = box
     ? {
-        transform: `translate(${box.x}px, ${box.y}px)`,
+        left: box.x,
+        top: box.y,
         width: box.w,
         height: box.h,
         // First show: place it, then fade. After that, slide.
-        transitionProperty: fresh ? "opacity" : "transform, width, height, opacity",
+        transitionProperty: fresh ? "background-color" : "left, top, width, height, background-color",
       }
     : undefined;
 
@@ -100,8 +104,8 @@ export function GlideGroup({
         aria-hidden="true"
         style={style}
         className={cn(
-          "pointer-events-none absolute left-0 top-0 -z-10 rounded-lg bg-state-hover duration-300 ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:duration-0",
-          visible && box ? "opacity-100" : "opacity-0",
+          "pointer-events-none absolute left-0 top-0 -z-10 rounded-lg duration-300 ease-[cubic-bezier(.32,.72,0,1)] motion-reduce:duration-0",
+          visible && box ? "bg-state-hover" : "bg-transparent",
           highlightClassName,
         )}
       />

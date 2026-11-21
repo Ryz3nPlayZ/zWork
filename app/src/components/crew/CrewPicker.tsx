@@ -50,7 +50,7 @@ export function CrewPicker({ disabled = false }: { disabled?: boolean }) {
   };
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative flex">
       <button
         ref={triggerRef}
         type="button"
