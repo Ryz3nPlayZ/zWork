@@ -74,10 +74,10 @@ only ever moves up.
 
 | Route | Model | When |
 |---|---|---|
-| `flash` | `z-ai/glm-5.3-flash`, then `deepseek/deepseek-v4.1-flash-1017` | the default |
+| `flash` | `z-ai/glm-5.3-flash`, then `deepseek/deepseek-v4.1-flash-1017`, then `deepseek/deepseek-v4.1-flash` | the default |
 | `vision` | `google/gemini-3.8-flash` | the run has images and isn't escalated |
 | `escalated` | `xiaomi/mimo-v2.6-pro` | see below |
-| `ab-luna`, `ab-glm` | `openai/gpt-6-luna`, `z-ai/glm-5.3-flash` | `ROUTER_AB_PERCENT` of paid runs, by run id, to compare cost and completion with `flash` |
+| `ab-luna`, `ab-haiku`, `ab-glm` | `openai/gpt-6-luna`, `anthropic/claude-haiku-5.5`, `z-ai/glm-5.3-flash` | `ROUTER_AB_PERCENT` of paid runs, by run id, split three ways, to compare cost and completion with `flash` |
 
 A run is escalated in one of two ways:
 

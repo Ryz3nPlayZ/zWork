@@ -305,6 +305,7 @@ const GEMINI_FLASH: &str = "google/gemini-3.8-flash:floor";
 const GPT_SOL: &str = "openai/gpt-6.2-sol:floor";
 const GPT_LUNA: &str = "openai/gpt-6-luna:floor";
 const GLM_FLASH: &str = "z-ai/glm-5.3-flash:floor";
+const CLAUDE_HAIKU: &str = "anthropic/claude-haiku-5.5:floor";
 
 /// Which model serves a run. Chosen on the run's first call and stored on
 /// every request (`gateway_requests.route`), so a run stays on one model and
@@ -312,7 +313,7 @@ const GLM_FLASH: &str = "z-ai/glm-5.3-flash:floor";
 /// show up, to `Escalated` when the run struggles).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Route {
-    /// GLM Flash, then DeepSeek Flash 1017: the default for everything.
+    /// GLM Flash, then the DeepSeek Flashes: the default for everything.
     Flash,
     /// Gemini Flash: runs with images in them.
     Vision,
@@ -320,6 +321,7 @@ enum Route {
     Escalated,
     /// A small slice of paid runs, to compare cost and completion against Flash.
     AbLuna,
+    AbHaiku,
     AbGlm,
     /// The `zwork-apex` tier.
     Apex,
@@ -332,6 +334,7 @@ impl Route {
             Route::Vision => "vision",
             Route::Escalated => "escalated",
             Route::AbLuna => "ab-luna",
+            Route::AbHaiku => "ab-haiku",
             Route::AbGlm => "ab-glm",
             Route::Apex => "apex",
         }
@@ -343,6 +346,7 @@ impl Route {
             "vision" => Route::Vision,
             "escalated" => Route::Escalated,
             "ab-luna" => Route::AbLuna,
+            "ab-haiku" => Route::AbHaiku,
             "ab-glm" => Route::AbGlm,
             "apex" => Route::Apex,
             _ => return None,
@@ -352,10 +356,11 @@ impl Route {
     /// OpenRouter ids to try, preferred first; later ones are failover.
     fn candidates(self) -> &'static [&'static str] {
         match self {
-            Route::Flash => &[GLM_FLASH, DEEPSEEK_1017, GPT_LUNA],
+            Route::Flash => &[GLM_FLASH, DEEPSEEK_1017, DEEPSEEK_FLASH],
             Route::Vision => &[GEMINI_FLASH, MIMO_PRO],
             Route::Escalated => &[MIMO_PRO, DEEPSEEK_FLASH],
             Route::AbLuna => &[GPT_LUNA, DEEPSEEK_FLASH],
+            Route::AbHaiku => &[CLAUDE_HAIKU, DEEPSEEK_FLASH],
             Route::AbGlm => &[GLM_FLASH, DEEPSEEK_FLASH],
             Route::Apex => &[GPT_SOL],
         }
@@ -372,7 +377,7 @@ fn ab_route(run_id: &str, percent: u64) -> Option<Route> {
     if run_id.is_empty() || (h % 100) as u64 >= percent {
         return None;
     }
-    Some(if (h / 100) % 2 == 0 { Route::AbLuna } else { Route::AbGlm })
+    Some([Route::AbLuna, Route::AbHaiku, Route::AbGlm][(h / 100) % 3])
 }
 
 /// The request's conversation, in either wire shape.
@@ -495,7 +500,8 @@ const CLASSIFIER_PROMPT: &str = "You route requests for an AI assistant that wor
 Reply with one word. HARD: the task needs a strong model, such as multi-step research, writing or fixing substantial code, \
 complex analysis, careful planning across many steps, or long documents that must be right. \
 EASY: a small fast model can do it, such as conversation, a quick question, a short piece of writing, \
-a simple edit, one lookup, or a simple action in a file or app.";
+a simple edit, one lookup, or a simple action in a file or app. Most requests are EASY: say HARD only when a small model \
+would likely get it wrong.";
 
 /// Ask the cheap model whether the run's first message needs the stronger
 /// one. Costs a few hundredths of a cent; any failure or timeout reads as
@@ -628,7 +634,7 @@ async fn choose_route(
                 }
             }
         }
-        if has_images && matches!(route, Route::Flash | Route::AbLuna | Route::AbGlm) {
+        if has_images && matches!(route, Route::Flash | Route::AbLuna | Route::AbHaiku | Route::AbGlm) {
             return (Route::Vision, serde_json::json!({ "reason": "images", "from": route.as_str() }));
         }
         return (route, serde_json::json!({ "reason": "sticky" }));
@@ -7907,11 +7913,12 @@ mod router_tests {
         }
         assert_eq!(hosted_tier("zwork-apex").unwrap().plan, "pro");
         assert!(hosted_tier("gpt-4o").is_none());
-        for route in [Route::Flash, Route::Vision, Route::Escalated, Route::AbLuna, Route::AbGlm, Route::Apex] {
+        for route in [Route::Flash, Route::Vision, Route::Escalated, Route::AbLuna, Route::AbHaiku, Route::AbGlm, Route::Apex] {
             assert_eq!(Route::parse(route.as_str()), Some(route));
             assert!(route.candidates().iter().all(|m| m.ends_with(":floor")));
         }
-        assert_eq!(Route::Flash.candidates()[..2], [GLM_FLASH, DEEPSEEK_1017]);
+        assert_eq!(Route::Flash.candidates(), [GLM_FLASH, DEEPSEEK_1017, DEEPSEEK_FLASH]);
+        assert_eq!(Route::AbHaiku.candidates()[0], CLAUDE_HAIKU);
         assert_eq!(Route::Escalated.candidates()[0], MIMO_PRO);
         assert_eq!(Route::Vision.candidates()[0], GEMINI_FLASH);
     }
@@ -7922,6 +7929,8 @@ mod router_tests {
         assert!((300..=700).contains(&hits), "{hits}");
         assert!((0..1000).all(|i| ab_route(&format!("run-{i}"), 0).is_none()));
         assert!(ab_route("", 100).is_none());
+        let haiku = (0..3000).filter(|i| ab_route(&format!("run-{i}"), 100) == Some(Route::AbHaiku)).count();
+        assert!((700..=1300).contains(&haiku), "{haiku}");
     }
 
     #[test]
