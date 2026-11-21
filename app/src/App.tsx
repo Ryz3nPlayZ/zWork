@@ -7,7 +7,9 @@ import { useApp } from "./lib/store";
 import { consumeInstalledUpdateNotice, detectUpdate, installUpdate, openReleaseUrl, type UpdateCardState, type UpdateProgress } from "./lib/update";
 import { cn } from "./lib/cn";
 import { dragRegionAttrs, onDragMouseDown } from "./lib/drag";
-import { hasTrafficLights, modShortcut, usesIntegratedTitleBar } from "./lib/platform";
+import { hasTrafficLights, IS_TAURI, modShortcut, usesIntegratedTitleBar } from "./lib/platform";
+import { IS_WEB } from "./lib/api";
+import { startCompanionBridge } from "./lib/companionBus";
 import { loadZoom, applyZoom, zoomIn, zoomOut, zoomReset } from "./lib/zoom";
 import { useTranslucencyPref, nativeVibrancySupported } from "./lib/translucency";
 import { recordTelemetry, setTelemetryEnabled, startTelemetrySession, stopTelemetrySession } from "./lib/telemetry";
@@ -32,7 +34,7 @@ const TasksPage = lazy(() => import("./components/tasks/TasksPage").then((m) => 
 const InboxPage = lazy(() => import("./components/InboxPage").then((m) => ({ default: m.InboxPage })));
 const ScheduledTasksPage = lazy(() => import("./components/scheduled/ScheduledTasksPage").then((m) => ({ default: m.ScheduledTasksPage })));
 const CrewPage = lazy(() => import("./components/crew/CrewPage").then((m) => ({ default: m.CrewPage })));
-const OverlayChatView = lazy(() => import("./components/OverlayChatView").then((m) => ({ default: m.OverlayChatView })));
+const CompanionView = lazy(() => import("./components/companion/CompanionView").then((m) => ({ default: m.CompanionView })));
 const ShareWindowApp = lazy(() => import("./components/ShareWindowApp").then((m) => ({ default: m.ShareWindowApp })));
 const DesktopBillingReturn = lazy(() => import("./components/DesktopBillingReturn").then((m) => ({ default: m.DesktopBillingReturn })));
 import { isDesktopBillingReturn, isPlanPath, opensPlanPage, readBillingReturn, type BillingReturn } from "./lib/billingReturn";
@@ -124,7 +126,7 @@ export default function App() {
   if (isOverlayWindow()) {
     return (
       <Suspense fallback={<div className="h-screen w-screen bg-transparent" />}>
-        <OverlayChatView />
+        <CompanionView />
       </Suspense>
     );
   }
@@ -255,6 +257,9 @@ export default function App() {
   useEffect(() => {
     void bootstrap();
   }, [bootstrap]);
+
+  // Tell the desktop companion when chats here start and finish.
+  useEffect(() => (IS_TAURI && !IS_WEB ? startCompanionBridge() : undefined), []);
 
   // Re-register the saved overlay shortcut on every main-window launch.
   // Rust can't read webview localStorage, so the Tauri boot path hardcodes the

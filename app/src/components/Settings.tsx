@@ -43,6 +43,7 @@ import {
 import { IconButton } from "./IconButton";
 import { api, IS_WEB, type CatalogModel, type CatalogProvider, type Integration, type RuntimeStatus } from "../lib/api";
 import { KeybindRecorder } from "./KeybindRecorder";
+import { COMPANION_CREW_KEY, COMPANION_KEY, configureCompanion } from "../lib/companionBus";
 import { GlideGroup } from "./Glide";
 import { Badge, Button, EmptyState, Switch } from "./page/Page";
 
@@ -1430,14 +1431,68 @@ function GeneralPanel({
         </div>
       </section>
 
-      {/* Global Keyboard Shortcut */}
+      {/* Desktop companion + its keyboard shortcut */}
       {IS_TAURI && !IS_WEB && (
-        <GlobalShortcutSection />
+        <>
+          <CompanionSection />
+          <GlobalShortcutSection />
+        </>
       )}
 
       {/* Prompt Templates */}
       <TemplatesSection />
     </div>
+  );
+}
+
+// ---------------- Desktop companion ----------------
+
+function CompanionSection() {
+  const crew = useApp((s) => s.crew);
+  const fetchCrew = useApp((s) => s.fetchCrew);
+  const [on, setOn] = useState(() => localStorage.getItem(COMPANION_KEY) !== "off");
+  const [crewId, setCrewId] = useState(() => localStorage.getItem(COMPANION_CREW_KEY) || "");
+  useEffect(() => {
+    void fetchCrew();
+  }, [fetchCrew]);
+  const apply = (nextOn: boolean, nextCrew: string) => {
+    setOn(nextOn);
+    setCrewId(nextCrew);
+    void configureCompanion(nextOn, nextCrew);
+  };
+
+  return (
+    <section className="rounded-2xl border border-line bg-paper-raised p-4 space-y-3">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="text-[13px] font-medium text-ink">Show a companion on your desktop</div>
+          <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-muted">
+            A small crewmate that floats over your other apps. Click it to chat, drag it anywhere, and it lets you know when a task is done.
+          </p>
+        </div>
+        <span className="mt-0.5">
+          <Switch checked={on} onChange={() => apply(!on, crewId)} label="Show a companion on your desktop" />
+        </span>
+      </div>
+      {on && crew.length > 1 && (
+        <Field label="Who it is" description="New chats you start from the companion go to this crewmate.">
+          <div className="relative">
+            <select
+              value={crewId || crew[0].id}
+              onChange={(e) => apply(true, e.target.value)}
+              className="ring-focus w-full appearance-none rounded-lg border border-line bg-paper px-3 py-2 pr-10 text-[13px] text-ink hover:border-line-strong focus:border-line-strong focus:outline-none cursor-pointer transition-colors"
+            >
+              {crew.map((m) => (
+                <option key={m.id} value={m.id} className="bg-paper text-ink">
+                  {m.name}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" />
+          </div>
+        </Field>
+      )}
+    </section>
   );
 }
 
@@ -1491,8 +1546,8 @@ function GlobalShortcutSection() {
       </div>
       <div className="border-t border-line" />
       <KeybindRecorder
-        label="Open the quick chat box"
-        description="Opens a small zWork chat box on top of whatever you're doing. Use ⌘, ⌃, ⌥ or ⇧ plus one other key."
+        label="Chat with your companion"
+        description="Opens the companion's chat on top of whatever you're doing; press it again to close. Use ⌘, ⌃, ⌥ or ⇧ plus one other key."
         value={shortcut}
         onChange={handleChange}
       />

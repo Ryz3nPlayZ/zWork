@@ -1186,14 +1186,13 @@ fn main() {
             use tauri_plugin_global_shortcut::ShortcutState;
             let current = overlay_shortcut().lock().unwrap().clone();
             if event.state() == ShortcutState::Pressed && current.as_ref() == Some(&shortcut) {
+                // The overlay window is the desktop companion: the shortcut shows it
+                // and asks it to open (or close) its chat card.
                 if let Some(window) = app.get_webview_window("overlay") {
-                    let is_visible = window.is_visible().unwrap_or(false);
-                    if is_visible {
-                        let _ = window.hide();
-                    } else {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
+                    use tauri::Emitter;
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                    let _ = app.emit_to("overlay", "companion-summon", ());
                 }
             }
         }).build())

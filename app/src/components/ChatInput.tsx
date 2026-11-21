@@ -235,6 +235,8 @@ interface Props {
   /** Callback when the user resolves a permission card. On deny-with-text,
    *  `otherText` carries the "what to do instead" instruction. */
   onResolvePermission?: (allow: boolean, otherText?: string) => void;
+  /** Start dictating whenever this number changes (the companion's Dictate button). */
+  dictateNonce?: number;
 }
 
 export function ChatInput({
@@ -252,6 +254,7 @@ export function ChatInput({
   permission,
   onAnswerQuestion,
   onResolvePermission,
+  dictateNonce,
 }: Props) {
   const [localValue, setLocalValue] = useState("");
   const isControlled = propValue !== undefined;
@@ -290,9 +293,14 @@ export function ChatInput({
 
   const isOverlay = variant === "overlay";
   const resolvedTheme = useResolvedTheme();
-  // shortcut: dictation is main-composer only; the floating overlay pill has no room for the Done state.
   const voice = useDictation(() => areaRef.current?.value ?? "", (t) => setValue(t));
-  const canDictate = dictationSupported && !isOverlay;
+  const canDictate = dictationSupported;
+  useEffect(() => {
+    if (!dictateNonce || !canDictate) return;
+    voice.start();
+    areaRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only a new nonce starts dictation
+  }, [dictateNonce]);
 
   const send = useApp((s) => s.send);
   const stop = useApp((s) => s.stop);
@@ -1264,6 +1272,7 @@ export function ChatInput({
           <span className="inline-flex max-w-[120px] items-center truncate text-[12px] font-medium text-ink-muted">
             {modelLabel}
           </span>
+          {micButton}
           {working ? (
             <>
               {queueButtons}
