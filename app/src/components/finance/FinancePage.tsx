@@ -326,66 +326,118 @@ function NewsCard({ query, title }: { query: string; title: string }) {
 
 // ---- The chat panel ----
 
+const CHAT_WIDTH_KEY = "zwork.financeChatWidth";
+const CHAT_MIN = 320;
+const CHAT_MAX = 760;
+const clampWidth = (w: number) => Math.round(Math.min(Math.max(w, CHAT_MIN), CHAT_MAX));
+
 function FinanceChat({ symbol, name, isCompany }: { symbol: string; name: string; isCompany: boolean }) {
   const hasChat = useApp((s) => !!s.activeChatId && s.chats[s.activeChatId]?.crewId === FINANCE);
   const startNew = () => useApp.setState({ activeChatId: null, newChatCrewId: FINANCE });
+  const [width, setWidth] = useState(() => {
+    try {
+      return clampWidth(Number(localStorage.getItem(CHAT_WIDTH_KEY)) || 400);
+    } catch {
+      return 400;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(CHAT_WIDTH_KEY, String(width));
+    } catch {
+      /* private mode: width just isn't remembered */
+    }
+  }, [width]);
+  const startDrag = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = width;
+    const move = (ev: PointerEvent) => setWidth(clampWidth(startW + startX - ev.clientX));
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  };
+
   const short = name.split(/[ ,]/)[0] || symbol;
+  const heading = isCompany ? `What do you want to know about ${short}?` : "What do you want to know about the market?";
   const ideas = isCompany
-    ? [
-        `How did ${short} do in its latest quarter?`,
-        `Chart ${symbol}'s revenue and profit over five years`,
-        `Compare ${symbol} with its closest competitors`,
-        "What moved the market today?",
-      ]
-    : [
-        "What moved the market today?",
-        `How has the ${name} done this year?`,
-        "Summarize this week's biggest market news",
-        "Which big companies report earnings this week?",
-      ];
+    ? [`How did ${short} do in its latest quarter?`, `Chart ${symbol}'s revenue and profit over five years`, "What moved the market today?"]
+    : ["What moved the market today?", `How has the ${name} done this year?`, "Which big companies report earnings this week?"];
   return (
-    // shortcut: breakpoints assume the sidebar is open (280px); container queries would track the real width.
-    <aside className="flex w-[320px] min-w-0 min-[1400px]:w-[400px] shrink-0 flex-col border-l border-line bg-paper">
-      <div className="flex h-11 shrink-0 items-center justify-between border-b border-line px-4">
-        <span className="min-w-0 truncate text-[13px] font-semibold text-ink">
-          {symbol ? `Ask zWork about ${isCompany ? symbol : name}` : "Ask zWork"}
-        </span>
-        {hasChat && (
-          <button
-            type="button"
-            onClick={startNew}
-            className="press ring-focus inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[12px] text-ink-muted hover:bg-state-hover hover:text-ink"
-          >
-            <SquarePen className="h-3.5 w-3.5" /> New chat
-          </button>
-        )}
+    // No background of its own: the page (or the wallpaper tint) shows through so the panel reads as part of it.
+    // shortcut: max-w-[55%] caps a remembered width on small windows without re-clamping state; dragging from there feels sticky until it's back in range.
+    <aside style={{ width }} className="relative flex min-w-0 max-w-[55%] shrink-0 flex-col border-l border-line">
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize chat"
+        aria-valuenow={width}
+        aria-valuemin={CHAT_MIN}
+        aria-valuemax={CHAT_MAX}
+        tabIndex={0}
+        onPointerDown={startDrag}
+        onDoubleClick={() => setWidth(400)}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowLeft") setWidth((w) => clampWidth(w + 24));
+          if (e.key === "ArrowRight") setWidth((w) => clampWidth(w - 24));
+        }}
+        title="Drag to resize. Double-click to reset."
+        className="group absolute inset-y-0 -left-[4px] z-30 w-[8px] cursor-col-resize focus:outline-none"
+      >
+        <div className="mx-auto h-full w-[2px] rounded-full transition-colors duration-150 group-hover:bg-ink/25 group-focus-visible:bg-ink/50 group-active:bg-ink/40" />
       </div>
-      <div className="relative flex min-h-0 flex-1">
-        {hasChat ? (
-          <Suspense fallback={<Spinner />}>
-            <ChatView embedded />
-          </Suspense>
-        ) : (
-          <div className="flex min-w-0 flex-1 flex-col justify-end gap-3 p-4">
-            <p className="text-[13px] leading-relaxed text-ink-muted">
-              This chat sees the stock you have open, reads live prices, SEC filings and market news, and draws charts. It gives research, not personal investment advice.
-            </p>
-            <div className="flex flex-col items-start gap-1.5">
-              {ideas.map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => void useApp.getState().send(t)}
-                  className="press ring-focus rounded-lg border border-line bg-paper-raised px-3 py-1.5 text-left text-[12.5px] text-ink hover:bg-state-hover"
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-            <ChatInput placeholder="Ask about a stock, a filing or the market" compact />
+
+      {hasChat ? (
+        <>
+          <div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b border-line px-4">
+            <span className="min-w-0 truncate text-[13px] font-semibold text-ink">
+              {symbol ? `Ask zWork about ${isCompany ? symbol : name}` : "Ask zWork"}
+            </span>
+            <button
+              type="button"
+              onClick={startNew}
+              className="press ring-focus inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] text-ink-muted hover:bg-state-hover hover:text-ink"
+            >
+              <SquarePen className="h-3.5 w-3.5" /> New chat
+            </button>
           </div>
-        )}
-      </div>
+          <div className="relative flex min-h-0 flex-1">
+            <Suspense fallback={<Spinner />}>
+              <ChatView embedded />
+            </Suspense>
+          </div>
+        </>
+      ) : (
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col px-5">
+          <div className="flex flex-1 flex-col justify-center">
+            <h2 className="text-balance text-center font-serif text-[30px] font-light leading-tight tracking-tight text-ink">{heading}</h2>
+            <div className="mt-6">
+              <ChatInput placeholder="Ask about a stock, a filing or the market" compact />
+            </div>
+            <ul className="mt-3 flex flex-col">
+              {ideas.map((t) => (
+                <li key={t}>
+                  <button
+                    type="button"
+                    onClick={() => void useApp.getState().send(t)}
+                    className="press ring-focus w-full rounded-lg px-3 py-2 text-left text-[13px] text-ink-muted transition-colors duration-150 hover:bg-state-hover hover:text-ink"
+                  >
+                    {t}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <p className="pb-4 text-center text-[11.5px] text-ink-faint">Uses live prices, SEC filings and news. Research, not personal investment advice.</p>
+        </div>
+      )}
     </aside>
   );
 }
@@ -488,7 +540,7 @@ export function FinancePage() {
 
   return (
     <div className="flex h-full min-w-0 flex-1 overflow-hidden bg-paper">
-      <div className="min-w-0 flex-1 overflow-y-auto">
+      <div className="min-w-0 flex-1 overflow-y-auto [container-type:inline-size]">
         <div className="mx-auto flex w-full max-w-[920px] flex-col gap-4 px-6 pb-16 pt-2">
           <header className="flex flex-wrap items-end justify-between gap-3">
             <div className="min-w-0">
@@ -501,7 +553,7 @@ export function FinancePage() {
           {loadError && <p className="rounded-lg border border-line bg-paper-sunken px-3 py-2 text-[12.5px] text-ink-muted">{loadError}</p>}
 
           {/* Market strip */}
-          <div className="grid grid-cols-2 gap-2 min-[1200px]:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 [@container(min-width:620px)]:grid-cols-4">
             {MARKETS.map((m) => {
               const mq = quotes[m.symbol];
               return (
@@ -527,7 +579,7 @@ export function FinancePage() {
             })}
           </div>
 
-          <div className="grid grid-cols-1 gap-4 min-[1400px]:grid-cols-[1fr_280px]">
+          <div className="grid grid-cols-1 gap-4 [@container(min-width:760px)]:grid-cols-[1fr_280px]">
             {/* Selected symbol */}
             <Card>
               <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
@@ -545,7 +597,7 @@ export function FinancePage() {
               </div>
               {chartError ? <p className="py-16 text-center text-[12.5px] text-ink-muted">{chartError}</p> : chart ? <PriceChart chart={chart} /> : <div className="h-[260px]"><Spinner /></div>}
               {q && (
-                <div className="mt-3 grid grid-cols-2 gap-3 border-t border-line pt-3 min-[1100px]:grid-cols-4">
+                <div className="mt-3 grid grid-cols-2 gap-3 border-t border-line pt-3 [@container(min-width:560px)]:grid-cols-4">
                   <Stat label="Previous close" value={price(q.previousClose)} />
                   <Stat label="Day range" value={q.dayLow != null ? `${price(q.dayLow)} – ${price(q.dayHigh)}` : "–"} />
                   <Stat label="52-week range" value={q.yearLow != null ? `${price(q.yearLow)} – ${price(q.yearHigh)}` : "–"} />
@@ -609,7 +661,7 @@ export function FinancePage() {
           </div>
 
           {isCompany ? (
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 [@container(min-width:760px)]:grid-cols-2">
               <div className="flex flex-col gap-4">
                 <FinancialsCard symbol={selected} />
               </div>

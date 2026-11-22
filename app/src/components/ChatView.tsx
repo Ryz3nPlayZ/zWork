@@ -188,7 +188,8 @@ export function ChatView({ embedded = false }: { embedded?: boolean } = {}) {
           On Windows the app's caption buttons sit over the header's right
           end, so it keeps clear of them (CAPTION_CLEARANCE).
         */}
-        <div
+        {/* Embedded (Finance panel): the panel's own header names the chat; a floating title would sit over the messages. */}
+        {!embedded && (<div
           {...(embedded ? {} : dragRegionAttrs())}
           onMouseDown={embedded ? undefined : onDragMouseDown}
           className={cn(
@@ -371,11 +372,11 @@ export function ChatView({ embedded = false }: { embedded?: boolean } = {}) {
               )}
             </div>
           </div>)}
-        </div>
+        </div>)}
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto" style={{ paddingBottom: composerH }}>
-          <div className={cn("mx-auto flex max-w-[748px] flex-col gap-5 pt-14 pb-8", embedded ? "px-4" : "px-6")}>
+          <div className={cn("mx-auto flex max-w-[748px] flex-col gap-5 pb-8", embedded ? "px-4 pt-4" : "px-6 pt-14")}>
             {/* Plan mode indicator — shows when plan mode is active so the user
                 knows the agent is restricted to read-only tools. */}
             {planMode && (
