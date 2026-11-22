@@ -572,7 +572,7 @@ export interface Chat {
   queuedItems?: QueuedItem[];
 }
 
-export type View = "chat" | "settings" | "projects" | "analytics" | "plan" | "connectors" | "admin" | "tasks" | "inbox" | "scheduled" | "crew";
+export type View = "chat" | "settings" | "projects" | "analytics" | "plan" | "connectors" | "skills" | "admin" | "tasks" | "inbox" | "scheduled" | "crew";
 
 export type SettingsSection =
   | "account"

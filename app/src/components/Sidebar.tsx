@@ -14,6 +14,7 @@ import {
   BarChart3,
   CreditCard,
   Plug,
+  BookOpen,
   Inbox,
   Clock,
   Bot,
@@ -186,6 +187,14 @@ export function Sidebar() {
               label="Connectors"
               onClick={() => setView("connectors")}
               active={view === "connectors"}
+            />
+          )}
+          {!demo && (
+            <SidebarButton
+              icon={<BookOpen />}
+              label="Skills"
+              onClick={() => setView("skills")}
+              active={view === "skills"}
             />
           )}
         </GlideGroup>

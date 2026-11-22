@@ -12,6 +12,7 @@ import {
   FolderOpen,
   Brain,
   Command,
+  BookOpen,
 } from "lucide-react";
 import { useApp, bucketFor, type ChatBucket } from "../lib/store";
 import { cn } from "../lib/cn";
@@ -110,6 +111,13 @@ export function SearchModal() {
       icon: <Plug className="h-4 w-4" />,
       run: () => { setView("connectors"); setOpen(false); },
       keywords: "connectors integrations mcp composio",
+    },
+    {
+      id: "view-skills",
+      label: "Skills",
+      icon: <BookOpen className="h-4 w-4" />,
+      run: () => { setView("skills"); setOpen(false); },
+      keywords: "skills store add teach skills.sh",
     },
     {
       id: "view-plan",

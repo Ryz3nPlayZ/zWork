@@ -421,6 +421,35 @@ export interface SkillMeta {
   name: string;
   description: string;
   path: string;
+  /** Where the loader found it: "user" (your zWork skills folder), "bundled", "project", or another app ("claude", "codex", "agents", ...). */
+  source?: string;
+  /** Set when the Skills store added it: the skills.sh id it came from. */
+  store_id?: string | null;
+}
+
+/** A skill on skills.sh, as the store lists it. */
+export interface StoreSkill {
+  id: string;
+  name: string;
+  /** owner/repo on GitHub. */
+  source: string;
+  title?: string;
+  description?: string;
+  installs?: number;
+}
+
+export interface StoreSkillDetail {
+  id: string;
+  name: string;
+  description: string;
+  license: string | null;
+  source: string;
+  url: string;
+  instructions: string;
+  truncated: boolean;
+  files: string[];
+  scripts: number;
+  installed: { source: string; from_store: boolean } | null;
 }
 
 export interface OnboardingStatus {
@@ -1116,6 +1145,24 @@ export const api = {
   // ---- Skills + onboarding ----
   skills: () =>
     localFetch("/api/skills").then((r) => j<{ skills: SkillMeta[] }>(r)),
+  skillStoreShelf: () =>
+    localFetch("/api/skills/store/shelf").then((r) => j<{ skills: StoreSkill[] }>(r)),
+  skillStoreSearch: (q: string) =>
+    localFetch(`/api/skills/store/search?q=${encodeURIComponent(q)}`).then((r) => j<{ skills: StoreSkill[] }>(r)),
+  skillStoreDetail: (id: string) =>
+    localFetch(`/api/skills/store/detail?id=${encodeURIComponent(id)}`).then((r) => j<StoreSkillDetail>(r)),
+  skillStoreInstall: (id: string) =>
+    localFetch("/api/skills/store/install", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id }),
+    }).then((r) => j<{ ok: boolean; name: string }>(r)),
+  skillStoreRemove: (name: string) =>
+    localFetch("/api/skills/store/remove", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name }),
+    }).then((r) => j<{ ok: boolean }>(r)),
   onboardStatus: () =>
     localFetch("/api/onboard/status").then((r) => j<OnboardingStatus>(r)),
 

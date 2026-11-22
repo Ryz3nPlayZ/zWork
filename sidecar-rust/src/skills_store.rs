@@ -33,7 +33,7 @@ pub const SOURCE_FILE: &str = ".zwork-source.json";
 /// 2026-11-21: each id downloads and has a SKILL.md at its root.
 const OFFICE_SHELF: &[(&str, &str, &str)] = &[
     ("anthropics/knowledge-work-plugins/invoice-chase", "Chase unpaid invoices", "Writes reminder emails for overdue invoices, from a gentle nudge to a firm final notice, in your tone."),
-    ("composiohq/awesome-claude-skills/invoice-organizer", "Organise invoices and receipts", "Reads messy invoice and receipt files, renames them the same way and sorts them into folders for tax time."),
+    ("composiohq/awesome-claude-skills/invoice-organizer", "File your receipts", "Reads messy invoice and receipt files, renames them the same way and sorts them into folders for tax time."),
     ("claude-office-skills/skills/expense-report", "Expense reports", "Turns receipts and notes into a tidy expense report with categories and totals."),
     ("claude-office-skills/skills/meeting-notes", "Meeting notes", "Turns a transcript or rough notes into clear meeting notes with decisions and next steps."),
     ("github/awesome-copilot/meeting-minutes", "Meeting minutes", "Writes short, actionable minutes: attendees, decisions, and action items with owners and dates."),

@@ -29,6 +29,7 @@ const ProjectView = lazy(() => import("./components/ProjectView").then((m) => ({
 const AnalyticsPage = lazy(() => import("./components/AnalyticsPage").then((m) => ({ default: m.AnalyticsPage })));
 const PlanPage = lazy(() => import("./components/PlanPage").then((m) => ({ default: m.PlanPage })));
 const ConnectorsPage = lazy(() => import("./components/ConnectorsPage").then((m) => ({ default: m.ConnectorsPage })));
+const SkillsPage = lazy(() => import("./components/SkillsPage").then((m) => ({ default: m.SkillsPage })));
 const AdminPage = lazy(() => import("./components/AdminPage").then((m) => ({ default: m.AdminPage })));
 const TasksPage = lazy(() => import("./components/tasks/TasksPage").then((m) => ({ default: m.TasksPage })));
 const InboxPage = lazy(() => import("./components/InboxPage").then((m) => ({ default: m.InboxPage })));
@@ -679,6 +680,10 @@ export default function App() {
           ) : view === "connectors" ? (
             <Suspense fallback={panelFallback}>
               <ConnectorsPage />
+            </Suspense>
+          ) : view === "skills" ? (
+            <Suspense fallback={panelFallback}>
+              <SkillsPage />
             </Suspense>
           ) : view === "tasks" ? (
             <Suspense fallback={panelFallback}>
