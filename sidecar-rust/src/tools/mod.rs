@@ -152,7 +152,8 @@ pub fn is_specialist_tool(name: &str) -> bool {
 pub fn wants_specialist_tools(message: &str) -> bool {
     const WORDS: &[&str] = &[
         "research paper", "citation", "cite ", "literature", "academic", "journal article", "thesis",
-        "stock price", "ticker", "telegram", "deploy", "website", "web app", "landing page",
+        "stock price", "ticker", "stock market", "share price", "shares of", "earnings", "dividend", "portfolio",
+        "watchlist", "nasdaq", "s&p", "dow jones", " etf", "crypto", "bitcoin", "telegram", "deploy", "website", "web app", "landing page",
     ];
     let message = message.to_lowercase();
     WORDS.iter().any(|w| message.contains(w))
@@ -1713,5 +1714,15 @@ mod tests {
     #[test]
     fn still_refuses_to_kill_zwork_backend() {
         assert!(gated("kill $(lsof -ti :8787)"));
+    }
+}
+
+#[cfg(test)]
+mod specialist_word_tests {
+    #[test]
+    fn finance_questions_get_market_tools() {
+        assert!(super::wants_specialist_tools("How did NVDA earnings land?"));
+        assert!(super::wants_specialist_tools("track my portfolio every morning"));
+        assert!(!super::wants_specialist_tools("sort the pet food invoices"));
     }
 }
