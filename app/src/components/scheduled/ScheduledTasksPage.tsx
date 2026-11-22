@@ -90,6 +90,8 @@ export function ScheduledTasksPage() {
   const [confirmDialog, confirm] = useConfirm();
   const [openAtLogin, setOpenAtLogin] = useState(false);
   const [draft, setDraft] = useState("");
+  const [focused, setFocused] = useState(false);
+  const draftRef = useRef<HTMLTextAreaElement>(null);
   const timers = useRef(new Map<string, number>());
 
   useEffect(() => {
@@ -150,6 +152,7 @@ export function ScheduledTasksPage() {
     if (!draft.trim()) return;
     setEditor({ task: null, initial: { title: "", prompt: draft.trim() } });
     setDraft("");
+    if (draftRef.current) draftRef.current.style.height = "auto";
   };
   const ideas = IDEAS.filter((idea) => !scheduledTasks.some((t) => t.title === idea.title));
 
@@ -178,28 +181,41 @@ export function ScheduledTasksPage() {
         ) : undefined
       }
     >
-      <form
-        onSubmit={describe}
-        className="flex items-center gap-2 rounded-2xl border border-line bg-paper-raised py-2 pl-4 pr-2 shadow-sm transition-colors focus-within:border-line-strong"
-      >
-        <input
+      {/* Same shell as the main chat composer (ChatInput), so a prompt box looks the same everywhere. */}
+      <form onSubmit={describe} className={cn("hairline-ring rounded-2xl bg-paper transition-[box-shadow]", focused && "focus-ring")}>
+        <textarea
+          ref={draftRef}
+          rows={1}
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            const el = e.currentTarget;
+            el.style.height = "auto";
+            el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) describe(e);
+          }}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           aria-label="Describe a task"
           placeholder="Describe a task, like listing my unpaid invoices every Monday"
-          className="min-w-0 flex-1 bg-transparent text-[13.5px] text-ink placeholder:text-ink-faint focus:outline-none"
+          className="block w-full resize-none bg-transparent px-5 pb-2 pt-4 text-[15px] leading-[25px] text-ink placeholder:text-ink-faint focus:outline-none [scrollbar-width:none]"
         />
-        <button
-          type="submit"
-          aria-label="Set up this task"
-          disabled={!draft.trim()}
-          className={cn(
-            "press ring-focus flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors",
-            draft.trim() ? "bg-ink text-paper" : "bg-ink/[0.07] text-ink-faint",
-          )}
-        >
-          <ArrowUp className="h-4 w-4" />
-        </button>
+        <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5 pt-1">
+          <span className="truncate pl-2.5 text-[12px] text-ink-faint">You'll pick the day and time next</span>
+          <button
+            type="submit"
+            aria-label="Set up this task"
+            disabled={!draft.trim()}
+            className={cn(
+              "press ring-focus inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors",
+              draft.trim() ? "bg-ink text-paper hover:bg-ink/90" : "cursor-not-allowed bg-ink/[0.07] text-ink-faint",
+            )}
+          >
+            <ArrowUp className="h-4 w-4" />
+          </button>
+        </div>
       </form>
 
       {IS_TAURI && (
