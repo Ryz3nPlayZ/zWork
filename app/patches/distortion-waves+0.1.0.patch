@@ -1,0 +1,47 @@
+diff --git a/node_modules/distortion-waves/dist/index.es.js b/node_modules/distortion-waves/dist/index.es.js
+index ddef541..079f661 100644
+--- a/node_modules/distortion-waves/dist/index.es.js
++++ b/node_modules/distortion-waves/dist/index.es.js
+@@ -931,7 +931,7 @@ const it = "http://www.w3.org/1999/xhtml", K = "http://www.w3.org/2000/svg", ze
+   details: ["open"],
+   dialog: ["open"]
+ };
+-let U = null, W = [], G = [], Tt = [], kt = 0, lt = 0, Jt = -1, te = -1, ee = -1, et = -1, xt = [], ie = [], Mt = { inh: [], non: [] };
++let PS = [], U = null, W = [], G = [], Tt = [], kt = 0, lt = 0, Jt = -1, te = -1, ee = -1, et = -1, xt = [], ie = [], Mt = { inh: [], non: [] };
+ const Rt = /* @__PURE__ */ new Map();
+ function He() {
+   if (U && U.frame.isConnected && U.frame.contentDocument === U.doc && U.hidden.isConnected) return !0;
+@@ -956,6 +956,7 @@ function He() {
+     }
+     n.remove(), W = a, G = l, Tt = l.map((h) => Ue.has(h)), kt = a.indexOf("color"), lt = a.indexOf("font-family"), Jt = l.indexOf("transform"), te = l.indexOf("transform-origin"), ee = l.indexOf("perspective-origin"), et = l.indexOf("appearance"), et < 0 && (et = l.indexOf("-webkit-appearance"));
+     const r = /^border-(?:top|right|bottom|left)-(?:width|style|color)$/, c = /^background-(?:color|image)$/, u = /^padding-(?:top|right|bottom|left)$/;
++    PS = l.map((h) => { const m = /^(border-(?:top|right|bottom|left)|outline|column-rule)-width$/.exec(h); return m ? l.indexOf(m[1] + "-style") : -1; });
+     ie = l.map((h) => r.test(h) || c.test(h) || u.test(h)), xt = l.map((h, f) => r.test(h) || c.test(h) ? f : -1).filter((h) => h >= 0);
+   }
+   return Mt = se("div", it, ""), !0;
+@@ -1199,6 +1200,7 @@ function ai(s) {
+   for (const e in s) t += `${e}:${s[e]};`;
+   return t;
+ }
++const drawn = (cs, p) => PS[p] >= 0 && !/^(none|hidden|)$/.test(cs.getPropertyValue(G[PS[p]]));
+ function Gt(s, t, e, i) {
+   const n = getComputedStyle(s, t), o = n.getPropertyValue("content");
+   if (!o || o === "none" || o === "normal" || o === "-moz-alt-content" || n.getPropertyValue("display") === "none") return "";
+@@ -1210,7 +1212,7 @@ function Gt(s, t, e, i) {
+   const r = Mt.non;
+   for (let u = 0; u < G.length; u++) {
+     let h = n.getPropertyValue(G[u]);
+-    h !== r[u] && (Tt[u] && h === l || (h.indexOf("url(") >= 0 && (h = ce(h, i)), a += `${G[u]}:${h};`));
++    (h !== r[u] || drawn(n, u)) && (Tt[u] && h === l || (h.indexOf("url(") >= 0 && (h = ce(h, i)), a += `${G[u]}:${h};`));
+   }
+   const c = "dw" + i.classes++;
+   return i.rules.push(`.${c}${t}{${a}}`), c;
+@@ -1262,7 +1264,7 @@ function he(s, t, e, i, n) {
+     }
+   for (let p = 0; p < G.length; p++) {
+     let R = c.getPropertyValue(G[p]);
+-    const T = C[p], $ = y[p] === T && !(F && ie[p]);
++    const T = C[p], $ = y[p] === T && !(F && ie[p]) && !drawn(c, p);
+     if (p === Jt && i)
+       R = R === "none" ? i : `${i} ${R}`;
+     else if ($ && (R === T || Tt[p] && R === m || p === te && _ || p === ee && c.getPropertyValue("perspective") === "none"))

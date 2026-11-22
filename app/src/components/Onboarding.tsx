@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
+import { DistortionWave } from "distortion-waves";
 import { ArrowRight, Check } from "lucide-react";
 import { Logo } from "./Logo";
 import { cn } from "../lib/cn";
@@ -27,11 +28,18 @@ export function Onboarding() {
   const [job, setJob] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const startRef = useRef<HTMLButtonElement>(null);
+  const waveDone = useRef<() => void>();
 
   const complete = async () => {
     if (saving) return;
     setError("");
     setSaving(true);
+    // Let the wave land before the app replaces this screen; the timer covers a wave that never reports.
+    const waved = new Promise<void>((resolve) => {
+      waveDone.current = resolve;
+      setTimeout(resolve, 2500);
+    });
     const chore = CHORES.find((c) => c.id === job);
     const payload: OnboardingAnswer[] = [
       { key: "name", question: "What should we call you?", answer: firstName },
@@ -60,6 +68,7 @@ export function Onboarding() {
         first_job: chore?.id || "",
       });
       useApp.setState({ starterDraft: chore?.prompt || "" });
+      await waved;
       setOnboardingDone(true);
     } catch (err) {
       console.error(err);
@@ -81,8 +90,6 @@ export function Onboarding() {
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  if (saving) return <FinalizingScreen />;
-
   return (
     // No background of its own, so a look with a wallpaper shows behind the card.
     <div className="relative flex h-full min-h-screen w-full flex-col overflow-y-auto">
@@ -92,12 +99,22 @@ export function Onboarding() {
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+          className="w-full max-w-[600px] rounded-2xl shadow-[0_20px_60px_-20px_rgb(var(--shadow)/0.35),0_2px_6px_-2px_rgb(var(--shadow)/0.15)]"
+        >
+        {/* Start sends a wave up from the button into "Setting things up"; a failed save folds it back.
+            shortcut: patches/distortion-waves+0.1.0.patch carries upstream PR #31 (Tailwind's 0-width borders drawn as 3px in the wave's snapshot); drop it once a release includes the fix. */}
+        <DistortionWave
+          revealed={saving}
+          source={startRef}
+          onFinish={(shown) => shown && waveDone.current?.()}
+          reducedMotion={needsLightweightRendering() ? "always" : "system"}
+          revealedContent={<FinalizingScreen />}
           className={cn(
-            "w-full max-w-[600px] rounded-2xl border border-line/80 p-6 md:p-9",
+            "overflow-hidden rounded-2xl border border-line/80",
             needsLightweightRendering() ? "bg-paper-raised" : "bg-paper-raised/90 backdrop-blur-lg",
-            "shadow-[0_20px_60px_-20px_rgb(var(--shadow)/0.35),0_2px_6px_-2px_rgb(var(--shadow)/0.15)]",
           )}
         >
+        <div className="p-6 md:p-9">
           <div className="flex items-center gap-2">
             <Logo size={20} />
             <span className="text-[13.5px] font-semibold tracking-tight text-ink">
@@ -151,6 +168,7 @@ export function Onboarding() {
 
           <div className="mt-8 flex justify-end">
             <button
+              ref={startRef}
               type="button"
               onClick={() => void complete()}
               className="press ring-focus inline-flex items-center gap-1.5 rounded-full bg-ink px-5 py-2.5 text-[13.5px] font-medium text-paper shadow-sm hover:bg-ink-soft"
@@ -158,6 +176,8 @@ export function Onboarding() {
               Start <ArrowRight className="h-3.5 w-3.5" />
             </button>
           </div>
+        </div>
+        </DistortionWave>
         </motion.div>
       </main>
     </div>
@@ -176,7 +196,7 @@ function friendlySetupError(detail: string) {
 
 function FinalizingScreen() {
   return (
-    <div className="flex h-full min-h-screen w-full items-center justify-center">
+    <div className="flex h-full w-full items-center justify-center bg-paper-raised">
       <span className="shimmer-text-slow font-serif text-[24px] tracking-tight">Setting things up…</span>
     </div>
   );

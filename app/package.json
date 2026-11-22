@@ -19,6 +19,7 @@
     "@tauri-apps/plugin-updater": "^2.10.1",
     "bot-avatars": "^0.2.2",
     "clsx": "^2.1.1",
+    "distortion-waves": "0.1.0",
     "framer-motion": "^12.38.0",
     "img-fx": "^0.5.1",
     "katex": "^0.16.45",
