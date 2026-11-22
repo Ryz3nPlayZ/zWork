@@ -259,11 +259,8 @@ export function SkillsPage() {
     );
   };
 
-  // skills.sh pads results with loose matches; when enough skills are named
-  // for what you typed, show only those.
-  const words = q.toLowerCase().split(/\s+/).filter((w) => w.length > 1);
-  const named = (results ?? []).filter((s) => words.some((w) => s.name.toLowerCase().includes(w.slice(0, 5))));
-  const shown = named.length >= 3 ? named : results ?? [];
+  // The sidecar already keeps the results named for what you typed.
+  const shown = results ?? [];
 
   let body: React.ReactNode;
   if (q.length >= 2) {

@@ -5,6 +5,7 @@ import { api, type ComposioAccount, type ComposioToolkit } from "../lib/api";
 import { AppBrandLogo, hasBrandLogo } from "./BrandLogos";
 import { IconButton } from "./IconButton";
 import { McpConnectors } from "./McpConnectors";
+import { BLURBS } from "./connectorBlurbs";
 import {
   Badge,
   Button,
@@ -150,9 +151,10 @@ function shelfOf(app: ComposioToolkit): string | null {
 
 const shelfTitle = (id: string) => SHELVES.find((s) => s.id === id)?.title ?? MORE.title;
 
-/** First sentence of Composio's description, so a card reads as one line of plain text. */
+/** One line of plain text for a card: our own copy where we have it, else Composio's first sentence. */
 function blurb(app: ComposioToolkit): string {
   if (CATALOG[app.slug]) return CATALOG[app.slug].short;
+  if (BLURBS[app.slug]) return BLURBS[app.slug];
   const first = app.description.split(/(?<=[.!?])\s/)[0]?.trim() ?? "";
   return first || `Use ${app.name} from zWork`;
 }
@@ -548,7 +550,7 @@ function AppDetail({
             )}
           </header>
 
-          <p className="mt-4 max-w-[60ch] text-[14px] leading-relaxed text-ink-soft">{entry?.long ?? (app.description || `Use ${app.name} from zWork.`)}</p>
+          <p className="mt-4 max-w-[60ch] text-[14px] leading-relaxed text-ink-soft">{entry?.long ?? (BLURBS[app.slug] ? `${BLURBS[app.slug]}.` : app.description || `Use ${app.name} from zWork.`)}</p>
           {!connected && <p className="mt-2 max-w-[60ch] text-[12.5px] leading-relaxed text-ink-muted">{howItConnects(app)}</p>}
           {error && (
             <p role="alert" className="mt-4 rounded-xl border border-error/20 bg-error/10 px-3.5 py-2.5 text-[12.5px] leading-relaxed text-error">{error}</p>

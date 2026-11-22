@@ -26,6 +26,8 @@ const DOWNLOAD_TTL: Duration = Duration::from_secs(30 * 60);
 /// A skill bigger than this is almost certainly not instructions for paperwork.
 const MAX_TOTAL_BYTES: usize = 5 * 1024 * 1024;
 const MAX_FILES: usize = 200;
+/// Search results shown at once; each is fetched for its description.
+const SEARCH_SHOWN: usize = 18;
 pub const SOURCE_FILE: &str = ".zwork-source.json";
 
 /// Hand-picked skills for office work, with descriptions in plain words
@@ -149,9 +151,66 @@ pub async fn search(q: &str) -> Result<Value, String> {
                 .collect()
         })
         .unwrap_or_default();
+    let skills = with_descriptions(relevant(skills, &key)).await;
     let v = json!({ "skills": skills });
     remember(&SEARCH_CACHE, &key, &v);
     Ok(v)
+}
+
+/// Search results worth showing. skills.sh pads its answer with loose
+/// matches (developer skills for "invoice"); when at least three skills are
+/// named for a word that was typed, keep only those.
+fn relevant(skills: Vec<Value>, q: &str) -> Vec<Value> {
+    let words: Vec<String> = q.split_whitespace().filter(|w| w.chars().count() > 1).map(|w| w.chars().take(5).collect()).collect();
+    let named = |s: &Value| {
+        let name = s.get("name").and_then(|n| n.as_str()).unwrap_or_default().to_lowercase();
+        words.iter().any(|w| name.contains(w.as_str()))
+    };
+    let picked: Vec<Value> = if skills.iter().filter(|s| named(s)).count() >= 3 {
+        skills.into_iter().filter(|s| named(s)).collect()
+    } else {
+        skills
+    };
+    picked.into_iter().take(SEARCH_SHOWN).collect()
+}
+
+/// Search answers carry no descriptions, so fetch each skill (a few at a time;
+/// the downloads are cached, which also makes its page open at once) and add
+/// the first sentence of what it says it does. A skill that can't be read
+/// keeps no description and the card says where it's from.
+async fn with_descriptions(skills: Vec<Value>) -> Vec<Value> {
+    use futures_util::stream::{self, StreamExt};
+    stream::iter(skills)
+        .map(|mut s| async move {
+            let id = s.get("id").and_then(|i| i.as_str()).unwrap_or_default().to_string();
+            let fetched = tokio::time::timeout(Duration::from_secs(8), download(&id)).await;
+            if let Ok(Ok(v)) = fetched {
+                if let Ok(c) = check(&id, &v) {
+                    s["description"] = json!(first_sentence(&c.description));
+                    s["name"] = json!(c.name);
+                }
+            }
+            s
+        })
+        .buffered(6)
+        .collect()
+        .await
+}
+
+/// The opening sentence of a description, for a two-line card.
+fn first_sentence(text: &str) -> String {
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let end = text
+        .char_indices()
+        .find(|&(i, c)| matches!(c, '.' | '!' | '?') && text[i + c.len_utf8()..].starts_with(' '))
+        .map(|(i, c)| i + c.len_utf8())
+        .unwrap_or(text.len());
+    let first = &text[..end];
+    if first.chars().count() <= 160 {
+        first.to_string()
+    } else {
+        format!("{}…", first.chars().take(157).collect::<String>().trim_end())
+    }
 }
 
 /// Every file of one skill, as skills.sh serves it.
@@ -219,7 +278,12 @@ fn check(id: &str, v: &Value) -> Result<Checked, String> {
     let skill_md = files.iter().find(|(p, _)| p == "SKILL.md").map(|(_, c)| c.as_str()).ok_or("skill_md_missing")?;
     let fm = parse_frontmatter(skill_md).map_err(|_| "skill_md_invalid".to_string())?;
     let folder = id.rsplit('/').next().unwrap_or_default();
-    let name = fm.get("name").map(str::trim).filter(|n| !n.is_empty()).unwrap_or(folder).to_string();
+    let given = fm.get("name").map(str::trim).filter(|n| !n.is_empty()).unwrap_or(folder);
+    // Some publishers write a title ("Invoice Automation") where the format
+    // wants a folder-style name. Use the skill's folder name instead; install
+    // writes it back so zWork finds the skill under the folder it lands in.
+    let renamed = !valid_name(given);
+    let name = if renamed { folder } else { given }.to_string();
     if !valid_name(&name) {
         return Err("skill_name_invalid".into());
     }
@@ -244,9 +308,12 @@ fn check(id: &str, v: &Value) -> Result<Checked, String> {
             .then(|| "See the licence file included with this skill".to_string())
     });
     let mut files = files;
-    if repaired {
-        if let Some((_, md)) = files.iter_mut().find(|(p, _)| p == "SKILL.md") {
-            *md = with_description(md, &description);
+    if let Some((_, md)) = files.iter_mut().find(|(p, _)| p == "SKILL.md") {
+        if repaired {
+            *md = with_field(md, "description", &description);
+        }
+        if renamed {
+            *md = with_field(md, "name", &name);
         }
     }
     Ok(Checked {
@@ -296,8 +363,9 @@ fn first_paragraph(body: &str) -> String {
 }
 
 /// SKILL.md with its frontmatter `description` replaced.
-fn with_description(md: &str, description: &str) -> String {
-    let quoted = serde_json::to_string(description).unwrap_or_default();
+fn with_field(md: &str, key: &str, value: &str) -> String {
+    let quoted = serde_json::to_string(value).unwrap_or_default();
+    let prefix = format!("{key}:");
     let mut in_front = false;
     let mut done = false;
     let mut lines: Vec<String> = Vec::new();
@@ -305,8 +373,8 @@ fn with_description(md: &str, description: &str) -> String {
         if line.trim() == "---" {
             in_front = i == 0;
         }
-        if in_front && !done && line.starts_with("description:") {
-            lines.push(format!("description: {quoted}"));
+        if in_front && !done && line.starts_with(&prefix) {
+            lines.push(format!("{key}: {quoted}"));
             done = true;
             continue;
         }
@@ -447,7 +515,7 @@ mod tests {
         let c = check("x/y/invoice-chase", &skill(&[("SKILL.md", md), ("LICENSE.txt", "MIT")])).unwrap();
         assert_eq!(c.description, "Chase overdue invoices.");
         assert!(c.license.is_some());
-        assert!(check("x/y/z", &skill(&[("SKILL.md", "---\nname: Bad Name\ndescription: d\n---\n")])).is_err());
+        assert!(check("x/y/Z_", &skill(&[("SKILL.md", "---\nname: Bad Name\ndescription: d\n---\n")])).is_err());
     }
 
     #[test]
@@ -459,6 +527,32 @@ mod tests {
         assert!(written.contains("description: \"Turns raw notes into minutes. With action items.\""));
         let reparsed = parse_frontmatter(written).unwrap();
         assert_eq!(reparsed.get("description"), Some("Turns raw notes into minutes. With action items."));
+    }
+
+    #[test]
+    fn title_style_names_fall_back_to_the_folder() {
+        let md = "---\nname: Invoice Automation\ndescription: Automate invoices\n---\nBody";
+        let c = check("a/b/invoice-automation", &skill(&[("SKILL.md", md)])).unwrap();
+        assert_eq!(c.name, "invoice-automation");
+        let reparsed = parse_frontmatter(&c.files[0].1).unwrap();
+        assert_eq!(reparsed.get("name"), Some("invoice-automation"));
+        assert_eq!(reparsed.get("description"), Some("Automate invoices"));
+    }
+
+    #[test]
+    fn search_keeps_skills_named_for_the_query() {
+        let r = |n: &str| json!({ "id": format!("a/b/{n}"), "name": n });
+        let all = vec![r("vercel-deploy"), r("invoice-chase"), r("invoicing"), r("convex"), r("invoice-organizer")];
+        let names: Vec<_> = relevant(all.clone(), "invoices").iter().map(|s| s["name"].as_str().unwrap().to_string()).collect();
+        assert_eq!(names, ["invoice-chase", "invoicing", "invoice-organizer"]);
+        assert_eq!(relevant(all, "receipts").len(), 5);
+    }
+
+    #[test]
+    fn first_sentence_is_short_and_whole() {
+        assert_eq!(first_sentence("Writes minutes.  Then more. "), "Writes minutes.");
+        assert_eq!(first_sentence("Use v1.2 of the form. Next"), "Use v1.2 of the form.");
+        assert!(first_sentence(&"word ".repeat(80)).ends_with('…'));
     }
 
     #[test]
