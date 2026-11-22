@@ -6197,9 +6197,13 @@ async fn composio_connect(
         .unwrap_or("")
         .to_string();
 
-    if auth_config_id.is_empty() {
-        return Err((StatusCode::NOT_FOUND, "composio_auth_config_not_found".into()));
-    }
+    let auth_config_id = if auth_config_id.is_empty() {
+        create_managed_auth_config(&state, &app_slug)
+            .await
+            .ok_or((StatusCode::NOT_FOUND, "composio_auth_config_not_found".into()))?
+    } else {
+        auth_config_id
+    };
 
     // Step 2: get OAuth link
     let link_url = format!("{}/connected_accounts/link", COMPOSIO_BASE_URL);
@@ -6340,6 +6344,140 @@ async fn composio_apps() -> Json<Value> {
         })
         .collect();
     Json(serde_json::json!({"apps": apps}))
+}
+
+/// Apps zWork has its own sign-in for, so they stay in the catalogue even
+/// where Composio has no managed one (Xero).
+fn zwork_auth_apps() -> &'static [&'static str] {
+    &[
+        "gmail", "googlecalendar", "slack", "notion", "googledrive", "github", "jira", "trello",
+        "todoist", "linear", "asana", "hubspot", "outlook", "one_drive", "excel",
+        "microsoft_teams", "quickbooks", "xero",
+    ]
+}
+
+/// One Composio toolkit in the shape the desktop storefront reads, or None
+/// when a person couldn't connect it in one step.
+fn catalog_entry(t: &Value) -> Option<Value> {
+    let slug = t.get("slug")?.as_str()?.to_lowercase();
+    let no_auth = t.get("no_auth").and_then(|v| v.as_bool()).unwrap_or(false);
+    let local = t.get("is_local_toolkit").and_then(|v| v.as_bool()).unwrap_or(false);
+    let managed = t
+        .get("composio_managed_auth_schemes")
+        .and_then(|v| v.as_array())
+        .is_some_and(|a| !a.is_empty());
+    if slug.is_empty() || no_auth || local || !(managed || zwork_auth_apps().contains(&slug.as_str())) {
+        return None;
+    }
+    let meta = t.get("meta").cloned().unwrap_or(Value::Null);
+    let categories: Vec<Value> = meta
+        .get("categories")
+        .and_then(|c| c.as_array())
+        .map(|a| a.iter().filter_map(|c| c.get("name").cloned()).collect())
+        .unwrap_or_default();
+    let logo = meta
+        .get("logo")
+        .and_then(|l| l.as_str())
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("https://logos.composio.dev/api/{slug}"));
+    Some(serde_json::json!({
+        "slug": slug,
+        "name": t.get("name").cloned().unwrap_or(Value::String(slug.clone())),
+        "description": meta.get("description").cloned().unwrap_or(Value::String(String::new())),
+        "logo": logo,
+        "categories": categories,
+        "auth": t.get("auth_schemes").cloned().unwrap_or(Value::Array(vec![])),
+        "tools": meta.get("tools_count").cloned().unwrap_or(Value::from(0)),
+    }))
+}
+
+static COMPOSIO_CATALOG: std::sync::Mutex<Option<(std::time::Instant, Value)>> = std::sync::Mutex::new(None);
+
+/// `GET /api/composio/catalog`: Composio's Toolkit Catalog API, trimmed to
+/// apps people can connect, for the desktop Connectors storefront. The
+/// catalogue isn't per user, so one copy is shared for six hours.
+async fn composio_catalog(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    ensure_gateway_access(&state, &headers)
+        .await
+        .map_err(|s| (s, "access_denied".into()))?;
+    if state.composio_api_key.is_empty() {
+        return Err((StatusCode::SERVICE_UNAVAILABLE, "composio_not_configured".into()));
+    }
+    if let Some((at, v)) = COMPOSIO_CATALOG.lock().ok().and_then(|c| c.clone()) {
+        if at.elapsed() < std::time::Duration::from_secs(6 * 60 * 60) {
+            return Ok(Json(v));
+        }
+    }
+    let mut toolkits: Vec<Value> = Vec::new();
+    let mut cursor: Option<String> = None;
+    for _ in 0..10 {
+        let mut url = format!("{}/toolkits?limit=1000", COMPOSIO_BASE_URL);
+        if let Some(c) = &cursor {
+            url.push_str(&format!("&cursor={}", urlencoding::encode(c)));
+        }
+        let resp = state
+            .http_client
+            .get(&url)
+            .headers(composio_request_headers(&state.composio_api_key))
+            .send()
+            .await
+            .map_err(|_| (StatusCode::BAD_GATEWAY, "composio_unreachable".into()))?;
+        if !resp.status().is_success() {
+            return Err((StatusCode::BAD_GATEWAY, "composio_catalog_failed".into()));
+        }
+        let page: Value = resp
+            .json()
+            .await
+            .map_err(|_| (StatusCode::BAD_GATEWAY, "composio_invalid_response".into()))?;
+        if let Some(items) = page.get("items").and_then(|v| v.as_array()) {
+            toolkits.extend(items.iter().filter_map(catalog_entry));
+        }
+        cursor = page
+            .get("next_cursor")
+            .and_then(|c| c.as_str())
+            .filter(|c| !c.is_empty())
+            .map(str::to_string);
+        if cursor.is_none() {
+            break;
+        }
+    }
+    toolkits.sort_by_key(|t| t["name"].as_str().unwrap_or_default().to_lowercase());
+    let body = serde_json::json!({ "toolkits": toolkits });
+    if let Ok(mut c) = COMPOSIO_CATALOG.lock() {
+        *c = Some((std::time::Instant::now(), body.clone()));
+    }
+    Ok(Json(body))
+}
+
+/// Create an auth config on Composio's managed sign-in for a toolkit that has
+/// none in this project yet, so any app with managed sign-in connects in one
+/// click. Returns the new config's id.
+async fn create_managed_auth_config(state: &AppState, slug: &str) -> Option<String> {
+    let resp = state
+        .http_client
+        .post(format!("{}/auth_configs", COMPOSIO_BASE_URL))
+        .headers(composio_request_headers(&state.composio_api_key))
+        .json(&serde_json::json!({
+            "toolkit": { "slug": slug },
+            "auth_config": { "type": "use_composio_managed_auth", "name": format!("zWork {slug}") }
+        }))
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        tracing::warn!("Composio managed auth config for {} failed: {}", slug, resp.status());
+        return None;
+    }
+    let body: Value = resp.json().await.ok()?;
+    body.get("auth_config")
+        .and_then(|a| a.get("id"))
+        .or_else(|| body.get("id"))
+        .and_then(|id| id.as_str())
+        .map(str::to_string)
 }
 
 async fn composio_tools(
@@ -7862,6 +8000,7 @@ async fn main() {
         .route("/api/composio/connect", post(composio_connect))
         .route("/api/composio/disconnect", post(composio_disconnect))
         .route("/api/composio/apps", get(composio_apps))
+        .route("/api/composio/catalog", get(composio_catalog))
         .route("/api/composio/tools", get(composio_tools))
         .route("/api/composio/tools/execute/:slug", post(composio_execute))
         .route("/api/composio/callback", get(composio_callback))

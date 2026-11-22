@@ -2866,6 +2866,12 @@ pub async fn composio_apps() -> impl IntoResponse {
     Json(crate::connectors::composio::apps())
 }
 
+/// The Connectors storefront's inventory: Composio's Toolkit Catalog, live
+/// through zWork Cloud or from the bundled snapshot.
+pub async fn composio_catalog() -> impl IntoResponse {
+    Json(crate::connectors::composio::catalog().await)
+}
+
 // ---- Ollama ----
 
 #[derive(serde::Deserialize)]

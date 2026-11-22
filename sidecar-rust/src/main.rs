@@ -235,6 +235,7 @@ async fn run() {
         .route("/api/composio/connect", post(server::composio_connect))
         .route("/api/composio/disconnect", post(server::composio_disconnect))
         .route("/api/composio/apps", get(server::composio_apps))
+        .route("/api/composio/catalog", get(server::composio_catalog))
         .route("/api/ollama/models", post(server::ollama_models))
         .route("/api/ollama/pull", post(server::ollama_pull))
         .route("/api/memory", get(server::get_memory).put(server::put_memory))

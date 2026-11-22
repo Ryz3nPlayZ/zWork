@@ -1,11 +1,23 @@
-import { useState, useEffect } from "react";
-import { Check, ChevronLeft, ExternalLink, Loader2, Plug, Plus, RefreshCw } from "lucide-react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { Check, ChevronLeft, ExternalLink, Loader2, Plug, RefreshCw, Search } from "lucide-react";
 import { useApp } from "../lib/store";
-import type { ComposioApp } from "../lib/api";
+import { api, type ComposioAccount, type ComposioToolkit } from "../lib/api";
 import { AppBrandLogo, hasBrandLogo } from "./BrandLogos";
 import { IconButton } from "./IconButton";
 import { McpConnectors } from "./McpConnectors";
-import { Button, PageShell, RowIconButton, SearchField, useConfirm } from "./page/Page";
+import {
+  Badge,
+  Button,
+  Card,
+  CardGrid,
+  EmptyState,
+  ListGroup,
+  ListRow,
+  PageShell,
+  SearchField,
+  SectionHeading,
+  useConfirm,
+} from "./page/Page";
 
 interface CatalogEntry {
   maker: string;
@@ -97,137 +109,223 @@ const CATALOG: Record<string, CatalogEntry> = {
   },
 };
 
-const SECTIONS: { title: string; apps: string[] }[] = [
-  { title: "Email and calendar", apps: ["gmail", "outlook", "googlecalendar"] },
-  { title: "Files and spreadsheets", apps: ["googledrive", "one_drive", "excel"] },
-  { title: "Team chat and notes", apps: ["slack", "microsoft_teams", "notion"] },
-  { title: "Accounting", apps: ["quickbooks", "xero"] },
+/** The apps most people doing office work reach for first, in this order. */
+const POPULAR = ["gmail", "outlook", "googlecalendar", "googledrive", "one_drive", "excel", "slack", "microsoft_teams", "notion", "quickbooks", "xero"];
+
+/**
+ * Shelves on the storefront, in plain words. Composio's own categories map
+ * onto them; an app sits on the shelf of its first category that has one.
+ */
+const SHELVES: { id: string; title: string; categories: string[] }[] = [
+  { id: "email", title: "Email and calendar", categories: ["email", "calendar", "scheduling & booking", "email newsletters", "event management"] },
+  { id: "files", title: "Files and documents", categories: ["documents", "file management & storage", "spreadsheets", "notes", "signatures", "forms & surveys", "images & design"] },
+  { id: "chat", title: "Chat and meetings", categories: ["team chat", "video conferencing", "communication", "phone & sms", "ai meeting assistants", "transcription", "notifications"] },
+  { id: "tasks", title: "Tasks and projects", categories: ["project management", "task management", "team collaboration", "productivity", "time tracking software", "product management"] },
+  { id: "money", title: "Money and accounting", categories: ["accounting", "proposal & invoice management", "payment processing", "fundraising"] },
+  { id: "customers", title: "Customers and sales", categories: ["crm", "contact management", "customer support", "ecommerce", "ai sales tools", "call tracking"] },
+  { id: "marketing", title: "Marketing and social", categories: ["marketing automation", "marketing", "social media accounts", "social media marketing", "ads & conversion", "website builders"] },
 ];
-const ALLOWED_APPS = new Set(SECTIONS.flatMap((section) => section.apps));
-const short = (app: ComposioApp) => CATALOG[app.id]?.short ?? `Use ${app.name} from zWork`;
+const MORE = { id: "more", title: "More apps" };
+
+/** Apps built for software teams. They stay findable by search but aren't shelved. */
+const BUILDER_CATEGORIES = new Set(["developer tools", "databases", "server monitoring", "ai models", "artificial intelligence", "model context protocol"]);
+
+/** Where curated apps belong regardless of how Composio files them. */
+const SHELF_OVERRIDES: Record<string, string> = {
+  gmail: "email", outlook: "email", googlecalendar: "email",
+  googledrive: "files", one_drive: "files", excel: "files", notion: "files",
+  slack: "chat", microsoft_teams: "chat",
+  quickbooks: "money", xero: "money",
+};
+
+function shelfOf(app: ComposioToolkit): string | null {
+  if (SHELF_OVERRIDES[app.slug]) return SHELF_OVERRIDES[app.slug];
+  for (const c of app.categories) {
+    const shelf = SHELVES.find((s) => s.categories.includes(c.toLowerCase()));
+    if (shelf) return shelf.id;
+  }
+  if (app.categories.some((c) => BUILDER_CATEGORIES.has(c.toLowerCase()))) return null;
+  return MORE.id;
+}
+
+const shelfTitle = (id: string) => SHELVES.find((s) => s.id === id)?.title ?? MORE.title;
+
+/** First sentence of Composio's description, so a card reads as one line of plain text. */
+function blurb(app: ComposioToolkit): string {
+  if (CATALOG[app.slug]) return CATALOG[app.slug].short;
+  const first = app.description.split(/(?<=[.!?])\s/)[0]?.trim() ?? "";
+  return first || `Use ${app.name} from zWork`;
+}
+
+/** How connecting works, in words a person who's never heard of OAuth can follow. */
+function howItConnects(app: ComposioToolkit): string {
+  const oauth = app.auth.some((a) => a.includes("OAUTH"));
+  return oauth
+    ? `You sign in to ${app.name} in your browser and choose what to allow. zWork never sees your password.`
+    : `Your browser opens a page where you paste a key from your ${app.name} account. zWork never sees your password.`;
+}
 
 /** Near-black brand marks (Notion, GitHub) are drawn in ink so they show in dark mode. */
 const INK_LOGOS = new Set(["notion", "github"]);
+/** Brand colours for the marks drawn in-app, keyed by app. */
+const BRAND_COLORS: Record<string, string> = {
+  gmail: "#EA4335", googlecalendar: "#4285F4", outlook: "#0078D4", googledrive: "#34A853", one_drive: "#0078D4",
+  excel: "#217346", slack: "#4A154B", microsoft_teams: "#6264A7", quickbooks: "#2CA01C", xero: "#13B5EA", linear: "#5E6AD2",
+};
 
-/** Brand mark on a tinted tile. Near-black marks (Notion, GitHub) use ink so they show in dark mode. */
-function AppLogoTile({ app, size = "md" }: { app: ComposioApp; size?: "md" | "xl" }) {
-  const ink = INK_LOGOS.has(app.id);
-  const hasLogo = hasBrandLogo(app.id);
-  const color = ink ? "rgb(var(--ink))" : app.color;
-  const box = size === "md" ? "h-10 w-10 rounded-xl" : "h-16 w-16 rounded-2xl";
+/**
+ * An app's logo on a light tile. Apps with a mark drawn in-app use it (no
+ * network); the rest load Composio's logo, and fall back to the app's initial.
+ */
+function AppLogoTile({ app, size = "md" }: { app: Pick<ComposioToolkit, "slug" | "name" | "logo">; size?: "sm" | "md" | "xl" }) {
+  const [broken, setBroken] = useState(false);
+  const box = { sm: "h-8 w-8 rounded-lg", md: "h-10 w-10 rounded-xl", xl: "h-16 w-16 rounded-2xl" }[size];
+  const px = { sm: 16, md: 20, xl: 32 }[size];
+  const ink = INK_LOGOS.has(app.slug);
   return (
-    <div
-      className={`flex shrink-0 items-center justify-center overflow-hidden ${box}`}
-      style={{
-        backgroundColor: ink ? "rgb(var(--ink) / 0.08)" : hasLogo ? `${color}14` : "rgb(var(--paper-sunken))",
-        color: hasLogo ? color : "rgb(var(--ink-muted))",
-      }}
-    >
-      {hasLogo ? (
-        <AppBrandLogo appId={app.id} size={size === "md" ? 18 : 30} />
-      ) : app.icon ? (
-        <img src={app.icon} alt="" className={size === "md" ? "h-5 w-5 object-contain" : "h-8 w-8 object-contain"} />
+    <div className={`flex shrink-0 items-center justify-center overflow-hidden border border-line bg-white ${box}`}>
+      {hasBrandLogo(app.slug) ? (
+        <span style={{ color: ink ? "#111" : BRAND_COLORS[app.slug] ?? "#111" }}>
+          <AppBrandLogo appId={app.slug} size={px} />
+        </span>
+      ) : app.logo && !broken ? (
+        <img src={app.logo} alt="" width={px} height={px} loading="lazy" onError={() => setBroken(true)} className="object-contain" style={{ width: px, height: px }} />
       ) : (
-        <Plug size={16} />
+        <span className="text-[13px] font-semibold text-neutral-600">{app.name.slice(0, 1).toUpperCase() || <Plug size={14} />}</span>
       )}
     </div>
   );
 }
 
+/** A connect failure in words a person can act on, not a status line and JSON. */
+function friendlyConnectError(raw: string): string {
+  if (raw.includes("composio_auth_config_not_found")) return "This app isn't ready to connect yet. Please try again later.";
+  if (/sign in|401|access_denied/i.test(raw)) return "Sign in to zWork first, then connect your apps.";
+  if (/composio_unreachable|Failed to fetch|NetworkError/i.test(raw)) return "Couldn't reach zWork. Check your internet connection and try again.";
+  const inner = raw.match(/"error"\s*:\s*"([^"]+)"/)?.[1];
+  return inner && !inner.includes("_") ? inner : "Something went wrong connecting this app. Please try again.";
+}
+
+/** One fetch per app session; the page reopens instantly after the first. */
+let catalogCache: ComposioToolkit[] | null = null;
+
 export function ConnectorsPage() {
   const composioAccounts = useApp((s) => s.composioAccounts);
-  const composioApps = useApp((s) => s.composioApps);
   const refreshComposio = useApp((s) => s.refreshComposio);
   const connectComposioApp = useApp((s) => s.connectComposioApp);
   const disconnectComposioApp = useApp((s) => s.disconnectComposioApp);
   const openLanding = useApp((s) => s.openLanding);
+  const [catalog, setCatalog] = useState<ComposioToolkit[] | null>(catalogCache);
+  const [catalogFailed, setCatalogFailed] = useState(false);
   const [query, setQuery] = useState("");
-
+  const [shelf, setShelf] = useState<string | null>(null);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
-  const [expandedApp, setExpandedApp] = useState<string | null>(null);
+  const [openApp, setOpenApp] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [confirmDialog, confirm] = useConfirm();
+  const topRef = useRef<HTMLDivElement>(null);
+
+  // Opening a shelf or going back starts at the top, not where the last view was scrolled.
+  useEffect(() => {
+    topRef.current?.closest(".overflow-y-auto")?.scrollTo({ top: 0 });
+  }, [shelf]);
+
+  async function loadCatalog() {
+    try {
+      const { toolkits } = await api.composioCatalog();
+      catalogCache = toolkits;
+      setCatalog(toolkits);
+      setCatalogFailed(false);
+    } catch {
+      setCatalogFailed(true);
+    }
+  }
 
   useEffect(() => {
     void refreshComposio();
+    if (!catalogCache) void loadCatalog();
   }, [refreshComposio]);
 
-  const connectedApps = new Set(
-    composioAccounts
-      .filter((a) => a.status === "ACTIVE")
-      .map((a) => a.app),
-  );
+  const bySlug = useMemo(() => new Map((catalog ?? []).map((a) => [a.slug, a])), [catalog]);
 
-  async function handleConnect(appId: string) {
-    setConnecting(appId);
+  /** A connected account as an app, even when the catalogue doesn't list it. */
+  const appFor = (account: ComposioAccount): ComposioToolkit =>
+    bySlug.get(account.app) ?? {
+      slug: account.app,
+      name: account.app_name || account.app,
+      description: "",
+      logo: account.icon || `https://logos.composio.dev/api/${account.app}`,
+      categories: [],
+      auth: ["OAUTH2"],
+      tools: 0,
+    };
+
+  const activeApps = new Set(composioAccounts.filter((a) => a.status === "ACTIVE").map((a) => a.app));
+  // One row per app: an active account wins over a stale one.
+  const accounts = [...new Map(
+    // A sign-in that was started but never finished isn't a connection.
+    composioAccounts.filter((a) => !["INITIATED", "INITIALIZING"].includes(a.status)).sort((a, b) => Number(a.status === "ACTIVE") - Number(b.status === "ACTIVE")).map((a) => [a.app, a]),
+  ).values()].sort((a, b) => appFor(a).name.localeCompare(appFor(b).name));
+
+  async function handleConnect(slug: string) {
+    setConnecting(slug);
     setConnectError(null);
     try {
-      await connectComposioApp(appId);
-      setExpandedApp(null);
+      await connectComposioApp(slug);
     } catch (e: any) {
-      const message = e?.message || String(e);
-      setConnectError(
-        message.includes("composio_auth_config_not_found")
-          ? "This app isn't ready to connect yet. Please try again later."
-          : message,
-      );
+      setConnectError(friendlyConnectError(e?.message || String(e)));
     } finally {
       setConnecting(null);
     }
   }
 
-  async function handleDisconnect(app: ComposioApp) {
+  async function handleDisconnect(app: ComposioToolkit) {
     const ok = await confirm({
       title: `Disconnect ${app.name}?`,
       body: `zWork will stop using ${app.name}. You can connect it again any time.`,
       confirmLabel: "Disconnect",
     });
     if (!ok) return;
-    setExpandedApp(null);
-    void disconnectComposioApp(app.id);
+    void disconnectComposioApp(app.slug);
   }
 
   async function refresh() {
     setRefreshing(true);
     try {
-      await refreshComposio();
+      await Promise.all([refreshComposio(), loadCatalog()]);
     } finally {
       setRefreshing(false);
     }
   }
-
-  const allowedComposioApps = composioApps.filter((app) => ALLOWED_APPS.has(app.id) || connectedApps.has(app.id));
-  const connectedCount = allowedComposioApps.filter((a) => connectedApps.has(a.id)).length;
-  const expandedAppData = allowedComposioApps.find((a) => a.id === expandedApp);
-  const byId = new Map(allowedComposioApps.map((app) => [app.id, app]));
-  const q = query.trim().toLowerCase();
-  const sections = q
-    ? [{ title: "Results", apps: allowedComposioApps.filter((app) => `${app.name} ${short(app)} ${CATALOG[app.id]?.maker ?? ""}`.toLowerCase().includes(q)) }]
-    : [
-        { title: "Connected", apps: allowedComposioApps.filter((app) => connectedApps.has(app.id)) },
-        ...SECTIONS.map((section) => ({
-          title: section.title,
-          apps: section.apps.map((id) => byId.get(id)).filter((app): app is ComposioApp => !!app && !connectedApps.has(app.id)),
-        })),
-      ];
 
   const ask = (prompt: string) => {
     openLanding();
     useApp.setState({ draftInject: { chatId: "", text: prompt, nonce: Date.now() } });
   };
 
-  if (expandedAppData) {
+  const opened = openApp ? bySlug.get(openApp) ?? (() => {
+    const account = composioAccounts.find((a) => a.app === openApp);
+    return account ? appFor(account) : undefined;
+  })() : undefined;
+
+  if (opened) {
+    const account = accounts.find((a) => a.app === opened.slug);
     return (
       <>
         <AppDetail
-          app={expandedAppData}
-          connected={connectedApps.has(expandedAppData.id)}
-          connecting={connecting === expandedAppData.id}
+          app={opened}
+          connected={activeApps.has(opened.slug)}
+          needsReconnect={!!account && !activeApps.has(opened.slug)}
+          connecting={connecting === opened.slug}
           error={connectError}
-          onBack={() => setExpandedApp(null)}
-          onConnect={() => void handleConnect(expandedAppData.id)}
-          onDisconnect={() => void handleDisconnect(expandedAppData)}
+          backLabel={shelf ? shelfTitle(shelf) : "Connectors"}
+          onBack={() => {
+            setOpenApp(null);
+            setConnectError(null);
+          }}
+          onConnect={() => void handleConnect(opened.slug)}
+          onDisconnect={() => void handleDisconnect(opened)}
           onAsk={ask}
         />
         {confirmDialog}
@@ -235,14 +333,102 @@ export function ConnectorsPage() {
     );
   }
 
+  const open = (slug: string) => {
+    setConnectError(null);
+    setOpenApp(slug);
+  };
+
+  const card = (app: ComposioToolkit) => (
+    <Card
+      key={app.slug}
+      icon={<AppLogoTile app={app} />}
+      title={app.name}
+      description={blurb(app)}
+      corner={activeApps.has(app.slug) ? <Badge tone="success">Connected</Badge> : undefined}
+      onClick={() => open(app.slug)}
+    />
+  );
+
+  const q = query.trim().toLowerCase();
+  const apps = catalog ?? [];
+  const shelved = new Map<string, ComposioToolkit[]>();
+  for (const app of apps) {
+    const id = shelfOf(app);
+    if (id) shelved.set(id, [...(shelved.get(id) ?? []), app]);
+  }
+  const popular = POPULAR.map((slug) => bySlug.get(slug)).filter((a): a is ComposioToolkit => !!a);
+  const results = q
+    ? apps.filter((a) => `${a.name} ${a.slug} ${blurb(a)} ${a.categories.join(" ")} ${CATALOG[a.slug]?.maker ?? ""}`.toLowerCase().includes(q))
+    : [];
+
+  let body: React.ReactNode;
+  if (!catalog) {
+    body = catalogFailed ? (
+      <EmptyState
+        icon={<Plug />}
+        title="Couldn't load apps"
+        body="Check your internet connection and try again."
+        action={<Button onClick={() => void loadCatalog()}>Try again</Button>}
+      />
+    ) : (
+      <div className="flex h-24 items-center justify-center text-ink-muted">
+        <Loader2 className="h-4 w-4 animate-spin" />
+      </div>
+    );
+  } else if (q) {
+    body = results.length ? (
+      <section className="mb-8">
+        <SectionHeading title="Results" count={results.length} />
+        <CardGrid>{results.map(card)}</CardGrid>
+      </section>
+    ) : (
+      <EmptyState compact icon={<Search />} title={`No apps match “${query.trim()}”`} body="Try the app's name, or a word for what it does, like invoices or calendar." />
+    );
+  } else if (shelf) {
+    const list = shelved.get(shelf) ?? [];
+    body = (
+      <section className="mb-8">
+        <button
+          type="button"
+          onClick={() => setShelf(null)}
+          className="press ring-focus -ml-2 mb-3 flex items-center gap-1 rounded-lg px-2 py-1 text-[13px] text-ink-muted hover:bg-state-hover hover:text-ink"
+        >
+          <ChevronLeft className="h-4 w-4" aria-hidden />
+          All apps
+        </button>
+        <SectionHeading title={shelfTitle(shelf)} count={list.length} />
+        <CardGrid>{list.map(card)}</CardGrid>
+      </section>
+    );
+  } else {
+    body = (
+      <>
+        <section className="mb-8">
+          <SectionHeading title="Popular for office work" />
+          <CardGrid>{popular.map(card)}</CardGrid>
+        </section>
+        {[...SHELVES, MORE].map(({ id, title }) => {
+          const list = (shelved.get(id) ?? []).filter((a) => !POPULAR.includes(a.slug));
+          if (!list.length) return null;
+          return (
+            <section key={id} className="mb-8">
+              <SectionHeading
+                title={title}
+                count={list.length}
+                action={list.length > 6 ? <Button onClick={() => setShelf(id)}>See all</Button> : undefined}
+              />
+              <CardGrid>{list.slice(0, 6).map(card)}</CardGrid>
+            </section>
+          );
+        })}
+      </>
+    );
+  }
+
   return (
     <PageShell
       title="Connectors"
-      subtitle={
-        allowedComposioApps.length > 0
-          ? `${connectedCount} of ${allowedComposioApps.length} apps connected. zWork can act in the apps you connect.`
-          : "Connect your apps and zWork can act in them for you."
-      }
+      subtitle="Connect the apps you use and zWork can work in them for you."
       actions={
         <IconButton
           icon={refreshing ? <Loader2 className="animate-spin" /> : <RefreshCw />}
@@ -251,65 +437,53 @@ export function ConnectorsPage() {
           onClick={() => void refresh()}
         />
       }
-      toolbar={<SearchField value={query} onChange={setQuery} placeholder="Search apps" />}
+      toolbar={<SearchField value={query} onChange={setQuery} placeholder={catalog ? `Search ${catalog.length} apps` : "Search apps"} />}
     >
+      <div ref={topRef} />
       {connectError && (
         <p role="alert" className="mb-4 rounded-xl border border-error/20 bg-error/10 px-3.5 py-2.5 text-[12.5px] text-error">{connectError}</p>
       )}
-      {allowedComposioApps.length === 0 ? (
-        <div className="flex h-24 items-center justify-center text-ink-muted">
-          <Loader2 className="h-4 w-4 animate-spin" />
-        </div>
-      ) : (
-        sections.map(
-          (section) =>
-            (section.apps.length > 0 || section.title === "Results") && (
-              <section key={section.title} className="mb-7">
-                <h2 className="mb-2 px-1 text-[14px] font-semibold text-ink">{section.title}</h2>
-                {section.apps.length === 0 && <p className="px-1 text-[13px] text-ink-muted">No apps match “{query.trim()}”.</p>}
-                <div className="grid gap-x-4 gap-y-1 sm:grid-cols-2">
-                  {section.apps.map((app) => {
-                    const isConnected = connectedApps.has(app.id);
-                    return (
-                      <div key={app.id} className="group relative flex items-center gap-3 rounded-xl px-2 py-2.5 transition-colors hover:bg-state-hover">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setConnectError(null);
-                            setExpandedApp(app.id);
-                          }}
-                          className="ring-focus absolute inset-0 rounded-xl"
-                          aria-label={`${app.name} details`}
-                        />
-                        <AppLogoTile app={app} />
-                        <div className="pointer-events-none min-w-0 flex-1">
-                          <p className="truncate text-[13.5px] font-medium text-ink">{app.name}</p>
-                          <p className="truncate text-[12.5px] text-ink-muted">{short(app)}</p>
-                        </div>
-                        {isConnected ? (
-                          <span className="pointer-events-none flex items-center gap-1 text-[12px] text-ink-muted">
-                            <Check className="h-3.5 w-3.5 text-success" aria-hidden />
-                            Connected
-                          </span>
-                        ) : (
-                          <RowIconButton
-                            label={`Connect ${app.name}`}
-                            onClick={() => void handleConnect(app.id)}
-                            className="relative"
-                          >
-                            {connecting === app.id ? <Loader2 className="animate-spin" /> : <Plus />}
-                          </RowIconButton>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            ),
-        )
+
+      {accounts.length > 0 && !q && !shelf && (
+        <section className="mb-8">
+          <SectionHeading title="What zWork can use" count={accounts.length} description="zWork can read and act in these apps for you. Disconnect one and it stops straight away." />
+          <ListGroup>
+            {accounts.map((account) => {
+              const app = appFor(account);
+              const active = account.status === "ACTIVE";
+              return (
+                <ListRow
+                  key={account.app}
+                  icon={<AppLogoTile app={app} size="sm" />}
+                  title={app.name}
+                  meta={blurb(app)}
+                  onClick={() => open(app.slug)}
+                  trailing={
+                    <>
+                      {active ? <Badge tone="success">Connected</Badge> : <Badge tone="warning">Needs reconnecting</Badge>}
+                      {active ? (
+                        <Button onClick={() => void handleDisconnect(app)}>Disconnect</Button>
+                      ) : (
+                        <Button
+                          disabled={connecting === app.slug}
+                          icon={connecting === app.slug ? <Loader2 className="animate-spin" /> : undefined}
+                          onClick={() => void handleConnect(app.slug)}
+                        >
+                          Reconnect
+                        </Button>
+                      )}
+                    </>
+                  }
+                />
+              );
+            })}
+          </ListGroup>
+        </section>
       )}
 
-      <McpConnectors confirm={confirm} />
+      {body}
+
+      {!q && !shelf && <McpConnectors confirm={confirm} />}
       {confirmDialog}
     </PageShell>
   );
@@ -319,24 +493,29 @@ export function ConnectorsPage() {
 function AppDetail({
   app,
   connected,
+  needsReconnect,
   connecting,
   error,
+  backLabel,
   onBack,
   onConnect,
   onDisconnect,
   onAsk,
 }: {
-  app: ComposioApp;
+  app: ComposioToolkit;
   connected: boolean;
+  needsReconnect: boolean;
   connecting: boolean;
   error: string | null;
+  backLabel: string;
   onBack: () => void;
   onConnect: () => void;
   onDisconnect: () => void;
   onAsk: (prompt: string) => void;
 }) {
-  const entry = CATALOG[app.id];
-  const tint = INK_LOGOS.has(app.id) ? "rgb(var(--ink))" : app.color;
+  const entry = CATALOG[app.slug];
+  const tint = INK_LOGOS.has(app.slug) ? "rgb(var(--ink))" : BRAND_COLORS[app.slug] ?? "rgb(var(--ink-muted))";
+  const shelfId = shelfOf(app);
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-paper">
       <div className="flex-1 overflow-y-auto">
@@ -347,7 +526,7 @@ function AppDetail({
             className="press ring-focus -ml-2 flex items-center gap-1 rounded-lg px-2 py-1 text-[13px] text-ink-muted hover:bg-state-hover hover:text-ink"
           >
             <ChevronLeft className="h-4 w-4" aria-hidden />
-            Connectors
+            {backLabel}
           </button>
 
           <header className="mt-5 flex flex-wrap items-center gap-4">
@@ -355,25 +534,22 @@ function AppDetail({
             <div className="min-w-0 flex-1">
               <h1 className="text-[24px] font-semibold tracking-tight text-ink">{app.name}</h1>
               <p className="flex items-center gap-3 text-[13px] text-ink-muted">
-                {entry ? `By ${entry.maker}` : "App"}
-                {connected && (
-                  <span className="flex items-center gap-1">
-                    <Check className="h-3.5 w-3.5 text-success" aria-hidden />
-                    Connected
-                  </span>
-                )}
+                {entry ? `By ${entry.maker}` : shelfId ? shelfTitle(shelfId) : "App"}
+                {connected && <Badge tone="success">Connected</Badge>}
+                {needsReconnect && <Badge tone="warning">Needs reconnecting</Badge>}
               </p>
             </div>
             {connected ? (
               <Button onClick={onDisconnect}>Disconnect</Button>
             ) : (
               <Button variant="primary" disabled={connecting} onClick={onConnect} icon={connecting ? <Loader2 className="animate-spin" /> : <ExternalLink />}>
-                {connecting ? "Connecting" : `Connect ${app.name}`}
+                {connecting ? "Connecting" : needsReconnect ? "Reconnect" : `Connect ${app.name}`}
               </Button>
             )}
           </header>
 
-          <p className="mt-4 max-w-[60ch] text-[14px] leading-relaxed text-ink-soft">{entry?.long ?? `Use ${app.name} from zWork.`}</p>
+          <p className="mt-4 max-w-[60ch] text-[14px] leading-relaxed text-ink-soft">{entry?.long ?? (app.description || `Use ${app.name} from zWork.`)}</p>
+          {!connected && <p className="mt-2 max-w-[60ch] text-[12.5px] leading-relaxed text-ink-muted">{howItConnects(app)}</p>}
           {error && (
             <p role="alert" className="mt-4 rounded-xl border border-error/20 bg-error/10 px-3.5 py-2.5 text-[12.5px] leading-relaxed text-error">{error}</p>
           )}
@@ -417,6 +593,18 @@ function AppDetail({
                 </p>
               </section>
             </>
+          )}
+
+          {!entry && (
+            <section className="mt-7">
+              <h2 className="text-[15px] font-semibold text-ink">What zWork can do in {app.name}</h2>
+              <p className="mt-2 max-w-[60ch] text-[13.5px] leading-relaxed text-ink-soft">
+                Once it's connected, zWork can look things up and make the changes you ask for in {app.name}.
+              </p>
+              <p className="mt-4 text-[12.5px] leading-relaxed text-ink-muted">
+                With Ask before changes on, zWork checks with you before it sends, deletes or changes anything in {app.name}. You can disconnect any time.
+              </p>
+            </section>
           )}
         </div>
       </div>

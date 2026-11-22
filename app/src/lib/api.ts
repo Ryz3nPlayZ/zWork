@@ -157,6 +157,17 @@ export interface ComposioApp {
   color: string;
 }
 
+/** One app from Composio's Toolkit Catalog, as the Connectors storefront shows it. */
+export interface ComposioToolkit {
+  slug: string;
+  name: string;
+  description: string;
+  logo: string;
+  categories: string[];
+  auth: string[];
+  tools: number;
+}
+
 export interface CrewMember {
   id: string;
   name: string;
@@ -845,6 +856,11 @@ export const api = {
   composioApps: () =>
     localFetch("/api/composio/apps").then((r) =>
       j<{ apps: ComposioApp[] }>(r),
+    ),
+
+  composioCatalog: () =>
+    localFetch("/api/composio/catalog").then((r) =>
+      j<{ toolkits: ComposioToolkit[]; source?: "live" | "bundled" }>(r),
     ),
 
   providers: () =>

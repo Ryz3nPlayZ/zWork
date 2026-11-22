@@ -264,6 +264,71 @@ pub fn apps() -> Value {
     json!({ "apps": apps })
 }
 
+/// Snapshot of Composio's Toolkit Catalog, trimmed to apps a person can
+/// connect in one step. Regenerate with `scripts/sync-composio-catalog.py`.
+const BUNDLED_CATALOG: &str = include_str!("composio_catalog.json");
+
+/// How long a live catalogue from zWork Cloud is reused before asking again.
+const CATALOG_TTL: Duration = Duration::from_secs(6 * 60 * 60);
+
+static CATALOG_CACHE: std::sync::Mutex<Option<(std::time::Instant, Value)>> = std::sync::Mutex::new(None);
+
+fn bundled_catalog() -> Value {
+    let mut v: Value = serde_json::from_str(BUNDLED_CATALOG).unwrap_or_else(|_| json!({ "toolkits": [] }));
+    v["source"] = json!("bundled");
+    v
+}
+
+/// Every toolkit has a slug, a name and a logo, whichever side it came from.
+fn tidy_catalog(mut v: Value) -> Option<Value> {
+    let list = v.get_mut("toolkits")?.as_array_mut()?;
+    list.retain(|t| t.get("slug").and_then(|s| s.as_str()).is_some_and(|s| !s.is_empty()));
+    for t in list.iter_mut() {
+        let slug = t["slug"].as_str().unwrap_or_default().to_lowercase();
+        if t.get("logo").and_then(|l| l.as_str()).map_or(true, str::is_empty) {
+            t["logo"] = json!(format!("https://logos.composio.dev/api/{slug}"));
+        }
+        if t.get("name").and_then(|n| n.as_str()).map_or(true, str::is_empty) {
+            t["name"] = json!(slug.clone());
+        }
+        t["slug"] = json!(slug);
+    }
+    if list.is_empty() {
+        return None;
+    }
+    Some(v)
+}
+
+/// `GET /catalog` → `{ toolkits: [{ slug, name, description, logo, categories,
+/// auth, tools }], source: "live" | "bundled" }`. The live list comes from
+/// Composio's Toolkit Catalog API through zWork Cloud; without a sign-in, or
+/// when the cloud doesn't answer, the bundled snapshot keeps the storefront
+/// browsable.
+pub async fn catalog() -> Value {
+    if let Some((at, v)) = CATALOG_CACHE.lock().ok().and_then(|c| c.clone()) {
+        if at.elapsed() < CATALOG_TTL {
+            return v;
+        }
+    }
+    let live = match authed_client() {
+        Some(client) => match client.get(format!("{}/catalog", cloud_base())).send().await {
+            Ok(resp) if resp.status().is_success() => resp.json::<Value>().await.ok().and_then(tidy_catalog),
+            _ => None,
+        },
+        None => None,
+    };
+    match live {
+        Some(mut v) => {
+            v["source"] = json!("live");
+            if let Ok(mut c) = CATALOG_CACHE.lock() {
+                *c = Some((std::time::Instant::now(), v.clone()));
+            }
+            v
+        }
+        None => tidy_catalog(bundled_catalog()).unwrap_or_else(|| json!({ "toolkits": [], "source": "bundled" })),
+    }
+}
+
 /// Build the `{connected_apps_block}` substitution for the system prompt from
 /// already-fetched tool schemas and the user's connected-app list. Empty when
 /// nothing is connected, so the prompt section simply collapses. This mirrors
@@ -1137,6 +1202,19 @@ fn collapse_ws(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bundled_catalog_has_the_office_apps_with_logos() {
+        let v = tidy_catalog(bundled_catalog()).expect("bundled catalog parses");
+        let list = v["toolkits"].as_array().unwrap();
+        assert!(list.len() > 50);
+        for slug in ["gmail", "outlook", "quickbooks", "xero", "slack"] {
+            let t = list.iter().find(|t| t["slug"] == slug).unwrap_or_else(|| panic!("{slug} missing"));
+            assert!(t["logo"].as_str().unwrap().starts_with("https://"));
+            assert!(!t["categories"].as_array().unwrap().is_empty());
+        }
+        assert_eq!(v["source"], "bundled");
+    }
 
     #[test]
     fn empty_gmail_schemas_get_real_parameters_and_core_tools() {
