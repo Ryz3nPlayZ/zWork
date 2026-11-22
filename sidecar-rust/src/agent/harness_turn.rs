@@ -102,6 +102,8 @@ struct TurnShared {
     /// Running token/cost usage for this run; each `MessageEnd` adds its
     /// delta and re-emits the total.
     usage: Mutex<Usage>,
+    /// The run's durable lane, so `use_app` can switch connector actions on mid-run.
+    lane: Mutex<Option<Arc<crate::harness::runtime::lane::Lane>>>,
 }
 
 impl TurnShared {
@@ -417,6 +419,91 @@ impl AgentTool for NativeTool {
 }
 
 // ---------------------------------------------------------------------------
+// use_app: connector actions load on demand
+// ---------------------------------------------------------------------------
+
+/// Connector (Composio) actions are registered but switched off: their
+/// schemas run to ~70k tokens (one Notion action alone is ~19k), and every
+/// model call re-sent them. This tool switches one app's actions on for the
+/// rest of the run; the lane's next generation sends them.
+struct UseAppTool {
+    /// (app key like "googlecalendar", action tool names) per connected app.
+    apps: Vec<(String, Vec<String>)>,
+    description: String,
+    shared: Arc<TurnShared>,
+}
+
+fn app_key(name: &str) -> String {
+    name.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_ascii_lowercase()
+}
+
+impl UseAppTool {
+    fn new(composio_schemas: &[Value], shared: &Arc<TurnShared>) -> Option<Self> {
+        let mut apps: Vec<(String, String, Vec<String>)> = Vec::new();
+        for name in composio_schemas.iter().filter_map(|s| s["name"].as_str()) {
+            let Some(slug) = name.strip_prefix(crate::connectors::composio::TOOL_PREFIX) else { continue };
+            let (display, _) = crate::connectors::composio::split_action(slug);
+            let key = app_key(&display);
+            match apps.iter_mut().find(|(k, _, _)| *k == key) {
+                Some((_, _, names)) => names.push(name.to_string()),
+                None => apps.push((key, display, vec![name.to_string()])),
+            }
+        }
+        if apps.is_empty() {
+            return None;
+        }
+        let listed = apps.iter().map(|(_, d, _)| d.as_str()).collect::<Vec<_>>().join(", ");
+        let description = format!(
+            "Turn on a connected app's actions before using it. Connected: {listed}. \
+             Call it once with the app's name; its actions are then available for the rest of this task."
+        );
+        Some(Self { apps: apps.into_iter().map(|(k, _, n)| (k, n)).collect(), description, shared: shared.clone() })
+    }
+
+    async fn run(&self, params: Value) -> Result<AgentToolResult, String> {
+        let wanted = app_key(params["app"].as_str().unwrap_or(""));
+        let Some((_, names)) = self.apps.iter().find(|(k, _)| *k == wanted) else {
+            let known = self.apps.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(", ");
+            return Err(format!("No connected app called \"{}\". Connected apps: {known}.", params["app"].as_str().unwrap_or("")));
+        };
+        let lane = self.shared.lane.lock_unpoisoned().clone().ok_or("The run isn't ready yet; try again.")?;
+        let mut active = lane.configuration().active_tool_names;
+        for name in names {
+            if !active.contains(name) {
+                active.push(name.clone());
+            }
+        }
+        lane.set_active_tools(active).await.map_err(|e| format!("Couldn't turn the app on: {e}"))?;
+        Ok(AgentToolResult::text(format!("Ready. You can now call: {}", names.join(", "))))
+    }
+}
+
+impl AgentTool for UseAppTool {
+    fn name(&self) -> &str {
+        "use_app"
+    }
+    fn description(&self) -> &str {
+        &self.description
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": { "app": { "type": "string", "description": "The app's name, for example Gmail or Notion." } },
+            "required": ["app"],
+        })
+    }
+    fn execute<'a>(
+        &'a self,
+        _tool_call_id: &'a str,
+        params: Value,
+        _signal: Option<&'a AbortSignal>,
+        _on_update: AgentToolUpdateCallback,
+    ) -> ToolFuture<'a> {
+        Box::pin(self.run(params))
+    }
+}
+
+// ---------------------------------------------------------------------------
 // pi core tools (read/bash/edit/write/grep/find/ls) with zWork gating
 // ---------------------------------------------------------------------------
 
@@ -595,6 +682,7 @@ fn step_labels(name: &str, params: &Value) -> (String, String) {
         "spawn_agent" => pair("Handing off a subtask", "Handed off a subtask", String::new()),
         "save_memory" => pair("Saving to memory", "Saved to memory", String::new()),
         "read_skill" => pair("Loading a skill", "Loaded a skill", String::new()),
+        "use_app" => pair("Opening", "Opened", arg("app").to_string()),
         "ask_user" | "ask_question" | "ask_user_for_permission" => pair("Asking you", "Asked you", String::new()),
         "manage_tasks" => pair("Updating tasks", "Updated tasks", String::new()),
         "manage_events" => pair("Updating the calendar", "Updated the calendar", String::new()),
@@ -967,6 +1055,17 @@ async fn run_durable_once(
         config.tool_execution = crate::harness::session::types::ToolExecutionMode::Parallel;
     }
     config.tools = Arc::new(tools.iter().map(|t| runtime_tool_from(t.clone())).collect());
+    // Connector actions start off (use_app turns them on); a retry after
+    // overflow keeps whatever the previous attempt turned on.
+    let previous_lane = shared.lane.lock_unpoisoned().clone();
+    let active_tool_names: Vec<String> = match previous_lane {
+        Some(lane) => lane.configuration().active_tool_names,
+        None => tools
+            .iter()
+            .map(|t| t.name().to_string())
+            .filter(|n| !n.starts_with(crate::connectors::composio::TOOL_PREFIX))
+            .collect(),
+    };
 
     let (harness, open) = match Harness::create(
         session,
@@ -974,7 +1073,7 @@ async fn run_durable_once(
             provider: model.provider.clone(),
             model_id: model.id.clone(),
             thinking_level: thinking_level_for(&model, shared.effort.as_deref()),
-            active_tool_names: tools.iter().map(|t| t.name().to_string()).collect(),
+            active_tool_names,
             config,
         },
     ) {
@@ -993,6 +1092,7 @@ async fn run_durable_once(
             return None;
         }
     };
+    *shared.lane.lock_unpoisoned() = Some(lane.clone());
     let mut seeded = std::collections::HashSet::new();
     for message in history {
         match lane.append_message(message.clone()).await {
@@ -1909,17 +2009,20 @@ pub fn run_agent_turn(
             call_args: Mutex::new(HashMap::new()),
             traces: Mutex::new(Vec::new()),
             usage: Mutex::new(Usage::empty()),
+            lane: Mutex::new(None),
         });
 
         // ── Tools ───────────────────────────────────────────────────────
         let mut schemas = get_tool_schemas(plan_mode);
         schemas.retain(|s| include_academic || !crate::tools::is_specialist_tool(s["name"].as_str().unwrap_or("")));
+        let use_app = UseAppTool::new(&composio_schemas, &shared);
         schemas.extend(composio_schemas);
         let mut tools: Vec<DynTool> = schemas
             .iter()
             .filter_map(|s| NativeTool::from_schema(s, shared.clone()))
             .map(|t| Arc::new(t) as DynTool)
             .collect();
+        tools.extend(use_app.map(|t| Arc::new(GatedTool::new(Arc::new(t), &shared)) as DynTool));
         // pi core tools. Plan mode keeps only the read-only ones.
         let supports_images: crate::harness::tools::SupportsImagesFn = {
             let has_image = model.input.contains(&InputType::Image);
@@ -2625,19 +2728,24 @@ async fn resume_one_interrupted(
         call_args: Mutex::new(HashMap::new()),
         traces: Mutex::new(Vec::new()),
         usage: Mutex::new(Usage::empty()),
+        lane: Mutex::new(None),
     });
 
     // Toolset: the same menu a live turn builds (plan-mode read-only not
     // reconstructed — resume runs with the full menu; the durable operation
     // state already carries which tools each step planned).
     let mut schemas = get_tool_schemas(false);
-    schemas.extend(crate::connectors::composio::all_tool_schemas().await);
+    let composio_schemas = crate::connectors::composio::all_tool_schemas().await;
+    // A resumed step may have planned a use_app call, so it has to exist here too.
+    let use_app = UseAppTool::new(&composio_schemas, &shared);
+    schemas.extend(composio_schemas);
     let cwd = read_str("turn.cwd").unwrap_or_else(|| ".".into());
     let mut tools: Vec<DynTool> = schemas
         .iter()
         .filter_map(|schema| NativeTool::from_schema(schema, shared.clone()))
         .map(|t| Arc::new(t) as DynTool)
         .collect();
+    tools.extend(use_app.map(|t| Arc::new(GatedTool::new(Arc::new(t), &shared)) as DynTool));
     let supports_images: crate::harness::tools::SupportsImagesFn = {
         let has_image = model.input.contains(&InputType::Image);
         Arc::new(move || has_image)
@@ -2697,6 +2805,7 @@ async fn resume_one_interrupted(
         Ok(lane) => lane,
         Err(_) => return "lane-open-failed",
     };
+    *shared.lane.lock_unpoisoned() = Some(lane.clone());
 
     // Recovery is observable too: an attached client polls
     // /api/chats/:id/run/live and watches the bus while resume settles.

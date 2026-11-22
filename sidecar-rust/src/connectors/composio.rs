@@ -421,7 +421,9 @@ pub fn build_connected_apps_block(schemas: &[Value], connected_apps: &[String]) 
     // catalogue above verbatim. This is the single most important rule for
     // Composio reliability — the model hallucinating bare names was the
     // direct cause of the beta.5 404 storm.
-    let naming_rule = "\nIMPORTANT: call Composio tools by the EXACT name in the tool list \
+    let naming_rule = "\nThese app actions are off until you call `use_app` with the app's name (once per app, \
+        only when the task needs that app); after that they appear in your tool list.\n\
+        IMPORTANT: call Composio tools by the EXACT name in the tool list \
         (copy it literally, including any suffix). A guessed or shortened name will fail.\n\nCalling rules:\n  \
         - Read/list tools (FETCH_EMAILS, GET_EVENTS, SEARCH_*) work with no arguments and return \
         the newest items. If that first page didn't answer the question, do NOT call it again the \
