@@ -114,21 +114,38 @@ pub fn format_for_system_prompt(include_specialist: bool) -> String {
         .into_iter()
         .filter(|s| include_specialist || !SPECIALIST_SKILLS.contains(&s.slug.as_str()))
         .collect();
+    render_listing(&skills)
+}
+
+/// zWork's own skills (the user's, the project's, bundled) get a line each;
+/// skills found in other AI apps' folders are named on one line. Sorted A–Z
+/// with one cap, a machine with Claude Code skills pushed `pdf`, `pptx` and
+/// `xlsx` past the cut, and their descriptions were most of the prompt.
+fn render_listing(skills: &[SkillMeta]) -> String {
     if skills.is_empty() {
         return "(none installed)".to_string();
     }
     const LIMIT: usize = 60;
-    // The listing rides on every request, so each entry is just enough to pick
-    // a skill by; `read_skill` loads the full playbook. At 280 chars apiece the
-    // listing alone was ~15k chars (~4k tokens) per model call.
+    const OTHER_LIMIT: usize = 40;
+    // Each entry is just enough to pick a skill by; `read_skill` loads the playbook.
     const PROMPT_DESCRIPTION_CHARS: usize = 150;
-    let mut lines: Vec<String> = skills
+    let ours = |s: &&SkillMeta| matches!(s.source.as_str(), "user" | "project" | "bundled");
+    let own: Vec<&SkillMeta> = skills.iter().filter(ours).collect();
+    let other: Vec<&SkillMeta> = skills.iter().filter(|s| !ours(s)).collect();
+    let mut lines: Vec<String> = own
         .iter()
         .take(LIMIT)
         .map(|s| format!("- `{}` — {}", s.slug, clip(&s.description, PROMPT_DESCRIPTION_CHARS)))
         .collect();
-    if skills.len() > LIMIT {
-        lines.push(format!("- …and {} more", skills.len() - LIMIT));
+    if own.len() > LIMIT {
+        lines.push(format!("- …and {} more", own.len() - LIMIT));
+    }
+    if !other.is_empty() {
+        let mut names: Vec<String> = other.iter().take(OTHER_LIMIT).map(|s| format!("`{}`", s.slug)).collect();
+        if other.len() > OTHER_LIMIT {
+            names.push(format!("and {} more", other.len() - OTHER_LIMIT));
+        }
+        lines.push(format!("\nAlso installed from the user's other AI apps, mostly for software work: {}.", names.join(", ")));
     }
     lines.join("\n")
 }
@@ -157,6 +174,23 @@ mod tests {
         assert!(pdf.starts_with("<skill name=\"pdf\""), "{}", &pdf[..80.min(pdf.len())]);
         assert!(pdf.contains("References are relative to"));
         assert!(!pdf.contains("\n---\nname:"), "frontmatter is stripped");
+    }
+
+    #[test]
+    fn own_skills_listed_before_other_apps() {
+        let meta = |slug: &str, source: &str| SkillMeta {
+            slug: slug.into(),
+            name: slug.into(),
+            description: format!("{slug} playbook"),
+            path: PathBuf::new(),
+            source: source.into(),
+        };
+        let mut skills: Vec<SkillMeta> = (0..70).map(|i| meta(&format!("a-dev-{i:02}"), "claude")).collect();
+        skills.push(meta("xlsx", "bundled"));
+        let out = render_listing(&skills);
+        assert!(out.starts_with("- `xlsx` — xlsx playbook"), "{out}");
+        assert!(out.contains("`a-dev-00`") && out.contains("and 30 more"), "{out}");
+        assert!(!out.contains("a-dev-00` —"), "other apps' skills carry no description");
     }
 
     #[test]

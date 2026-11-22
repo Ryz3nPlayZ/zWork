@@ -286,15 +286,14 @@ pub fn build_timeline_block() -> String {
 
     let date_fmt = |d: NaiveDate| d.format("%A, %B %e, %Y").to_string();
 
+    // Day-level only: the exact time rides in each turn's <turn-context>, so this
+    // block (and the cached system prompt) stays the same all day.
     format!(
-        "Current time: {now_str} ({tz})\n\
-        Today: {today_str}\n\
+        "Today: {today_str} (time zone {tz})\n\
         Yesterday: {yesterday_str}\n\
         Tomorrow: {tomorrow_str}\n\
         This week: {week_start} – {week_end}\n\
-        Next week: {next_week_start} – {next_week_end}\n\
-        The current day of the week is {day_of_week}.",
-        now_str = now.format("%I:%M %p").to_string().trim_start_matches('0'),
+        Next week: {next_week_start} – {next_week_end}",
         tz = now.format("%Z").to_string(),
         today_str = date_fmt(today),
         yesterday_str = date_fmt(yesterday),
@@ -303,6 +302,5 @@ pub fn build_timeline_block() -> String {
         week_end = date_fmt(sunday),
         next_week_start = date_fmt(next_monday),
         next_week_end = date_fmt(next_sunday),
-        day_of_week = weekday,
     )
 }

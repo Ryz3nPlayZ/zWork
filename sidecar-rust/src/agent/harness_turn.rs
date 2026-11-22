@@ -1927,9 +1927,9 @@ pub fn run_agent_turn(
         let system_prompt = format!(
             "{system_prompt}\n\n## Live environment status\n{}",
             if browser_connected {
-                "- Chrome browser bridge: CONNECTED. Your browser_* tools are LIVE and drive the user's real Chrome (signed-in sessions, no login walls). For ANY task involving a website, web app, web form, login-gated page, or anything browser-based, USE the browser_* tools (browser_navigate / browser_snapshot / browser_click / browser_type / browser_eval). Do not claim you cannot browse, and do not guess URLs from memory — navigate to a real URL or snapshot and click real links."
+                "- Chrome: connected. `browser_*` tools drive the user's real Chrome, where they are signed in. Use them for signed-in sites, web apps and forms, and go to real URLs rather than guessing them."
             } else {
-                "- Chrome browser bridge: NOT connected. browser_* tools will fail until the user opens Chrome with the zbctl extension loaded and zWork running. If the task needs the browser, tell the user to connect it rather than guessing."
+                "- Chrome: not connected, so `browser_*` tools will fail. Read public pages with `web_fetch`. If a task needs the user's signed-in browser, drive it with `desktop_*` tools or tell the user Chrome isn't connected to zWork."
             }
         );
 
