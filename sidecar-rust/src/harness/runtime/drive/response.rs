@@ -144,8 +144,8 @@ pub async fn publish_response(
     response: AssistantMessage,
     recovery: bool,
 ) -> SessionResult<ProcedureResult> {
-    let overflow = is_context_overflow(&response, Some(intent.context_window))
-        || is_recoverable_length(&response, intent.intended_output_limit);
+    let context_overflow = is_context_overflow(&response, Some(intent.context_window));
+    let overflow = context_overflow || is_recoverable_length(&response, intent.intended_output_limit);
     let live_scope = lane.operation_snapshot().map(|operation| operation.state.scope().clone());
     let overflow_preparation = if overflow && !intent.generation.overflow_recovery_used {
         match live_scope {
@@ -219,7 +219,17 @@ pub async fn publish_response(
                     response
                         .error_message
                         .clone()
-                        .unwrap_or_else(|| "Assistant request exceeded the context window".into()),
+                        .unwrap_or_else(|| {
+                            if context_overflow {
+                                "Assistant request exceeded the context window".into()
+                            } else {
+                                // A length stop the window didn't cause: the reply itself hit the model's output cap.
+                                format!(
+                                    "The reply hit the model's output limit ({} tokens) before it finished. Ask for the work in smaller parts.",
+                                    response.usage.output
+                                )
+                            }
+                        }),
                 );
                 if intent_for_plan.generation.overflow_recovery_used || overflow_prep.is_none() {
                     failure = Some(provider_error(source, &committed));
