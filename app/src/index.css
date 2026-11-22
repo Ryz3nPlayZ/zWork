@@ -184,6 +184,13 @@ body {
 .focus-ring {
   box-shadow: 0 0 0 1.5px rgb(var(--accent) / 0.45);
 }
+/* The voice glow clips the composer while listening, which cuts off an outset ring: draw it inside instead. */
+.ring-inside.hairline-ring {
+  box-shadow: inset 0 0 0 0.5px rgb(var(--border-overlay) / 0.10);
+}
+.ring-inside.focus-ring {
+  box-shadow: inset 0 0 0 1.5px rgb(var(--accent) / 0.45);
+}
 
 /* Overlay window: force a fully transparent chrome so only the chat UI is
    visible. The global `body { @apply bg-paper }` would otherwise paint an

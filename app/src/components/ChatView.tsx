@@ -369,7 +369,7 @@ export function ChatView() {
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto" style={{ paddingBottom: composerH }}>
-          <div className="mx-auto flex max-w-[960px] flex-col gap-5 px-6 pt-14 pb-8">
+          <div className="mx-auto flex max-w-[748px] flex-col gap-5 px-6 pt-14 pb-8">
             {/* Plan mode indicator — shows when plan mode is active so the user
                 knows the agent is restricted to read-only tools. */}
             {planMode && (
@@ -430,7 +430,7 @@ export function ChatView() {
             a question or needs permission, the composer morphs into an inline
             card (question/permission mode) instead of showing the textarea. */}
         <div ref={composerRef} className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-paper via-paper/95 to-transparent px-6 pb-5 pt-10 pointer-events-none z-10">
-          <div className="mx-auto max-w-[960px] pointer-events-auto">
+          <div className="mx-auto max-w-[700px] pointer-events-auto">
             <TodoPanel />
             <ChatInput
               autoFocus

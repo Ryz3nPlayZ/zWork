@@ -1153,7 +1153,7 @@ export function ChatInput({
                 (multiline || attachments.length > 0) ? "rounded-2xl" : "rounded-full",
                 focused && "focus-ring",
               )
-            : cn("bg-paper rounded-2xl", focused ? "focus-ring" : ""),
+            : cn("bg-paper rounded-2xl", focused ? "focus-ring" : "", voice.listening && "ring-inside"),
           className,
         )}
       >

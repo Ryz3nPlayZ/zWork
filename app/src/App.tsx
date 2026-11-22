@@ -768,8 +768,8 @@ export default function App() {
         className={cn(
           "absolute z-50 flex items-center gap-0.5",
           trafficLights
-            // Centred on the traffic lights' row, one light-spacing after them.
-            ? "left-[80px] top-[6px]"
+            // Centred on the traffic lights' row (which lines up with the chat header), one light-spacing after them.
+            ? "left-[80px] top-[15px]"
             : cn(
                 "top-[14px] transition-[left] duration-200 ease-out",
                 sidebarOpen ? "left-[182px]" : "left-[12px]",

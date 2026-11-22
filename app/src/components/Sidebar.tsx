@@ -108,7 +108,7 @@ export function Sidebar() {
         <div
           className={cn(
             "flex shrink-0 items-center px-2 pb-1",
-            hasTrafficLights() ? "pt-[48px]" : "pt-2",
+            hasTrafficLights() ? "pt-[56px]" : "pt-2",
           )}
         >
           <button

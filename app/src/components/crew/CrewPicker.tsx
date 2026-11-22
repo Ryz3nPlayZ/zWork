@@ -4,6 +4,7 @@ import { useApp } from "../../lib/store";
 import { cn } from "../../lib/cn";
 import { MENU_PANEL, MENU_TRIGGER, menuPlacement, type MenuPlacement } from "../../lib/menu";
 import { CrewAvatar } from "./CrewAvatar";
+import { GlideGroup } from "../Glide";
 
 export function CrewPicker({ disabled = false }: { disabled?: boolean }) {
   const crew = useApp((s) => s.crew);
@@ -70,18 +71,20 @@ export function CrewPicker({ disabled = false }: { disabled?: boolean }) {
         <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 text-ink-muted transition-transform", open && "rotate-180")} aria-hidden />
       </button>
       {open && (
-        <div
+        <GlideGroup
           role="menu"
           aria-label="Crew members"
+          highlightClassName="rounded-lg"
           style={{ maxHeight: place.maxHeight }}
           className={cn(MENU_PANEL, "left-0 w-64", place.dropDown ? "top-full mt-2 origin-top-left" : "bottom-full mb-2 origin-bottom-left")}
         >
           <button
             type="button"
             role="menuitemradio"
+            data-glide=""
             aria-checked={!selected}
             onClick={() => void choose("")}
-            className="press ring-focus flex min-h-10 w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12.5px] text-ink hover:bg-state-hover"
+            className="press ring-focus flex min-h-10 w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12.5px] text-ink"
           >
             <Bot className="h-4 w-4 text-ink-muted" aria-hidden />
             <span className="flex-1">No crew member</span>
@@ -92,9 +95,10 @@ export function CrewPicker({ disabled = false }: { disabled?: boolean }) {
               key={member.id}
               type="button"
               role="menuitemradio"
+              data-glide=""
               aria-checked={selected?.id === member.id}
               onClick={() => void choose(member.id)}
-              className="press ring-focus flex min-h-10 w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12.5px] text-ink hover:bg-state-hover"
+              className="press ring-focus flex min-h-10 w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[12.5px] text-ink"
             >
               <CrewAvatar member={member} size={26} />
               <span className="min-w-0 flex-1 truncate">{member.name}</span>
@@ -106,16 +110,17 @@ export function CrewPicker({ disabled = false }: { disabled?: boolean }) {
           <button
             type="button"
             role="menuitem"
+            data-glide=""
             onClick={() => {
               setOpen(false);
               setView("crew");
             }}
-            className="press ring-focus flex min-h-10 w-full items-center rounded-lg px-2 py-1.5 text-left text-[12.5px] font-medium text-ink hover:bg-state-hover"
+            className="press ring-focus flex min-h-10 w-full items-center rounded-lg px-2 py-1.5 text-left text-[12.5px] font-medium text-ink"
           >
             Manage crew
           </button>
           {error && <p role="alert" className="px-2 pb-1 pt-2 text-[11.5px] text-error">{error}</p>}
-        </div>
+        </GlideGroup>
       )}
     </div>
   );
