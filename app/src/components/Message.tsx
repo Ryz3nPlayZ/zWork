@@ -1,6 +1,7 @@
 /* Hallmark · genre: modern-minimal · macrostructure: Workbench · design-system: design.md · designed-as-app */
 
-import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef, lazy, Suspense } from "react";
+import { parseChartSpec } from "./finance/chartSpec";
 import { THINKING_WORDS, shuffled } from "../lib/thinkingWords";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -38,6 +39,9 @@ import { ImageCard } from "./ImageCard";
 import { CrewAvatar } from "./crew/CrewAvatar";
 import { AttachmentChip } from "./AttachmentChip";
 import { Lightbox } from "./Lightbox";
+
+// recharts is heavy; load it only when a reply actually contains a chart.
+const ChartBlock = lazy(() => import("./finance/ChartBlock").then((m) => ({ default: m.ChartBlock })));
 
 function formatTime(ts: number): string {
   if (!ts) return "";
@@ -298,6 +302,10 @@ export function AssistantMarkdown({
           const language = match ? match[1] : "";
           const codeStr = String(children).replace(/\n$/, "");
           // Detect block code (children will be multi-line or language is set)
+          if (language === "chart") {
+            const spec = parseChartSpec(codeStr);
+            if (spec) return <Suspense fallback={null}><ChartBlock spec={spec} /></Suspense>;
+          }
           if (language || codeStr.includes("\n")) {
             return (
               <CodeBlock

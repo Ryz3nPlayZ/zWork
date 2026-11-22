@@ -2014,7 +2014,8 @@ pub fn run_agent_turn(
 
         // ── Tools ───────────────────────────────────────────────────────
         let mut schemas = get_tool_schemas(plan_mode);
-        schemas.retain(|s| include_academic || !crate::tools::is_specialist_tool(s["name"].as_str().unwrap_or("")));
+        let include_finance = chat.crew_id == crate::crewstore::FINANCE_ID || crate::tools::wants_finance_tools(&user_message);
+        schemas.retain(|s| crate::tools::tool_in_turn(s["name"].as_str().unwrap_or(""), include_academic, include_finance));
         let use_app = UseAppTool::new(&composio_schemas, &shared);
         schemas.extend(composio_schemas);
         let mut tools: Vec<DynTool> = schemas

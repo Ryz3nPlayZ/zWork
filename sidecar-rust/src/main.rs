@@ -110,6 +110,7 @@ mod harness;
 mod taskstore;
 mod schedulestore;
 mod crewstore;
+mod finance;
 mod inboxstore;
 mod scheduler;
 mod server;
@@ -261,6 +262,12 @@ async fn run() {
         .route("/api/tasks/:task_id/column", patch(server::update_task_column_handler))
         .route("/api/events", get(server::list_events).post(server::create_event_handler))
         .route("/api/events/:event_id", delete(server::delete_event_handler))
+        .route("/api/finance/quotes", get(finance::quotes_handler))
+        .route("/api/finance/chart", get(finance::chart_handler))
+        .route("/api/finance/search", get(finance::search_handler))
+        .route("/api/finance/news", get(finance::news_handler))
+        .route("/api/finance/financials", get(finance::financials_handler))
+        .route("/api/finance/watchlist", get(finance::get_watchlist).put(finance::put_watchlist))
         .route("/api/crew", get(crewstore::list_crew).post(crewstore::create_crew))
         .route("/api/crew/:id", axum::routing::patch(crewstore::update_crew).delete(crewstore::delete_crew))
         .route("/api/schedules", get(server::list_schedules).post(server::create_schedule))

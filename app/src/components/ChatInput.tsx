@@ -238,6 +238,8 @@ interface Props {
   onResolvePermission?: (allow: boolean, otherText?: string) => void;
   /** Start dictating whenever this number changes (the companion's Dictate button). */
   dictateNonce?: number;
+  /** Narrow side-panel composer: hides the crew picker (the Finance chat is always its own crew member) and the permission picker (it still applies). */
+  compact?: boolean;
 }
 
 export function ChatInput({
@@ -256,6 +258,7 @@ export function ChatInput({
   onAnswerQuestion,
   onResolvePermission,
   dictateNonce,
+  compact,
 }: Props) {
   const [localValue, setLocalValue] = useState("");
   const isControlled = propValue !== undefined;
@@ -1334,7 +1337,7 @@ export function ChatInput({
               onClick={() => fileInputRef.current?.click()}
             />
             {/* Permissions and crew are agent features; the web app is a plain chat. */}
-            {!IS_WEB && (
+            {!IS_WEB && !compact && (
               <>
                 <SecurityPresetPicker value={securityPreset} onChange={setSecurityPreset} />
                 <CrewPicker disabled={working} />

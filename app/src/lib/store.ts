@@ -572,7 +572,7 @@ export interface Chat {
   queuedItems?: QueuedItem[];
 }
 
-export type View = "chat" | "settings" | "projects" | "analytics" | "plan" | "connectors" | "skills" | "admin" | "tasks" | "inbox" | "scheduled" | "crew";
+export type View = "chat" | "settings" | "projects" | "analytics" | "plan" | "connectors" | "skills" | "admin" | "tasks" | "inbox" | "scheduled" | "crew" | "finance";
 
 export type SettingsSection =
   | "account"
@@ -1749,9 +1749,12 @@ export const useApp = create<AppState>((set, get) => ({
   openChat: async (id) => {
     const existing = get().chats[id];
     const projectId = existing?.projectId || null;
+    // A finance chat opened from the Finance page stays in that page's side panel.
+    const crew = existing?.crewId ?? get().chatSummaries.find((c) => c.id === id)?.crew_id;
+    const view: View = get().view === "finance" && crew === "finance" ? "finance" : "chat";
     set({
       activeChatId: id,
-      view: "chat",
+      view,
       activeProjectId: projectId,
     });
     if (get().backendOffline) {
@@ -1803,7 +1806,7 @@ export const useApp = create<AppState>((set, get) => ({
         const unfinished = !full.running && last?.role === "assistant" && !last.content.trim();
         set((s) => ({
           activeProjectId: fetchedProjectId,
-          view: "chat",
+          view,
           chats: {
             ...s.chats,
             [id]: {
@@ -2321,7 +2324,8 @@ export const useApp = create<AppState>((set, get) => ({
       return {
         chats: { ...s.chats, [localId]: chat },
         activeChatId: localId,
-        view: "chat",
+        // The finance page hosts its own chat; sending from it stays there.
+        view: s.view === "finance" ? "finance" : "chat",
       };
     });
 

@@ -29,7 +29,8 @@ import { downloadChatJson, downloadChatMarkdown } from "../lib/chatExport";
 import { cn } from "../lib/cn";
 import { CrewAvatar } from "./crew/CrewAvatar";
 
-export function ChatView() {
+/** `embedded`: shown as a side panel (the Finance page), so no window-drag header or sidebar gutters. */
+export function ChatView({ embedded = false }: { embedded?: boolean } = {}) {
   const chat = useApp((s) =>
     s.activeChatId ? s.chats[s.activeChatId] : undefined,
   );
@@ -188,16 +189,19 @@ export function ChatView() {
           end, so it keeps clear of them (CAPTION_CLEARANCE).
         */}
         <div
-          {...dragRegionAttrs()}
-          onMouseDown={onDragMouseDown}
+          {...(embedded ? {} : dragRegionAttrs())}
+          onMouseDown={embedded ? undefined : onDragMouseDown}
           className={cn(
             "absolute inset-x-0 top-0 z-20 flex items-center justify-between py-2.5 bg-gradient-to-b from-paper via-paper/95 to-transparent",
+            embedded ? "px-3" :
             usesIntegratedTitleBar() ? CAPTION_CLEARANCE : "pr-5",
             // When the sidebar is collapsed, the main pane slides left and the
             // chat title would slide under the window-level search + sidebar toggle.
             // Reserve a left gutter so the title stays clear. Beside macOS
             // traffic lights the controls sit at 80px; elsewhere at 12px (58px wide).
-            sidebarOpen
+            embedded
+              ? ""
+              : sidebarOpen
               ? "pl-5"
               : hasTrafficLights()
                 ? "pl-[146px]"
@@ -370,7 +374,7 @@ export function ChatView() {
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto" style={{ paddingBottom: composerH }}>
-          <div className="mx-auto flex max-w-[748px] flex-col gap-5 px-6 pt-14 pb-8">
+          <div className={cn("mx-auto flex max-w-[748px] flex-col gap-5 pt-14 pb-8", embedded ? "px-4" : "px-6")}>
             {/* Plan mode indicator — shows when plan mode is active so the user
                 knows the agent is restricted to read-only tools. */}
             {planMode && (
@@ -430,12 +434,13 @@ export function ChatView() {
         {/* Composer — floating directly over the chat text. When the agent asks
             a question or needs permission, the composer morphs into an inline
             card (question/permission mode) instead of showing the textarea. */}
-        <div ref={composerRef} className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-paper via-paper/95 to-transparent px-6 pb-5 pt-10 pointer-events-none z-10">
+        <div ref={composerRef} className={cn("absolute bottom-0 left-0 right-0 bg-gradient-to-t from-paper via-paper/95 to-transparent pb-5 pt-10 pointer-events-none z-10", embedded ? "px-3" : "px-6")}>
           <div className="mx-auto max-w-[700px] pointer-events-auto">
             <TodoPanel />
             <ChatInput
               autoFocus
               placeholder="Reply to zWork"
+              compact={embedded}
               mode={composerMode}
               question={chat.pendingQuestion ? { question: chat.pendingQuestion.question, options: chat.pendingQuestion.options } : undefined}
               permission={activeGate ? { reason: activeGate.reason } : undefined}

@@ -6,13 +6,13 @@ pub async fn execute_get_stock_data(params: &Value) -> Result<String, String> {
     let range = params.get("range").and_then(|v| v.as_str()).unwrap_or("3mo");
 
     let url = format!(
-        "https://query1.finance.yahoo.com/v8/chart/{}?range={}&interval=1d",
-        ticker, range
+        "https://query1.finance.yahoo.com/v8/finance/chart/{}?range={}&interval=1d",
+        ticker.replace('^', "%5E"), range
     );
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
-        .user_agent("Mozilla/5.0 zWork/1.0")
+        .user_agent("Mozilla/5.0")
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
 

@@ -140,7 +140,7 @@ pub fn is_specialist_tool(name: &str) -> bool {
     matches!(
         name,
         "search_papers" | "format_citation" | "write_research_paper" | "review_paper" | "check_novelty"
-            | "get_stock_data" | "detect_hardware" | "deploy_web_app" | "send_telegram_message"
+            | "get_stock_data" | "get_company_financials" | "get_market_news" | "detect_hardware" | "deploy_web_app" | "send_telegram_message"
             // Duplicates of ask_user and of the permission gate.
             | "ask_question" | "ask_user_for_permission"
     )
@@ -152,11 +152,30 @@ pub fn is_specialist_tool(name: &str) -> bool {
 pub fn wants_specialist_tools(message: &str) -> bool {
     const WORDS: &[&str] = &[
         "research paper", "citation", "cite ", "literature", "academic", "journal article", "thesis",
-        "stock price", "ticker", "stock market", "share price", "shares of", "earnings", "dividend", "portfolio",
-        "watchlist", "nasdaq", "s&p", "dow jones", " etf", "crypto", "bitcoin", "telegram", "deploy", "website", "web app", "landing page",
+        "telegram", "deploy", "website", "web app", "landing page",
     ];
     let message = message.to_lowercase();
     WORDS.iter().any(|w| message.contains(w))
+}
+
+/// The market-data tools: loaded for finance chats and for messages about markets,
+/// without the academic and deploy tools that `wants_specialist_tools` brings.
+pub fn is_finance_tool(name: &str) -> bool {
+    matches!(name, "get_stock_data" | "get_company_financials" | "get_market_news")
+}
+
+pub fn wants_finance_tools(message: &str) -> bool {
+    const WORDS: &[&str] = &[
+        "stock", "ticker", "share price", "shares of", "earnings", "dividend", "portfolio", "watchlist",
+        "nasdaq", "s&p", "dow jones", " etf", "10-k", "10-q", "sec filing", "market cap", "revenue growth",
+    ];
+    let message = message.to_lowercase();
+    WORDS.iter().any(|w| message.contains(w))
+}
+
+/// Whether a built-in tool goes into this turn's schemas.
+pub fn tool_in_turn(name: &str, academic: bool, finance: bool) -> bool {
+    if is_finance_tool(name) { finance } else { academic || !is_specialist_tool(name) }
 }
 
 pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
@@ -231,7 +250,7 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
         }),
         json!({
             "name": "get_stock_data",
-            "description": "Get stock price data and technical indicators (SMA, EMA, RSI, MACD) for a given ticker.",
+            "description": "Get price history and technical indicators (SMA, EMA, RSI, MACD) for a stock, ETF or index ticker (^GSPC for the S&P 500).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -239,6 +258,27 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
                     "range": { "type": "string", "description": "Time range: 5d, 1mo, 3mo, 6mo, 1y, 2y, ytd, max", "default": "3mo" }
                 },
                 "required": ["ticker"]
+            }
+        }),
+        json!({
+            "name": "get_company_financials",
+            "description": "Yearly revenue, operating income, net income and diluted EPS from SEC filings, plus the latest 10-K, 10-Q and 8-K filings with links. US-listed companies only.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": { "type": "string", "description": "Ticker, e.g. AAPL" }
+                },
+                "required": ["ticker"]
+            }
+        }),
+        json!({
+            "name": "get_market_news",
+            "description": "Recent headlines with sources and links: about a company or ticker from the last week, or today's market news when query is empty.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Company name or ticker; empty for market news" }
+                }
             }
         }),
         json!({
@@ -832,6 +872,8 @@ pub fn execute_tool(
                 Ok(serde_json::to_string_pretty(&profile).unwrap_or_default())
             }
             "get_stock_data" => stock::execute_get_stock_data(&params).await,
+            "get_company_financials" => crate::finance::financials_text(params["ticker"].as_str().unwrap_or("")).await,
+            "get_market_news" => crate::finance::news_text(params["query"].as_str().unwrap_or("")).await,
             "deploy_web_app" => {
                 let project_path = params.get("project_path").and_then(|v| v.as_str()).unwrap_or(".");
                 let framework = params.get("framework").and_then(|v| v.as_str()).unwrap_or("");
@@ -1721,8 +1763,11 @@ mod tests {
 mod specialist_word_tests {
     #[test]
     fn finance_questions_get_market_tools() {
-        assert!(super::wants_specialist_tools("How did NVDA earnings land?"));
-        assert!(super::wants_specialist_tools("track my portfolio every morning"));
-        assert!(!super::wants_specialist_tools("sort the pet food invoices"));
+        assert!(super::wants_finance_tools("How did NVDA earnings land?"));
+        assert!(super::wants_finance_tools("track my portfolio every morning"));
+        assert!(!super::wants_finance_tools("sort the pet food invoices"));
+        assert!(!super::wants_specialist_tools("How did NVDA earnings land?"));
+        assert!(super::tool_in_turn("get_market_news", false, true));
+        assert!(!super::tool_in_turn("search_papers", false, true));
     }
 }

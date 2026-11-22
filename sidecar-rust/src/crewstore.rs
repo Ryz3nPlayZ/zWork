@@ -43,8 +43,26 @@ pub fn list() -> Vec<CrewMember> {
     fs::read_to_string(crate::paths::crew_path()).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
 }
 
+/// The built-in helper behind the Finance tab. Not stored in crew.json and not listed.
+pub const FINANCE_ID: &str = "finance";
+
+fn finance_member() -> CrewMember {
+    let instructions = format!(
+        "Help with markets and companies: prices, earnings, filings, news, comparisons.\n\
+- get_stock_data for prices and trends, get_company_financials for revenue, profit, EPS and SEC filings (US-listed companies), get_market_news for headlines. Use web_search and web_fetch for anything else: analyst commentary, the text of a filing, non-US companies.\n\
+- Say how current the data is and link your sources.\n\
+- To show a chart, write a fenced block with the language `chart` containing JSON: {{\"type\": \"line\" or \"bar\", \"title\": \"...\", \"x\": \"year\", \"series\": [\"revenue\", \"netIncome\"], \"unit\": \"$B\", \"data\": [{{\"year\": \"2024\", \"revenue\": 391.0, \"netIncome\": 93.7}}]}}. At most 60 points; scale big numbers to the unit.\n\
+- This is research, not personal investment advice. Don't tell the user to buy or sell; lay out the facts, the risks and what to watch.\n\
+- Crypto is not supported yet.\n\n\
+The user's watchlist: {}.",
+        crate::finance::watchlist().join(", ")
+    );
+    CrewMember { id: FINANCE_ID.into(), name: "zWork Finance".into(), instructions, ..Default::default() }
+}
+
 pub fn get(id: &str) -> Option<CrewMember> {
     if id.is_empty() { return None; }
+    if id == FINANCE_ID { return Some(finance_member()); }
     list().into_iter().find(|m| m.id == id)
 }
 

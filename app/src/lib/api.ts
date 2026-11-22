@@ -523,6 +523,34 @@ export interface UploadedFile {
   size: number;
 }
 
+export interface FinanceQuote {
+  symbol: string;
+  name: string;
+  currency?: string;
+  price: number | null;
+  previousClose: number | null;
+  change: number | null;
+  changePct: number | null;
+  dayHigh?: number | null;
+  dayLow?: number | null;
+  yearHigh?: number | null;
+  yearLow?: number | null;
+  volume?: number | null;
+  exchange?: string;
+  type?: string;
+  marketTime?: number | null;
+  points?: number[];
+}
+export interface FinanceChart extends Omit<FinanceQuote, "points"> {
+  range: string;
+  points: { t: number; c: number }[];
+}
+export interface FinanceSearchHit { symbol: string; name: string; exchange: string; type: string }
+export interface FinanceNewsItem { title: string; url: string; source: string; published: number | null }
+export interface FinanceYear { year: number; revenue: number | null; operatingIncome: number | null; netIncome: number | null; eps: number | null }
+export interface FinanceFiling { form: string; date: string; title: string; url: string }
+export interface FinanceFinancials { symbol: string; name: string; cik: string; years: FinanceYear[]; filings: FinanceFiling[] }
+
 export const api = {
   health: healthFetch,
 
@@ -766,6 +794,25 @@ export const api = {
     localFetch(`/api/crew/${id}`, { method: "DELETE" }).then(async (r) => {
       if (!r.ok) throw new Error(`${r.status} ${r.statusText}: ${await r.text()}`);
     }),
+
+  // --- Finance (Yahoo prices, SEC filings, Google News, via the sidecar) ---
+  financeQuotes: (symbols: string[]) =>
+    localFetch(`/api/finance/quotes?symbols=${encodeURIComponent(symbols.join(","))}`).then((r) => j<FinanceQuote[]>(r)),
+  financeChart: (symbol: string, range: string) =>
+    localFetch(`/api/finance/chart?symbol=${encodeURIComponent(symbol)}&range=${range}`).then((r) => j<FinanceChart>(r)),
+  financeSearch: (q: string) =>
+    localFetch(`/api/finance/search?q=${encodeURIComponent(q)}`).then((r) => j<FinanceSearchHit[]>(r)),
+  financeNews: (q: string) =>
+    localFetch(`/api/finance/news?q=${encodeURIComponent(q)}`).then((r) => j<FinanceNewsItem[]>(r)),
+  financeFinancials: (symbol: string) =>
+    localFetch(`/api/finance/financials?symbol=${encodeURIComponent(symbol)}`).then((r) => j<FinanceFinancials>(r)),
+  getWatchlist: () => localFetch("/api/finance/watchlist").then((r) => j<{ watchlist: string[] }>(r)),
+  setWatchlist: (watchlist: string[]) =>
+    localFetch("/api/finance/watchlist", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ watchlist }),
+    }).then((r) => j<{ watchlist: string[] }>(r)),
 
   // --- Scheduled Tasks ---
   getLaunchAtLogin: () => (IS_TAURI ? invoke<boolean>("get_launch_at_login") : Promise.resolve(false)),

@@ -18,6 +18,7 @@ import {
   Inbox,
   Clock,
   Bot,
+  ChartLine,
 } from "lucide-react";
 import { cn } from "../lib/cn";
 import { GlideGroup } from "./Glide";
@@ -163,6 +164,14 @@ export function Sidebar() {
               label="Crew"
               onClick={() => setView("crew")}
               active={view === "crew"}
+            />
+          )}
+          {!demo && (
+            <SidebarButton
+              icon={<ChartLine />}
+              label="Finance"
+              onClick={() => setView("finance")}
+              active={view === "finance"}
             />
           )}
           {/* Tasks (kanban) — deferred for reimplementation. The current
