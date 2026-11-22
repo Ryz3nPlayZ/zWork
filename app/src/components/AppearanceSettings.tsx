@@ -7,7 +7,7 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Check, ChevronDown, Copy, Upload, X } from "lucide-react";
+import { Check, ChevronDown, Copy, Plus, Upload, X } from "lucide-react";
 import { cn } from "../lib/cn";
 import { applyZoom, loadZoom } from "../lib/zoom";
 import { setSchemePref, resolvedSchemeModes, setThemePref } from "../lib/theme";
@@ -293,6 +293,7 @@ export function AppearanceSettings() {
   const [busy, setBusy] = useState(false);
   const [zoom, setZoom] = useState(() => Math.round(loadZoom() * 100));
   const [themeName, setThemeName] = useState("");
+  const [naming, setNaming] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
 
   const hasWallpaper = look.wallpaper !== "none";
@@ -442,57 +443,70 @@ export function AppearanceSettings() {
         </Row>
 
         <Row label="Saved themes" hint={`Keep up to ${MAX_SAVED} of your own, with their wallpaper.`} stack>
-          {saved.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {saved.map((t, i) => (
-                <span key={i} className="inline-flex h-8 items-center rounded-lg border border-line bg-paper">
-                  <button
-                    type="button"
+          <div className="flex flex-wrap items-start gap-x-2 gap-y-3">
+            {saved.map((t, i) => {
+              const g = WALLPAPER_PRESETS.find((w) => w.id === t.look.wallpaper);
+              const backdrop = t.look.wallpaper === "image" && t.image ? `center / cover url("${t.image}")` : g ? gradientCss(g) : undefined;
+              return (
+                <div key={i} className="group/saved relative">
+                  <Tile
+                    label={t.name}
+                    selected={false}
                     onClick={() => guard(() => { applySavedTheme(t); setNote(`Applied “${t.name}”.`); })}
-                    className="press ring-focus flex h-full items-center gap-2 rounded-l-lg pl-2 pr-2.5 text-[12.5px] text-ink hover:bg-state-hover"
-                  >
-                    <span
-                      className="h-4 w-4 rounded-full border border-line"
-                      style={{ background: t.colors ? `linear-gradient(135deg, ${t.colors.surface} 50%, ${t.colors.accent} 50%)` : PARCHMENT.light.accent }}
-                    />
-                    {t.name}
-                  </button>
+                    {...(t.colors ?? PARCHMENT.light)}
+                    backdrop={backdrop}
+                  />
                   <button
                     type="button"
                     aria-label={`Remove ${t.name}`}
                     onClick={() => guard(() => removeSaved(i))}
-                    className="press ring-focus flex h-full w-7 items-center justify-center rounded-r-lg border-l border-line text-ink-faint hover:bg-state-hover hover:text-ink"
+                    className="press ring-focus absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-line bg-paper-raised text-ink-muted opacity-0 shadow-sm transition-opacity hover:text-ink focus-visible:opacity-100 group-hover/saved:opacity-100 [@media(hover:none)]:opacity-100"
                   >
                     <X className="h-3 w-3" />
                   </button>
+                </div>
+              );
+            })}
+            {saved.length < MAX_SAVED && !naming && (
+              <button
+                type="button"
+                onClick={() => setNaming(true)}
+                className="press ring-focus group flex w-[92px] flex-col items-center gap-1.5 rounded-lg"
+              >
+                <span className="flex h-[58px] w-full items-center justify-center rounded-lg border border-dashed border-line-strong text-ink-muted group-hover:border-ink-faint group-hover:text-ink">
+                  <Plus className="h-4 w-4" />
                 </span>
-              ))}
-            </div>
-          )}
-          {saved.length < MAX_SAVED ? (
-            <form
-              className="flex gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                guard(() => {
-                  saveCurrentTheme(themeName);
-                  setThemeName("");
-                });
-              }}
-            >
-              <input
-                value={themeName}
-                onChange={(e) => setThemeName(e.target.value)}
-                placeholder="Name this theme"
-                maxLength={40}
-                aria-label="Theme name"
-                className="h-8 w-48 rounded-lg border border-line bg-paper px-3 text-[12.5px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
-              />
-              <Button type="submit">Save current look</Button>
-            </form>
-          ) : (
-            <p className="text-[11.5px] text-ink-muted">Remove a saved theme to save another.</p>
-          )}
+                <span className="text-[11.5px] text-ink-muted">Save current</span>
+              </button>
+            )}
+            {naming && (
+              <form
+                className="flex h-[58px] items-center gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  guard(() => {
+                    saveCurrentTheme(themeName);
+                    setThemeName("");
+                    setNaming(false);
+                  });
+                }}
+              >
+                <input
+                  autoFocus
+                  value={themeName}
+                  onChange={(e) => setThemeName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Escape" && (setNaming(false), setThemeName(""))}
+                  placeholder="Name this theme"
+                  maxLength={40}
+                  aria-label="Theme name"
+                  className="h-8 w-44 rounded-lg border border-line bg-paper px-3 text-[12.5px] text-ink placeholder:text-ink-faint focus:border-line-strong focus:outline-none"
+                />
+                <Button type="submit">Save</Button>
+                <Button type="button" onClick={() => { setNaming(false); setThemeName(""); }}>Cancel</Button>
+              </form>
+            )}
+          </div>
+          {saved.length >= MAX_SAVED && <p className="text-[11.5px] text-ink-muted">Remove a saved theme to save another.</p>}
         </Row>
       </Group>
 
