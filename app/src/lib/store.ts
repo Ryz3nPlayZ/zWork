@@ -898,6 +898,8 @@ interface AppState {
   crewLoading: boolean;
   crewError: string | null;
   newChatCrewId: string;
+  /** One line describing the stock open on the Finance tab, sent with finance chat turns. */
+  financeFocus: string;
   fetchCrew: () => Promise<void>;
   createCrew: (body: CrewMemberInput) => Promise<CrewMember>;
   updateCrew: (id: string, body: CrewMemberInput) => Promise<CrewMember>;
@@ -1046,6 +1048,7 @@ export const useApp = create<AppState>((set, get) => ({
   crewLoading: false,
   crewError: null,
   newChatCrewId: "",
+  financeFocus: "",
 
   // Scheduled Tasks + Inbox
   scheduledTasks: [],
@@ -2409,6 +2412,7 @@ export const useApp = create<AppState>((set, get) => ({
           effort: get().effort,
           history: priorHistory,
           resume,
+          screen_context: get().view === "finance" ? get().financeFocus || undefined : undefined,
         },
         (evt) => {
           // Any event means the stream is alive — push the silence watchdog

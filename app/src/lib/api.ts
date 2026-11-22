@@ -1912,6 +1912,8 @@ export async function streamChat(
     history?: { role: "user" | "assistant"; content: string }[];
     /** Watch the chat's run that is already going (after a reload) instead of sending a message. */
     resume?: boolean;
+    /** What the user has open next to the chat, e.g. the Finance tab's stock. */
+    screen_context?: string;
   },
   onEvent: (evt: StreamEvent) => void,
   signal?: AbortSignal,

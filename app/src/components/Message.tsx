@@ -865,9 +865,9 @@ export function Message({
             active={message.feedback === "bad"}
             onClick={() => onBadResponse?.(message.id)}
           />
-          <span className="ml-auto text-[11px] text-ink-faint">{formatTime(message.createdAt)}</span>
+          <span className="ml-auto shrink-0 whitespace-nowrap text-[11px] text-ink-faint">{formatTime(message.createdAt)}</span>
           {message.usage && (
-            <span className="text-[11px] text-ink-faint">
+            <span className="min-w-0 truncate text-[11px] text-ink-faint">
               <UsageCaption usage={message.usage} />
             </span>
           )}

@@ -344,9 +344,12 @@ function FinanceChat({ symbol, name, isCompany }: { symbol: string; name: string
         "Which big companies report earnings this week?",
       ];
   return (
-    <aside className="flex w-[400px] min-w-0 shrink-0 flex-col border-l border-line bg-paper">
+    // shortcut: breakpoints assume the sidebar is open (280px); container queries would track the real width.
+    <aside className="flex w-[320px] min-w-0 min-[1400px]:w-[400px] shrink-0 flex-col border-l border-line bg-paper">
       <div className="flex h-11 shrink-0 items-center justify-between border-b border-line px-4">
-        <span className="text-[13px] font-semibold text-ink">Ask zWork</span>
+        <span className="min-w-0 truncate text-[13px] font-semibold text-ink">
+          {symbol ? `Ask zWork about ${isCompany ? symbol : name}` : "Ask zWork"}
+        </span>
         {hasChat && (
           <button
             type="button"
@@ -365,7 +368,7 @@ function FinanceChat({ symbol, name, isCompany }: { symbol: string; name: string
         ) : (
           <div className="flex min-w-0 flex-1 flex-col justify-end gap-3 p-4">
             <p className="text-[13px] leading-relaxed text-ink-muted">
-              This chat can read live prices, SEC filings and market news, and draw charts. It gives research, not personal investment advice.
+              This chat sees the stock you have open, reads live prices, SEC filings and market news, and draws charts. It gives research, not personal investment advice.
             </p>
             <div className="flex flex-col items-start gap-1.5">
               {ideas.map((t) => (
@@ -473,6 +476,16 @@ export function FinancePage() {
   const isCompany = !!selected && !selected.startsWith("^") && (q?.type ?? "EQUITY") === "EQUITY";
   const name = q?.name || selected;
 
+  // Tell the finance chat what's on screen, so "how did it do?" means this stock.
+  const focusPrice = q?.price;
+  const focusPct = q?.changePct;
+  useEffect(() => {
+    if (!selected) return;
+    const move = focusPrice == null ? "" : `, last price ${focusPrice}${q?.currency ? ` ${q.currency}` : ""}${focusPct == null ? "" : ` (${focusPct >= 0 ? "+" : ""}${focusPct.toFixed(2)}% today)`}`;
+    useApp.setState({ financeFocus: `${name} (${selected})${move}, chart showing ${range}` });
+  }, [selected, name, focusPrice, focusPct, q?.currency, range]);
+  useEffect(() => () => useApp.setState({ financeFocus: "" }), []);
+
   return (
     <div className="flex h-full min-w-0 flex-1 overflow-hidden bg-paper">
       <div className="min-w-0 flex-1 overflow-y-auto">
@@ -488,7 +501,7 @@ export function FinancePage() {
           {loadError && <p className="rounded-lg border border-line bg-paper-sunken px-3 py-2 text-[12.5px] text-ink-muted">{loadError}</p>}
 
           {/* Market strip */}
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 min-[1200px]:grid-cols-4">
             {MARKETS.map((m) => {
               const mq = quotes[m.symbol];
               return (
@@ -514,7 +527,7 @@ export function FinancePage() {
             })}
           </div>
 
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_280px]">
+          <div className="grid grid-cols-1 gap-4 min-[1400px]:grid-cols-[1fr_280px]">
             {/* Selected symbol */}
             <Card>
               <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
@@ -532,7 +545,7 @@ export function FinancePage() {
               </div>
               {chartError ? <p className="py-16 text-center text-[12.5px] text-ink-muted">{chartError}</p> : chart ? <PriceChart chart={chart} /> : <div className="h-[260px]"><Spinner /></div>}
               {q && (
-                <div className="mt-3 grid grid-cols-2 gap-3 border-t border-line pt-3 sm:grid-cols-4">
+                <div className="mt-3 grid grid-cols-2 gap-3 border-t border-line pt-3 min-[1100px]:grid-cols-4">
                   <Stat label="Previous close" value={price(q.previousClose)} />
                   <Stat label="Day range" value={q.dayLow != null ? `${price(q.dayLow)} – ${price(q.dayHigh)}` : "–"} />
                   <Stat label="52-week range" value={q.yearLow != null ? `${price(q.yearLow)} – ${price(q.yearHigh)}` : "–"} />

@@ -68,6 +68,9 @@ pub struct ChatStreamRequest {
     /// Reasoning effort from the prompt bar: low, medium, high, xhigh or max.
     #[serde(default)]
     pub effort: Option<String>,
+    /// What the user has open next to the chat (the Finance tab's selected stock).
+    #[serde(default)]
+    pub screen_context: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -928,7 +931,7 @@ pub async fn chat_stream_route(
         req.auto_approve_destructive,
         req.artifact_mode,
         req.web_search_enabled,
-        None,
+        screen_context_block(req.screen_context.as_deref()),
         req.effort.filter(|e| matches!(e.as_str(), "low" | "medium" | "high" | "xhigh" | "max")),
     );
 
@@ -940,6 +943,27 @@ pub async fn chat_stream_route(
     });
 
     Sse::new(mapped).keep_alive(axum::response::sse::KeepAlive::default()).into_response()
+}
+
+/// Per-turn note on what the user is looking at. Capped: it comes from the
+/// local app, but a runaway string shouldn't eat the context window.
+fn screen_context_block(ctx: Option<&str>) -> Option<String> {
+    let ctx: String = ctx?.trim().chars().take(400).collect();
+    (!ctx.is_empty()).then(|| {
+        format!("## What the user has open
+Next to this chat the user is looking at: {ctx}. When they say \"it\", \"this stock\" or \"this company\", they mean this one.")
+    })
+}
+
+#[cfg(test)]
+mod screen_context_tests {
+    #[test]
+    fn caps_and_skips_empty() {
+        assert_eq!(super::screen_context_block(Some("  ")), None);
+        assert_eq!(super::screen_context_block(None), None);
+        let b = super::screen_context_block(Some(&"x".repeat(1000))).unwrap();
+        assert!(b.contains(&"x".repeat(400)) && !b.contains(&"x".repeat(401)));
+    }
 }
 
 // Onboarding Structs and Handlers

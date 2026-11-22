@@ -39,6 +39,12 @@ export function compact(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(2);
 }
 
+/** "netIncome" / "net_income" → "Net income", for legends when the model sends raw keys. */
+export function seriesLabel(k: string): string {
+  const words = k.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ").trim().toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 export function ChartBlock({ spec }: { spec: ChartSpec }) {
   // "$B" → "$391B", "%" → "12.3%": a leading $ goes in front, the rest after.
   const pre = spec.unit?.startsWith("$") ? "$" : "";
@@ -52,7 +58,10 @@ export function ChartBlock({ spec }: { spec: ChartSpec }) {
     <>
       <CartesianGrid stroke="rgb(var(--line-soft))" strokeDasharray="3 3" vertical={false} />
       <XAxis dataKey={spec.x} {...axisProps} minTickGap={16} />
-      <YAxis {...axisProps} width={56} tickFormatter={fmt} domain={["auto", "auto"]} />
+      <YAxis {...axisProps} width={56} tickFormatter={fmt} domain={
+          // Bars must start at zero or their heights lie; lines can zoom to their range.
+          spec.type === "bar" ? [(lo: number) => Math.min(0, lo), (hi: number) => Math.max(0, hi)] : ["auto", "auto"]
+        } />
       <Tooltip contentStyle={tooltipStyle} labelStyle={{ color: "rgb(var(--ink-muted))" }} formatter={(v) => fmt(Number(v))} />
       {spec.series.length > 1 && <Legend wrapperStyle={{ fontSize: 12 }} />}
     </>
@@ -66,14 +75,14 @@ export function ChartBlock({ spec }: { spec: ChartSpec }) {
             <BarChart {...common}>
               {axes}
               {spec.series.map((k, i) => (
-                <Bar key={k} dataKey={k} fill={COLORS[i % COLORS.length]} radius={[3, 3, 0, 0]} maxBarSize={36} />
+                <Bar key={k} dataKey={k} name={seriesLabel(k)} fill={COLORS[i % COLORS.length]} radius={[3, 3, 0, 0]} maxBarSize={36} />
               ))}
             </BarChart>
           ) : (
             <LineChart {...common}>
               {axes}
               {spec.series.map((k, i) => (
-                <Line key={k} dataKey={k} stroke={COLORS[i % COLORS.length]} strokeWidth={2} dot={false} type="monotone" />
+                <Line key={k} dataKey={k} name={seriesLabel(k)} stroke={COLORS[i % COLORS.length]} strokeWidth={2} dot={false} type="monotone" />
               ))}
             </LineChart>
           )}

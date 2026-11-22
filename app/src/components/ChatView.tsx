@@ -222,7 +222,7 @@ export function ChatView({ embedded = false }: { embedded?: boolean } = {}) {
                 <ArrowLeft className="h-3.5 w-3.5" />
               </button>
             )}
-            {crewMember && (
+            {crewMember && !embedded && (
               <span data-no-drag title={`Crew member: ${crewMember.name}`} className="inline-flex shrink-0">
                 <CrewAvatar member={crewMember} size={28} />
               </span>
@@ -269,7 +269,8 @@ export function ChatView({ embedded = false }: { embedded?: boolean } = {}) {
               </button>
             )}
           </div>
-          <div className="flex shrink-0 items-center gap-2 whitespace-nowrap" data-no-drag>
+          {/* The Finance panel has its own header with New chat; cost, versions and export stay in the full view. */}
+          {!embedded && (<div className="flex shrink-0 items-center gap-2 whitespace-nowrap" data-no-drag>
             {(() => {
               // Only a cost means anything to a non-developer; token counts
               // stay in the tooltip.
@@ -369,7 +370,7 @@ export function ChatView({ embedded = false }: { embedded?: boolean } = {}) {
                 </GlideGroup>
               )}
             </div>
-          </div>
+          </div>)}
         </div>
 
         {/* Messages */}
