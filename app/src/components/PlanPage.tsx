@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from "react";
 import { Check, ArrowUpRight } from "lucide-react";
+import { DistortionWave } from "distortion-waves";
 import { type CloudUser, createBillingCheckoutSession, createBillingPortalSession, redeemAccessCode, pollForPlanChange } from "../lib/cloud";
 import { cn } from "../lib/cn";
+import { needsLightweightRendering } from "../lib/platform";
 import type { BillingReturn } from "../lib/billingReturn";
 
 const IS_TAURI = typeof window !== "undefined" && !!(window as any).__TAURI_INTERNALS__;
@@ -104,7 +106,8 @@ export function PlanPage({
   const [couponCode, setCouponCode] = useState("");
   const [couponBusy, setCouponBusy] = useState(false);
   const [showCoupon, setShowCoupon] = useState(false);
-  const [upgrading, setUpgrading] = useState(false);
+  // The plan whose card has waved over to "Finish paying in your browser".
+  const [checkoutTier, setCheckoutTier] = useState<string | null>(null);
   const stopPollRef = useRef<(() => void) | null>(null);
 
   const handleRedeem = async () => {
@@ -127,29 +130,37 @@ export function PlanPage({
     if (tierId !== "pro" && tierId !== "max") return;
     setBusy(true);
     setError("");
+    setCheckoutTier(tierId);
     try {
       const session = await createBillingCheckoutSession(isAnnual, tierId);
-      if (session?.url) {
-        await openUrl(session.url);
-        // Poll for plan change after opening Stripe checkout
-        setUpgrading(true);
-        stopPollRef.current?.();
-        stopPollRef.current = pollForPlanChange(
-          currentTier,
-          (user) => {
-            setUpgrading(false);
-            onUserChanged?.(user);
-          },
-          undefined,
-          // Checkout abandoned: drop the banner instead of waiting forever.
-          () => setUpgrading(false),
-        );
+      if (!session?.url) {
+        setCheckoutTier(null);
+        return;
       }
+      await openUrl(session.url);
+      stopPollRef.current?.();
+      stopPollRef.current = pollForPlanChange(
+        currentTier,
+        (user) => {
+          setCheckoutTier(null);
+          onUserChanged?.(user);
+        },
+        undefined,
+        // Checkout abandoned: fold the card back instead of waiting forever.
+        () => setCheckoutTier(null),
+      );
     } catch (err) {
+      setCheckoutTier(null);
       setError(err instanceof Error ? err.message : "Failed to start checkout");
     } finally {
       setBusy(false);
     }
+  };
+
+  const cancelCheckout = () => {
+    stopPollRef.current?.();
+    stopPollRef.current = null;
+    setCheckoutTier(null);
   };
 
   const handleManage = async () => {
@@ -215,13 +226,6 @@ export function PlanPage({
           </div>
         )}
 
-        {upgrading && (
-          <div className="mb-8 rounded-2xl border border-success/20 bg-success/10 px-4 py-3 text-[13px] text-success flex items-center gap-2">
-            <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" /><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" /></svg>
-            Waiting for payment to complete…
-          </div>
-        )}
-
         {/* Monthly / Annual toggle */}
         <div className="mb-12 flex justify-center">
           <div className="inline-flex rounded-full border border-line bg-paper-raised p-1">
@@ -260,6 +264,8 @@ export function PlanPage({
               isCurrent={currentTier === tier.id}
               isAnnual={isAnnual}
               busy={busy}
+              checkingOut={checkoutTier === tier.id}
+              onCancelCheckout={cancelCheckout}
               onUpgrade={() => handleUpgrade(tier.id)}
               onManage={handleManage}
               isPaid={isPaid}
@@ -324,6 +330,8 @@ function PricingCard({
   isCurrent,
   isAnnual,
   busy,
+  checkingOut,
+  onCancelCheckout,
   onUpgrade,
   onManage,
   isPaid,
@@ -332,6 +340,8 @@ function PricingCard({
   isCurrent: boolean;
   isAnnual: boolean;
   busy: boolean;
+  checkingOut: boolean;
+  onCancelCheckout: () => void;
   onUpgrade: () => void;
   onManage: () => void;
   isPaid: boolean;
@@ -339,11 +349,25 @@ function PricingCard({
   const price = isAnnual ? tier.priceAnnual : tier.priceMonthly;
   const periodLabel = isAnnual ? "/year" : "/month";
   const isFree = tier.id === "free";
+  const upgradeRef = useRef<HTMLButtonElement>(null);
 
   return (
-    <div
+    <div className="relative">
+      {isCurrent && (
+        <div className="absolute -top-3 left-1/2 z-10 -translate-x-1/2">
+          <span className="inline-flex items-center rounded-full border border-line-strong bg-paper px-3 py-0.5 text-[11px] font-semibold text-ink shadow-sm">
+            Current
+          </span>
+        </div>
+      )}
+    {/* The upgrade button sends a wave over its card while Stripe is open; closing or finishing checkout folds it back. */}
+    <DistortionWave
+      revealed={checkingOut}
+      source={upgradeRef}
+      reducedMotion={needsLightweightRendering() ? "always" : "system"}
+      revealedContent={<CheckoutWaiting opening={busy} onCancel={onCancelCheckout} />}
       className={cn(
-        "relative flex flex-col rounded-2xl border p-7 transition-colors",
+        "overflow-hidden rounded-2xl border transition-colors",
         isCurrent
           ? "border-ink/20 bg-paper-raised"
           : tier.highlight
@@ -351,14 +375,7 @@ function PricingCard({
             : "border-line bg-paper-raised hover:border-line-strong"
       )}
     >
-      {isCurrent && (
-        <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-          <span className="inline-flex items-center rounded-full border border-line-strong bg-paper px-3 py-0.5 text-[11px] font-semibold text-ink shadow-sm">
-            Current
-          </span>
-        </div>
-      )}
-
+      <div className="flex flex-col p-7">
       {/* Plan name */}
       <div className="mb-5">
         <h3 className="text-[18px] font-bold tracking-tight text-ink">{tier.name}</h3>
@@ -399,6 +416,7 @@ function PricingCard({
         </button>
       ) : (
         <button
+          ref={upgradeRef}
           type="button"
           disabled={busy}
           onClick={onUpgrade}
@@ -409,7 +427,7 @@ function PricingCard({
               : "border border-line bg-paper text-ink hover:bg-state-hover"
           )}
         >
-          {busy ? "Opening…" : (
+          {busy && checkingOut ? "Opening…" : (
             <span className="inline-flex items-center justify-center gap-1.5">
               {tier.cta}
               <ArrowUpRight className="h-3.5 w-3.5" />
@@ -427,6 +445,30 @@ function PricingCard({
           </li>
         ))}
       </ul>
+      </div>
+    </DistortionWave>
+    </div>
+  );
+}
+
+function CheckoutWaiting({ opening, onCancel }: { opening: boolean; onCancel: () => void }) {
+  return (
+    <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-paper-raised px-7 text-center">
+      <span className="shimmer-text-slow font-serif text-[22px] tracking-tight">
+        {opening ? "Opening checkout…" : "Finish paying in your browser"}
+      </span>
+      <p className="max-w-[220px] text-[12.5px] leading-5 text-ink-muted">
+        Your plan changes here as soon as the payment goes through.
+      </p>
+      {!opening && (
+        <button
+          type="button"
+          onClick={onCancel}
+          className="press ring-focus mt-2 rounded-xl border border-line bg-paper px-4 py-2 text-[12.5px] font-medium text-ink hover:bg-state-hover"
+        >
+          Back to plans
+        </button>
+      )}
     </div>
   );
 }
