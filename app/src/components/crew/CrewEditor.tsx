@@ -109,10 +109,12 @@ export function CrewEditor({
       <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
         <div
           className={cn(
-            "absolute left-1/2 top-[30%] h-[70vmin] w-[70vmin] -translate-x-1/2 -translate-y-1/2 rounded-full opacity-40 blur-[90px] transition-[background-color,left,top] duration-700 ease-[cubic-bezier(.32,.72,0,1)] md:top-1/2",
-            arrived ? "top-1/2" : "md:left-[32%]",
+            "absolute left-1/2 top-[30%] h-[90vmin] w-[90vmin] -translate-x-1/2 -translate-y-1/2 opacity-40 transition-[background-color,left,top] duration-700 ease-[cubic-bezier(.32,.72,0,1)] md:top-1/2",
+            // Centre of the stage, i.e. the window minus the 420px briefing panel.
+            arrived ? "top-1/2" : "md:left-[calc((100%-420px)/2)]",
           )}
-          style={{ backgroundColor: color }}
+          // A radial mask, not a blur filter: WebKit draws a 90px blur this size as a hard-edged disc.
+          style={{ backgroundColor: color, maskImage: "radial-gradient(closest-side, #000 15%, transparent)", WebkitMaskImage: "radial-gradient(closest-side, #000 15%, transparent)" }}
         />
       </div>
 
@@ -220,7 +222,9 @@ export function CrewEditor({
                       avatar === type ? "bg-state-selected ring-1 ring-ink/30" : "hover:bg-state-hover",
                     )}
                   >
-                    <BotAvatar type={type} color={color} size={30} theme={theme} interactive={false} aria-hidden />
+                    {/* Still thumbnails: eighteen live fur canvases were half the editor's GPU load in WebKit.
+                        shortcut: patches/bot-avatars+0.2.2.patch caps every avatar's shared loop at 30fps; keep it until the package offers a frame-rate option. */}
+                    <BotAvatar type={type} color={color} size={30} theme={theme} interactive={false} paused shading="smooth" aria-hidden />
                   </button>
                 ))}
               </div>

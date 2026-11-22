@@ -1,0 +1,12 @@
+diff --git a/node_modules/bot-avatars/dist/index.es.js b/node_modules/bot-avatars/dist/index.es.js
+index 301ff9a..33e5467 100644
+--- a/node_modules/bot-avatars/dist/index.es.js
++++ b/node_modules/bot-avatars/dist/index.es.js
+@@ -3035,6 +3035,7 @@ function ii(t, n, o) {
+ const os = { x: NaN, y: NaN }, Gs = /* @__PURE__ */ new Set();
+ let Uo = 0, K0 = 0;
+ function Br(t) {
++  if (K0 && t - K0 < 30) { Uo = requestAnimationFrame(Br); return; }
+   Uo = 0;
+   const n = K0 ? Math.min(0.1, (t - K0) / 1e3) : 0;
+   K0 = t, Gs.forEach((o) => o(n)), Gs.size && (Uo = requestAnimationFrame(Br));
