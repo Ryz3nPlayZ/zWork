@@ -1,4 +1,4 @@
-/** The recurring paperwork zWork is for (docs/POSITIONING.md). Used by onboarding
+/** The recurring office work zWork is for (docs/POSITIONING.md). Used by onboarding
  *  and the home screen. Each prompt reads as the user's own request and ends the
  *  first session with one checked result and an offer to schedule it. */
 export interface Chore {
@@ -15,10 +15,10 @@ export const CHORES: Chore[] = [
       "Set up my monthly expense report. Ask me which bank or card export to use and what the report should look like, make it once as an Excel file so I can check it, then offer to repeat it every month.",
   },
   {
-    id: "pdf-invoices",
-    label: "PDF invoices into one sheet",
+    id: "inbox-digest",
+    label: "Morning inbox summary",
     prompt:
-      "Read the PDF invoices in a folder into one Excel sheet. Ask me which folder, do it once so I can check it, then offer to repeat it every week.",
+      "Summarize my inbox each morning: what needs a reply, what can wait, and any dates or deadlines. Ask me which email account to use, do it once so I can check it, then offer to repeat it every weekday.",
   },
   {
     id: "chase-invoices",
@@ -33,10 +33,10 @@ export const CHORES: Chore[] = [
       "Write my weekly client update. Ask me who it's for and where the news comes from, draft it once as a Word file so I can check it, then offer to repeat it every week.",
   },
   {
-    id: "compare-sheets",
-    label: "Compare two spreadsheets",
+    id: "research-brief",
+    label: "Research a topic into notes",
     prompt:
-      "Compare two spreadsheets and flag what doesn't match. Ask me which two files, give me the result as an Excel file so I can check it, then offer to repeat it every month.",
+      "Research a topic for me and write it up as short notes with links to the sources. Ask me the topic and what I need it for, do it once so I can check it, then offer to repeat it every week with what's new.",
   },
   {
     id: "fill-template",

@@ -979,7 +979,16 @@ export function ChatInput({
   // Queued messages waiting against the live run, above the draft. A word
   // label instead of an icon per kind; the x cancels.
   const allowanceLine = allowanceNote && (
-    <p role="status" className="px-5 pt-3 text-[12px] leading-5 text-warning">{allowanceNote}</p>
+    <div role="status" className="mx-3 mt-3 flex items-start gap-3 rounded-xl border border-warning/20 bg-warning/5 px-3 py-2 text-[12px] leading-5 text-warning">
+      <span className="min-w-0 flex-1">{allowanceNote}</span>
+      <button
+        type="button"
+        onClick={() => useApp.getState().setView("analytics")}
+        className="press ring-focus shrink-0 rounded-md px-1.5 font-medium underline-offset-2 hover:underline"
+      >
+        See usage
+      </button>
+    </div>
   );
 
   const queueChips = queuedItems.length > 0 && (

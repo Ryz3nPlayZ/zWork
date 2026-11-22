@@ -12,7 +12,7 @@ import { CHORES } from "../lib/chores";
 import { EarlyScreenChrome } from "./TitleBar";
 import { ThemeTiles } from "./AppearanceSettings";
 
-const JOB_QUESTION = "What paperwork keeps coming back?";
+const JOB_QUESTION = "What do you do every week that you'd rather hand off?";
 // The rest stay in Settings > Appearance; these fit two rows.
 const ONBOARDING_PRESETS = ["dune", "tide", "meadow", "blossom", "graphite", "night", "aurora"];
 
