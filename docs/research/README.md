@@ -2,7 +2,7 @@
 
 Date: 2026-11-16. The question was whether zWork's model is working with broken tools or badly managed context, how that compares with opencode, and whether offering too many tools hurts.
 
-Five notes sit in this folder. This page is the summary; the notes have the evidence and file:line references.
+Seven notes sit in this folder. This page is the summary; the notes have the evidence and file:line references.
 
 | Note | What it covers |
 |---|---|
@@ -12,6 +12,7 @@ Five notes sit in this folder. This page is the summary; the notes have the evid
 | [zwork-context-audit.md](zwork-context-audit.md) | How zWork builds and keeps the model's context; findings F1–F14, M1–M5 |
 | [zwork-tool-audit.md](zwork-tool-audit.md) | zWork's tool list, its cost, and the tools that break; findings B1–B8 and a grouping proposal |
 | [desktop-control-and-omp.md](desktop-control-and-omp.md) | A 2M-token run explained, the false CuaDriver permission cards, why desktop control fails, CuaDriver vs alternatives, and what to take from oh-my-pi |
+| [agent-memory-and-token-efficiency.md](agent-memory-and-token-efficiency.md) | Added 2026-11-21. Open-source agent memory (ACE, Mastra Observational Memory, LightMem and others) and token-saving work (ACON, observation masking, source-judged compaction and others), ranked by how new, how proven and how well each fits zWork, with an adoption order and licence warnings |
 
 Every finding listed below as confirmed was checked against the code on `site/redesign` at `66636d9`. External claims spot-checked in source: Codex compacts at 90% of the window (`openai_models.rs` `auto_compact_token_limit`), and Goose at 80% capped at 225k (`context_mgmt/mod.rs`).
 
