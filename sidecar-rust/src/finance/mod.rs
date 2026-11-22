@@ -1,13 +1,19 @@
 //! Finance tab and the finance chat's data: quotes, price history, news and
 //! company financials, all from free keyless sources (Yahoo Finance's public
-//! chart/search endpoints, Google News RSS, SEC EDGAR).
+//! chart/search endpoints, Nasdaq's public quote API, Google News RSS, SEC EDGAR).
+
+pub mod nasdaq;
+pub mod portfolio;
+pub mod statements;
+pub mod universe;
 
 use axum::{extract::Query, http::StatusCode, response::IntoResponse, Json};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::future::Future;
+use std::time::{Duration, Instant};
 
 // Yahoo answers 429 to curl's and to full browser user agents from some IPs; this one passes.
 const YAHOO_UA: &str = "Mozilla/5.0";
@@ -19,7 +25,36 @@ fn http(ua: &str) -> reqwest::Client {
     reqwest::Client::builder().timeout(Duration::from_secs(20)).user_agent(ua).build().unwrap_or_default()
 }
 
-async fn get_json(url: &str, ua: &str) -> Result<Value, String> {
+/// Responses are kept for `ttl` so switching tickers is instant and we stay under the
+/// free services' rate limits. A failed refresh serves the stale copy if there is one.
+pub async fn cached<F, Fut>(key: &str, ttl: Duration, fetch: F) -> Result<Value, String>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<Value, String>>,
+{
+    static C: OnceLock<Mutex<HashMap<String, (Instant, Value)>>> = OnceLock::new();
+    let c = C.get_or_init(|| Mutex::new(HashMap::new()));
+    let hit = c.lock().unwrap().get(key).cloned();
+    if let Some((at, v)) = &hit {
+        if at.elapsed() < ttl {
+            return Ok(v.clone());
+        }
+    }
+    match fetch().await {
+        Ok(v) => {
+            let mut map = c.lock().unwrap();
+            // shortcut: crude cap; drops everything older than 10 min once it grows. Fine for one user.
+            if map.len() > 400 {
+                map.retain(|_, (at, _)| at.elapsed() < Duration::from_secs(600));
+            }
+            map.insert(key.to_string(), (Instant::now(), v.clone()));
+            Ok(v)
+        }
+        Err(e) => hit.map(|(_, v)| v).ok_or(e),
+    }
+}
+
+pub async fn get_json(url: &str, ua: &str) -> Result<Value, String> {
     let resp = http(ua).get(url).send().await.map_err(|e| format!("Couldn't reach the market data service: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("The market data service answered {}", resp.status()));
@@ -34,7 +69,7 @@ pub fn clean_symbol(s: &str) -> Option<String> {
     ok.then_some(s)
 }
 
-fn num(v: &Value) -> Option<f64> {
+pub fn num(v: &Value) -> Option<f64> {
     v.as_f64().filter(|n| n.is_finite())
 }
 
@@ -42,6 +77,22 @@ fn closes(result: &Value) -> Vec<(i64, f64)> {
     let ts = result["timestamp"].as_array().cloned().unwrap_or_default();
     let cs = result["indicators"]["quote"][0]["close"].as_array().cloned().unwrap_or_default();
     ts.iter().zip(cs.iter()).filter_map(|(t, c)| Some((t.as_i64()?, num(c)?))).collect()
+}
+
+/// Candles with open, high, low, close and volume; rows without a close are dropped.
+fn candles(result: &Value) -> Vec<Value> {
+    let ts = result["timestamp"].as_array().cloned().unwrap_or_default();
+    let q = &result["indicators"]["quote"][0];
+    let col = |k: &str| q[k].as_array().cloned().unwrap_or_default();
+    let (o, h, l, c, v) = (col("open"), col("high"), col("low"), col("close"), col("volume"));
+    ts.iter()
+        .enumerate()
+        .filter_map(|(i, t)| {
+            let close = num(c.get(i)?)?;
+            let or = |col: &Vec<Value>| col.get(i).and_then(num).unwrap_or(close);
+            Some(json!({ "t": t.as_i64()?, "o": or(&o), "h": or(&h), "l": or(&l), "c": close, "v": v.get(i).and_then(num).unwrap_or(0.0) }))
+        })
+        .collect()
 }
 
 fn quote_from(meta: &Value, points: &[(i64, f64)], prev_key: &str) -> Value {
@@ -73,7 +124,8 @@ pub async fn quotes(symbols: &[String]) -> Result<Vec<Value>, String> {
         return Ok(vec![]);
     }
     let list = symbols.iter().take(20).map(|s| s.replace('^', "%5E")).collect::<Vec<_>>().join(",");
-    let body = get_json(&format!("https://query1.finance.yahoo.com/v7/finance/spark?symbols={list}&range=1d&interval=15m"), YAHOO_UA).await?;
+    let url = format!("https://query1.finance.yahoo.com/v7/finance/spark?symbols={list}&range=1d&interval=15m");
+    let body = cached(&url, Duration::from_secs(60), || get_json(&url, YAHOO_UA)).await?;
     let results = body["spark"]["result"].as_array().cloned().unwrap_or_default();
     Ok(results
         .iter()
@@ -107,16 +159,48 @@ pub async fn chart(symbol: &str, range: &str) -> Result<Value, String> {
         symbol.replace('^', "%5E"),
         interval_for(range)
     );
-    let body = get_json(&url, YAHOO_UA).await?;
-    let result = &body["chart"]["result"][0];
+    let ttl = Duration::from_secs(if range == "1d" { 60 } else { 300 });
+    let body = cached(&url, ttl, || get_json(&url, YAHOO_UA)).await;
+    let result = body.as_ref().map(|b| b["chart"]["result"][0].clone()).unwrap_or(Value::Null);
     if !result["meta"].is_object() {
-        return Err(format!("No price data for {symbol}."));
+        // Daily history can come from Nasdaq when Yahoo is down or blocking us.
+        if !matches!(range, "1d" | "5d") && !symbol.contains(['^', '=']) {
+            if let Ok(q) = nasdaq::history(symbol, range).await {
+                return Ok(q);
+            }
+        }
+        return Err(body.err().unwrap_or_else(|| format!("No price data for {symbol}.")));
     }
-    let pts = closes(result);
+    let pts = closes(&result);
     let mut q = quote_from(&result["meta"], &pts, if range == "1d" { "previousClose" } else { "chartPreviousClose" });
     q["range"] = json!(range);
-    q["points"] = json!(pts.iter().map(|(t, c)| json!({ "t": t, "c": c })).collect::<Vec<_>>());
+    q["points"] = json!(candles(&result));
     Ok(q)
+}
+
+/// Daily closes over a range for several symbols at once (for compare charts, the
+/// screener's 1-month and YTD moves, and portfolio history).
+pub async fn spark_many(symbols: &[String], range: &str, interval: &str) -> HashMap<String, Vec<(i64, f64)>> {
+    use futures_util::StreamExt;
+    let chunks: Vec<Vec<String>> = symbols.chunks(20).map(|c| c.to_vec()).collect();
+    let bodies: Vec<Value> = futures_util::stream::iter(chunks)
+        .map(|chunk| async move {
+            let list = chunk.iter().map(|s| s.replace('^', "%5E")).collect::<Vec<_>>().join(",");
+            let url = format!("https://query1.finance.yahoo.com/v7/finance/spark?symbols={list}&range={range}&interval={interval}");
+            cached(&url, Duration::from_secs(3600), || get_json(&url, YAHOO_UA)).await.unwrap_or(Value::Null)
+        })
+        .buffer_unordered(4)
+        .collect()
+        .await;
+    let mut out = HashMap::new();
+    for b in bodies {
+        for r in b["spark"]["result"].as_array().into_iter().flatten() {
+            if let Some(sym) = r["symbol"].as_str() {
+                out.insert(sym.to_string(), closes(&r["response"][0]));
+            }
+        }
+    }
+    out
 }
 
 /// Ticker lookup by name or symbol. Crypto is left out on purpose.
@@ -175,13 +259,77 @@ pub fn parse_news_rss(xml: &str, max: usize) -> Vec<Value> {
 /// Headlines from the last week about `query` (a company name or ticker), or today's
 /// market headlines when it's empty.
 /// shortcut: Google News links go through a news.google.com redirect; fine for clicking, not for scraping.
+/// A company's headlines: Yahoo's per-ticker feed first, then Google News on its name,
+/// with quote pages and repeats removed.
+pub async fn ticker_news(symbol: &str, name: &str, max: usize) -> Result<Vec<Value>, String> {
+    let url = reqwest::Url::parse_with_params(
+        "https://query2.finance.yahoo.com/v1/finance/search",
+        &[("q", symbol), ("quotesCount", "0"), ("newsCount", "12")],
+    )
+    .map_err(|e| e.to_string())?;
+    let (yahoo, google) = tokio::join!(
+        cached(url.as_str(), Duration::from_secs(600), || get_json(url.as_str(), YAHOO_UA)),
+        news(if name.is_empty() { symbol } else { name }, 12)
+    );
+    let mut items: Vec<Value> = yahoo
+        .map(|b| {
+            b["news"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|n| json!({ "title": n["title"], "url": n["link"], "source": n["publisher"], "published": n["providerPublishTime"] }))
+                .collect()
+        })
+        .unwrap_or_default();
+    items.extend(google.unwrap_or_default());
+    let mut out = clean_news(items, name, 40);
+    // Yahoo's ticker feed mixes in general market stories; put the ones about this company first.
+    let word = name.split_whitespace().next().unwrap_or(symbol).trim_end_matches([',', '.']).to_lowercase();
+    let about = |n: &Value| {
+        let t = n["title"].as_str().unwrap_or("").to_lowercase();
+        t.contains(&word) || t.contains(&symbol.to_lowercase())
+    };
+    out.sort_by_key(|n| !about(n)); // stable, so each half stays newest first
+    out.truncate(max);
+    Ok(out)
+}
+
+/// Drops rows that are a quote or overview page rather than a story, and repeats of the same headline.
+pub fn clean_news(items: Vec<Value>, name: &str, max: usize) -> Vec<Value> {
+    const JUNK: &[&str] = &["stock price", "share price", "stock quote", "quote & history", "price & chart", "overview", "stock chart", "price today", "live chart"];
+    let norm = |s: &str| s.to_lowercase().chars().filter(|c| c.is_alphanumeric() || *c == ' ').collect::<String>();
+    let name_n = norm(name);
+    let mut seen = std::collections::HashSet::new();
+    let mut out: Vec<Value> = items
+        .into_iter()
+        .filter(|n| {
+            let t = norm(n["title"].as_str().unwrap_or(""));
+            let key: String = t.split_whitespace().take(8).collect::<Vec<_>>().join(" ");
+            t.split_whitespace().count() >= 4 && t != name_n && !JUNK.iter().any(|j| t.contains(&norm(j))) && seen.insert(key)
+        })
+        .collect();
+    out.sort_by_key(|n| std::cmp::Reverse(n["published"].as_i64().unwrap_or(0)));
+    out.truncate(max);
+    out
+}
+
 pub async fn news(query: &str, max: usize) -> Result<Vec<Value>, String> {
     let q = if query.trim().is_empty() { "stock market when:1d".to_string() } else { format!("{} stock when:7d", query.trim()) };
     let url = reqwest::Url::parse_with_params("https://news.google.com/rss/search", &[("q", q.as_str()), ("hl", "en-US"), ("gl", "US"), ("ceid", "US:en")])
         .map_err(|e| e.to_string())?;
-    let resp = http("zWork/1.0 (+https://tryzwork.app)").get(url).send().await.map_err(|e| format!("Couldn't reach the news feed: {e}"))?;
-    let xml = resp.text().await.map_err(|e| e.to_string())?;
-    Ok(parse_news_rss(&xml, max))
+    let key = url.to_string();
+    let v = cached(&key, Duration::from_secs(600), || async move {
+        let resp = http("zWork/1.0 (+https://tryzwork.app)").get(url).send().await.map_err(|e| format!("Couldn't reach the news feed: {e}"))?;
+        let xml = resp.text().await.map_err(|e| e.to_string())?;
+        Ok(json!(parse_news_rss(&xml, 30)))
+    })
+    .await?;
+    let mut items: Vec<Value> = v.as_array().cloned().unwrap_or_default();
+    if query.trim().is_empty() {
+        items = clean_news(items, "", max);
+    }
+    items.truncate(max);
+    Ok(items)
 }
 
 // ── SEC EDGAR ──────────────────────────────────────────────────────────
@@ -191,7 +339,7 @@ fn cik_cache() -> &'static Mutex<HashMap<String, (u64, String)>> {
     C.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-async fn cik_for(symbol: &str) -> Result<(u64, String), String> {
+pub async fn cik_for(symbol: &str) -> Result<(u64, String), String> {
     if cik_cache().lock().unwrap().is_empty() {
         let body = get_json("https://www.sec.gov/files/company_tickers.json", SEC_UA).await?;
         let mut map = cik_cache().lock().unwrap();
@@ -206,7 +354,7 @@ async fn cik_for(symbol: &str) -> Result<(u64, String), String> {
     cik_cache().lock().unwrap().get(&key).cloned().ok_or_else(|| format!("{symbol} has no SEC filings. Financials cover US-listed companies only."))
 }
 
-const REVENUE_TAGS: &[&str] = &[
+pub const REVENUE_TAGS: &[&str] = &[
     "Revenues",
     "RevenueFromContractWithCustomerExcludingAssessedTax",
     "RevenueFromContractWithCustomerIncludingAssessedTax",
@@ -283,14 +431,25 @@ pub fn summarize_facts(facts: &Value, submissions: &Value, cik: u64) -> Value {
     json!({ "name": facts["entityName"], "cik": cik, "years": years, "filings": filings })
 }
 
-/// shortcut: companyfacts is ~4 MB per company and refetched on every call; cache it if the tab feels slow.
-pub async fn financials(symbol: &str) -> Result<Value, String> {
-    let (cik, title) = cik_for(symbol).await?;
+/// A company's XBRL facts (~4 MB) and filing list from EDGAR, kept for a day and six hours.
+pub async fn sec_data(cik: u64) -> (Result<Value, String>, Result<Value, String>) {
     let (facts_url, subs_url) = (
         format!("https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010}.json"),
         format!("https://data.sec.gov/submissions/CIK{cik:010}.json"),
     );
-    let (facts, subs) = tokio::join!(get_json(&facts_url, SEC_UA), get_json(&subs_url, SEC_UA));
+    tokio::join!(
+        cached(&facts_url, Duration::from_secs(86_400), || get_json(&facts_url, SEC_UA)),
+        cached(&subs_url, Duration::from_secs(21_600), || get_json(&subs_url, SEC_UA))
+    )
+}
+
+pub async fn sec_json(url: &str, ttl_secs: u64) -> Result<Value, String> {
+    cached(url, Duration::from_secs(ttl_secs), || get_json(url, SEC_UA)).await
+}
+
+pub async fn financials(symbol: &str) -> Result<Value, String> {
+    let (cik, title) = cik_for(symbol).await?;
+    let (facts, subs) = sec_data(cik).await;
     let mut out = summarize_facts(&facts?, &subs.unwrap_or(Value::Null), cik);
     out["symbol"] = json!(symbol);
     if out["name"].is_null() {
@@ -355,20 +514,20 @@ pub fn watchlist() -> Vec<String> {
 
 // ── HTTP handlers ──────────────────────────────────────────────────────
 
-fn fail(e: String) -> axum::response::Response {
+pub fn fail(e: String) -> axum::response::Response {
     (StatusCode::BAD_GATEWAY, Json(json!({ "error": e }))).into_response()
 }
 
 #[derive(Deserialize)]
 pub struct Params {
     #[serde(default)]
-    symbols: String,
+    pub symbols: String,
     #[serde(default)]
-    symbol: String,
+    pub symbol: String,
     #[serde(default)]
-    range: String,
+    pub range: String,
     #[serde(default)]
-    q: String,
+    pub q: String,
 }
 
 pub async fn quotes_handler(Query(p): Query<Params>) -> axum::response::Response {
@@ -387,7 +546,11 @@ pub async fn search_handler(Query(p): Query<Params>) -> axum::response::Response
 }
 
 pub async fn news_handler(Query(p): Query<Params>) -> axum::response::Response {
-    match news(&p.q, 12).await { Ok(v) => Json(v).into_response(), Err(e) => fail(e) }
+    let res = match clean_symbol(&p.symbol) {
+        Some(sym) => ticker_news(&sym, p.q.trim(), 15).await,
+        None => news(&p.q, 15).await,
+    };
+    match res { Ok(v) => Json(v).into_response(), Err(e) => fail(e) }
 }
 
 pub async fn financials_handler(Query(p): Query<Params>) -> axum::response::Response {
@@ -424,6 +587,24 @@ mod tests {
         assert_eq!(clean_symbol("^GSPC"), Some("^GSPC".into()));
         assert_eq!(clean_symbol("AAPL&range=max"), None);
         assert_eq!(clean_symbol(""), None);
+    }
+
+    #[test]
+    fn news_drops_quote_pages_and_repeats() {
+        let n = |t: &str, at: i64| json!({ "title": t, "published": at });
+        let out = clean_news(
+            vec![
+                n("Apple (AAPL) Stock Price & Chart", 5),
+                n("Apple Inc.", 4),
+                n("Apple beats on iPhone sales as services climb", 3),
+                n("Apple beats on iPhone sales as services climb - Reuters", 2),
+                n("Apple faces EU fine over App Store rules", 9),
+            ],
+            "Apple Inc.",
+            10,
+        );
+        let titles: Vec<_> = out.iter().map(|x| x["title"].as_str().unwrap()).collect();
+        assert_eq!(titles, ["Apple faces EU fine over App Store rules", "Apple beats on iPhone sales as services climb"]);
     }
 
     #[test]

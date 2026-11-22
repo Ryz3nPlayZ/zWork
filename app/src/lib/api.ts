@@ -541,14 +541,52 @@ export interface FinanceQuote {
   marketTime?: number | null;
   points?: number[];
 }
+export interface FinanceCandle { t: number; o: number; h: number; l: number; c: number; v: number }
 export interface FinanceChart extends Omit<FinanceQuote, "points"> {
   range: string;
-  points: { t: number; c: number }[];
+  points: FinanceCandle[];
 }
+export interface FinanceProfile {
+  symbol: string; name: string; sector: string; industry: string; region: string; website: string; description: string;
+  exchange: string; marketCap: number | null; volume: number | null; yearRange: string;
+  dividend: number | null; yield: number | null; exDividend: string;
+  analysts: { rating: string | null; target: number | null; low: number | null; high: number | null; buy: number | null; hold: number | null; sell: number | null };
+}
+export interface FinanceEarnings {
+  symbol: string;
+  quarters: { quarter: string; date: string; eps: number | null; estimate: number | null; surprisePct: number | null }[];
+  next: string | null;
+  release: { date: string; url: string } | null;
+}
+export interface FinanceOwnership {
+  symbol: string;
+  insiders: { name: string; role: string; date: string; type: string; shares: number | null; price: number | null; held: number | null }[];
+  holders: { name: string; date: string; shares: number | null; change: number | null; changePct: number | null; value: number | null }[];
+  institutionalPct: number | null;
+}
+export interface FinanceCalendar {
+  earnings: { date: string; symbol: string; name: string; time: string; estimate: number | null; eps: number | null; surprisePct: number | null; marketCap: number | null }[];
+  economy: { date: string; time: string; event: string; actual: string; consensus: string; previous: string }[];
+}
+export interface FinanceStock {
+  symbol: string; name: string; sector: string; industry: string;
+  price: number | null; changePct: number | null; marketCap: number | null; pe: number | null;
+  revenueGrowth: number | null; netMargin: number | null; dividendYield: number | null; change1m: number | null; changeYtd: number | null;
+}
+export interface FinanceUniverse { asOf: number; complete: boolean; rows: FinanceStock[] }
+export interface FinanceStatementRow { label: string; kind: "usd" | "eps" | "pct" | "shares"; values: (number | null)[] }
+export interface FinanceStatements { symbol: string; name: string; period: "annual" | "quarterly"; periods: string[]; sections: { title: string; rows: FinanceStatementRow[] }[] }
+export interface FinanceHolding { symbol: string; shares: number; cost: number | null }
+export interface FinanceOrder {
+  id: string; symbol: string; side: "buy" | "sell"; type: "market" | "limit"; shares: number; limit: number | null;
+  status: "filled" | "open" | "cancelled" | "rejected"; created: number; filledAt: number | null; price: number | null; note?: string;
+}
+export interface FinancePractice { cash: number; start: number; positions: FinanceHolding[]; orders: FinanceOrder[] }
+export interface FinanceAlert { id: string; symbol: string; above: number | null; below: number | null; created: number; triggered: number | null; price: number | null }
 export interface FinanceSearchHit { symbol: string; name: string; exchange: string; type: string }
 export interface FinanceNewsItem { title: string; url: string; source: string; published: number | null }
 export interface FinanceYear { year: number; revenue: number | null; operatingIncome: number | null; netIncome: number | null; eps: number | null }
-export interface FinanceFiling { form: string; date: string; title: string; url: string }
+export interface FinanceFiling { form: string; date: string; title: string; url: string; items?: string }
 export interface FinanceFinancials { symbol: string; name: string; cik: string; years: FinanceYear[]; filings: FinanceFiling[] }
 
 export const api = {
@@ -802,8 +840,31 @@ export const api = {
     localFetch(`/api/finance/chart?symbol=${encodeURIComponent(symbol)}&range=${range}`).then((r) => j<FinanceChart>(r)),
   financeSearch: (q: string) =>
     localFetch(`/api/finance/search?q=${encodeURIComponent(q)}`).then((r) => j<FinanceSearchHit[]>(r)),
-  financeNews: (q: string) =>
-    localFetch(`/api/finance/news?q=${encodeURIComponent(q)}`).then((r) => j<FinanceNewsItem[]>(r)),
+  financeNews: (q: string, symbol = "") =>
+    localFetch(`/api/finance/news?q=${encodeURIComponent(q)}&symbol=${encodeURIComponent(symbol)}`).then((r) => j<FinanceNewsItem[]>(r)),
+  financeProfile: (symbol: string) => localFetch(`/api/finance/profile?symbol=${encodeURIComponent(symbol)}`).then((r) => j<FinanceProfile>(r)),
+  financeEarnings: (symbol: string) => localFetch(`/api/finance/earnings?symbol=${encodeURIComponent(symbol)}`).then((r) => j<FinanceEarnings>(r)),
+  financeOwnership: (symbol: string) => localFetch(`/api/finance/ownership?symbol=${encodeURIComponent(symbol)}`).then((r) => j<FinanceOwnership>(r)),
+  financeCalendar: (days = 5) => localFetch(`/api/finance/calendar?range=${days}`).then((r) => j<FinanceCalendar>(r)),
+  financeUniverse: () => localFetch("/api/finance/universe").then((r) => j<FinanceUniverse>(r)),
+  financeStatements: (symbol: string, period: "annual" | "quarterly") =>
+    localFetch(`/api/finance/statements?symbol=${encodeURIComponent(symbol)}&range=${period}`).then((r) => j<FinanceStatements>(r)),
+  financeFilings: (symbol: string) => localFetch(`/api/finance/filings?symbol=${encodeURIComponent(symbol)}`).then((r) => j<FinanceFiling[]>(r)),
+  getPortfolio: () => localFetch("/api/finance/portfolio").then((r) => j<{ holdings: FinanceHolding[] }>(r)),
+  setPortfolio: (holdings: FinanceHolding[]) =>
+    localFetch("/api/finance/portfolio", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ holdings }) }).then((r) =>
+      j<{ holdings: FinanceHolding[] }>(r),
+    ),
+  getPractice: () => localFetch("/api/finance/practice").then((r) => j<FinancePractice>(r)),
+  practiceOrder: (o: { symbol: string; side: "buy" | "sell"; type: "market" | "limit"; shares: number; limit?: number | null }) =>
+    localFetch("/api/finance/practice/order", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(o) }).then((r) => j<FinancePractice>(r)),
+  practiceCancel: (id: string) =>
+    localFetch(`/api/finance/practice/order/${encodeURIComponent(id)}`, { method: "DELETE" }).then((r) => j<FinancePractice>(r)),
+  practiceReset: () => localFetch("/api/finance/practice/reset", { method: "POST" }).then((r) => j<FinancePractice>(r)),
+  getAlerts: () => localFetch("/api/finance/alerts").then((r) => j<FinanceAlert[]>(r)),
+  addAlert: (a: { symbol: string; above?: number | null; below?: number | null }) =>
+    localFetch("/api/finance/alerts", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(a) }).then((r) => j<FinanceAlert[]>(r)),
+  deleteAlert: (id: string) => localFetch(`/api/finance/alerts/${encodeURIComponent(id)}`, { method: "DELETE" }).then((r) => j<FinanceAlert[]>(r)),
   financeFinancials: (symbol: string) =>
     localFetch(`/api/finance/financials?symbol=${encodeURIComponent(symbol)}`).then((r) => j<FinanceFinancials>(r)),
   getWatchlist: () => localFetch("/api/finance/watchlist").then((r) => j<{ watchlist: string[] }>(r)),

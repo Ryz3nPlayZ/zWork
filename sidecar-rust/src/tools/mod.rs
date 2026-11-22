@@ -140,7 +140,7 @@ pub fn is_specialist_tool(name: &str) -> bool {
     matches!(
         name,
         "search_papers" | "format_citation" | "write_research_paper" | "review_paper" | "check_novelty"
-            | "get_stock_data" | "get_company_financials" | "get_market_news" | "detect_hardware" | "deploy_web_app" | "send_telegram_message"
+            | "get_stock_data" | "get_company_financials" | "get_market_news" | "get_financial_statements" | "screen_stocks" | "get_portfolio" | "set_price_alert" | "detect_hardware" | "deploy_web_app" | "send_telegram_message"
             // Duplicates of ask_user and of the permission gate.
             | "ask_question" | "ask_user_for_permission"
     )
@@ -161,13 +161,14 @@ pub fn wants_specialist_tools(message: &str) -> bool {
 /// The market-data tools: loaded for finance chats and for messages about markets,
 /// without the academic and deploy tools that `wants_specialist_tools` brings.
 pub fn is_finance_tool(name: &str) -> bool {
-    matches!(name, "get_stock_data" | "get_company_financials" | "get_market_news")
+    matches!(name, "get_stock_data" | "get_company_financials" | "get_market_news" | "get_financial_statements" | "screen_stocks" | "get_portfolio" | "set_price_alert")
 }
 
 pub fn wants_finance_tools(message: &str) -> bool {
     const WORDS: &[&str] = &[
         "stock", "ticker", "share price", "shares of", "earnings", "dividend", "portfolio", "watchlist",
         "nasdaq", "s&p", "dow jones", " etf", "10-k", "10-q", "sec filing", "market cap", "revenue growth",
+        "price alert", "balance sheet", "cash flow", "income statement", "p/e", "my holdings",
     ];
     let message = message.to_lowercase();
     WORDS.iter().any(|w| message.contains(w))
@@ -279,6 +280,49 @@ pub fn get_tool_schemas(plan_mode: bool) -> Vec<Value> {
                 "properties": {
                     "query": { "type": "string", "description": "Company name or ticker; empty for market news" }
                 }
+            }
+        }),
+        json!({
+            "name": "get_financial_statements",
+            "description": "Income statement, margins, balance sheet and cash flow from SEC filings: the last 6 years or the last 8 quarters. US-listed companies only.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ticker": { "type": "string", "description": "Ticker, e.g. AAPL" },
+                    "period": { "type": "string", "enum": ["annual", "quarterly"], "default": "annual" }
+                },
+                "required": ["ticker"]
+            }
+        }),
+        json!({
+            "name": "screen_stocks",
+            "description": "The S&P 500 with today's price and move, market cap, P/E, revenue growth, net margin, dividend yield and YTD change, best first. Use for 'biggest', 'cheapest', 'best performing' or sector questions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sector": { "type": "string", "description": "GICS sector, e.g. Information Technology, Health Care, Financials, Energy; empty for all" },
+                    "sort": { "type": "string", "enum": ["marketCap", "changePct", "pe", "revenueGrowth", "netMargin", "dividendYield", "changeYtd", "change1m"], "default": "marketCap" },
+                    "ascending": { "type": "boolean", "default": false },
+                    "limit": { "type": "integer", "default": 15 }
+                }
+            }
+        }),
+        json!({
+            "name": "get_portfolio",
+            "description": "The user's holdings (entered on the Finance tab) and their practice trading account, valued at current prices with gains.",
+            "parameters": { "type": "object", "properties": {} }
+        }),
+        json!({
+            "name": "set_price_alert",
+            "description": "Send the user an Inbox message when a stock goes above or below a price. Checked every 15 minutes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "symbol": { "type": "string", "description": "Ticker, e.g. AAPL" },
+                    "above": { "type": "number", "description": "Alert when the price is at or above this" },
+                    "below": { "type": "number", "description": "Alert when the price is at or below this" }
+                },
+                "required": ["symbol"]
             }
         }),
         json!({
@@ -874,6 +918,15 @@ pub fn execute_tool(
             "get_stock_data" => stock::execute_get_stock_data(&params).await,
             "get_company_financials" => crate::finance::financials_text(params["ticker"].as_str().unwrap_or("")).await,
             "get_market_news" => crate::finance::news_text(params["query"].as_str().unwrap_or("")).await,
+            "get_financial_statements" => Ok(crate::finance::statements::statements_text(params["ticker"].as_str().unwrap_or(""), params["period"].as_str() == Some("quarterly")).await),
+            "screen_stocks" => Ok(crate::finance::universe::screen_text(
+                params["sector"].as_str().unwrap_or(""),
+                params["sort"].as_str().unwrap_or(""),
+                params["ascending"].as_bool().unwrap_or(false),
+                params["limit"].as_u64().unwrap_or(15).clamp(1, 50) as usize,
+            ).await),
+            "get_portfolio" => Ok(crate::finance::portfolio::holdings_text().await),
+            "set_price_alert" => Ok(crate::finance::portfolio::alert_text(&params).await),
             "deploy_web_app" => {
                 let project_path = params.get("project_path").and_then(|v| v.as_str()).unwrap_or(".");
                 let framework = params.get("framework").and_then(|v| v.as_str()).unwrap_or("");

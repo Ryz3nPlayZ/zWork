@@ -41,6 +41,7 @@ import { AttachmentChip } from "./AttachmentChip";
 import { Lightbox } from "./Lightbox";
 
 // recharts is heavy; load it only when a reply actually contains a chart.
+const FinanceShow = lazy(() => import("./finance/FinanceShow").then((m) => ({ default: m.FinanceShow })));
 const ChartBlock = lazy(() => import("./finance/ChartBlock").then((m) => ({ default: m.ChartBlock })));
 
 function formatTime(ts: number): string {
@@ -298,7 +299,7 @@ export function AssistantMarkdown({
       rehypePlugins={[rehypeKatex]}
       components={{
         code({ className, children, ...props }) {
-          const match = /language-(\w+)/.exec(className || "");
+          const match = /language-([\w-]+)/.exec(className || "");
           const language = match ? match[1] : "";
           const codeStr = String(children).replace(/\n$/, "");
           // Detect block code (children will be multi-line or language is set)
@@ -306,6 +307,7 @@ export function AssistantMarkdown({
             const spec = parseChartSpec(codeStr);
             if (spec) return <Suspense fallback={null}><ChartBlock spec={spec} /></Suspense>;
           }
+          if (language === "finance-show") return <Suspense fallback={null}><FinanceShow code={codeStr} /></Suspense>;
           if (language || codeStr.includes("\n")) {
             return (
               <CodeBlock

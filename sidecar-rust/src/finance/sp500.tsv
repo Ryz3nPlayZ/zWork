@@ -1,0 +1,504 @@
+# S&P 500 constituents (symbol, name, sector, industry, CIK). Source: github.com/datasets/s-and-p-500-companies (PDDL), 2026-11-22.
+MMM	3M	Industrials	Industrial Conglomerates	66740
+AOS	A. O. Smith	Industrials	Building Products	91142
+ABT	Abbott Laboratories	Health Care	Health Care Equipment	1800
+ABBV	AbbVie	Health Care	Biotechnology	1551152
+ACN	Accenture	Information Technology	IT Consulting & Other Services	1467373
+ADBE	Adobe Inc.	Information Technology	Application Software	796343
+AMD	Advanced Micro Devices	Information Technology	Semiconductors	2488
+AES	AES Corporation	Utilities	Independent Power Producers & Energy Traders	874761
+AFL	Aflac	Financials	Life & Health Insurance	4977
+A	Agilent Technologies	Health Care	Life Sciences Tools & Services	1090872
+APD	Air Products	Materials	Industrial Gases	2969
+ABNB	Airbnb	Consumer Discretionary	Hotels, Resorts & Cruise Lines	1559720
+AKAM	Akamai Technologies	Information Technology	Internet Services & Infrastructure	1086222
+ALB	Albemarle Corporation	Materials	Specialty Chemicals	915913
+ARE	Alexandria Real Estate Equities	Real Estate	Office REITs	1035443
+ALGN	Align Technology	Health Care	Health Care Supplies	1097149
+ALLE	Allegion	Industrials	Building Products	1579241
+LNT	Alliant Energy	Utilities	Electric Utilities	352541
+ALL	Allstate	Financials	Property & Casualty Insurance	899051
+GOOGL	Alphabet Inc. (Class A)	Communication Services	Interactive Media & Services	1652044
+GOOG	Alphabet Inc. (Class C)	Communication Services	Interactive Media & Services	1652044
+MO	Altria	Consumer Staples	Tobacco	764180
+AMZN	Amazon	Consumer Discretionary	Broadline Retail	1018724
+AMCR	Amcor	Materials	Paper & Plastic Packaging Products & Materials	1748790
+AEE	Ameren	Utilities	Multi-Utilities	1002910
+AEP	American Electric Power	Utilities	Electric Utilities	4904
+AXP	American Express	Financials	Consumer Finance	4962
+AIG	American International Group	Financials	Multi-line Insurance	5272
+AMT	American Tower	Real Estate	Telecom Tower REITs	1053507
+AWK	American Water Works	Utilities	Water Utilities	1410636
+AMP	Ameriprise Financial	Financials	Asset Management & Custody Banks	820027
+AME	Ametek	Industrials	Electrical Components & Equipment	1037868
+AMGN	Amgen	Health Care	Biotechnology	318154
+APH	Amphenol	Information Technology	Electronic Components	820313
+ADI	Analog Devices	Information Technology	Semiconductors	6281
+AON	Aon plc	Financials	Insurance Brokers	315293
+APA	APA Corporation	Energy	Oil & Gas Exploration & Production	1841666
+APO	Apollo Global Management	Financials	Asset Management & Custody Banks	1858681
+AAPL	Apple Inc.	Information Technology	Technology Hardware, Storage & Peripherals	320193
+AMAT	Applied Materials	Information Technology	Semiconductor Materials & Equipment	6951
+APP	AppLovin	Communication Services	Advertising	1751008
+APTV	Aptiv	Consumer Discretionary	Automotive Parts & Equipment	1521332
+ACGL	Arch Capital Group	Financials	Property & Casualty Insurance	947484
+ADM	Archer Daniels Midland	Consumer Staples	Agricultural Products & Services	7084
+ARES	Ares Management	Financials	Asset Management & Custody Banks	1176948
+ANET	Arista Networks	Information Technology	Communications Equipment	1596532
+AJG	Arthur J. Gallagher & Co.	Financials	Insurance Brokers	354190
+AIZ	Assurant	Financials	Multi-line Insurance	1267238
+T	AT&T	Communication Services	Integrated Telecommunication Services	732717
+ATO	Atmos Energy	Utilities	Gas Utilities	731802
+ADSK	Autodesk	Information Technology	Application Software	769397
+ADP	Automatic Data Processing	Industrials	Human Resource & Employment Services	8670
+AZO	AutoZone	Consumer Discretionary	Automotive Retail	866787
+AVY	Avery Dennison	Materials	Paper & Plastic Packaging Products & Materials	8818
+AXON	Axon Enterprise	Industrials	Aerospace & Defense	1069183
+BKR	Baker Hughes	Energy	Oil & Gas Equipment & Services	1701605
+BALL	Ball Corporation	Materials	Metal, Glass & Plastic Containers	9389
+BAC	Bank of America	Financials	Diversified Banks	70858
+BAX	Baxter International	Health Care	Health Care Equipment	10456
+BDX	Becton Dickinson	Health Care	Health Care Equipment	10795
+BRK.B	Berkshire Hathaway	Financials	Multi-Sector Holdings	1067983
+BBY	Best Buy	Consumer Discretionary	Computer & Electronics Retail	764478
+TECH	Bio-Techne	Health Care	Life Sciences Tools & Services	842023
+BIIB	Biogen	Health Care	Biotechnology	875045
+BLK	BlackRock	Financials	Asset Management & Custody Banks	2012383
+BX	Blackstone Inc.	Financials	Asset Management & Custody Banks	1393818
+XYZ	Block, Inc.	Financials	Transaction & Payment Processing Services	1512673
+BE	Bloom Energy	Industrials	Electrical Components & Equipment	1664703
+BNY	BNY Mellon	Financials	Asset Management & Custody Banks	1390777
+BA	Boeing	Industrials	Aerospace & Defense	12927
+BKNG	Booking Holdings	Consumer Discretionary	Hotels, Resorts & Cruise Lines	1075531
+BSX	Boston Scientific	Health Care	Health Care Equipment	885725
+BMY	Bristol Myers Squibb	Health Care	Pharmaceuticals	14272
+AVGO	Broadcom	Information Technology	Semiconductors	1730168
+BR	Broadridge Financial Solutions	Industrials	Data Processing & Outsourced Services	1383312
+BRO	Brown & Brown	Financials	Insurance Brokers	79282
+BF.B	Brown–Forman	Consumer Staples	Distillers & Vintners	14693
+BG	Bunge Global	Consumer Staples	Agricultural Products & Services	1996862
+BXP	BXP, Inc.	Real Estate	Office REITs	1037540
+CHRW	C.H. Robinson	Industrials	Air Freight & Logistics	1043277
+CDNS	Cadence Design Systems	Information Technology	Application Software	813672
+CPT	Camden Property Trust	Real Estate	Multi-Family Residential REITs	906345
+COF	Capital One	Financials	Consumer Finance	927628
+CAH	Cardinal Health	Health Care	Health Care Distributors	721371
+CCL	Carnival Corporation	Consumer Discretionary	Hotels, Resorts & Cruise Lines	815097
+CARR	Carrier Global	Industrials	Building Products	1783180
+CVNA	Carvana	Consumer Discretionary	Automotive Retail	1690820
+CASY	Casey's	Consumer Staples	Food Retail	726958
+CAT	Caterpillar Inc.	Industrials	Construction Machinery & Heavy Transportation Equipment	18230
+CBOE	Cboe Global Markets	Financials	Financial Exchanges & Data	1374310
+CBRE	CBRE Group	Real Estate	Real Estate Services	1138118
+CDW	CDW Corporation	Information Technology	Technology Distributors	1402057
+COR	Cencora	Health Care	Health Care Distributors	1140859
+CNC	Centene Corporation	Health Care	Managed Health Care	1071739
+CNP	CenterPoint Energy	Utilities	Multi-Utilities	1130310
+CF	CF Industries	Materials	Fertilizers & Agricultural Chemicals	1324404
+CRL	Charles River Laboratories	Health Care	Life Sciences Tools & Services	1100682
+SCHW	Charles Schwab Corporation	Financials	Investment Banking & Brokerage	316709
+CHTR	Charter Communications	Communication Services	Cable & Satellite	1091667
+CVX	Chevron Corporation	Energy	Integrated Oil & Gas	93410
+CMG	Chipotle Mexican Grill	Consumer Discretionary	Restaurants	1058090
+CB	Chubb Limited	Financials	Property & Casualty Insurance	896159
+CHD	Church & Dwight	Consumer Staples	Household Products	313927
+CIEN	Ciena	Information Technology	Communications Equipment	936395
+CI	Cigna	Health Care	Health Care Services	1739940
+CINF	Cincinnati Financial	Financials	Property & Casualty Insurance	20286
+CTAS	Cintas	Industrials	Diversified Support Services	723254
+CSCO	Cisco	Information Technology	Communications Equipment	858877
+C	Citigroup	Financials	Diversified Banks	831001
+CFG	Citizens Financial Group	Financials	Regional Banks	759944
+CLX	Clorox	Consumer Staples	Household Products	21076
+CME	CME Group	Financials	Financial Exchanges & Data	1156375
+CMS	CMS Energy	Utilities	Multi-Utilities	811156
+KO	Coca-Cola Company (The)	Consumer Staples	Soft Drinks & Non-alcoholic Beverages	21344
+CTSH	Cognizant	Information Technology	IT Consulting & Other Services	1058290
+COHR	Coherent Corp.	Information Technology	Electronic Components	820318
+COIN	Coinbase	Financials	Financial Exchanges & Data	1679788
+CL	Colgate-Palmolive	Consumer Staples	Household Products	21665
+CMCSA	Comcast	Communication Services	Cable & Satellite	1166691
+FIX	Comfort Systems USA	Industrials	Construction & Engineering	1035983
+COP	ConocoPhillips	Energy	Oil & Gas Exploration & Production	1163165
+ED	Consolidated Edison	Utilities	Multi-Utilities	1047862
+STZ	Constellation Brands	Consumer Staples	Distillers & Vintners	16918
+CEG	Constellation Energy	Utilities	Electric Utilities	1868275
+COO	Cooper Companies (The)	Health Care	Health Care Supplies	711404
+CPRT	Copart	Industrials	Diversified Support Services	900075
+GLW	Corning Inc.	Information Technology	Electronic Components	24741
+CPAY	Corpay	Financials	Transaction & Payment Processing Services	1175454
+CSGP	CoStar Group	Real Estate	Real Estate Services	1057352
+COST	Costco	Consumer Staples	Consumer Staples Merchandise Retail	909832
+CRH	CRH plc	Materials	Construction Materials	849395
+CRWD	CrowdStrike	Information Technology	Systems Software	1535527
+CCI	Crown Castle	Real Estate	Telecom Tower REITs	1051470
+CSX	CSX Corporation	Industrials	Rail Transportation	277948
+CMI	Cummins	Industrials	Construction Machinery & Heavy Transportation Equipment	26172
+CVS	CVS Health	Health Care	Health Care Services	64803
+DHR	Danaher Corporation	Health Care	Life Sciences Tools & Services	313616
+DRI	Darden Restaurants	Consumer Discretionary	Restaurants	940944
+DDOG	Datadog	Information Technology	Application Software	1561550
+DVA	DaVita	Health Care	Health Care Services	927066
+DECK	Deckers Brands	Consumer Discretionary	Footwear	910521
+DE	Deere & Company	Industrials	Agricultural & Farm Machinery	315189
+DELL	Dell Technologies	Information Technology	Technology Hardware, Storage & Peripherals	1571996
+DAL	Delta Air Lines	Industrials	Passenger Airlines	27904
+DVN	Devon Energy	Energy	Oil & Gas Exploration & Production	1090012
+DXCM	Dexcom	Health Care	Health Care Equipment	1093557
+FANG	Diamondback Energy	Energy	Oil & Gas Exploration & Production	1539838
+DLR	Digital Realty	Real Estate	Data Center REITs	1297996
+DG	Dollar General	Consumer Staples	Consumer Staples Merchandise Retail	29534
+DLTR	Dollar Tree	Consumer Staples	Consumer Staples Merchandise Retail	935703
+D	Dominion Energy	Utilities	Multi-Utilities	715957
+DPZ	Domino's	Consumer Discretionary	Restaurants	1286681
+DASH	DoorDash	Consumer Discretionary	Specialized Consumer Services	1792789
+DOV	Dover Corporation	Industrials	Industrial Machinery & Supplies & Components	29905
+DOW	Dow Inc.	Materials	Commodity Chemicals	1751788
+DHI	D. R. Horton	Consumer Discretionary	Homebuilding	882184
+DTE	DTE Energy	Utilities	Multi-Utilities	936340
+DUK	Duke Energy	Utilities	Electric Utilities	1326160
+DD	DuPont	Industrials	Industrial Conglomerates	1666700
+ETN	Eaton Corporation	Industrials	Electrical Components & Equipment	1551182
+EBAY	eBay Inc.	Consumer Discretionary	Broadline Retail	1065088
+ECHO	EchoStar	Communication Services	Wireless Telecommunication Services	1415404
+ECL	Ecolab	Materials	Specialty Chemicals	31462
+EIX	Edison International	Utilities	Electric Utilities	827052
+EW	Edwards Lifesciences	Health Care	Health Care Equipment	1099800
+ELV	Elevance Health	Health Care	Managed Health Care	1156039
+EME	Emcor	Industrials	Construction & Engineering	105634
+EMR	Emerson Electric	Industrials	Electrical Components & Equipment	32604
+ETR	Entergy	Utilities	Electric Utilities	65984
+EOG	EOG Resources	Energy	Oil & Gas Exploration & Production	821189
+EQT	EQT Corporation	Energy	Oil & Gas Exploration & Production	33213
+EFX	Equifax	Industrials	Research & Consulting Services	33185
+EQIX	Equinix	Real Estate	Data Center REITs	1101239
+ERIE	Erie Indemnity	Financials	Insurance Brokers	922621
+ESS	Essex Property Trust	Real Estate	Multi-Family Residential REITs	920522
+EL	Estée Lauder Companies (The)	Consumer Staples	Personal Care Products	1001250
+EG	Everest Group	Financials	Reinsurance	1095073
+EVRG	Evergy	Utilities	Electric Utilities	1711269
+P	Everpure	Information Technology	Technology Hardware, Storage & Peripherals	1474432
+ES	Eversource Energy	Utilities	Electric Utilities	72741
+EXC	Exelon	Utilities	Electric Utilities	1109357
+EXE	Expand Energy	Energy	Oil & Gas Exploration & Production	895126
+EXPE	Expedia Group	Consumer Discretionary	Hotels, Resorts & Cruise Lines	1324424
+EXPD	Expeditors International	Industrials	Air Freight & Logistics	746515
+EXR	Extra Space Storage	Real Estate	Self-Storage REITs	1289490
+XOM	ExxonMobil	Energy	Integrated Oil & Gas	2115436
+FFIV	F5, Inc.	Information Technology	Communications Equipment	1048695
+FDS	FactSet	Financials	Financial Exchanges & Data	1013237
+FICO	Fair Isaac	Information Technology	Application Software	814547
+FAST	Fastenal	Industrials	Trading Companies & Distributors	815556
+FRT	Federal Realty Investment Trust	Real Estate	Retail REITs	34903
+FDX	FedEx	Industrials	Air Freight & Logistics	1048911
+FDXF	FedEx Freight	Industrials	Cargo Ground Transportation	2082247
+FERG	Ferguson Enterprises	Industrials	Trading Companies & Distributors	2011641
+FIS	Fidelity National Information Services	Financials	Transaction & Payment Processing Services	1136893
+FITB	Fifth Third Bancorp	Financials	Regional Banks	35527
+FSLR	First Solar	Information Technology	Semiconductors	1274494
+FE	FirstEnergy	Utilities	Electric Utilities	1031296
+FISV	Fiserv	Financials	Transaction & Payment Processing Services	798354
+FLEX	Flex Ltd.	Information Technology	Electronic Manufacturing Services	866374
+F	Ford Motor Company	Consumer Discretionary	Automobile Manufacturers	37996
+FTNT	Fortinet	Information Technology	Systems Software	1262039
+FTV	Fortive	Industrials	Industrial Machinery & Supplies & Components	1659166
+FOXA	Fox Corporation (Class A)	Communication Services	Broadcasting	1754301
+FOX	Fox Corporation (Class B)	Communication Services	Broadcasting	1754301
+BEN	Franklin Resources	Financials	Asset Management & Custody Banks	38777
+FCX	Freeport-McMoRan	Materials	Copper	831259
+GRMN	Garmin	Consumer Discretionary	Consumer Electronics	1121788
+IT	Gartner	Information Technology	IT Consulting & Other Services	749251
+GE	GE Aerospace	Industrials	Aerospace & Defense	40545
+GEHC	GE HealthCare	Health Care	Health Care Equipment	1932393
+GEV	GE Vernova	Industrials	Heavy Electrical Equipment	1996810
+GEN	Gen Digital	Information Technology	Systems Software	849399
+GNRC	Generac	Industrials	Heavy Electrical Equipment	1474735
+GD	General Dynamics	Industrials	Aerospace & Defense	40533
+GIS	General Mills	Consumer Staples	Packaged Foods & Meats	40704
+GM	General Motors	Consumer Discretionary	Automobile Manufacturers	1467858
+GPC	Genuine Parts Company	Consumer Discretionary	Distributors	40987
+GILD	Gilead Sciences	Health Care	Biotechnology	882095
+GPN	Global Payments	Financials	Transaction & Payment Processing Services	1123360
+GL	Globe Life	Financials	Life & Health Insurance	320335
+GDDY	GoDaddy	Information Technology	Internet Services & Infrastructure	1609711
+GS	Goldman Sachs	Financials	Investment Banking & Brokerage	886982
+HAL	Halliburton	Energy	Oil & Gas Equipment & Services	45012
+HIG	Hartford (The)	Financials	Property & Casualty Insurance	874766
+HAS	Hasbro	Consumer Discretionary	Leisure Products	46080
+HCA	HCA Healthcare	Health Care	Health Care Facilities	860730
+DOC	Healthpeak Properties	Real Estate	Health Care REITs	765880
+HSIC	Henry Schein	Health Care	Health Care Distributors	1000228
+HSY	Hershey Company (The)	Consumer Staples	Packaged Foods & Meats	47111
+HPE	Hewlett Packard Enterprise	Information Technology	Technology Hardware, Storage & Peripherals	1645590
+HLT	Hilton Worldwide	Consumer Discretionary	Hotels, Resorts & Cruise Lines	1585689
+HD	Home Depot (The)	Consumer Discretionary	Home Improvement Retail	354950
+HONA	Honeywell Aerospace	Industrials	Aerospace & Defense	2089271
+HON	Honeywell Technologies	Industrials	Industrial Conglomerates	773840
+HRL	Hormel Foods	Consumer Staples	Packaged Foods & Meats	48465
+HST	Host Hotels & Resorts	Real Estate	Hotel & Resort REITs	1070750
+HWM	Howmet Aerospace	Industrials	Aerospace & Defense	4281
+HPQ	HP Inc.	Information Technology	Technology Hardware, Storage & Peripherals	47217
+HUBB	Hubbell Incorporated	Industrials	Industrial Machinery & Supplies & Components	48898
+HUM	Humana	Health Care	Managed Health Care	49071
+HBAN	Huntington Bancshares	Financials	Regional Banks	49196
+HII	Huntington Ingalls Industries	Industrials	Aerospace & Defense	1501585
+IBM	IBM	Information Technology	IT Consulting & Other Services	51143
+IEX	IDEX Corporation	Industrials	Industrial Machinery & Supplies & Components	832101
+IDXX	Idexx Laboratories	Health Care	Health Care Equipment	874716
+ITW	Illinois Tool Works	Industrials	Industrial Machinery & Supplies & Components	49826
+ILMN	Illumina, Inc.	Health Care	Life Sciences Tools & Services	1110803
+INCY	Incyte	Health Care	Biotechnology	879169
+IR	Ingersoll Rand	Industrials	Industrial Machinery & Supplies & Components	1699150
+PODD	Insulet Corporation	Health Care	Health Care Equipment	1145197
+INTC	Intel	Information Technology	Semiconductors	50863
+IBKR	Interactive Brokers	Financials	Investment Banking & Brokerage	1381197
+ICE	Intercontinental Exchange	Financials	Financial Exchanges & Data	1571949
+IFF	International Flavors & Fragrances	Materials	Specialty Chemicals	51253
+IP	International Paper	Materials	Paper & Plastic Packaging Products & Materials	51434
+INTU	Intuit	Information Technology	Application Software	896878
+ISRG	Intuitive Surgical	Health Care	Health Care Equipment	1035267
+IVZ	Invesco	Financials	Asset Management & Custody Banks	914208
+INVH	Invitation Homes	Real Estate	Single-Family Residential REITs	1687229
+IQV	IQVIA	Health Care	Life Sciences Tools & Services	1478242
+IRM	Iron Mountain	Real Estate	Other Specialized REITs	1020569
+JBHT	J.B. Hunt	Industrials	Cargo Ground Transportation	728535
+JBL	Jabil	Information Technology	Electronic Manufacturing Services	898293
+JKHY	Jack Henry & Associates	Financials	Transaction & Payment Processing Services	779152
+J	Jacobs Solutions	Industrials	Construction & Engineering	52988
+JNJ	Johnson & Johnson	Health Care	Pharmaceuticals	200406
+JCI	Johnson Controls	Industrials	Building Products	833444
+JPM	JPMorgan Chase	Financials	Diversified Banks	19617
+KDP	Keurig Dr Pepper	Consumer Staples	Soft Drinks & Non-alcoholic Beverages	1418135
+KEY	KeyCorp	Financials	Regional Banks	91576
+KEYS	Keysight Technologies	Information Technology	Electronic Equipment & Instruments	1601046
+KMB	Kimberly-Clark	Consumer Staples	Household Products	55785
+KIM	Kimco Realty	Real Estate	Retail REITs	879101
+KMI	Kinder Morgan	Energy	Oil & Gas Storage & Transportation	1506307
+KKR	KKR & Co.	Financials	Asset Management & Custody Banks	1404912
+KLAC	KLA Corporation	Information Technology	Semiconductor Materials & Equipment	319201
+KHC	Kraft Heinz	Consumer Staples	Packaged Foods & Meats	1637459
+KR	Kroger	Consumer Staples	Food Retail	56873
+LHX	L3Harris	Industrials	Aerospace & Defense	202058
+LH	Labcorp	Health Care	Health Care Services	920148
+LRCX	Lam Research	Information Technology	Semiconductor Materials & Equipment	707549
+LVS	Las Vegas Sands	Consumer Discretionary	Casinos & Gaming	1300514
+LDOS	Leidos	Industrials	Diversified Support Services	1336920
+LEN	Lennar	Consumer Discretionary	Homebuilding	920760
+LII	Lennox International	Industrials	Building Products	1069202
+LLY	Lilly (Eli)	Health Care	Pharmaceuticals	59478
+LIN	Linde plc	Materials	Industrial Gases	1707925
+LYV	Live Nation Entertainment	Communication Services	Movies & Entertainment	1335258
+LMT	Lockheed Martin	Industrials	Aerospace & Defense	936468
+L	Loews Corporation	Financials	Multi-line Insurance	60086
+LOW	Lowe's	Consumer Discretionary	Home Improvement Retail	60667
+LULU	Lululemon Athletica	Consumer Discretionary	Apparel, Accessories & Luxury Goods	1397187
+LITE	Lumentum	Information Technology	Communications Equipment	1633978
+LYB	LyondellBasell	Materials	Specialty Chemicals	1489393
+MTB	M&T Bank	Financials	Regional Banks	36270
+MPC	Marathon Petroleum	Energy	Oil & Gas Refining & Marketing	1510295
+MAR	Marriott International	Consumer Discretionary	Hotels, Resorts & Cruise Lines	1048286
+MRSH	Marsh McLennan	Financials	Insurance Brokers	62709
+MLM	Martin Marietta Materials	Materials	Construction Materials	916076
+MRVL	Marvell Technology	Information Technology	Semiconductors	1835632
+MAS	Masco	Industrials	Building Products	62996
+MA	Mastercard	Financials	Transaction & Payment Processing Services	1141391
+MKC	McCormick & Company	Consumer Staples	Packaged Foods & Meats	63754
+MCD	McDonald's	Consumer Discretionary	Restaurants	63908
+MCK	McKesson	Health Care	Health Care Distributors	927653
+MDT	Medtronic	Health Care	Health Care Equipment	1613103
+MRK	Merck & Co.	Health Care	Pharmaceuticals	310158
+META	Meta Platforms	Communication Services	Interactive Media & Services	1326801
+MET	MetLife	Financials	Life & Health Insurance	1099219
+MTD	Mettler Toledo	Health Care	Life Sciences Tools & Services	1037646
+MGM	MGM Resorts	Consumer Discretionary	Casinos & Gaming	789570
+MCHP	Microchip Technology	Information Technology	Semiconductors	827054
+MU	Micron Technology	Information Technology	Semiconductors	723125
+MSFT	Microsoft	Information Technology	Systems Software	789019
+MAA	Mid-America Apartment Communities	Real Estate	Multi-Family Residential REITs	912595
+MRNA	Moderna	Health Care	Biotechnology	1682852
+MDLZ	Mondelez International	Consumer Staples	Packaged Foods & Meats	1103982
+MPWR	Monolithic Power Systems	Information Technology	Semiconductors	1280452
+MNST	Monster Beverage	Consumer Staples	Soft Drinks & Non-alcoholic Beverages	865752
+MCO	Moody's Corporation	Financials	Financial Exchanges & Data	1059556
+MS	Morgan Stanley	Financials	Investment Banking & Brokerage	895421
+MOS	Mosaic Company (The)	Materials	Fertilizers & Agricultural Chemicals	1285785
+MSI	Motorola Solutions	Information Technology	Communications Equipment	68505
+MSCI	MSCI	Financials	Financial Exchanges & Data	1408198
+NDAQ	Nasdaq, Inc.	Financials	Financial Exchanges & Data	1120193
+NTAP	NetApp	Information Technology	Technology Hardware, Storage & Peripherals	1002047
+NFLX	Netflix	Communication Services	Movies & Entertainment	1065280
+NEM	Newmont	Materials	Gold	1164727
+NWSA	News Corp (Class A)	Communication Services	Publishing	1564708
+NWS	News Corp (Class B)	Communication Services	Publishing	1564708
+NEE	NextEra Energy	Utilities	Multi-Utilities	753308
+NKE	Nike, Inc.	Consumer Discretionary	Apparel, Accessories & Luxury Goods	320187
+NI	NiSource	Utilities	Multi-Utilities	1111711
+NDSN	Nordson Corporation	Industrials	Industrial Machinery & Supplies & Components	72331
+NSC	Norfolk Southern	Industrials	Rail Transportation	702165
+NTRS	Northern Trust	Financials	Asset Management & Custody Banks	73124
+NOC	Northrop Grumman	Industrials	Aerospace & Defense	1133421
+NCLH	Norwegian Cruise Line Holdings	Consumer Discretionary	Hotels, Resorts & Cruise Lines	1513761
+NRG	NRG Energy	Utilities	Independent Power Producers & Energy Traders	1013871
+NUE	Nucor	Materials	Steel	73309
+NVDA	Nvidia	Information Technology	Semiconductors	1045810
+NVR	NVR, Inc.	Consumer Discretionary	Homebuilding	906163
+NXPI	NXP Semiconductors	Information Technology	Semiconductors	1413447
+ORLY	O'Reilly Automotive	Consumer Discretionary	Automotive Retail	898173
+OXY	Occidental Petroleum	Energy	Oil & Gas Exploration & Production	797468
+OKTA	Okta, Inc.	Information Technology	Application Software	1660134
+ODFL	Old Dominion	Industrials	Cargo Ground Transportation	878927
+OMC	Omnicom Group	Communication Services	Advertising	29989
+ON	ON Semiconductor	Information Technology	Semiconductors	1097864
+OKE	Oneok	Energy	Oil & Gas Storage & Transportation	1039684
+ORCL	Oracle Corporation	Information Technology	Application Software	1341439
+OTIS	Otis Worldwide	Industrials	Industrial Machinery & Supplies & Components	1781335
+PCAR	Paccar	Industrials	Construction Machinery & Heavy Transportation Equipment	75362
+PKG	Packaging Corporation of America	Materials	Paper & Plastic Packaging Products & Materials	75677
+PLTR	Palantir Technologies	Information Technology	Application Software	1321655
+PANW	Palo Alto Networks	Information Technology	Systems Software	1327567
+PH	Parker Hannifin	Industrials	Industrial Machinery & Supplies & Components	76334
+PAYX	Paychex	Industrials	Human Resource & Employment Services	723531
+PYPL	PayPal	Financials	Transaction & Payment Processing Services	1633917
+PNR	Pentair	Industrials	Industrial Machinery & Supplies & Components	77360
+PEP	PepsiCo	Consumer Staples	Soft Drinks & Non-alcoholic Beverages	77476
+PFE	Pfizer	Health Care	Pharmaceuticals	78003
+PCG	PG&E Corporation	Utilities	Multi-Utilities	1004980
+PM	Philip Morris International	Consumer Staples	Tobacco	1413329
+PSX	Phillips 66	Energy	Oil & Gas Refining & Marketing	1534701
+PNW	Pinnacle West Capital	Utilities	Multi-Utilities	764622
+PNC	PNC Financial Services	Financials	Diversified Banks	713676
+PPG	PPG Industries	Materials	Specialty Chemicals	79879
+PPL	PPL Corporation	Utilities	Electric Utilities	922224
+PFG	Principal Financial Group	Financials	Life & Health Insurance	1126328
+PG	Procter & Gamble	Consumer Staples	Personal Care Products	80424
+PGR	Progressive Corporation	Financials	Property & Casualty Insurance	80661
+PLD	Prologis	Real Estate	Industrial REITs	1045609
+PRU	Prudential Financial	Financials	Life & Health Insurance	1137774
+PTC	PTC Inc.	Information Technology	Application Software	857005
+PEG	Public Service Enterprise Group	Utilities	Electric Utilities	788784
+PSA	Public Storage	Real Estate	Self-Storage REITs	1393311
+PHM	PulteGroup	Consumer Discretionary	Homebuilding	822416
+Q	Qnity Electronics	Information Technology	Semiconductor Materials & Equipment	2058873
+QCOM	Qualcomm	Information Technology	Semiconductors	804328
+PWR	Quanta Services	Industrials	Construction & Engineering	1050915
+DGX	Quest Diagnostics	Health Care	Health Care Services	1022079
+RL	Ralph Lauren Corporation	Consumer Discretionary	Apparel, Accessories & Luxury Goods	1037038
+RJF	Raymond James Financial	Financials	Investment Banking & Brokerage	720005
+RDDT	Reddit	Communication Services	Interactive Media & Services	1713445
+O	Realty Income	Real Estate	Retail REITs	726728
+REG	Regency Centers	Real Estate	Retail REITs	910606
+REGN	Regeneron Pharmaceuticals	Health Care	Biotechnology	872589
+RF	Regions Financial Corporation	Financials	Regional Banks	1281761
+RSG	Republic Services	Industrials	Environmental & Facilities Services	1060391
+RMD	ResMed	Health Care	Health Care Equipment	943819
+RVTY	Revvity	Health Care	Health Care Equipment	31791
+HOOD	Robinhood Markets	Financials	Investment Banking & Brokerage	1783879
+ROK	Rockwell Automation	Industrials	Electrical Components & Equipment	1024478
+ROL	Rollins, Inc.	Industrials	Environmental & Facilities Services	84839
+ROP	Roper Technologies	Information Technology	Electronic Equipment & Instruments	882835
+ROST	Ross Stores	Consumer Discretionary	Apparel Retail	745732
+RCL	Royal Caribbean Group	Consumer Discretionary	Hotels, Resorts & Cruise Lines	884887
+RTX	RTX Corporation	Industrials	Aerospace & Defense	101829
+SPGI	S&P Global	Financials	Financial Exchanges & Data	64040
+CRM	Salesforce	Information Technology	Application Software	1108524
+SNDK	Sandisk	Information Technology	Technology Hardware, Storage & Peripherals	2023554
+SBAC	SBA Communications	Real Estate	Telecom Tower REITs	1034054
+SLB	Schlumberger	Energy	Oil & Gas Equipment & Services	87347
+STX	Seagate Technology	Information Technology	Technology Hardware, Storage & Peripherals	1137789
+SRE	Sempra	Utilities	Multi-Utilities	1032208
+NOW	ServiceNow	Information Technology	Systems Software	1373715
+SHW	Sherwin-Williams	Materials	Specialty Chemicals	89800
+SPG	Simon Property Group	Real Estate	Retail REITs	1063761
+SKYD	Skydance	Communication Services	Movies & Entertainment	2041610
+SWKS	Skyworks Solutions	Information Technology	Semiconductors	4127
+SJM	J.M. Smucker Company (The)	Consumer Staples	Packaged Foods & Meats	91419
+SW	Smurfit Westrock	Materials	Paper & Plastic Packaging Products & Materials	2005951
+SNA	Snap-on	Industrials	Industrial Machinery & Supplies & Components	91440
+SOLV	Solventum	Health Care	Health Care Technology	1964738
+SO	Southern Company	Utilities	Electric Utilities	92122
+LUV	Southwest Airlines	Industrials	Passenger Airlines	92380
+SWK	Stanley Black & Decker	Industrials	Industrial Machinery & Supplies & Components	93556
+SBUX	Starbucks	Consumer Discretionary	Restaurants	829224
+STT	State Street Corporation	Financials	Asset Management & Custody Banks	93751
+STLD	Steel Dynamics	Materials	Steel	1022671
+STE	Steris	Health Care	Health Care Equipment	1757898
+SYK	Stryker Corporation	Health Care	Health Care Equipment	310764
+SMCI	Supermicro	Information Technology	Technology Hardware, Storage & Peripherals	1375365
+SYF	Synchrony Financial	Financials	Consumer Finance	1601712
+SNPS	Synopsys	Information Technology	Application Software	883241
+SYY	Sysco	Consumer Staples	Food Distributors	96021
+TMUS	T-Mobile US	Communication Services	Wireless Telecommunication Services	1283699
+TROW	T. Rowe Price	Financials	Asset Management & Custody Banks	1113169
+TTWO	Take-Two Interactive	Communication Services	Interactive Home Entertainment	946581
+TPR	Tapestry, Inc.	Consumer Discretionary	Apparel, Accessories & Luxury Goods	1116132
+TRGP	Targa Resources	Energy	Oil & Gas Storage & Transportation	1389170
+TGT	Target Corporation	Consumer Staples	Consumer Staples Merchandise Retail	27419
+TEL	TE Connectivity	Information Technology	Electronic Manufacturing Services	1385157
+TDY	Teledyne Technologies	Information Technology	Electronic Equipment & Instruments	1094285
+TER	Teradyne	Information Technology	Semiconductor Materials & Equipment	97210
+TSLA	Tesla, Inc.	Consumer Discretionary	Automobile Manufacturers	1318605
+TXN	Texas Instruments	Information Technology	Semiconductors	97476
+TPL	Texas Pacific Land Corporation	Energy	Oil & Gas Exploration & Production	1811074
+TXT	Textron	Industrials	Aerospace & Defense	217346
+TMO	Thermo Fisher Scientific	Health Care	Life Sciences Tools & Services	97745
+TJX	TJX Companies	Consumer Discretionary	Apparel Retail	109198
+TKO	TKO Group Holdings	Communication Services	Movies & Entertainment	1973266
+TSCO	Tractor Supply	Consumer Discretionary	Other Specialty Retail	916365
+TT	Trane Technologies	Industrials	Building Products	1466258
+TDG	TransDigm Group	Industrials	Aerospace & Defense	1260221
+TRV	Travelers Companies (The)	Financials	Property & Casualty Insurance	86312
+TRMB	Trimble Inc.	Information Technology	Application Software	864749
+TFC	Truist Financial	Financials	Diversified Banks	92230
+TWLO	Twilio	Information Technology	Systems Software	1447669
+TYL	Tyler Technologies	Information Technology	Application Software	860731
+TSN	Tyson Foods	Consumer Staples	Packaged Foods & Meats	100493
+USB	U.S. Bancorp	Financials	Diversified Banks	36104
+UBER	Uber	Industrials	Passenger Ground Transportation	1543151
+UDR	UDR, Inc.	Real Estate	Multi-Family Residential REITs	74208
+ULTA	Ulta Beauty	Consumer Discretionary	Other Specialty Retail	1403568
+UNP	Union Pacific Corporation	Industrials	Rail Transportation	100885
+UAL	United Airlines Holdings	Industrials	Passenger Airlines	100517
+UPS	United Parcel Service	Industrials	Air Freight & Logistics	1090727
+URI	United Rentals	Industrials	Trading Companies & Distributors	1067701
+UNH	UnitedHealth Group	Health Care	Managed Health Care	731766
+UHS	Universal Health Services	Health Care	Health Care Facilities	352915
+VLO	Valero Energy	Energy	Oil & Gas Refining & Marketing	1035002
+VEEV	Veeva Systems	Health Care	Health Care Technology	1393052
+VTR	Ventas	Real Estate	Health Care REITs	740260
+VLTO	Veralto	Industrials	Environmental & Facilities Services	1967680
+VRSN	Verisign	Information Technology	Internet Services & Infrastructure	1014473
+VRSK	Verisk Analytics	Industrials	Research & Consulting Services	1442145
+VZ	Verizon	Communication Services	Integrated Telecommunication Services	732712
+VRTX	Vertex Pharmaceuticals	Health Care	Biotechnology	875320
+VRT	Vertiv	Industrials	Electrical Components & Equipment	1674101
+VTRS	Viatris	Health Care	Pharmaceuticals	1792044
+VICI	Vici Properties	Real Estate	Hotel & Resort REITs	1705696
+V	Visa Inc.	Financials	Transaction & Payment Processing Services	1403161
+VST	Vistra Corp.	Utilities	Electric Utilities	1692819
+VMRK	Vivmark Residential	Real Estate	Multi-Family Residential REITs	906107
+VMC	Vulcan Materials Company	Materials	Construction Materials	1396009
+VYLR	Vylor	Consumer Staples	Agricultural Products & Services	2128626
+WRB	W. R. Berkley Corporation	Financials	Property & Casualty Insurance	11544
+GWW	W. W. Grainger	Industrials	Industrial Machinery & Supplies & Components	277135
+WAB	Wabtec	Industrials	Construction Machinery & Heavy Transportation Equipment	943452
+WMT	Walmart	Consumer Staples	Consumer Staples Merchandise Retail	104169
+DIS	Walt Disney Company (The)	Communication Services	Movies & Entertainment	1744489
+WM	Waste Management	Industrials	Environmental & Facilities Services	823768
+WAT	Waters Corporation	Health Care	Life Sciences Tools & Services	1000697
+WEC	WEC Energy Group	Utilities	Electric Utilities	783325
+WFC	Wells Fargo	Financials	Diversified Banks	72971
+WELL	Welltower	Real Estate	Health Care REITs	766704
+WST	West Pharmaceutical Services	Health Care	Health Care Supplies	105770
+WDC	Western Digital	Information Technology	Technology Hardware, Storage & Peripherals	106040
+WY	Weyerhaeuser	Real Estate	Timber REITs	106535
+WSM	Williams-Sonoma, Inc.	Consumer Discretionary	Homefurnishing Retail	719955
+WMB	Williams Companies	Energy	Oil & Gas Storage & Transportation	107263
+WTW	Willis Towers Watson	Financials	Insurance Brokers	1140536
+WDAY	Workday, Inc.	Information Technology	Application Software	1327811
+WYNN	Wynn Resorts	Consumer Discretionary	Casinos & Gaming	1174922
+XEL	Xcel Energy	Utilities	Multi-Utilities	72903
+XYL	Xylem Inc.	Industrials	Industrial Machinery & Supplies & Components	1524472
+YUM	Yum! Brands	Consumer Discretionary	Restaurants	1041061
+ZBRA	Zebra Technologies	Information Technology	Electronic Equipment & Instruments	877212
+ZBH	Zimmer Biomet	Health Care	Health Care Equipment	1136869
+ZTS	Zoetis	Health Care	Pharmaceuticals	1555280

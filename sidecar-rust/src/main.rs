@@ -268,6 +268,20 @@ async fn run() {
         .route("/api/finance/news", get(finance::news_handler))
         .route("/api/finance/financials", get(finance::financials_handler))
         .route("/api/finance/watchlist", get(finance::get_watchlist).put(finance::put_watchlist))
+        .route("/api/finance/profile", get(finance::nasdaq::profile_handler))
+        .route("/api/finance/earnings", get(finance::nasdaq::earnings_handler))
+        .route("/api/finance/ownership", get(finance::nasdaq::ownership_handler))
+        .route("/api/finance/calendar", get(finance::nasdaq::calendar_handler))
+        .route("/api/finance/universe", get(finance::universe::universe_handler))
+        .route("/api/finance/statements", get(finance::statements::statements_handler))
+        .route("/api/finance/filings", get(finance::statements::filings_handler))
+        .route("/api/finance/portfolio", get(finance::portfolio::get_portfolio).put(finance::portfolio::put_portfolio))
+        .route("/api/finance/practice", get(finance::portfolio::get_practice))
+        .route("/api/finance/practice/order", post(finance::portfolio::place_order))
+        .route("/api/finance/practice/order/:id", delete(finance::portfolio::cancel_order))
+        .route("/api/finance/practice/reset", post(finance::portfolio::reset_practice))
+        .route("/api/finance/alerts", get(finance::portfolio::get_alerts).post(finance::portfolio::post_alert))
+        .route("/api/finance/alerts/:id", delete(finance::portfolio::delete_alert))
         .route("/api/crew", get(crewstore::list_crew).post(crewstore::create_crew))
         .route("/api/crew/:id", axum::routing::patch(crewstore::update_crew).delete(crewstore::delete_crew))
         .route("/api/schedules", get(server::list_schedules).post(server::create_schedule))
@@ -327,6 +341,9 @@ async fn run() {
     // schedules (every N min, or daily at HH:MM) and posts findings to the
     // inbox. See scheduler::scheduler_loop.
     tokio::spawn(scheduler::scheduler_loop());
+
+    // Finance: fill practice limit orders and fire price alerts every 15 minutes.
+    tokio::spawn(finance::portfolio::watch_loop());
 
     // Provider/model catalog: cached models.dev copy, refreshed daily in the
     // background (the embedded snapshot covers offline and first launch).

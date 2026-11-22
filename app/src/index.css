@@ -301,6 +301,15 @@ html.has-wallpaper :is(.app-pane, .app-base aside) .bg-paper-sunken:not([class*=
   100% { background-color: transparent; }
 }
 
+/* Finance "compact" density: tighter cards, rows and tables so more fits on screen. */
+[data-density="terminal"] .fin-page { gap: 10px; }
+[data-density="terminal"] .fin-page > * { gap: 10px; }
+[data-density="terminal"] .fin-card { padding: 10px 12px; border-radius: 12px; }
+[data-density="terminal"] .fin-card-head { margin-bottom: 6px; }
+[data-density="terminal"] .fin-row { padding-top: 2px; padding-bottom: 2px; }
+[data-density="terminal"] .fin-table td,
+[data-density="terminal"] .fin-table th { padding-top: 2px; padding-bottom: 2px; font-size: 12px; }
+
 /* Surface style "3D": a lit top edge and soft depth on panels and cards,
    instead of flat fills. */
 html.surface-3d .app-pane {
