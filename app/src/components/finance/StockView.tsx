@@ -105,6 +105,9 @@ function RangePicker({ range, setRange }: { range: Range; setRange: (r: Range) =
 function Overview({ symbol, company, chart, chartError, range, setRange }: { symbol: string; company: boolean; chart: FinanceChart | null; chartError: string; range: Range; setRange: (r: Range) => void }) {
   const q = useFinance((s) => s.quotes[symbol]) ?? chart;
   const [profile] = useLoad(company ? `p|${symbol}` : "", () => (company ? api.financeProfile(symbol) : Promise.resolve(null)));
+  // The profile source often lacks market cap; the S&P 500 list (cached, shared with the heatmap) has it.
+  const [u] = useLoad("universe", () => api.financeUniverse());
+  const cap = profile?.marketCap ?? u?.rows.find((r) => r.symbol === symbol)?.marketCap;
   return (
     <div className="grid grid-cols-1 gap-4 [@container(min-width:820px)]:grid-cols-[1fr_300px]">
       <div className="flex min-w-0 flex-col gap-4">
@@ -118,7 +121,7 @@ function Overview({ symbol, company, chart, chartError, range, setRange }: { sym
               <Stat label="Volume" value={q.volume ? big(q.volume) : "–"} />
               {profile && (
                 <>
-                  <Stat label="Market cap" value={big(profile.marketCap, "$")} />
+                  <Stat label="Market cap" value={big(cap, "$")} />
                   <Stat label="Dividend yield" value={profile.yield != null ? pct(profile.yield, false) : "None"} />
                   <Stat label="Sector" value={profile.sector || "–"} title={profile.industry} />
                   <Stat label="Ex-dividend" value={profile.exDividend || "–"} />

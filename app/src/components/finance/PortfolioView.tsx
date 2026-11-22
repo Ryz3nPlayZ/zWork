@@ -4,7 +4,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bell, Pencil, Plus, Sparkles, Sunrise, Trash2, Upload, X } from "lucide-react";
-import { api, type FinanceAlert, type FinanceChart, type FinanceHolding, type FinancePractice, type ScheduledTask } from "../../lib/api";
+import { api, type FinanceAlert, type FinanceChart, type FinanceHolding, type FinanceOrder, type FinancePractice, type ScheduledTask } from "../../lib/api";
 import { useApp } from "../../lib/store";
 import { cn } from "../../lib/cn";
 import { Segmented } from "../page/Page";
@@ -115,13 +115,15 @@ function HoldingsTable({ holdings, quotes, onRemove }: { holdings: FinanceHoldin
 }
 
 /** Totals for a set of holdings at current quotes. */
-function totals(holdings: FinanceHolding[], quotes: ReturnType<typeof useQuotes>) {
+/** `orders` (practice only): shares filled after the last trade didn't live through today's move. */
+function totals(holdings: FinanceHolding[], quotes: ReturnType<typeof useQuotes>, orders: FinanceOrder[] = []) {
   let value = 0, day = 0, cost = 0, costKnown = true;
   for (const h of holdings) {
     const q = quotes[h.symbol];
     if (q?.price == null) continue;
     value += q.price * h.shares;
-    day += (q.change ?? 0) * h.shares;
+    const late = orders.filter((o) => o.symbol === h.symbol && o.status === "filled" && (o.filledAt ?? 0) > (q.marketTime ?? Infinity)).reduce((n, o) => n + (o.side === "buy" ? o.shares : -o.shares), 0);
+    day += (q.change ?? 0) * Math.max(h.shares - late, 0);
     if (h.cost == null) costKnown = false;
     else cost += h.cost * h.shares;
   }
@@ -284,7 +286,7 @@ function Practice() {
   const quotes = useQuotes([...(p?.positions ?? []).map((h) => h.symbol), ...(order.symbol ? [order.symbol.toUpperCase()] : [])]);
   if (error) return <Card><Empty>The practice account couldn't be loaded: {error}</Empty></Card>;
   if (!p) return <Spinner className="h-64" />;
-  const t = totals(p.positions, quotes);
+  const t = totals(p.positions, quotes, p.orders);
   const total = p.cash + t.value;
   const q = quotes[order.symbol.trim().toUpperCase()];
   const est = q?.price != null && Number(order.shares) > 0 ? (order.type === "limit" && order.limit ? Number(order.limit) : q.price) * Number(order.shares) : null;

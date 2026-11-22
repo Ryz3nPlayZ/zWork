@@ -214,7 +214,7 @@ pub async fn ownership(symbol: &str) -> Result<Value, String> {
         .flatten()
         .map(|r| json!({
             "name": r["insider"], "role": r["relation"], "date": r["lastDate"], "type": r["transactionType"],
-            "shares": parse_num(&r["sharesTraded"]), "price": parse_num(&r["lastPrice"]), "held": parse_num(&r["sharesHeld"]),
+            "shares": parse_num(&r["sharesTraded"]), "price": parse_num(&r["lastPrice"]).filter(|p| *p > 0.0), "held": parse_num(&r["sharesHeld"]),
         }))
         .collect();
     let holders: Vec<Value> = inst["data"]["holdingsTransactions"]["table"]["rows"]
