@@ -108,6 +108,9 @@ function loadEffort(): Effort {
   return "medium";
 }
 
+/** Set by Settings' "Redo onboarding": that run keeps the user's model and usage-stats choices. */
+export const REDO_ONBOARDING_KEY = "zwork:redo-onboarding";
+
 function hasCompletedOnboardingLocally(): boolean {
   if (typeof window === "undefined") return false;
   return window.localStorage.getItem(ONBOARDING_DONE_KEY) === "true";

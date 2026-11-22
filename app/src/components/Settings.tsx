@@ -45,6 +45,7 @@ import { api, IS_WEB, type CatalogModel, type CatalogProvider, type Integration,
 import { KeybindRecorder } from "./KeybindRecorder";
 import { COMPANION_CREW_KEY, COMPANION_ENABLED, COMPANION_KEY, configureCompanion } from "../lib/companionBus";
 import { GlideGroup } from "./Glide";
+import { REDO_ONBOARDING_KEY } from "../lib/store";
 import { Badge, Button, EmptyState, Switch } from "./page/Page";
 
 type Section = "account" | "appearance" | "general" | "memory" | "models" | "integrations";
@@ -1063,6 +1064,7 @@ function GeneralPanel({
   const [appVersion, setAppVersion] = useState(fallbackAppVersion());
   const [backendVersion, setBackendVersion] = useState<string | null>(null);
   const providers = useApp((s) => s.providers);
+  const setOnboardingDone = useApp((s) => s.setOnboardingDone);
 
   const accessibilityPermissionGranted = useApp((s) => s.accessibilityPermissionGranted);
   const screenRecordingPermissionGranted = useApp((s) => s.screenRecordingPermissionGranted);
@@ -1280,6 +1282,18 @@ function GeneralPanel({
             <span className="font-mono text-ink-muted">{backendVersion ?? "…"}</span>
           </div>
         </Field>
+        <div className="mt-4">
+          <Field label="Welcome screen" description="Pick a first job and a look again. Your chats, models and settings stay as they are.">
+            <Button
+              onClick={() => {
+                window.sessionStorage.setItem(REDO_ONBOARDING_KEY, "1");
+                setOnboardingDone(false);
+              }}
+            >
+              Redo onboarding
+            </Button>
+          </Field>
+        </div>
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] text-ink-muted">
           <a
             href="https://tryzwork.app/privacy"

@@ -4,7 +4,7 @@ import { DistortionWave } from "distortion-waves";
 import { ArrowRight, Check } from "lucide-react";
 import { Logo } from "./Logo";
 import { cn } from "../lib/cn";
-import { useApp } from "../lib/store";
+import { REDO_ONBOARDING_KEY, useApp } from "../lib/store";
 import { recordTelemetry } from "../lib/telemetry";
 import { needsLightweightRendering } from "../lib/platform";
 import { api, type OnboardingAnswer, type OnboardingCredential } from "../lib/api";
@@ -47,8 +47,10 @@ export function Onboarding() {
     ];
     // Sign-in is required on desktop and Free includes hosted models, so nobody
     // needs a key to start. Their own key is in Settings.
+    // A redo sends no credential: the sidecar would reset the default model and turn usage stats back on.
+    const redo = window.sessionStorage.getItem(REDO_ONBOARDING_KEY) === "1";
     const token = (window.localStorage.getItem("zwork:cloud-token") || "").trim();
-    const credential: OnboardingCredential | undefined = token
+    const credential: OnboardingCredential | undefined = token && !redo
       ? {
           shape: "anthropic",
           credential: "zwork_router",
@@ -69,6 +71,7 @@ export function Onboarding() {
       });
       useApp.setState({ starterDraft: chore?.prompt || "" });
       await waved;
+      window.sessionStorage.removeItem(REDO_ONBOARDING_KEY);
       setOnboardingDone(true);
     } catch (err) {
       console.error(err);
