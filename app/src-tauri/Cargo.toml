@@ -31,6 +31,12 @@ base64 = "0.22"
 # shortcut: pinned because 2.7 forces a Tauri and wry upgrade; unpin with the next Tauri bump.
 tauri-plugin-autostart = "=2.5.1"
 
+# The Dock icon choice (Settings > Appearance). Same versions Tauri already builds.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSData"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSImage", "NSResponder"] }
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

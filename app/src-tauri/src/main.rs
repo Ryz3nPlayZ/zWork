@@ -516,6 +516,35 @@ fn ax_self_trusted_impl(prompt: Option<bool>) -> bool {
     }
 }
 
+/// The Dock icon: "light" or "dark" pins that tile; anything else hands the Dock
+/// back to the bundle's icon, which follows the system appearance on macOS 26.
+/// shortcut: only the running app's Dock tile changes; Finder and Launchpad keep the bundle icon.
+#[tauri::command]
+fn set_app_icon(app: tauri::AppHandle, variant: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        app.run_on_main_thread(move || {
+            use objc2::{AllocAnyThread, MainThreadMarker};
+            use objc2_app_kit::{NSApplication, NSImage};
+            use objc2_foundation::NSData;
+            let Some(mtm) = MainThreadMarker::new() else { return };
+            let bytes: Option<&'static [u8]> = match variant.as_str() {
+                "light" => Some(include_bytes!("../icons/dock-light.png")),
+                "dark" => Some(include_bytes!("../icons/dock-dark.png")),
+                _ => None,
+            };
+            let image = bytes.and_then(|b| NSImage::initWithData(NSImage::alloc(), &NSData::with_bytes(b)));
+            unsafe { NSApplication::sharedApplication(mtm).setApplicationIconImage(image.as_deref()) };
+        })
+        .map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, variant);
+        Ok(())
+    }
+}
+
 /// List on-screen, layer-0 windows for the Share Window picker. macOS-only;
 /// returns empty on other platforms. Uses CoreGraphics FFI directly so zWork
 /// reads the window list under its own identity — no cua-driver dependency.
@@ -1201,6 +1230,7 @@ fn main() {
         }).build())
         .invoke_handler(tauri::generate_handler![
             open_external,
+            set_app_icon,
             ensure_backend,
             restart_backend,
             begin_desktop_auth,

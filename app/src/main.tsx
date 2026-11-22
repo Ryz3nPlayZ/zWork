@@ -8,6 +8,7 @@ import { posthogOptions, posthogProjectToken } from "./lib/posthog";
 import { isMacOS, isWindows } from "./lib/platform";
 import { initTheme } from "./lib/theme";
 import { applyTranslucency, loadTranslucencyPref } from "./lib/translucency";
+import { applyAppIcon, loadAppIconPref } from "./lib/appIcon";
 import { applyWallpaper } from "./lib/wallpaper";
 
 // Platform class on <html> for the few CSS rules that must diverge per-OS
@@ -20,6 +21,7 @@ initTheme();
 // Apply the saved sidebar-translucency pref before first paint so the sidebar
 // doesn't flash opaque before the effect resolves.
 applyTranslucency(loadTranslucencyPref());
+if (loadAppIconPref() !== "system") applyAppIcon(loadAppIconPref());
 applyWallpaper();
 
 // Overlay window transparency — applied synchronously, BEFORE first paint. The

@@ -50,6 +50,8 @@ import {
   useTranslucencyPref,
 } from "../lib/translucency";
 import { Button, Segmented, Switch } from "./page/Page";
+import { useAppIconPref, type AppIconPref } from "../lib/appIcon";
+import { hasTrafficLights } from "../lib/platform";
 
 // ---------------- primitives ----------------
 
@@ -288,6 +290,7 @@ export function ThemeTiles({
 export function AppearanceSettings() {
   const { look, image, saved, scheme, mode, colors } = useLook();
   const translucency = useTranslucencyPref();
+  const [appIcon, setAppIcon] = useAppIconPref();
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -680,6 +683,20 @@ export function AppearanceSettings() {
               label="Sidebar translucency"
               checked={translucency === "on"}
               onChange={() => setTranslucencyPref(translucency === "on" ? "off" : "on")}
+            />
+          </Row>
+        )}
+        {hasTrafficLights() && (
+          <Row label="App icon" hint="The icon in your Dock. Match system follows your Mac's light or dark appearance.">
+            <Segmented<AppIconPref>
+              label="App icon"
+              value={appIcon}
+              onChange={setAppIcon}
+              options={[
+                { value: "system", label: "Match system" },
+                { value: "light", label: "Light" },
+                { value: "dark", label: "Dark" },
+              ]}
             />
           </Row>
         )}
