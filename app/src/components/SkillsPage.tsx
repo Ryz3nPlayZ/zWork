@@ -2,34 +2,23 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   BookOpen,
-  Calculator,
   ChevronLeft,
   ExternalLink,
-  FileText,
-  GraduationCap,
-  Languages,
   Loader2,
-  Mail,
-  MonitorSmartphone,
-  Palette,
   Plus,
-  Presentation,
-  Receipt,
   RefreshCw,
   Search,
-  Sheet,
-  Users,
 } from "lucide-react";
 import { useApp } from "../lib/store";
 import { api, type SkillMeta, type StoreSkill, type StoreSkillDetail } from "../lib/api";
 import { IconButton } from "./IconButton";
+import { SkillDoc } from "./SkillDoc";
 import {
   Badge,
   Button,
   Card,
   CardGrid,
   EmptyState,
-  IconTile,
   ListGroup,
   ListRow,
   PageShell,
@@ -72,24 +61,8 @@ function humanize(name: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-function iconFor(name: string) {
-  const n = name.toLowerCase();
-  if (/invoice|receipt|expense|budget|tax/.test(n)) return <Receipt />;
-  if (/meeting|minutes|interview|team/.test(n)) return <Users />;
-  if (/excel|xlsx|sheet|spreadsheet/.test(n)) return <Sheet />;
-  if (/pptx|slide|deck|presentation/.test(n)) return <Presentation />;
-  if (/letter|email|mail|comms|outreach/.test(n)) return <Mail />;
-  if (/lesson|teach|research|grant|academic|study|paper/.test(n)) return <GraduationCap />;
-  if (/translat|language/.test(n)) return <Languages />;
-  if (/account|finance|payroll|calcul/.test(n)) return <Calculator />;
-  if (/design|theme|poster|canvas|brand/.test(n)) return <Palette />;
-  if (/computer|browser/.test(n)) return <MonitorSmartphone />;
-  if (/pdf|docx|doc|resume|cv|proposal|report|notes|writ/.test(n)) return <FileText />;
-  return <BookOpen />;
-}
-
-function SkillTile({ name, size = "md" }: { name: string; size?: "md" | "lg" }) {
-  return <IconTile size={size}>{iconFor(name)}</IconTile>;
+function SkillTile({ name, size = "md" }: { name: string; size?: "sm" | "md" | "lg" }) {
+  return <SkillDoc name={name} size={size} />;
 }
 
 function friendlyStoreError(raw: string, name?: string): string {
@@ -274,7 +247,7 @@ export function SkillsPage() {
               {mine.slice(0, 8).map((s) => (
                 <ListRow
                   key={`${s.source}:${s.name}`}
-                  icon={<SkillTile name={s.name} />}
+                  icon={<SkillTile name={s.name} size="sm" />}
                   title={INCLUDED[s.name]?.title ?? humanize(s.name)}
                   meta={INCLUDED[s.name]?.blurb ?? s.description}
                   onClick={s.store_id ? () => setOpenId(storeSkillOf(s)) : undefined}
@@ -309,7 +282,7 @@ export function SkillsPage() {
               {added.map((s) => (
                 <ListRow
                   key={s.name}
-                  icon={<SkillTile name={s.name} />}
+                  icon={<SkillTile name={s.name} size="sm" />}
                   title={humanize(s.name)}
                   meta={s.description}
                   onClick={s.store_id ? () => setOpenId(storeSkillOf(s)) : undefined}
@@ -351,7 +324,7 @@ export function SkillsPage() {
               {included.map((s) => (
                 <ListRow
                   key={s.name}
-                  icon={<SkillTile name={s.name} />}
+                  icon={<SkillTile name={s.name} size="sm" />}
                   title={INCLUDED[s.name].title}
                   meta={INCLUDED[s.name].blurb}
                 />
@@ -373,7 +346,7 @@ export function SkillsPage() {
                 {fromOthers.map((s) => (
                   <ListRow
                     key={`${s.source}:${s.name}`}
-                    icon={<SkillTile name={s.name} />}
+                    icon={<SkillTile name={s.name} size="sm" />}
                     title={humanize(s.name)}
                     meta={s.description}
                     trailing={<span>{s.source === "project" ? "This folder" : `From ${OTHER_APPS[s.source ?? ""] ?? s.source}`}</span>}
@@ -500,7 +473,7 @@ function SkillDetail({
           </button>
 
           <header className="mt-5 flex flex-wrap items-center gap-4">
-            <IconTile size="lg" className="h-14 w-14 rounded-2xl [&_svg]:h-6 [&_svg]:w-6">{iconFor(skill.name)}</IconTile>
+            <SkillDoc name={skill.name} size="lg" />
             <div className="min-w-0 flex-1">
               <h1 className="text-[24px] font-semibold tracking-tight text-ink">{title}</h1>
               <p className="flex flex-wrap items-center gap-3 text-[13px] text-ink-muted">
