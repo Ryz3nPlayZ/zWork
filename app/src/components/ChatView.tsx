@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Pencil, Check, X, AlertCircle, Settings as SettingsIcon, RefreshCcw, Download, ChevronDown, ArrowLeft, NotebookPen, History } from "lucide-react";
+import { GlideGroup } from "./Glide";
 import { useApp } from "../lib/store";
 import { api } from "../lib/api";
 import { ChatInput } from "./ChatInput";
@@ -290,14 +291,14 @@ export function ChatView() {
                 <span>Versions</span>
               </button>
               {branchOpen && (
-                <div className="absolute top-[calc(100%+4px)] right-0 z-40 w-[280px] animate-fade-in whitespace-normal rounded-xl border border-line bg-paper-raised p-1 shadow-pop">
+                <GlideGroup className="absolute top-[calc(100%+4px)] right-0 z-40 w-[280px] animate-fade-in whitespace-normal rounded-xl border border-line bg-paper-raised p-1 shadow-pop" highlightClassName="rounded">
                   {branches.length === 0 && (
                     <div className="px-2.5 py-2 text-[12px] leading-relaxed text-ink-muted">
                       Nothing here yet. When you edit a message you already sent, the replies that came after it are kept here so you can bring them back.
                     </div>
                   )}
                   {branches.map((b) => (
-                    <div key={b.id} className="flex items-center gap-1 rounded px-2.5 py-1.5 hover:bg-state-hover">
+                    <div key={b.id} data-glide="" className="flex items-center gap-1 rounded px-2.5 py-1.5">
                       <button
                         type="button"
                         onClick={async () => {
@@ -325,7 +326,7 @@ export function ChatView() {
                       </button>
                     </div>
                   ))}
-                </div>
+                </GlideGroup>
               )}
             </div>
             <div ref={exportRef} className="relative">
@@ -340,14 +341,14 @@ export function ChatView() {
                 <ChevronDown className="h-3 w-3 text-ink-muted" />
               </button>
               {exportOpen && (
-                <div className="absolute top-[calc(100%+4px)] right-0 z-40 w-[170px] animate-fade-in rounded-xl border border-line bg-paper-raised p-1 shadow-pop">
+                <GlideGroup className="absolute top-[calc(100%+4px)] right-0 z-40 w-[170px] animate-fade-in rounded-xl border border-line bg-paper-raised p-1 shadow-pop" highlightClassName="rounded">
                   <button
                     type="button"
                     onClick={() => {
                       exportToMarkdown();
                       setExportOpen(false);
                     }}
-                    className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-[12px] text-ink hover:bg-state-hover font-medium transition-colors"
+                    data-glide="" className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-[12px] text-ink font-medium"
                   >
                     Export as Markdown (.md)
                   </button>
@@ -357,11 +358,11 @@ export function ChatView() {
                       exportToJSON();
                       setExportOpen(false);
                     }}
-                    className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-[12px] text-ink hover:bg-state-hover font-medium transition-colors"
+                    data-glide="" className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-[12px] text-ink font-medium"
                   >
                     Export as JSON (.json)
                   </button>
-                </div>
+                </GlideGroup>
               )}
             </div>
           </div>

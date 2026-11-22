@@ -366,6 +366,10 @@ html.dark.surface-3d .app-pane {
   color: rgb(var(--paper));
 }
 
+/* Lists that scroll with the wheel or trackpad and show no bar (the sidebar's chat history). */
+.scrollbar-none { scrollbar-width: none; }
+.scrollbar-none::-webkit-scrollbar { display: none; }
+
 /* Thin, elegant scrollbars that adapt to theme */
 *::-webkit-scrollbar {
   width: 10px;

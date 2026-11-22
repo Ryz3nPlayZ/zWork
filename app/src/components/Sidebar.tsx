@@ -191,8 +191,9 @@ export function Sidebar() {
         </GlideGroup>
 
         {/* Chat history */}
-        <div className="mt-3 flex-1 overflow-x-hidden overflow-y-auto pb-3">
-          <div className="px-2">
+        <div className="scrollbar-none mt-3 flex-1 overflow-x-hidden overflow-y-auto pb-3">
+          {/* One highlight for the whole history, so it slides across buckets like the nav above. */}
+          <GlideGroup className="px-2" highlightClassName="rounded-md">
             {(["Today", "This week", "Earlier"] as ChatBucket[]).map((bucket) => {
               const items = grouped[bucket];
               if (items.length === 0) return null;
@@ -213,13 +214,14 @@ export function Sidebar() {
                         >
                           <button
                             type="button"
+                            data-glide=""
                             onClick={() => {
                               setOpenMenuId(null);
                               void openChat(c.id);
                             }}
                             className={cn(
                               "press flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] text-ink-muted",
-                              "hover:bg-state-hover hover:text-ink",
+                              "hover:text-ink group-hover/item:text-ink",
                               isActive &&
                               "bg-state-selected hover:bg-state-selected font-semibold text-ink",
                             )}
@@ -267,7 +269,7 @@ export function Sidebar() {
                 to start.
               </div>
             )}
-          </div>
+          </GlideGroup>
         </div>
 
         {/* Footer */}
