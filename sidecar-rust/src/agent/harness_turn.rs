@@ -304,6 +304,9 @@ impl NativeTool {
         }
 
         let (running, finished) = step_labels(&self.name, &params);
+        // A picture's card is rebuilt from its call when the chat is reopened.
+        let image_input = (self.name == "generate_image").then(|| params.clone());
+        let mut activity_id = Value::Null;
         let mut stream = Box::pin(execute_tool(&self.name, params, &shared.chat_id));
         let mut result_txt = String::new();
         let mut result_ok = true;
@@ -324,6 +327,7 @@ impl NativeTool {
                 "activity" => {
                     let done = evt.get("done").and_then(|v| v.as_bool()).unwrap_or(false);
                     evt["label"] = json!(if done { &finished } else { &running });
+                    activity_id = evt.get("id").cloned().unwrap_or(Value::Null);
                     shared.upsert_activity(json!({
                         "id": evt.get("id").cloned().unwrap_or(Value::Null),
                         "label": evt["label"].clone(),
@@ -365,6 +369,13 @@ impl NativeTool {
             }
         }
 
+        if let (Some(input), false) = (image_input, activity_id.is_null()) {
+            shared.upsert_activity(json!({
+                "id": activity_id, "label": finished, "done": true,
+                "tool": self.name, "input": input, "result": result_txt, "ok": result_ok,
+            }));
+            shared.persist().await;
+        }
         llm_trace(
             &shared.chat_id,
             turn,
@@ -498,22 +509,13 @@ impl GatedTool {
             let _ = shared.tx.try_send(json!({ "type": "status", "text": "Finishing first-time setup. This only happens once." }));
             crate::runtime::wait_for_setup().await;
         }
-        // A picture's card is rebuilt from its call when the chat is reopened.
-        let image_input = (name == "generate_image").then(|| params.clone());
         let outcome = self.inner.execute(tc_id, params, signal, forward).await;
 
         let (ok, text) = match &outcome {
             Ok(r) => (true, r.text_content()),
             Err(e) => (false, e.clone()),
         };
-        let mut done_entry = json!({ "id": activity_id, "label": finished, "done": true });
-        if let Some(input) = image_input {
-            done_entry["tool"] = json!(name);
-            done_entry["input"] = input;
-            done_entry["result"] = json!(text);
-            done_entry["ok"] = json!(ok);
-        }
-        shared.upsert_activity(done_entry);
+        shared.upsert_activity(json!({ "id": activity_id, "label": finished, "done": true }));
         shared.persist().await;
         shared
             .send(json!({ "type": "activity", "id": activity_id, "label": finished, "done": true, "tool_use_id": tc_id }))
