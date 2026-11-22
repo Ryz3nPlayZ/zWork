@@ -266,7 +266,7 @@ use super::types::{now_ms, AssistantMessage, StopReason};
 /// but never recover by retrying.
 static NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     // z.ai and DeepSeek send "Insufficient balance" (z.ai as HTTP 429 code 1113).
-    Regex::new("(?i)GoUsageLimitError|FreeUsageLimitError|Monthly usage limit reached|available balance|insufficient.?balance|no resource package|insufficient_quota|out of budget|quota exceeded|billing").unwrap()
+    Regex::new("(?i)GoUsageLimitError|FreeUsageLimitError|Monthly usage limit reached|available balance|insufficient.?balance|no resource package|insufficient_quota|out of budget|quota.?exceeded|billing").unwrap()
 });
 
 /// True for account/billing limits that look like throttles (often a 429)
@@ -352,6 +352,13 @@ mod assistant_error_tests {
         assert!(is_retryable_assistant_error(&errored("overloaded error, please retry (503)")));
         assert!(!is_retryable_assistant_error(&errored("insufficient_quota: 429")));
         assert!(!is_retryable_assistant_error(&errored("invalid x-api-key")));
+    }
+
+    #[test]
+    fn zwork_allowance_429_is_not_retried() {
+        let err = ProviderError { status: Some(429), message: "Too Many Requests".into(), headers: Vec::new(), body: Some("root_request_quota_exceeded".into()) };
+        assert!(!is_retryable(&err));
+        assert!(!is_retryable_assistant_error(&errored(&err.format())));
     }
 
     #[test]

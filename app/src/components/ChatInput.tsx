@@ -38,6 +38,7 @@ import { useApp } from "../lib/store";
 import type { SecurityPreset } from "../lib/store";
 import { api, IS_WEB, type QueuedItem, type UploadedFile } from "../lib/api";
 import { isDemoMode } from "../lib/preview";
+import { fetchAnalyticsSummary, getCloudToken } from "../lib/cloud";
 import {
   filterTemplates,
   mergeCommands,
@@ -330,6 +331,32 @@ export function ChatInput({
   const pendingShareImage = useApp((s) => s.pendingShareImage);
   const clearPendingShareImage = useApp((s) => s.clearPendingShareImage);
   const currentModel = providers?.models.find((m) => m.id === model);
+
+  // zWork's own models draw on the plan allowance: warn before sending, not
+  // after a failed run. Rechecked whenever a run ends.
+  const [allowanceNote, setAllowanceNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!model.startsWith("zwork-") || IS_WEB || !getCloudToken() || working) {
+      if (!model.startsWith("zwork-")) setAllowanceNote(null);
+      return;
+    }
+    let live = true;
+    fetchAnalyticsSummary()
+      .then((s) => {
+        if (!live) return;
+        const hours = s.five_hour_used / Math.max(1, s.five_hour_limit);
+        const week = s.weekly_used / Math.max(1, s.weekly_limit);
+        setAllowanceNote(
+          week >= 1 ? "You've used this week's allowance. It refills over the next few days; upgrading raises it."
+          : hours >= 1 ? "You've used this period's allowance. It refills over the next few hours; upgrading raises it."
+          : week >= 0.8 ? `You've used ${Math.round(week * 100)}% of this week's allowance.`
+          : hours >= 0.8 ? `You've used ${Math.round(hours * 100)}% of your 5-hour allowance.`
+          : null,
+        );
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [model, working]);
   const modelLabel = currentModel?.name ?? (providers?.models.length ? "Model" : "No models");
 
   const slashMatches = useMemo(
@@ -951,6 +978,10 @@ export function ChatInput({
 
   // Queued messages waiting against the live run, above the draft. A word
   // label instead of an icon per kind; the x cancels.
+  const allowanceLine = allowanceNote && (
+    <p role="status" className="px-5 pt-3 text-[12px] leading-5 text-warning">{allowanceNote}</p>
+  );
+
   const queueChips = queuedItems.length > 0 && (
     <div className="flex flex-wrap items-center gap-1.5 px-5 pt-3">
       {queuedItems.map((item) => {
@@ -1226,6 +1257,7 @@ export function ChatInput({
               </button>
             </div>
           )}
+          {allowanceLine}
           {queueChips}
           {attachmentList}
           {slashMenu}

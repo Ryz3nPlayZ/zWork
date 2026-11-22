@@ -489,7 +489,50 @@ pub async fn all_tool_schemas() -> Vec<Value> {
         .and_then(|t| t.as_array())
         .cloned()
         .unwrap_or_default();
-    repair_tool_schemas(tools)
+    repair_tool_schemas(tools).into_iter().map(slim_tool_schema).collect()
+}
+
+/// Some actions (Notion's page and row writers) ship 30–76k-char schemas
+/// that inline every block type. Drop `title`s, and past a few levels deep
+/// keep only the type and a short description; Composio still validates.
+/// shortcut: fixed depth 3 for big schemas, upgrade to per-field rules if the model misfills Notion blocks.
+fn slim_tool_schema(mut tool: Value) -> Value {
+    fn strip(v: &mut Value, depth: usize, cut: bool) {
+        match v {
+            Value::Object(m) => {
+                m.remove("title");
+                m.remove("examples");
+                if cut && depth >= 3 && (m.contains_key("properties") || m.contains_key("anyOf") || m.contains_key("oneOf") || m.contains_key("items")) {
+                    let ty = m.get("type").cloned().unwrap_or(json!("object"));
+                    let desc: String = m.get("description").and_then(|d| d.as_str()).unwrap_or("").chars().take(200).collect();
+                    m.clear();
+                    m.insert("type".into(), ty);
+                    if !desc.is_empty() { m.insert("description".into(), json!(desc)); }
+                    return;
+                }
+                for x in m.values_mut() { strip(x, depth + 1, cut); }
+            }
+            Value::Array(a) => for x in a { strip(x, depth, cut); },
+            _ => {}
+        }
+    }
+    let cut = tool.get("parameters").map_or(false, |p| p.to_string().len() > 8_000);
+    if let Some(p) = tool.get_mut("parameters") { strip(p, 0, cut); }
+    tool
+}
+
+#[cfg(test)]
+mod slim_tests {
+    use super::*;
+    #[test]
+    fn big_schema_is_cut_small_one_keeps_shape() {
+        let deep = json!({"type":"object","title":"X","properties":{"a":{"type":"object","properties":{"b":{"type":"object","properties":{"c":{"type":"string","description":"d".repeat(9000)}}}}}}});
+        let out = slim_tool_schema(json!({"name":"n","parameters":deep}));
+        assert!(out["parameters"].get("title").is_none());
+        assert!(out.to_string().len() < 1000);
+        let small = json!({"name":"n","parameters":{"type":"object","properties":{"a":{"type":"object","properties":{"b":{"type":"object","properties":{"c":{"type":"string"}}}}}}}});
+        assert!(slim_tool_schema(small)["parameters"]["properties"]["a"]["properties"]["b"]["properties"]["c"].is_object());
+    }
 }
 
 /// True when a schema advertises no parameters at all.

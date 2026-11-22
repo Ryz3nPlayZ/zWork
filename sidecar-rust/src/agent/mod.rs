@@ -298,6 +298,11 @@ pub fn friendly_upstream_error(message: &str, raw: Option<&str>, retries_exhaust
         );
     }
 
+    // zWork's own allowance (the router's 429). Same words as the app's.
+    if lower.contains("root_request_quota_exceeded") || raw_lower.contains("root_request_quota_exceeded") {
+        return "You've used this period's allowance. It refills over the next few hours; upgrading raises it.".to_string();
+    }
+
     // Out of credit / model not in the plan. z.ai sends this as a 429, so it
     // must be caught before the rate-limit branch or it reads as "wait".
     if crate::harness::retry::is_provider_limit_error(message)
