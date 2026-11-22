@@ -1108,6 +1108,7 @@ pub async fn list_skills() -> impl IntoResponse {
             "name": s.name,
             "description": s.description,
             "path": s.path.to_string_lossy().to_string(),
+            "store_id": crate::skills_store::store_id(&s.path),
             "source": s.source
         })
     }).collect();
@@ -2868,6 +2869,59 @@ pub async fn composio_apps() -> impl IntoResponse {
 
 /// The Connectors storefront's inventory: Composio's Toolkit Catalog, live
 /// through zWork Cloud or from the bundled snapshot.
+// ---- Skills storefront (skills.sh) ----
+
+fn store_result(r: Result<serde_json::Value, String>) -> axum::response::Response {
+    match r {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => {
+            let status = match e.as_str() {
+                "skills_unreachable" => axum::http::StatusCode::BAD_GATEWAY,
+                "skill_not_found" => axum::http::StatusCode::NOT_FOUND,
+                "skill_name_taken" => axum::http::StatusCode::CONFLICT,
+                "skill_write_failed" | "skill_remove_failed" => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                _ if e.starts_with("skills_") => axum::http::StatusCode::BAD_GATEWAY,
+                _ => axum::http::StatusCode::BAD_REQUEST,
+            };
+            (status, Json(json!({ "error": e }))).into_response()
+        }
+    }
+}
+
+pub async fn skills_store_shelf() -> impl IntoResponse {
+    Json(crate::skills_store::office_shelf())
+}
+
+pub async fn skills_store_search(
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> axum::response::Response {
+    store_result(crate::skills_store::search(q.get("q").map(String::as_str).unwrap_or("")).await)
+}
+
+pub async fn skills_store_detail(
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> axum::response::Response {
+    store_result(crate::skills_store::detail(q.get("id").map(String::as_str).unwrap_or("")).await)
+}
+
+#[derive(serde::Deserialize)]
+pub struct SkillStoreInstall {
+    pub id: String,
+}
+
+pub async fn skills_store_install(Json(req): Json<SkillStoreInstall>) -> axum::response::Response {
+    store_result(crate::skills_store::install(&req.id).await)
+}
+
+#[derive(serde::Deserialize)]
+pub struct SkillStoreRemove {
+    pub name: String,
+}
+
+pub async fn skills_store_remove(Json(req): Json<SkillStoreRemove>) -> axum::response::Response {
+    store_result(crate::skills_store::remove(&req.name))
+}
+
 pub async fn composio_catalog() -> impl IntoResponse {
     Json(crate::connectors::composio::catalog().await)
 }
