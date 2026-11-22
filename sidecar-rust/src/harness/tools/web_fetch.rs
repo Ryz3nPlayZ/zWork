@@ -88,10 +88,17 @@ impl AgentTool for WebFetchTool {
                 }
             };
             let fetched = tokio::select! {
-                r = tokio::time::timeout(timeout, fetch(&url, format)) => r.map_err(|_| format!("Timed out after {}s fetching {url}", timeout.as_secs()))??,
+                r = tokio::time::timeout(timeout, fetch(&url, format)) => r.map_err(|_| format!("Timed out after {}s fetching {url}", timeout.as_secs())).and_then(|r| r),
                 _ = aborted => return Err("Fetch aborted".into()),
             };
-            render(&url, format, fetched).await
+            match fetched {
+                Ok(f) => render(&url, format, f).await,
+                // Blocked or unreachable for a plain request (bot walls, 403s): let Jina's reader try.
+                Err(e) => match jina_reader(&url).await {
+                    Some(text) => Ok(AgentToolResult::text(truncate_or_spill(&format!("{url} (read via r.jina.ai)"), &text, "md"))),
+                    None => Err(e),
+                },
+            }
         })
     }
 }
@@ -164,6 +171,21 @@ async fn fetch(url: &str, format: Format) -> Result<Fetched, String> {
     Ok(Fetched { final_url, mime, bytes })
 }
 
+/// Jina Reader: free, no key, renders JavaScript and returns markdown.
+/// shortcut: keyless limit is ~20 requests/minute per IP; add a JINA_API_KEY header if users hit it.
+async fn jina_reader(url: &str) -> Option<String> {
+    let resp = client(BROWSER_UA).ok()?
+        .get(format!("https://r.jina.ai/{url}"))
+        .header("X-Return-Format", "markdown")
+        .timeout(Duration::from_secs(25))
+        .send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let text = resp.text().await.ok()?;
+    (text.trim().len() >= 200 && !text.contains("requiring CAPTCHA")).then_some(text)
+}
+
 fn describe(e: &reqwest::Error) -> String {
     if e.is_connect() {
         format!("Could not connect: {e}")
@@ -205,6 +227,12 @@ async fn render(url: &str, format: Format, f: Fetched) -> Result<AgentToolResult
         (true, Format::Html) => (body.into_owned(), "html"),
         (false, _) => (body.into_owned(), "txt"),
     };
+    // Pages built by JavaScript come back nearly empty; Jina's free reader renders them.
+    if is_html && !matches!(format, Format::Html) && text.trim().len() < 200 {
+        if let Some(read) = jina_reader(&f.final_url).await {
+            return Ok(AgentToolResult::text(truncate_or_spill(&format!("{source} (read via r.jina.ai)"), &read, "md")).with_details(details));
+        }
+    }
     if text.trim().is_empty() {
         return Ok(AgentToolResult::text(format!("{source} returned no readable text ({}). It may need JavaScript — try the browser tools.", f.mime)).with_details(details));
     }

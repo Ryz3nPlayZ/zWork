@@ -83,8 +83,46 @@ pub async fn execute_web_search(params: &Value) -> Result<String, String> {
         if let Some(results) = exa_search(&query, max_results).await {
             return Ok(format!("Results for: {}\n\n{}", query, results));
         }
+        if let Some(results) = duckduckgo(&query, max_results).await {
+            return Ok(format!("Results for: {}\n\n{}", query, results));
+        }
     }
     google_news(&query, max_results).await
+}
+
+/// Second source when Exa is rate-limited: DuckDuckGo's no-JavaScript results page (free, no key).
+/// shortcut: scrapes HTML class names; returns None (falls to Google News) if DuckDuckGo changes them or shows a challenge.
+async fn duckduckgo(query: &str, max_results: usize) -> Option<String> {
+    let html = reqwest::Client::builder().timeout(Duration::from_secs(12)).build().ok()?
+        .get("https://html.duckduckgo.com/html/")
+        .query(&[("q", query)])
+        .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15")
+        .send().await.ok()?
+        .text().await.ok()?;
+    parse_duckduckgo(&html, max_results)
+}
+
+fn parse_duckduckgo(html: &str, max_results: usize) -> Option<String> {
+    let link = regex::Regex::new(r#"class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>"#).ok()?;
+    let snippet = regex::Regex::new(r#"class="result__snippet"[^>]*>(.*?)</a>"#).ok()?;
+    let tags = regex::Regex::new(r"<[^>]+>").ok()?;
+    let clean = |s: &str| tags.replace_all(s, "").replace("&amp;", "&").replace("&#x27;", "'").replace("&quot;", "\"").trim().to_string();
+    let snippets: Vec<String> = snippet.captures_iter(html).map(|c| clean(&c[1])).collect();
+    let rows: Vec<String> = link.captures_iter(html)
+        .filter_map(|c| {
+            let href = c[1].replace("&amp;", "&");
+            // Result links go through DuckDuckGo's redirect: //duckduckgo.com/l/?uddg=<encoded url>&...
+            let url = match reqwest::Url::parse(&format!("https:{href}")) {
+                Ok(u) if href.contains("uddg=") => u.query_pairs().find(|(k, _)| k == "uddg")?.1.into_owned(),
+                _ => href,
+            };
+            (!url.contains("duckduckgo.com/y.js")).then(|| (clean(&c[2]), url)) // skip ads
+        })
+        .take(max_results)
+        .enumerate()
+        .map(|(i, (title, url))| format!("Title: {title}\nURL: {url}\n{}", snippets.get(i).map(String::as_str).unwrap_or("")))
+        .collect();
+    (!rows.is_empty()).then(|| rows.join("\n\n---\n\n"))
 }
 
 /// Fallback, and the only source for an empty query (top headlines).
@@ -158,7 +196,15 @@ async fn google_news(query: &str, max_results: usize) -> Result<String, String> 
 
 #[cfg(test)]
 mod tests {
-    use super::parse_exa_reply;
+    use super::{parse_duckduckgo, parse_exa_reply};
+
+    #[test]
+    fn duckduckgo_parsing() {
+        let html = r#"<a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fa.com%2Fx&amp;rut=1">A &amp; B</a>
+            <a class="result__snippet" href="x">first <b>hit</b></a>"#;
+        assert_eq!(parse_duckduckgo(html, 5).unwrap(), "Title: A & B\nURL: https://a.com/x\nfirst hit");
+        assert!(parse_duckduckgo("<html>challenge</html>", 5).is_none());
+    }
 
     #[test]
     fn exa_reply_parsing() {
