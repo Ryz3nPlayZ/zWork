@@ -65,6 +65,8 @@ export interface Look {
   glow: GlowStyle;
   /** The typeface zWork's replies are set in. */
   messageFont: MessageFont;
+  /** Chat text size in px (13–19), for replies and your own messages. */
+  messageSize: number;
   /** The THEME_PRESETS entry this look came from; null once edited. */
   preset: string | null;
 }
@@ -101,6 +103,7 @@ export const DEFAULT_LOOK: Look = {
   surface: "flat",
   glow: "auto",
   messageFont: "sans",
+  messageSize: 15,
   preset: null,
 };
 
@@ -202,6 +205,7 @@ export function sanitizeLook(raw: unknown): Look {
     surface: r.surface === "3d" ? "3d" : "flat",
     glow: GLOW_STYLES.includes(r.glow) ? r.glow : d.glow,
     messageFont: Object.keys(MESSAGE_FONTS).includes(r.messageFont) ? (r.messageFont as MessageFont) : d.messageFont,
+    messageSize: clamp(r.messageSize, 13, 19, d.messageSize),
     preset: typeof r.preset === "string" ? r.preset : null,
   };
 }
@@ -272,8 +276,8 @@ export function applyPreset(p: ThemePreset): void {
   saveCustomColors(p.colors);
   setSchemePref(CUSTOM_SCHEME_ID);
   // The glow and message font are the person's, not the preset's.
-  const { glow, messageFont } = loadLook();
-  saveLook({ ...DEFAULT_LOOK, ...p.look, glow, messageFont, preset: p.id });
+  const { glow, messageFont, messageSize } = loadLook();
+  saveLook({ ...DEFAULT_LOOK, ...p.look, glow, messageFont, messageSize, preset: p.id });
 }
 
 /**
@@ -409,6 +413,7 @@ let resizeHooked = false;
 export function applyWallpaper(look: Look = loadLook()): void {
   const root = document.documentElement;
   root.style.setProperty("--message-font", MESSAGE_FONTS[look.messageFont].css);
+  root.style.setProperty("--message-size", `${look.messageSize}px`);
   // The floating overlay window has no sidebar or pane to sit behind.
   if (root.classList.contains("overlay-window")) return;
   root.classList.toggle("surface-3d", look.surface === "3d");

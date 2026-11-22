@@ -545,6 +545,19 @@ export function AppearanceSettings() {
             ))}
           </Select>
         </Row>
+        <Row label="Chat text size" hint="Replies and your own messages.">
+          <Slider
+            label="Chat text size"
+            value={look.messageSize}
+            min={13}
+            max={19}
+            unit="px"
+            onChange={(messageSize) => patch({ messageSize, preset: look.preset })}
+          />
+          <Button disabled={look.messageSize === 15} onClick={() => patch({ messageSize: 15, preset: look.preset })}>
+            Reset
+          </Button>
+        </Row>
         <Row label="Voice glow" hint="The light around the message box while you dictate. Match theme is rainbow on plain themes and the accent on colored ones.">
           <Select label="Voice glow" value={look.glow} onChange={(glow) => patch({ glow, preset: look.preset })}>
             {GLOW_STYLES.map((g) => (

@@ -311,7 +311,7 @@ export function AssistantMarkdown({
           }
           // Inline code
           return (
-            <code className="rounded bg-paper-sunken px-1.5 py-0.5 text-[13px] font-mono text-ink" {...props}>
+            <code className="rounded bg-paper-sunken px-1.5 py-0.5 text-[0.8667em] font-mono text-ink" {...props}>
               {children}
             </code>
           );
@@ -323,13 +323,13 @@ export function AssistantMarkdown({
           return <p className="mb-4 last:mb-0 leading-[1.7]"><span className="sel-text">{children}</span></p>;
         },
         h1({ children }) {
-          return <h1 className="mb-2 mt-5 text-[19px] font-bold text-ink"><span className="sel-text">{children}</span></h1>;
+          return <h1 className="mb-2 mt-5 text-[1.2667em] font-bold text-ink"><span className="sel-text">{children}</span></h1>;
         },
         h2({ children }) {
-          return <h2 className="mb-2 mt-6 text-[17px] font-semibold text-ink first:mt-0"><span className="sel-text">{children}</span></h2>;
+          return <h2 className="mb-2 mt-6 text-[1.1333em] font-semibold text-ink first:mt-0"><span className="sel-text">{children}</span></h2>;
         },
         h3({ children }) {
-          return <h3 className="mb-1.5 mt-5 text-[15px] font-semibold text-ink first:mt-0"><span className="sel-text">{children}</span></h3>;
+          return <h3 className="mb-1.5 mt-5 text-[1em] font-semibold text-ink first:mt-0"><span className="sel-text">{children}</span></h3>;
         },
         ul({ children }) {
           return <ul className="mb-4 list-disc space-y-1.5 pl-5 marker:text-ink-faint">{children}</ul>;
@@ -350,7 +350,7 @@ export function AssistantMarkdown({
         table({ children }) {
           return (
             <div className="my-2 overflow-x-auto">
-              <table className="w-full border-collapse text-[13px]">{children}</table>
+              <table className="w-full border-collapse text-[0.8667em]">{children}</table>
             </div>
           );
         },
@@ -447,7 +447,7 @@ function UserBubble({
         <div className="relative">
           <div
             className={cn(
-              "rounded-[20px] bg-state-selected px-4 py-2.5 text-[15px] leading-[24px] text-ink break-words whitespace-pre-wrap",
+              "rounded-[20px] bg-state-selected px-4 py-2.5 text-[length:var(--message-size,15px)] leading-[1.6] text-ink break-words whitespace-pre-wrap",
               beingEdited && "outline-dashed outline-1 outline-line-strong",
             )}
           >
@@ -790,7 +790,7 @@ export function Message({
     <div className="group flex w-full gap-3 justify-start">
       <AssistantMark orbState={streaming ? orbStateForParts(parts) : null} />
       <div className="min-w-0 flex-1 max-w-[min(92%,660px)]">
-        <div className="font-[family-name:var(--message-font)] text-[15px] leading-[26px] text-ink">
+        <div className="font-[family-name:var(--message-font)] text-[length:var(--message-size,15px)] leading-[1.7333] text-ink">
           {hasProcess && (
             <ProcessPanel
               parts={parts}
