@@ -1425,6 +1425,7 @@ export type StreamEvent =
   | { type: "todo_update"; todos: Array<{ id: string; content: string; status: "pending" | "in_progress" | "completed" }> }
   | { type: "queue"; items: QueuedItem[] }
   | { type: "user_message"; text: string; assistant_id?: string }
+  | { type: "queued"; entry_id: string }
   | { type: "message_ids"; user?: string | null; assistant?: string }
   | { type: "run_state"; live: boolean; run_id?: string; cursor?: number; started_at?: number };
 
@@ -1862,6 +1863,8 @@ export async function streamChat(
     web_search_enabled?: boolean;
     effort?: string;
     history?: { role: "user" | "assistant"; content: string }[];
+    /** Watch the chat's run that is already going (after a reload) instead of sending a message. */
+    resume?: boolean;
   },
   onEvent: (evt: StreamEvent) => void,
   signal?: AbortSignal,
@@ -1889,6 +1892,7 @@ export async function streamChat(
   let liveChatId =
     body.chat_id && !body.chat_id.startsWith("tmp_") ? body.chat_id : undefined;
   let lastSeq: number | undefined;
+  let runGone = false;
   const noteEvent = (evt: any) => {
     sawEvent = true;
     if (evt.type === "chat" && typeof evt.id === "string" && !evt.id.startsWith("tmp_")) {
@@ -1975,7 +1979,9 @@ export async function streamChat(
     // first bus event), from 0 so nothing is missed. The replay can include
     // the chat's history and the prompt's own entry; the sidecar only sends
     // queued messages as user_message, so neither comes back as a bubble.
-    const url = u(`/api/chats/${liveChatId}/run/live`) + `?after=${lastSeq ?? 0}`;
+    // A resume starts from now (no `after`): the reloaded chat already shows what the run saved so far.
+    const after = lastSeq ?? (body.resume ? undefined : 0);
+    const url = u(`/api/chats/${liveChatId}/run/live`) + (after === undefined ? "" : `?after=${after}`);
     let resp: Response;
     try {
       resp = await fetch(url, {
@@ -2006,6 +2012,7 @@ export async function streamChat(
         if (evt?.type === "run_state") {
           headerSeen = true;
           if (!evt.live) {
+            runGone = true;
             // No live run (finished while we were disconnected) — cancel
             // the read; the caller falls back to its normal retry path.
             void reader.cancel().catch(() => {});
@@ -2033,6 +2040,18 @@ export async function streamChat(
     }
     return headerSeen;
   };
+
+  if (body.resume) {
+    // shortcut: events between the reload's chat fetch and this attach are missed (a few deltas at most); attach before the fetch if that shows.
+    for (let tries = 0; tries < 5; tries++) {
+      const attached = await attachLive();
+      if (sawTerminal || sawServerError) return;
+      if (!attached || runGone) break;
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    onEvent({ type: "end" } as StreamEvent);
+    return;
+  }
 
   while (true) {
     try {

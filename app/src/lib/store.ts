@@ -832,6 +832,8 @@ interface AppState {
       planMode?: boolean;
       autoApproveDestructive?: boolean;
       attachments?: SendAttachment[];
+      /** Re-attach to the chat's run that is still going (after a reload); `text` is ignored. */
+      resume?: boolean;
     },
   ) => Promise<void>;
   retry: () => Promise<void>;
@@ -1816,6 +1818,8 @@ export const useApp = create<AppState>((set, get) => ({
             },
           },
         }));
+        // The run outlived a reload or a closed window: show it working and keep streaming it.
+        if (full.running && get().activeChatId === id) void get().send("", { resume: true });
       } catch (e) {
         // Fallback to cache if available
         const allChats = readCachedChats();
@@ -2233,8 +2237,9 @@ export const useApp = create<AppState>((set, get) => ({
 
   send: async (text, options) => {
     const attachments = options?.attachments ?? [];
-    const trimmed = text.trim();
-    if (!trimmed && attachments.length === 0) return;
+    const resume = !!options?.resume;
+    const trimmed = resume ? "" : text.trim();
+    if (!resume && !trimmed && attachments.length === 0) return;
 
     const runId = uid();
     const currentId = get().view === "projects" ? null : get().activeChatId;
@@ -2288,13 +2293,13 @@ export const useApp = create<AppState>((set, get) => ({
       const chat: Chat = existing
         ? {
           ...existing,
-          messages: [...existing.messages, userMsg],
+          messages: resume ? existing.messages : [...existing.messages, userMsg],
           working: true,
           status: "Thinking",
           error: undefined,
           needsSetup: false,
-          lastUserMessage: userMsgText || chatTitle,
-          activities: [],
+          lastUserMessage: resume ? existing.lastUserMessage : userMsgText || chatTitle,
+          activities: resume ? existing.activities : [],
           updatedAt: Date.now(),
         }
         : {
@@ -2320,9 +2325,12 @@ export const useApp = create<AppState>((set, get) => ({
       };
     });
 
-    // Prepare assistant message placeholder for streaming
-    const asstId = uid();
-    set((s) => {
+    // Prepare assistant message placeholder for streaming; a resume keeps
+    // streaming into the reply the run has been writing.
+    const resumeMsgs = resume ? get().chats[localId]?.messages ?? [] : [];
+    const resumeTarget = resumeMsgs[resumeMsgs.length - 1];
+    const asstId = resumeTarget?.role === "assistant" ? resumeTarget.id : uid();
+    if (asstId !== resumeTarget?.id) set((s) => {
       const c = s.chats[localId]!;
       return {
         chats: {
@@ -2396,6 +2404,7 @@ export const useApp = create<AppState>((set, get) => ({
           web_search_enabled: get().webSearchEnabled,
           effort: get().effort,
           history: priorHistory,
+          resume,
         },
         (evt) => {
           // Any event means the stream is alive — push the silence watchdog
@@ -2943,6 +2952,24 @@ export const useApp = create<AppState>((set, get) => ({
                 return { chats: { ...s.chats, [localId]: { ...c, messages } } };
               });
             }
+          } else if (evt.type === "queued") {
+            // The chat's earlier run was still going (the app had lost track of it), so the
+            // sidecar queued this message onto it. Drop the optimistic bubbles, show the queue
+            // chip, and keep streaming the run's own reply; user_message brings the bubble back.
+            set((s) => {
+              const c = s.chats[localId];
+              if (!c) return s;
+              const msgs = c.messages.filter((m) => m.id !== userMsg.id && m.id !== asstId);
+              const last = msgs[msgs.length - 1];
+              if (last?.role === "assistant") activeAsstId = last.id;
+              const queuedItems = [
+                ...(c.queuedItems ?? []),
+                { entry_id: evt.entry_id, kind: "follow_up", text: trimmed } as QueuedItem,
+              ];
+              // The send cleared the live activity list; the run's reply still owns its steps.
+              const activities = last?.role === "assistant" ? last.activities ?? [] : c.activities;
+              return { chats: { ...s.chats, [localId]: { ...c, messages: msgs, activities, queuedItems, status: "Working" } } };
+            });
           } else if (evt.type === "user_message") {
             // A queued message (steer / follow-up / next-run) was consumed
             // and committed mid-run: it becomes a real user bubble, and the

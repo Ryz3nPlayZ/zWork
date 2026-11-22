@@ -861,7 +861,32 @@ pub async fn chat_run_live(
 // SSE Chat Stream Endpoint
 pub async fn chat_stream_route(
     Json(req): Json<ChatStreamRequest>,
-) -> impl IntoResponse {
+) -> axum::response::Response {
+    // One run per chat: a message for a chat whose run is still going (a second
+    // window, a send racing a reload) joins that run's queue instead of starting
+    // a parallel run on the same history. The client then keeps watching the run.
+    // shortcut: attachments still start a new run (the queue carries text only); queue them too if that bites.
+    if let (Some(existing), true) = (req.chat_id.as_deref(), req.attachments.is_empty()) {
+        let wire = |val: Value| Ok::<Event, Infallible>(Event::default().data(serde_json::to_string(&val).unwrap_or_default()));
+        match crate::agent::run_state::queue_follow_up(existing, &req.message).await {
+            crate::agent::run_state::QueueOutcome::NotBusy => {}
+            crate::agent::run_state::QueueOutcome::Done(entry_id) => {
+                let head = futures_util::stream::iter(vec![json!({ "type": "queued", "entry_id": entry_id })]);
+                let live = crate::agent::run_state::attach_or_idle(existing, None);
+                return Sse::new(head.chain(live).map(wire))
+                    .keep_alive(axum::response::sse::KeepAlive::default())
+                    .into_response();
+            }
+            crate::agent::run_state::QueueOutcome::Failed(error) => {
+                let events = vec![
+                    json!({ "type": "error", "text": format!("zWork is still working on this chat and couldn't queue your message: {error}") }),
+                    json!({ "type": "end" }),
+                ];
+                return Sse::new(futures_util::stream::iter(events).map(wire)).into_response();
+            }
+        }
+    }
+
     let chat_id = req.chat_id.unwrap_or_else(|| {
         let title = req.new_chat_title.as_deref().unwrap_or("New chat");
         let mut chat = chatstore::create(
@@ -914,7 +939,7 @@ pub async fn chat_stream_route(
         Ok::<Event, Infallible>(Event::default().data(s))
     });
 
-    Sse::new(mapped).keep_alive(axum::response::sse::KeepAlive::default())
+    Sse::new(mapped).keep_alive(axum::response::sse::KeepAlive::default()).into_response()
 }
 
 // Onboarding Structs and Handlers
