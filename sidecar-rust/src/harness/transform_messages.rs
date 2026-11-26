@@ -58,6 +58,48 @@ fn downgrade_unsupported_images(messages: Vec<Message>, model: &Model) -> Vec<Me
         .collect()
 }
 
+/// Tools whose results are big snapshots of something that changes (a screen,
+/// a page). Older ones are shortened before each request; the saved transcript
+/// keeps them in full.
+const OBSERVATION_TOOLS: &[&str] = &["desktop_capture", "browser_snapshot", "browser_screenshot", "web_fetch"];
+/// Results this recent are never shortened.
+const KEEP_RECENT_RESULTS: usize = 3;
+const SHORTEN_OVER_CHARS: usize = 2000;
+const SHORTENED_HEAD_CHARS: usize = 600;
+const SHORTENED_NOTE: &str = "[Older result shortened to save space. Run the tool again if you need it in full.]";
+
+/// Shorten older screen reads and web pages so they stop riding along on every
+/// later request. Kept in full: the last few results of any kind, and the
+/// newest result of each observation tool. A result is shortened once (when
+/// it falls out of the window), so the cached prompt prefix changes rarely.
+fn shorten_old_observations(mut messages: Vec<Message>) -> Vec<Message> {
+    let results: Vec<usize> = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| matches!(m, Message::ToolResult(_)))
+        .map(|(i, _)| i)
+        .collect();
+    if results.len() <= KEEP_RECENT_RESULTS {
+        return messages;
+    }
+    let cutoff = results[results.len() - KEEP_RECENT_RESULTS];
+    let mut newest_seen: HashSet<String> = HashSet::new();
+    for i in results.into_iter().rev() {
+        let Message::ToolResult(t) = &mut messages[i] else { continue };
+        if !OBSERVATION_TOOLS.contains(&t.tool_name.as_str()) || newest_seen.insert(t.tool_name.clone()) || i >= cutoff {
+            continue;
+        }
+        let text = t.text();
+        let has_image = t.content.iter().any(|c| matches!(c, UserContent::Image(_)));
+        if text.chars().count() <= SHORTEN_OVER_CHARS && !has_image {
+            continue;
+        }
+        let head: String = text.chars().take(SHORTENED_HEAD_CHARS).collect();
+        t.content = vec![UserContent::text(format!("{head}\n{SHORTENED_NOTE}"))];
+    }
+    messages
+}
+
 /// Normalize a transcript for `model`. `normalize_tool_call_id` runs only
 /// for tool calls produced by a *different* model/provider.
 pub fn transform_messages(
@@ -66,7 +108,7 @@ pub fn transform_messages(
     normalize_tool_call_id: Option<&dyn Fn(&str) -> String>,
 ) -> Vec<Message> {
     let mut id_map: HashMap<String, String> = HashMap::new();
-    let image_aware = downgrade_unsupported_images(messages, model);
+    let image_aware = downgrade_unsupported_images(shorten_old_observations(messages), model);
 
     // First pass: thinking-block + tool-call-id transforms.
     let transformed: Vec<Message> = image_aware
@@ -257,6 +299,43 @@ mod tests {
             thought_signature: None,
             namespace: None,
         })
+    }
+
+    fn result(name: &str, text: &str) -> Message {
+        Message::ToolResult(ToolResultMessage {
+            tool_call_id: format!("{name}-{}", text.len()),
+            tool_name: name.into(),
+            content: vec![UserContent::text(text)],
+            details: None,
+            usage: None,
+            is_error: false,
+            timestamp: 0,
+        })
+    }
+
+    #[test]
+    fn older_screen_reads_and_pages_are_shortened() {
+        let big = "x".repeat(5000);
+        let msgs = vec![
+            result("desktop_capture", &big),       // old capture: shortened
+            result("web_fetch", &format!("{big}a")), // old page: shortened
+            result("read", &big),                   // not an observation tool: kept
+            result("web_fetch", &format!("{big}b")), // newest page: kept
+            result("desktop_capture", &format!("{big}c")), // newest capture: kept
+            result("bash", "ok"),
+            result("bash", "ok"),
+        ];
+        let out = shorten_old_observations(msgs);
+        let len = |m: &Message| match m {
+            Message::ToolResult(t) => t.text().len(),
+            _ => 0,
+        };
+        assert!(len(&out[0]) < 1000 && len(&out[1]) < 1000);
+        assert_eq!(len(&out[2]), 5000);
+        assert!(len(&out[3]) > 5000 && len(&out[4]) > 5000);
+        // Few results: nothing changes.
+        let few = shorten_old_observations(vec![result("desktop_capture", &big), result("desktop_capture", &big)]);
+        assert_eq!(len(&few[0]), 5000);
     }
 
     #[test]
