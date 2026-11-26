@@ -25,6 +25,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 mod admin_insights;
+mod log_reports;
 
 #[derive(Clone)]
 struct AppState {
@@ -927,6 +928,8 @@ struct AnalyticsSummary {
     five_hour_used: i64,
     weekly_limit: i64,
     weekly_used: i64,
+    /// When new tasks are allowed again; None while under both budgets.
+    refills_at: Option<String>,
     /// Runs a free user may still have escalated to the stronger model in
     /// this 30 days; None on paid plans.
     free_escalations_left: Option<i64>,
@@ -1756,6 +1759,8 @@ async fn bootstrap_schema(db: &PgPool) -> Result<(), sqlx::Error> {
     .execute(db)
     .await?;
 
+    log_reports::ensure_table(db).await?;
+
     Ok(())
 }
 
@@ -2202,6 +2207,37 @@ async fn spent_usd(state: &AppState, user_id: &str, plan: &str, hours: i64) -> R
     .fetch_one(&state.db)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+/// When a user over a window's budget is back under it, assuming no more use:
+/// the moment enough of their oldest spend in the window ages out. None when
+/// already under.
+async fn back_under_at(state: &AppState, user_id: &str, plan: &str, hours: i64, limit_usd: f64) -> Option<DateTime<Utc>> {
+    sqlx::query_scalar(
+        r#"
+        SELECT created_at + make_interval(hours => $2::int)
+        FROM (
+            SELECT created_at,
+                   SUM(estimated_cost_usd) OVER (ORDER BY created_at, id) AS cum,
+                   SUM(estimated_cost_usd) OVER () AS total
+            FROM gateway_requests
+            WHERE user_id = $1
+              AND created_at >= NOW() - make_interval(hours => $2::int)
+              AND NOT ($3 AND (COALESCE(route, '') = 'escalated' OR COALESCE(model_tier, '') = 'zwork-pro'))
+        ) w
+        WHERE total >= $4 AND total - cum < $4
+        ORDER BY created_at
+        LIMIT 1
+        "#,
+    )
+    .bind(user_id)
+    .bind(hours as i32)
+    .bind(plan_rank(plan) == 0)
+    .bind(limit_usd)
+    .fetch_optional(&state.db)
+    .await
+    .ok()
+    .flatten()
 }
 
 /// Gate a request on plan access and spend. Usage is metered in dollars of
@@ -7245,6 +7281,11 @@ async fn analytics_summary(
     let weekly_used = usd_to_units(&state, spent_usd(&state, &user.user_id, &user.tier, 24 * 7).await?);
     let five_hour_limit = usd_to_units(&state, limits.five_hour_usd).max(1);
     let weekly_limit = usd_to_units(&state, limits.weekly_usd).max(1);
+    // New tasks are refused while either window is spent; say when both are clear.
+    let refills_at = back_under_at(&state, &user.user_id, &user.tier, 5, limits.five_hour_usd)
+        .await
+        .max(back_under_at(&state, &user.user_id, &user.tier, 24 * 7, limits.weekly_usd).await)
+        .map(|t| t.to_rfc3339());
     let free_escalations_left = if plan_rank(&user.tier) == 0 {
         Some((state.gateway.free_escalations_30d - free_escalations_used(&state, &user.user_id).await?).max(0))
     } else {
@@ -7458,6 +7499,7 @@ async fn analytics_summary(
         five_hour_used,
         weekly_limit,
         weekly_used,
+        refills_at,
         free_escalations_left,
         free_escalations_limit: state.gateway.free_escalations_30d,
         past_week,
@@ -7934,6 +7976,30 @@ async fn main() {
             config: demo_governor_conf,
         });
 
+    // "Send logs" from the desktop app needs no sign-in, so cap it per IP:
+    // one report every 20 seconds, 3 at once.
+    let log_governor_conf = Arc::new(
+        GovernorConfigBuilder::default()
+            .per_second(20)
+            .burst_size(3)
+            .key_extractor(SmartIpKeyExtractor)
+            .finish()
+            .expect("valid log report governor config"),
+    );
+    let log_governor_limiter = log_governor_conf.limiter().clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            log_governor_limiter.retain_recent();
+        }
+    });
+    let log_report_routes = Router::new()
+        .route("/api/logs/report", post(log_reports::submit))
+        .layer(GovernorLayer {
+            config: log_governor_conf,
+        });
+
     // Snapshot GitHub release downloads hourly so the admin downloads chart
     // has a daily series even on days nobody opens the dashboard.
     let snapshot_state = state.clone();
@@ -7994,6 +8060,7 @@ async fn main() {
             put(admin_update_user_tier),
         )
         .route("/api/admin/audit", get(admin_audit_list))
+        .route("/api/admin/log-reports/:code", get(log_reports::admin_get))
         // Composio proxy
         .route("/api/composio/status", get(composio_status))
         .route("/api/composio/accounts", get(composio_accounts))
@@ -8018,6 +8085,7 @@ async fn main() {
         )
         .merge(auth_routes)
         .merge(demo_routes)
+        .merge(log_report_routes)
         .layer(cors)
         .layer(
             TraceLayer::new_for_http()
