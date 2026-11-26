@@ -701,6 +701,24 @@ export const api = {
     return body as { ok: boolean; path: string; revealed: boolean };
   },
 
+  /** Sends the app's error logs (keys and chat text removed) to the zWork
+   *  team. Resolves to the short code the user passes on. */
+  sendLogs: async () => {
+    const r = await localFetch("/api/logs/send", { method: "POST" });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok || !body.code) throw new Error(body.error || "Couldn't send the logs. Try again.");
+    return body.code as string;
+  },
+
+  /** Opens the folder that holds zWork's log files. */
+  openLogFolder: async () => {
+    const r = await localFetch("/api/logs/open", { method: "POST" });
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}));
+      throw new Error(body.error || "Couldn't open the log folder.");
+    }
+  },
+
   /** An image zWork made (outputs folder only), as a same-origin blob so the
    *  WebGL reveal can draw it. */
   outputImage: async (path: string) => {
