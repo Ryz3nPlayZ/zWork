@@ -157,6 +157,9 @@ struct GatewayConfig {
     /// A run the classifier escalated goes back to Flash after this many
     /// calls on the stronger model (0 = never).
     escalated_handback_calls: i64,
+    /// Send runs with a new image to the Vision route (Gemini). Off: they
+    /// stay on Flash, whose models read images too.
+    vision_for_images: bool,
     /// How far past the budget a run already under way may go.
     continuation_headroom: f64,
     /// Dollars per usage unit shown in the app (≈ one typical Flash message).
@@ -392,20 +395,34 @@ fn request_has_tools(body: &Value) -> bool {
     body.get("tools").and_then(|t| t.as_array()).is_some_and(|t| !t.is_empty())
 }
 
+/// An image in the newest messages: those after the model's last reply (the
+/// user's new message, or the tool results it is about to read). Older
+/// screenshots in the history don't count.
+fn latest_has_images(body: &Value) -> bool {
+    let messages = request_messages(body);
+    let start = messages
+        .iter()
+        .rposition(|m| m.get("role").and_then(|r| r.as_str()) == Some("assistant"))
+        .map_or(0, |i| i + 1);
+    messages[start..].iter().any(|m| value_has_images(m))
+}
+
 /// An image anywhere in the conversation (OpenAI `image_url`, Anthropic
 /// `image`, Responses-style `input_image`).
+#[cfg(test)]
 fn request_has_images(body: &Value) -> bool {
-    fn walk(v: &Value) -> bool {
-        match v {
-            Value::Array(items) => items.iter().any(walk),
-            Value::Object(obj) => {
-                matches!(obj.get("type").and_then(|t| t.as_str()), Some("image_url" | "image" | "input_image"))
-                    || obj.values().any(walk)
-            }
-            _ => false,
+    request_messages(body).iter().any(value_has_images)
+}
+
+fn value_has_images(v: &Value) -> bool {
+    match v {
+        Value::Array(items) => items.iter().any(value_has_images),
+        Value::Object(obj) => {
+            matches!(obj.get("type").and_then(|t| t.as_str()), Some("image_url" | "image" | "input_image"))
+                || obj.values().any(value_has_images)
         }
+        _ => false,
     }
-    request_messages(body).iter().any(walk)
 }
 
 fn content_text(content: &Value) -> String {
@@ -462,7 +479,9 @@ fn strip_turn_context(text: &str) -> String {
 /// over and over, or most recent tool results being errors.
 #[derive(Debug, Default, PartialEq)]
 struct StruggleSignals {
-    /// Most times one identical tool call appears among the last 8.
+    /// Longest stretch of one identical tool call made back to back, among
+    /// the last 8. Looking again between actions (capture, act, capture) is
+    /// normal work, so only calls in a row count.
     repeated_call: usize,
     /// Errors among the last 6 tool results.
     recent_errors: usize,
@@ -498,11 +517,12 @@ fn struggle_signals(body: &Value) -> StruggleSignals {
         }
     }
     let recent_calls = &calls[calls.len().saturating_sub(8)..];
-    let repeated_call = recent_calls
-        .iter()
-        .map(|c| recent_calls.iter().filter(|o| *o == c).count())
-        .max()
-        .unwrap_or(0);
+    let mut repeated_call = 0;
+    let mut streak = 0;
+    for (i, c) in recent_calls.iter().enumerate() {
+        streak = if i > 0 && recent_calls[i - 1] == *c { streak + 1 } else { 1 };
+        repeated_call = repeated_call.max(streak);
+    }
     let recent_errors = results[results.len().saturating_sub(6)..].iter().filter(|e| **e).count();
     StruggleSignals { repeated_call, recent_errors }
 }
@@ -603,11 +623,12 @@ async fn free_escalations_used(state: &AppState, user_id: &str) -> Result<i64, S
 ///
 /// - `zwork-apex` is always Sol.
 /// - A run keeps the route of its earlier calls; it moves up to `Escalated`
-///   when the request shows it struggling, or to `Vision` once images appear.
+///   when the request shows it struggling. Images stay on Flash, whose models
+///   all read them, unless `vision_for_images` sends them to `Vision`.
 ///   A run the classifier escalated goes back to Flash once, after
 ///   `escalated_handback_calls` calls on the stronger model.
-/// - A new run is escalated when the classifier calls it hard, goes to
-///   `Vision` when it has images, and otherwise runs on Flash (or, for a
+/// - A new run is escalated when the classifier calls it hard, and otherwise
+///   runs on Flash (or, for a
 ///   small slice of paid runs, an A/B model).
 ///
 /// Only agent requests (ones that carry tools) are classified or escalated,
@@ -625,7 +646,10 @@ async fn choose_route(
         return (Route::Apex, serde_json::json!({ "reason": "apex" }));
     }
     let has_tools = request_has_tools(body);
-    let has_images = request_has_images(body);
+    // Every Flash model reads images, so a screenshot only moves a run to
+    // the Vision route when `ROUTER_VISION_FOR_IMAGES` is on.
+    let has_images = latest_has_images(body);
+    let to_vision = has_images && state.gateway.vision_for_images;
     let paid = user.is_some_and(|u| plan_rank(&u.tier) > 0);
 
     let (prior, calls_in_run): (Option<String>, i64) = match user {
@@ -696,7 +720,7 @@ async fn choose_route(
                 }
             }
         }
-        if has_images && matches!(route, Route::Flash | Route::AbLuna | Route::AbHaiku | Route::AbGlm) {
+        if to_vision && matches!(route, Route::Flash | Route::AbLuna | Route::AbHaiku | Route::AbGlm) {
             return (Route::Vision, serde_json::json!({ "reason": "images", "from": route.as_str() }));
         }
         return (route, serde_json::json!({ "reason": "sticky" }));
@@ -707,7 +731,7 @@ async fn choose_route(
         if hard {
             return (Route::Escalated, serde_json::json!({ "reason": "classifier", "classifier_cost_usd": cost }));
         }
-        if has_images {
+        if to_vision {
             return (Route::Vision, serde_json::json!({ "reason": "images", "classifier_cost_usd": cost }));
         }
         if let Some(ab) = ab_route(run_id, if paid { state.gateway.router_ab_percent } else { 0 }) {
@@ -715,7 +739,7 @@ async fn choose_route(
         }
         return (Route::Flash, serde_json::json!({ "reason": "classifier_easy", "classifier_cost_usd": cost }));
     }
-    if has_images {
+    if to_vision {
         return (Route::Vision, serde_json::json!({ "reason": "images" }));
     }
     (Route::Flash, serde_json::json!({ "reason": "default" }))
@@ -745,11 +769,16 @@ fn load_gateway_providers() -> Vec<GatewayProvider> {
     ]
 }
 
-/// Ask OpenRouter to report the billed cost in the response's `usage`, and
-/// pass the effort level through as its unified `reasoning` parameter.
-fn prepare_upstream_body(body: &mut Value, model: &str) {
+/// Ask OpenRouter to report the billed cost in the response's `usage`, pass
+/// the effort level through as its unified `reasoning` parameter, and send
+/// the run id as `session_id` so every call of a run goes to the same
+/// provider and reuses its prompt cache.
+fn prepare_upstream_body(body: &mut Value, model: &str, run_id: &str) {
     let Some(obj) = body.as_object_mut() else { return };
     obj.insert("model".to_string(), Value::String(model.to_string()));
+    if !run_id.is_empty() && !obj.contains_key("session_id") {
+        obj.insert("session_id".to_string(), Value::String(run_id.chars().take(256).collect()));
+    }
     obj.insert("usage".to_string(), serde_json::json!({ "include": true }));
     // Effort may arrive as OpenAI's `reasoning_effort`; OpenRouter's own
     // `reasoning.effort` wins when both are set.
@@ -2948,7 +2977,7 @@ async fn ai_proxy(
         let attempt_number = attempt_index as i32 + 1;
         let attempt_started = Utc::now();
         let mut attempt_body = body_json.clone();
-        prepare_upstream_body(&mut attempt_body, model_name);
+        prepare_upstream_body(&mut attempt_body, model_name, &run_id);
         if wants_stream {
             if let Some(obj) = attempt_body.as_object_mut() {
                 obj.insert("stream_options".to_string(), serde_json::json!({ "include_usage": true }));
@@ -3352,7 +3381,7 @@ async fn ai_proxy_anthropic(
         let attempt_number = attempt_index as i32 + 1;
         let attempt_started = Utc::now();
         let mut attempt_body = body_json.clone();
-        prepare_upstream_body(&mut attempt_body, model_name);
+        prepare_upstream_body(&mut attempt_body, model_name, &run_id);
         if let Some(obj) = attempt_body.as_object_mut() {
             obj.insert("stream".to_string(), Value::Bool(true));
         }
@@ -7868,6 +7897,8 @@ async fn main() {
                 .ok()
                 .and_then(|v| v.parse::<i64>().ok())
                 .unwrap_or(6),
+            vision_for_images: std::env::var("ROUTER_VISION_FOR_IMAGES")
+                .is_ok_and(|v| matches!(v.trim(), "1" | "true" | "yes")),
             continuation_headroom: env_f64("CONTINUATION_HEADROOM", 1.5),
             usage_unit_usd: env_f64("USAGE_UNIT_USD", 0.008),
             dev_coupon_codes: std::env::var("DEV_COUPON_CODES")
@@ -8158,6 +8189,17 @@ mod router_tests {
     }
 
     #[test]
+    fn only_new_images_count() {
+        let shot = serde_json::json!({ "role": "tool", "content": [{ "type": "image_url", "image_url": { "url": "data:" } }] });
+        let reply = serde_json::json!({ "role": "assistant", "content": "clicked" });
+        let text = serde_json::json!({ "role": "tool", "content": "ok" });
+        assert!(latest_has_images(&serde_json::json!({ "messages": [reply.clone(), shot.clone()] })));
+        assert!(!latest_has_images(&serde_json::json!({ "messages": [shot.clone(), reply.clone(), text.clone()] })), "old screenshot");
+        assert!(latest_has_images(&serde_json::json!({ "messages": [shot.clone()] })));
+        assert!(!latest_has_images(&serde_json::json!({ "messages": [] })));
+    }
+
+    #[test]
     fn classifier_reads_what_the_user_typed() {
         let prefix = "<turn-context>\n<current-time>2026-11-25 10:00:00</current-time>\n</turn-context>";
         let work = "## Work done so far\n".to_string() + &"earlier step. ".repeat(400);
@@ -8223,6 +8265,16 @@ mod router_tests {
         ]}]});
         assert_eq!(struggle_signals(&anthropic).recent_errors, 3);
 
+        // Look, act, look again: the same capture between actions is fine.
+        let named = |name: &str, args: &str| serde_json::json!({ "role": "assistant", "tool_calls": [{ "function": { "name": name, "arguments": args } }] });
+        let observing = serde_json::json!({ "messages": [
+            named("desktop_capture", "{}"), result("tree"), named("desktop_key", "1"), result("ok"),
+            named("desktop_capture", "{}"), result("tree"), named("desktop_key", "2"), result("ok"),
+            named("desktop_capture", "{}"), result("tree"),
+        ]});
+        assert_eq!(struggle_signals(&observing).repeated_call, 1);
+        assert_eq!(should_escalate(&struggle_signals(&observing), 10, 60), None);
+
         let healthy = serde_json::json!({ "messages": [call("a"), result("ok"), call("b"), result("done")] });
         assert_eq!(should_escalate(&struggle_signals(&healthy), 3, 40), None);
         assert_eq!(should_escalate(&struggle_signals(&healthy), 40, 40), Some("long_run"));
@@ -8232,21 +8284,25 @@ mod router_tests {
     #[test]
     fn upstream_body_gets_model_usage_and_effort() {
         let mut body = serde_json::json!({ "model": "zwork-auto", "reasoning_effort": "high" });
-        prepare_upstream_body(&mut body, MIMO_PRO);
+        prepare_upstream_body(&mut body, MIMO_PRO, "run-1");
         assert_eq!(body["model"], MIMO_PRO);
         assert_eq!(body["usage"]["include"], true);
         assert_eq!(body["reasoning"]["effort"], "high");
         assert!(body.get("reasoning_effort").is_none());
+        assert_eq!(body["session_id"], "run-1");
 
         // Sol can't run with reasoning off; drop the request to disable it.
         for off in [serde_json::json!({ "effort": "none" }), serde_json::json!({ "enabled": false })] {
             let mut body = serde_json::json!({ "model": "zwork-apex", "reasoning": off });
-            prepare_upstream_body(&mut body, GPT_SOL);
+            prepare_upstream_body(&mut body, GPT_SOL, "");
             assert!(body.get("reasoning").is_none());
         }
         let mut body = serde_json::json!({ "model": "zwork-auto", "reasoning": { "effort": "none" } });
-        prepare_upstream_body(&mut body, DEEPSEEK_FLASH);
+        prepare_upstream_body(&mut body, DEEPSEEK_FLASH, "run-1");
         assert_eq!(body["reasoning"]["effort"], "none");
+        let mut body = serde_json::json!({ "session_id": "client" });
+        prepare_upstream_body(&mut body, DEEPSEEK_FLASH, "run-1");
+        assert_eq!(body["session_id"], "client");
     }
 
     #[test]

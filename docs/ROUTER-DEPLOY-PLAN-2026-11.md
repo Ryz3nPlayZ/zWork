@@ -21,6 +21,7 @@ Live is image `cloud-axum_api:latest` (22aa2107, built Nov 22). Its
 | Outlook, OneDrive, Excel, Teams, QuickBooks, Xero connector tiles | yes | tiles show in the storefront |
 | CORS exposes `x-zwork-router-provider` / `-model` to the web app | yes | web app can show the model |
 | Classifier reads the user's words, hand-back after 6 MiMo calls, A/B off, long-run at 60, titles not counted as tasks | this branch | about 25–30% cheaper per task |
+| Images stay on Flash (only new images count), `session_id` per run for provider stickiness, repeat check counts only calls in a row | this branch | vision share about $0.40 cheaper; fewer cache misses and false escalations |
 | New limits: Pro $1.50/wk, Max $6/wk, 5-hour share 0.25, free $0.05–0.25/wk | this branch | 2–3.5× more work per week |
 
 `Cargo.toml`, `Cargo.lock`, `Dockerfile` and `admin_insights.rs` on the VM
@@ -48,10 +49,11 @@ environment and to `~/cloud/.env`.
 | `ROUTER_AB_PERCENT` | 0 |
 | `ROUTER_ESCALATE_AFTER_CALLS` | 60 |
 | `ROUTER_ESCALATED_HANDBACK_CALLS` | 6 |
+| `ROUTER_VISION_FOR_IMAGES` | off |
 
 ## Steps (on approval)
 
-`C` is the commit to deploy: `55ded18` (router changes on top of `main`), or its merge into `main`.
+`C` is the commit to deploy: the tip of `claude/zen-taussig-01eb25` (router changes on top of `main`), or its merge into `main`.
 
 1. **Back up.** On the VM:
    `sudo docker tag cloud-axum_api:latest cloud-axum_api:rollback-20261125`
@@ -90,7 +92,11 @@ Read-only, per day:
 - `handback` runs: their call count and whether they end in an error;
 - spend per agent run, against a median of $0.0024 on Flash and $0.039
   escalated;
-- users at their 5-hour or weekly cap, against 4 of 7 before.
+- users at their 5-hour or weekly cap, against 4 of 7 before;
+- cache reads on calls 2+ of Flash runs (`session_id` should remove most
+  full misses);
+- whether screenshot runs on Flash finish as often as they did on Gemini.
 
-If hand-back runs finish worse, set `ROUTER_ESCALATED_HANDBACK_CALLS=0` in the
+If screenshot runs finish worse on Flash, set `ROUTER_VISION_FOR_IMAGES=1`
+the same way. If hand-back runs finish worse, set `ROUTER_ESCALATED_HANDBACK_CALLS=0` in the
 VM compose environment and recreate the container. No rebuild needed.

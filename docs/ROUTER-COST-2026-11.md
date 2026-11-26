@@ -98,6 +98,36 @@ cost roughly half to a third as much: another $0.20–0.30 a month, 10–13%. It
 only hits while the cache is warm, and at today's traffic it will often be
 cold, so the limits below don't count on it.
 
+## Images, provider stickiness and false "stuck" alarms
+
+**Images stay on Flash.** GLM 5.3 Flash and both DeepSeek V4.1 Flash models
+accept images (OpenRouter model list, `input_modalities`, read 2026-11-25).
+Gemini Flash lists at about 7× their input price and 11× their output price,
+and was 21% of the month's spend ($0.47). Screenshots now stay on Flash, and
+only images in the newest messages count, so an old screenshot no longer
+keeps a run on an image route. Moved to Flash prices, the vision share would
+have cost well under $0.10: a saving of about $0.35–0.40.
+`ROUTER_VISION_FOR_IMAGES=1` turns Gemini back on.
+
+**Cache misses in one run.** A 16-call run on Nov 24 (`ab-glm` arm) missed
+the cache on calls 2, 4 and 11, about 70k of its 103k uncached tokens:
+
+- Calls 1–10 were all GLM 5.3 Flash, first attempt, no failover. Misses on 2
+  and 4 came with no model change, so OpenRouter served them from a different
+  GLM provider than the call before (each provider has its own cache).
+  OpenRouter only keeps a conversation on one provider after it sees a cache
+  hit, and may not at all with `:floor` price sorting. Fix: every call now
+  sends the run id as `session_id`, which OpenRouter uses as the sticky key
+  from the first successful call.
+- Call 11 moved to MiMo (`repeated_tool_call`): `desktop_capture` with the
+  same arguments three times among the last eight calls, with key presses in
+  between. That is normal look-act-look work, not a stuck run. It cost $0.015,
+  over half the run. Fix: only identical calls in a row count.
+
+The gateway doesn't record which OpenRouter provider served a call (that is
+in OpenRouter's `/generation` metadata, not the response), so the provider
+switch is inferred from the cache pattern, not seen directly.
+
 ## New limits
 
 | Setting | Before | After |
@@ -157,6 +187,8 @@ spend in total; the measured month's free spend was $0.93.
 - **Price table.** `estimate_cost` lists DeepSeek Flash at $0.035/$0.14 per
   million; first calls bill about 1.65× that. Only matters where the estimate
   is used without a billed cost.
+- **Record the serving provider.** Store OpenRouter's provider name per call
+  (from `/generation?id=…`) so cache misses can be traced directly.
 - **Measure after deploy.** Count `routing_decision.why.reason` per week:
   `classifier` share should fall from 26%, and `handback` runs should finish
   as often as other runs.
