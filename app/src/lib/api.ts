@@ -343,7 +343,10 @@ async function waitForBackendReady(attempts = 60) {
   let lastError: unknown = null;
   for (let i = 0; i < attempts; i += 1) {
     try {
-      if (i === 0 || (i > 0 && i % 15 === 0)) await invokeBackendCommand("ensure_backend");
+      // Ask the shell to (re)start the backend only after a failed check:
+      // this runs before nearly every request, and a healthy backend needs
+      // nothing from the shell.
+      if (i === 1 || (i > 0 && i % 15 === 0)) await invokeBackendCommand("ensure_backend");
       return await healthFetch();
     } catch (err) {
       lastError = err;

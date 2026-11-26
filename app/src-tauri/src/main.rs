@@ -100,33 +100,98 @@ fn append_log(msg: &str) {
     }
 }
 
-fn backend_http_healthy(token: &str) -> bool {
-    let addr = "127.0.0.1:8787";
+/// What a health probe found. `Busy` (the port took the connection but no
+/// answer came in time) is kept apart from `Down`: a backend deep in a heavy
+/// turn is alive, and killing it ends every chat that is running.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Health {
+    Healthy,
+    /// Nothing listening, the connection dropped, or a reply that isn't ours
+    /// (wrong token from an orphan backend, an error status).
+    Down,
+    /// Connected, but no reply within the timeout.
+    Busy,
+}
+
+fn backend_health(token: &str) -> Health {
     // Use a generous timeout so slow-but-alive backends aren't killed mid-stream.
-    let timeout = Duration::from_secs(5);
-    let mut stream =
-        match TcpStream::connect_timeout(&addr.parse().expect("valid backend addr"), timeout) {
-            Ok(stream) => stream,
-            Err(_) => return false,
-        };
+    probe_health("127.0.0.1:8787", token, Duration::from_secs(5))
+}
+
+fn probe_health(addr: &str, token: &str, timeout: Duration) -> Health {
+    let Ok(sock) = addr.parse() else { return Health::Down };
+    let mut stream = match TcpStream::connect_timeout(&sock, timeout) {
+        Ok(stream) => stream,
+        Err(_) => return Health::Down,
+    };
     let _ = stream.set_read_timeout(Some(timeout));
     let _ = stream.set_write_timeout(Some(timeout));
 
     // The sidecar rejects requests without the per-run token (401).
     let request =
         format!("GET /api/health HTTP/1.0\r\nHost: 127.0.0.1\r\nx-zwork-token: {token}\r\n\r\n");
-    if stream.write_all(request.as_bytes()).is_err() {
-        return false;
+    if let Err(e) = stream.write_all(request.as_bytes()) {
+        return if is_timeout(&e) { Health::Busy } else { Health::Down };
     }
 
     let mut buf = [0_u8; 128];
     let n = match stream.read(&mut buf) {
-        Ok(0) | Err(_) => return false,
+        Ok(0) => return Health::Down,
+        Err(e) => return if is_timeout(&e) { Health::Busy } else { Health::Down },
         Ok(n) => n,
     };
-    std::str::from_utf8(&buf[..n])
+    let ok = std::str::from_utf8(&buf[..n])
         .map(|head| head.starts_with("HTTP/1.1 200") || head.starts_with("HTTP/1.0 200"))
-        .unwrap_or(false)
+        .unwrap_or(false);
+    if ok { Health::Healthy } else { Health::Down }
+}
+
+fn is_timeout(e: &std::io::Error) -> bool {
+    // Windows reports a read timeout as TimedOut, Unix as WouldBlock.
+    matches!(e.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock)
+}
+
+#[cfg(test)]
+mod health_tests {
+    use super::*;
+    use std::net::TcpListener;
+
+    #[test]
+    fn nothing_listening_is_down() {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap().to_string();
+        drop(l);
+        assert_eq!(probe_health(&addr, "t", Duration::from_millis(300)), Health::Down);
+    }
+
+    #[test]
+    fn silent_listener_is_busy_not_down() {
+        // Accepts (the kernel backlog does) but never answers: a backend
+        // whose workers are all tied up.
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap().to_string();
+        assert_eq!(probe_health(&addr, "t", Duration::from_millis(300)), Health::Busy);
+        drop(l);
+    }
+
+    #[test]
+    fn ok_and_error_replies() {
+        for (reply, want) in [
+            ("HTTP/1.1 200 OK\r\n\r\n{}", Health::Healthy),
+            ("HTTP/1.1 401 Unauthorized\r\n\r\n", Health::Down),
+        ] {
+            let l = TcpListener::bind("127.0.0.1:0").unwrap();
+            let addr = l.local_addr().unwrap().to_string();
+            let t = std::thread::spawn(move || {
+                let (mut s, _) = l.accept().unwrap();
+                let mut buf = [0u8; 512];
+                let _ = s.read(&mut buf);
+                let _ = s.write_all(reply.as_bytes());
+            });
+            assert_eq!(probe_health(&addr, "t", Duration::from_secs(2)), want);
+            t.join().unwrap();
+        }
+    }
 }
 
 fn timestamp() -> String {
@@ -349,9 +414,19 @@ fn spawn_backend_initial(app: &tauri::AppHandle) -> Option<BackendChild> {
     spawn_backend(app)
 }
 
-fn ensure_backend_running(app: &tauri::AppHandle, backend: &Backend) -> Result<bool, String> {
+/// Start the backend if it is down. A `Busy` backend (alive, slow to answer)
+/// is only restarted when `restart_busy` is set: the UI asks this on almost
+/// every request, and one slow answer during a heavy turn must not kill every
+/// running chat. The watchdog sets it after the backend stays silent for
+/// minutes.
+fn ensure_backend_running(
+    app: &tauri::AppHandle,
+    backend: &Backend,
+    restart_busy: bool,
+) -> Result<bool, String> {
     let token = sidecar_token(app);
-    if backend_http_healthy(&token) {
+    let first = backend_health(&token);
+    if first == Health::Healthy {
         return Ok(true);
     }
 
@@ -360,9 +435,13 @@ fn ensure_backend_running(app: &tauri::AppHandle, backend: &Backend) -> Result<b
         .lock()
         .map_err(|_| "backend state lock poisoned".to_string())?;
 
+    if first == Health::Busy && !restart_busy && guard.child.is_some() {
+        return Ok(false);
+    }
+
     // Re-check after acquiring the lock — another thread may have spawned
     // a healthy backend while we were waiting.
-    if backend_http_healthy(&token) {
+    if backend_health(&token) == Health::Healthy {
         return Ok(true);
     }
 
@@ -399,21 +478,41 @@ fn ensure_backend_running(app: &tauri::AppHandle, backend: &Backend) -> Result<b
     Ok(guard.child.is_some())
 }
 
+/// Watchdog checks this many times in a row with no answer before it treats a
+/// connected backend as hung (30s apart, so about two minutes).
+const BUSY_CHECKS_BEFORE_RESTART: u32 = 4;
+
 fn start_backend_watchdog(app: tauri::AppHandle) {
-    std::thread::spawn(move || loop {
-        std::thread::sleep(Duration::from_secs(30));
-        if let Some(backend) = app.try_state::<Backend>() {
+    std::thread::spawn(move || {
+        let mut busy_streak = 0u32;
+        loop {
+            std::thread::sleep(Duration::from_secs(30));
+            let Some(backend) = app.try_state::<Backend>() else { continue };
             let token = sidecar_token(&app);
-            if !backend_http_healthy(&token) {
-                // One retry after a short pause — a single slow response
-                // during heavy streaming work is not a dead backend.
-                append_log("Backend watchdog: first health check failed, retrying...");
-                std::thread::sleep(Duration::from_secs(3));
-                if !backend_http_healthy(&token) {
-                    append_log("Backend watchdog: second health check failed, restarting backend");
-                    let _ = ensure_backend_running(&app, &backend);
-                } else {
-                    append_log("Backend watchdog: second health check passed, backend is alive");
+            match backend_health(&token) {
+                Health::Healthy => busy_streak = 0,
+                Health::Busy => {
+                    busy_streak += 1;
+                    append_log(&format!(
+                        "Backend watchdog: backend connected but did not answer ({busy_streak}/{BUSY_CHECKS_BEFORE_RESTART})"
+                    ));
+                    if busy_streak >= BUSY_CHECKS_BEFORE_RESTART {
+                        append_log("Backend watchdog: backend hung, restarting it");
+                        busy_streak = 0;
+                        let _ = ensure_backend_running(&app, &backend, true);
+                    }
+                }
+                Health::Down => {
+                    busy_streak = 0;
+                    // One retry after a short pause before restarting.
+                    append_log("Backend watchdog: first health check failed, retrying...");
+                    std::thread::sleep(Duration::from_secs(3));
+                    if backend_health(&token) == Health::Healthy {
+                        append_log("Backend watchdog: second health check passed, backend is alive");
+                    } else {
+                        append_log("Backend watchdog: second health check failed, restarting backend");
+                        let _ = ensure_backend_running(&app, &backend, false);
+                    }
                 }
             }
         }
@@ -628,27 +727,42 @@ fn set_launch_at_login(app: tauri::AppHandle, enabled: bool) -> Result<(), Strin
     if enabled { auto.enable() } else { auto.disable() }.map_err(|e| e.to_string())
 }
 
+// Both backend commands are async and do their work on a blocking thread.
+// Tauri runs a plain `fn` command on the main thread, and these do network
+// round trips (up to 10s against a busy backend), wait on the backend lock
+// and spawn processes: on the main thread that froze the whole window, and
+// the UI calls `ensure_backend` before almost every request.
 #[tauri::command]
-fn ensure_backend(app: tauri::AppHandle, backend: tauri::State<Backend>) -> Result<bool, String> {
-    ensure_backend_running(&app, &backend)
+async fn ensure_backend(app: tauri::AppHandle) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let backend = app.state::<Backend>();
+        ensure_backend_running(&app, &backend, false)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn restart_backend(app: tauri::AppHandle, backend: tauri::State<Backend>) -> Result<bool, String> {
-    let mut guard = backend
-        .0
-        .lock()
-        .map_err(|_| "backend state lock poisoned".to_string())?;
-    if let Some(child) = guard.child.take() {
-        child.shutdown();
-    }
-    // Give the killed process a moment to release the port.
-    std::thread::sleep(Duration::from_millis(300));
-    guard.child = spawn_backend(&app);
-    if guard.child.is_some() {
-        guard.spawned_at = Some(Instant::now());
-    }
-    Ok(guard.child.is_some())
+async fn restart_backend(app: tauri::AppHandle) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let backend = app.state::<Backend>();
+        let mut guard = backend
+            .0
+            .lock()
+            .map_err(|_| "backend state lock poisoned".to_string())?;
+        if let Some(child) = guard.child.take() {
+            child.shutdown();
+        }
+        // Give the killed process a moment to release the port.
+        std::thread::sleep(Duration::from_millis(300));
+        guard.child = spawn_backend(&app);
+        if guard.child.is_some() {
+            guard.spawned_at = Some(Instant::now());
+        }
+        Ok(guard.child.is_some())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
