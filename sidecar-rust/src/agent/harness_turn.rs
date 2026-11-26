@@ -569,26 +569,15 @@ impl GatedTool {
             .send(json!({ "type": "activity", "id": activity_id, "label": label, "done": false, "tool_use_id": tc_id }))
             .await;
 
-        // Stream bash output as `status` lines:
-        // each update carries the full accumulated output, so only the
-        // newly completed lines are forwarded.
+        // Stream bash output as a `status` line. The UI shows one status line,
+        // so each update (throttled to 10/s by the tool) sends only the newest
+        // one: sending every line flooded the window with an event per line
+        // of a long listing.
         let tx = shared.tx.clone();
-        let seen = Arc::new(Mutex::new(0usize));
+        let latest = Arc::new(Mutex::new(LatestLine::default()));
         let forward: AgentToolUpdateCallback = Arc::new(move |partial: AgentToolResult| {
             let text = partial.text_content();
-            let mut seen = seen.lock_unpoisoned();
-            if text.len() <= *seen {
-                return;
-            }
-            let fresh = &text[*seen..];
-            let Some(last_nl) = fresh.rfind('\n') else { return };
-            let complete = &fresh[..last_nl];
-            *seen += last_nl + 1;
-            for line in complete.lines() {
-                let line = line.trim_end();
-                if line.is_empty() {
-                    continue;
-                }
+            if let Some(line) = latest.lock_unpoisoned().fresh(&text) {
                 let _ = tx.try_send(json!({ "type": "status", "text": line }));
             }
         });
@@ -617,6 +606,32 @@ impl GatedTool {
             json!({ "name": name, "ok": ok, "len": text.len(), "preview": text.chars().take(200).collect::<String>() }),
         );
         outcome
+    }
+}
+
+/// Picks the newest complete line out of a streamed tool snapshot, for a
+/// one-line progress display. Snapshots are a sliding tail window once the
+/// output passes the tool's limit, so this never indexes into them by an
+/// earlier length (that could land inside a multi-byte character and panic).
+#[derive(Default)]
+struct LatestLine {
+    last: String,
+}
+
+impl LatestLine {
+    const MAX_CHARS: usize = 300;
+
+    /// The newest complete, non-empty line of `text`, or `None` when there
+    /// is none yet or it is the line returned last time.
+    fn fresh(&mut self, text: &str) -> Option<String> {
+        let complete = &text[..text.rfind('\n')?];
+        let line = complete.lines().rev().map(str::trim_end).find(|l| !l.is_empty())?;
+        let line: String = line.chars().take(Self::MAX_CHARS).collect();
+        if line == self.last {
+            return None;
+        }
+        self.last.clone_from(&line);
+        Some(line)
     }
 }
 
@@ -2149,10 +2164,14 @@ impl AgentTool for SubagentPiTool {
         }
         let tx = self.tx.clone();
         let task_id = self.task_id.clone();
+        // Each update carries the tool's whole output so far (up to 50KB);
+        // forwarding it as a delta sent that again ten times a second, and
+        // the window appended every copy. Send the newest line only.
+        let latest = Arc::new(Mutex::new(LatestLine::default()));
         let forward: AgentToolUpdateCallback = Arc::new(move |partial: AgentToolResult| {
             let text = partial.text_content();
-            if !text.is_empty() {
-                let _ = tx.try_send(json!({ "type": "subagent_delta", "task_id": task_id, "text": format!("{text}\n") }));
+            if let Some(line) = latest.lock_unpoisoned().fresh(&text) {
+                let _ = tx.try_send(json!({ "type": "subagent_delta", "task_id": task_id, "text": format!("{line}\n") }));
             }
         });
         self.inner.execute(tc_id, params, signal, forward)
@@ -2840,6 +2859,38 @@ async fn resume_one_interrupted(
         Ok(record) if record.status == crate::harness::session::types::TerminalStatus::Completed => "resumed-completed",
         Ok(_) => "resumed-settled",
         Err(_) => "resume-failed",
+    }
+}
+
+#[cfg(test)]
+mod latest_line_tests {
+    use super::LatestLine;
+
+    #[test]
+    fn sends_only_the_newest_complete_line_once() {
+        let mut l = LatestLine::default();
+        assert_eq!(l.fresh("partial"), None);
+        assert_eq!(l.fresh("one\ntwo\nthr").as_deref(), Some("two"));
+        assert_eq!(l.fresh("one\ntwo\nthr"), None);
+        assert_eq!(l.fresh("one\ntwo\nthree\n\n").as_deref(), Some("three"));
+    }
+
+    #[test]
+    fn survives_a_sliding_tail_window_with_non_ascii_text() {
+        // A truncated snapshot is shorter than the last one and starts
+        // mid-output; offsets from before would split "é" and panic.
+        let mut l = LatestLine::default();
+        let first: String = (0..500).map(|i| format!("café {i}\n")).collect();
+        assert_eq!(l.fresh(&first).as_deref(), Some("café 499"));
+        let tail: String = (400..520).map(|i| format!("résumé {i}\n")).collect();
+        assert_eq!(l.fresh(&tail).as_deref(), Some("résumé 519"));
+    }
+
+    #[test]
+    fn caps_a_very_long_line() {
+        let mut l = LatestLine::default();
+        let long = format!("{}\n", "é".repeat(10_000));
+        assert_eq!(l.fresh(&long).unwrap().chars().count(), LatestLine::MAX_CHARS);
     }
 }
 
