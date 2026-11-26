@@ -136,8 +136,8 @@ struct GatewayConfig {
     pro_max_concurrent_roots: i64,
     max_max_concurrent_roots: i64,
     dev_coupon_codes: Vec<String>,
-    /// Weekly API spend per plan, in USD. Pro defaults to $4 a month of its
-    /// $12 price; Max to the same third of its $50.
+    /// Weekly API spend per plan, in USD. Pro defaults to $6.50 a month of
+    /// its $12 price; Max to $26 of its $50 (docs/ROUTER-COST-2026-11.md).
     pro_weekly_usd: f64,
     max_weekly_usd: f64,
     /// One weekly pool shared by all free users, split evenly across those
@@ -154,6 +154,9 @@ struct GatewayConfig {
     router_ab_percent: u64,
     /// A run this many calls long moves to the stronger model (0 = never).
     escalate_after_calls: i64,
+    /// A run the classifier escalated goes back to Flash after this many
+    /// calls on the stronger model (0 = never).
+    escalated_handback_calls: i64,
     /// How far past the budget a run already under way may go.
     continuation_headroom: f64,
     /// Dollars per usage unit shown in the app (≈ one typical Flash message).
@@ -417,15 +420,42 @@ fn content_text(content: &Value) -> String {
     }
 }
 
-/// The latest thing the user typed, which is what the classifier reads.
-fn last_user_text(body: &Value) -> String {
-    request_messages(body)
+/// What the classifier reads: the end of the latest user message, without
+/// the app's `<turn-context>` block. The desktop app puts its own context
+/// (earlier work, crew, skills, headlines) in front of what the user typed,
+/// so the user's words are at the end.
+fn classifier_input(body: &Value) -> String {
+    const TAIL_CHARS: usize = 2000;
+    let text = request_messages(body)
         .iter()
         .rev()
         .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
-        .map(|m| content_text(m.get("content").unwrap_or(&Value::Null)))
+        .map(|m| match m.get("content") {
+            Some(Value::Array(parts)) => parts
+                .iter()
+                .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
+                .filter(|t| !t.trim_start().starts_with("<turn-context>"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            Some(other) => content_text(other),
+            None => String::new(),
+        })
+        .map(|t| strip_turn_context(&t))
         .find(|t| !t.trim().is_empty())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    let chars: Vec<char> = text.trim().chars().collect();
+    chars[chars.len().saturating_sub(TAIL_CHARS)..].iter().collect()
+}
+
+fn strip_turn_context(text: &str) -> String {
+    let mut out = text.to_string();
+    while let (Some(start), Some(end)) = (out.find("<turn-context>"), out.find("</turn-context>")) {
+        if end < start {
+            break;
+        }
+        out.replace_range(start..end + "</turn-context>".len(), "");
+    }
+    out
 }
 
 /// Signs in the request itself that a run is stuck: the same tool call made
@@ -496,12 +526,20 @@ fn should_escalate(signals: &StruggleSignals, calls_in_run: i64, escalate_after_
     }
 }
 
+/// Whether an escalated run goes back to Flash. Only runs the classifier
+/// escalated hand back (a struggling run stays on the stronger model), only
+/// once, and not while the run carries images.
+fn should_hand_back(first_escalation: Option<&str>, escalated_calls: i64, handed_back: bool, has_images: bool, after: i64) -> bool {
+    after > 0 && !handed_back && !has_images && first_escalation == Some("classifier") && escalated_calls >= after
+}
+
 const CLASSIFIER_PROMPT: &str = "You route requests for an AI assistant that works on the user's computer (files, apps, browser, documents). \
 Reply with one word. HARD: the task needs a strong model, such as multi-step research, writing or fixing substantial code, \
 complex analysis, careful planning across many steps, or long documents that must be right. \
 EASY: a small fast model can do it, such as conversation, a quick question, a short piece of writing, \
 a simple edit, one lookup, or a simple action in a file or app. Most requests are EASY: say HARD only when a small model \
-would likely get it wrong.";
+would likely get it wrong. The message may start with context the app adds (earlier work, notes, headlines); judge only \
+the user's request, which comes last.";
 
 /// Ask the cheap model whether the run's first message needs the stronger
 /// one. Costs a few hundredths of a cent; any failure or timeout reads as
@@ -510,7 +548,6 @@ async fn classify_needs_strong_model(state: &AppState, text: &str) -> (bool, Opt
     let Some(provider) = state.gateway.providers.iter().find(|p| p.protocol == GatewayProtocol::OpenAi) else {
         return (false, None);
     };
-    let text: String = text.chars().take(4000).collect();
     if text.trim().is_empty() {
         return (false, None);
     }
@@ -567,6 +604,8 @@ async fn free_escalations_used(state: &AppState, user_id: &str) -> Result<i64, S
 /// - `zwork-apex` is always Sol.
 /// - A run keeps the route of its earlier calls; it moves up to `Escalated`
 ///   when the request shows it struggling, or to `Vision` once images appear.
+///   A run the classifier escalated goes back to Flash once, after
+///   `escalated_handback_calls` calls on the stronger model.
 /// - A new run is escalated when the classifier calls it hard, goes to
 ///   `Vision` when it has images, and otherwise runs on Flash (or, for a
 ///   small slice of paid runs, an A/B model).
@@ -619,6 +658,29 @@ async fn choose_route(
     };
 
     if prior == Some(Route::Escalated) {
+        let after = state.gateway.escalated_handback_calls;
+        if let (Some(u), true) = (user, after > 0 && !has_images) {
+            let (first, escalated_calls, handed_back): (Option<String>, i64, bool) = sqlx::query_as(
+                r#"
+                SELECT
+                  (SELECT routing_decision->'why'->>'reason' FROM gateway_requests
+                    WHERE user_id = $1 AND run_id = $2 AND route = 'escalated'
+                    ORDER BY created_at ASC LIMIT 1),
+                  (SELECT COUNT(*) FROM gateway_requests
+                    WHERE user_id = $1 AND run_id = $2 AND route = 'escalated'),
+                  EXISTS(SELECT 1 FROM gateway_requests
+                    WHERE user_id = $1 AND run_id = $2 AND routing_decision->'why'->>'reason' = 'handback')
+                "#,
+            )
+            .bind(&u.user_id)
+            .bind(run_id)
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or((None, 0, true));
+            if should_hand_back(first.as_deref(), escalated_calls, handed_back, has_images, after) {
+                return (Route::Flash, serde_json::json!({ "reason": "handback", "escalated_calls": escalated_calls }));
+            }
+        }
         return (Route::Escalated, serde_json::json!({ "reason": "sticky" }));
     }
 
@@ -641,7 +703,7 @@ async fn choose_route(
     }
 
     if has_tools && can_escalate().await {
-        let (hard, cost) = classify_needs_strong_model(state, &last_user_text(body)).await;
+        let (hard, cost) = classify_needs_strong_model(state, &classifier_input(body)).await;
         if hard {
             return (Route::Escalated, serde_json::json!({ "reason": "classifier", "classifier_cost_usd": cost }));
         }
@@ -1851,7 +1913,12 @@ async fn ensure_gateway_access(
     Err(StatusCode::UNAUTHORIZED)
 }
 
+/// Background calls (chat titles) belong to a task already counted, so they
+/// are never a new task against the quota or the running-task limit.
 fn request_kind_from_headers(headers: &HeaderMap) -> RequestKind {
+    if header_str(headers, "x-zwork-trigger").is_some_and(|t| t.eq_ignore_ascii_case("background")) {
+        return RequestKind::Continuation;
+    }
     match headers
         .get("x-zwork-request-kind")
         .and_then(|v| v.to_str().ok())
@@ -7778,12 +7845,12 @@ async fn main() {
                 .ok()
                 .and_then(|v| v.parse::<i64>().ok())
                 .unwrap_or(20),
-            pro_weekly_usd: env_f64("PRO_WEEKLY_USD", 0.92),
-            max_weekly_usd: env_f64("MAX_WEEKLY_USD", 3.83),
+            pro_weekly_usd: env_f64("PRO_WEEKLY_USD", 1.50),
+            max_weekly_usd: env_f64("MAX_WEEKLY_USD", 6.00),
             free_pool_weekly_usd: env_f64("FREE_POOL_WEEKLY_USD", 15.0),
-            free_user_weekly_min_usd: env_f64("FREE_USER_WEEKLY_MIN_USD", 0.03),
-            free_user_weekly_max_usd: env_f64("FREE_USER_WEEKLY_MAX_USD", 0.10),
-            five_hour_share: env_f64("FIVE_HOUR_SHARE", 0.35),
+            free_user_weekly_min_usd: env_f64("FREE_USER_WEEKLY_MIN_USD", 0.05),
+            free_user_weekly_max_usd: env_f64("FREE_USER_WEEKLY_MAX_USD", 0.25),
+            five_hour_share: env_f64("FIVE_HOUR_SHARE", 0.50),
             free_escalations_30d: std::env::var("FREE_ESCALATIONS_30D")
                 .ok()
                 .and_then(|v| v.parse::<i64>().ok())
@@ -7791,12 +7858,16 @@ async fn main() {
             router_ab_percent: std::env::var("ROUTER_AB_PERCENT")
                 .ok()
                 .and_then(|v| v.parse::<u64>().ok())
-                .unwrap_or(5)
+                .unwrap_or(0)
                 .min(100),
             escalate_after_calls: std::env::var("ROUTER_ESCALATE_AFTER_CALLS")
                 .ok()
                 .and_then(|v| v.parse::<i64>().ok())
-                .unwrap_or(40),
+                .unwrap_or(60),
+            escalated_handback_calls: std::env::var("ROUTER_ESCALATED_HANDBACK_CALLS")
+                .ok()
+                .and_then(|v| v.parse::<i64>().ok())
+                .unwrap_or(6),
             continuation_headroom: env_f64("CONTINUATION_HEADROOM", 1.5),
             usage_unit_usd: env_f64("USAGE_UNIT_USD", 0.008),
             dev_coupon_codes: std::env::var("DEV_COUPON_CODES")
@@ -8078,12 +8149,58 @@ mod router_tests {
             { "role": "user", "content": [{ "type": "text", "text": "what is this" }, { "type": "image_url", "image_url": { "url": "data:" } }] },
         ]});
         assert!(request_has_images(&openai) && request_has_tools(&openai));
-        assert_eq!(last_user_text(&openai), "what is this");
+        assert_eq!(classifier_input(&openai), "what is this");
         let anthropic = serde_json::json!({ "messages": [
             { "role": "user", "content": [{ "type": "tool_result", "content": [{ "type": "image", "source": {} }] }] },
         ]});
         assert!(request_has_images(&anthropic) && !request_has_tools(&anthropic));
         assert!(!request_has_images(&serde_json::json!({ "messages": [{ "role": "user", "content": "hi" }] })));
+    }
+
+    #[test]
+    fn classifier_reads_what_the_user_typed() {
+        let prefix = "<turn-context>\n<current-time>2026-11-25 10:00:00</current-time>\n</turn-context>";
+        let work = "## Work done so far\n".to_string() + &"earlier step. ".repeat(400);
+        let plain = serde_json::json!({ "messages": [
+            { "role": "user", "content": format!("{prefix}\n\n{work}\n\nrename this file") },
+        ]});
+        let input = classifier_input(&plain);
+        assert!(input.ends_with("rename this file"));
+        assert!(!input.contains("<turn-context>"));
+        assert!(input.chars().count() <= 2000);
+
+        // With attachments the app's context is the last text block.
+        let blocks = serde_json::json!({ "messages": [
+            { "role": "user", "content": [
+                { "type": "text", "text": "summarise the attached report" },
+                { "type": "image_url", "image_url": { "url": "data:" } },
+                { "type": "text", "text": format!("{prefix}\n\n## News headlines\nx") },
+            ]},
+        ]});
+        assert_eq!(classifier_input(&blocks), "summarise the attached report");
+        assert_eq!(classifier_input(&serde_json::json!({ "messages": [{ "role": "user", "content": "hi" }] })), "hi");
+        assert_eq!(strip_turn_context("a</turn-context>b<turn-context>"), "a</turn-context>b<turn-context>");
+    }
+
+    #[test]
+    fn classifier_escalations_hand_back_once() {
+        assert!(should_hand_back(Some("classifier"), 6, false, false, 6));
+        assert!(!should_hand_back(Some("classifier"), 5, false, false, 6));
+        assert!(!should_hand_back(Some("classifier"), 9, true, false, 6), "only once");
+        assert!(!should_hand_back(Some("classifier"), 9, false, true, 6), "images stay");
+        assert!(!should_hand_back(Some("repeated_tool_call"), 20, false, false, 6), "struggling runs stay");
+        assert!(!should_hand_back(None, 20, false, false, 6));
+        assert!(!should_hand_back(Some("classifier"), 20, false, false, 0), "0 turns it off");
+    }
+
+    #[test]
+    fn background_calls_are_never_new_tasks() {
+        let mut headers = HeaderMap::new();
+        assert!(request_kind_from_headers(&headers) == RequestKind::Root);
+        headers.insert("x-zwork-trigger", "background".parse().unwrap());
+        assert!(request_kind_from_headers(&headers) == RequestKind::Continuation);
+        headers.insert("x-zwork-trigger", "chat".parse().unwrap());
+        assert!(request_kind_from_headers(&headers) == RequestKind::Root);
     }
 
     #[test]

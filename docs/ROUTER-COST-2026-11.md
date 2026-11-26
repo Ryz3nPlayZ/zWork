@@ -89,6 +89,15 @@ On this month that is about +$0.12 on the $0.42 Flash share.
 25–30% less for the same work. Every escalated run is also capped near six
 MiMo calls unless it is struggling.
 
+**Not counted above: the steadier desktop prompt (9733646).** A run's first
+call is billed at about list price: $0.44 of the $2.13 chat spend (21%). Since
+9733646 the system prompt stays byte-for-byte the same all day (the time moved
+into each message), so a first call can reuse the cache another run left. If
+the shared system-and-tools prefix (most of the 37k tokens) hits, first calls
+cost roughly half to a third as much: another $0.20–0.30 a month, 10–13%. It
+only hits while the cache is warm, and at today's traffic it will often be
+cold, so the limits below don't count on it.
+
 ## New limits
 
 | Setting | Before | After |

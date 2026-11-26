@@ -70,24 +70,36 @@ OpenRouter id with `:floor` routing.
 The auto router picks a route on a run's first call and stores it on every
 request (`gateway_requests.route`, with the reason in `routing_decision.why`).
 Later calls of the run keep the route, so the prompt cache stays warm. A route
-only ever moves up.
+only moves up, with one exception: the hand-back below.
 
 | Route | Model | When |
 |---|---|---|
 | `flash` | `z-ai/glm-5.3-flash`, then `deepseek/deepseek-v4.1-flash-1017`, then `deepseek/deepseek-v4.1-flash` | the default |
 | `vision` | `google/gemini-3.8-flash` | the run has images and isn't escalated |
 | `escalated` | `xiaomi/mimo-v2.6-pro` | see below |
-| `ab-luna`, `ab-haiku`, `ab-glm` | `openai/gpt-6-luna`, `anthropic/claude-haiku-5.5`, `z-ai/glm-5.3-flash` | `ROUTER_AB_PERCENT` of paid runs, by run id, split three ways, to compare cost and completion with `flash` |
+| `ab-luna`, `ab-haiku`, `ab-glm` | `openai/gpt-6-luna`, `anthropic/claude-haiku-5.5`, `z-ai/glm-5.3-flash` | `ROUTER_AB_PERCENT` of paid runs (0 by default), by run id, split three ways, to compare cost and completion with `flash` |
 
 A run is escalated in one of two ways:
 
 - **On its first call:** a one-word DeepSeek Flash classifier (about $0.00003;
   its cost is in `routing_decision.why.classifier_cost_usd`) calls the user's
-  message hard.
+  message hard. It reads the last 2,000 characters of the latest user message,
+  without the desktop app's `<turn-context>` block: the app puts its own
+  context in front, so what the user typed is at the end.
 - **Mid-run, when it struggles:**
   - the same tool call three times among the last eight;
   - three errors among the last six tool results;
   - `ROUTER_ESCALATE_AFTER_CALLS` calls in the run.
+
+**Hand-back.** A run the classifier escalated goes back to `flash` after
+`ROUTER_ESCALATED_HANDBACK_CALLS` (6) calls on MiMo, once (reason
+`handback`). The strong model plans and starts the work; Flash finishes it.
+A run escalated because it was struggling stays on MiMo, and so does a run
+with images. If a handed-back run struggles again it escalates again and then
+stays.
+
+Chat titles (`x-zwork-trigger: background`) count as part of a task already
+under way, never as a new task.
 
 Only requests that carry `tools` are classified or escalated, so plain chat
 (the web app included) always stays on `flash`. Paid plans escalate freely. A
@@ -216,12 +228,13 @@ ENABLE_EMAIL_AUTH=false
 ENABLE_COUPONS=false
 
 # Usage is metered in dollars of OpenRouter cost (see cloud-src/.env.example).
-PRO_WEEKLY_USD=0.92
-MAX_WEEKLY_USD=3.83
+PRO_WEEKLY_USD=1.50
+MAX_WEEKLY_USD=6.00
 FREE_POOL_WEEKLY_USD=15
 FREE_ESCALATIONS_30D=3
-ROUTER_AB_PERCENT=5
-ROUTER_ESCALATE_AFTER_CALLS=40
+ROUTER_AB_PERCENT=0
+ROUTER_ESCALATE_AFTER_CALLS=60
+ROUTER_ESCALATED_HANDBACK_CALLS=6
 MAX_CONCURRENT_ROOT_RUNS=3
 DEV_COUPON_CODES=zwork-dev-pro
 
