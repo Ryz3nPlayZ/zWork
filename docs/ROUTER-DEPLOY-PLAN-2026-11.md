@@ -21,7 +21,7 @@ Live is image `cloud-axum_api:latest` (22aa2107, built Nov 22). Its
 | Outlook, OneDrive, Excel, Teams, QuickBooks, Xero connector tiles | yes | tiles show in the storefront |
 | CORS exposes `x-zwork-router-provider` / `-model` to the web app | yes | web app can show the model |
 | Classifier reads the user's words, hand-back after 6 MiMo calls, A/B off, long-run at 60, titles not counted as tasks | this branch | about 25–30% cheaper per task |
-| New limits: Pro $1.50/wk, Max $6/wk, 5-hour share 0.5, free $0.05–0.25/wk | this branch | 2–3.5× more work per week |
+| New limits: Pro $1.50/wk, Max $6/wk, 5-hour share 0.25, free $0.05–0.25/wk | this branch | 2–3.5× more work per week |
 
 `Cargo.toml`, `Cargo.lock`, `Dockerfile` and `admin_insights.rs` on the VM
 already match HEAD, so only `main.rs` changes.
@@ -43,7 +43,7 @@ environment and to `~/cloud/.env`.
 |---|---|
 | `PRO_WEEKLY_USD` | 1.50 |
 | `MAX_WEEKLY_USD` | 6.00 |
-| `FIVE_HOUR_SHARE` | 0.50 |
+| `FIVE_HOUR_SHARE` | 0.25 |
 | `FREE_USER_WEEKLY_MIN_USD` / `MAX_USD` | 0.05 / 0.25 |
 | `ROUTER_AB_PERCENT` | 0 |
 | `ROUTER_ESCALATE_AFTER_CALLS` | 60 |

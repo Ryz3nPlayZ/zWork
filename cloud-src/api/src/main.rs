@@ -7850,7 +7850,7 @@ async fn main() {
             free_pool_weekly_usd: env_f64("FREE_POOL_WEEKLY_USD", 15.0),
             free_user_weekly_min_usd: env_f64("FREE_USER_WEEKLY_MIN_USD", 0.05),
             free_user_weekly_max_usd: env_f64("FREE_USER_WEEKLY_MAX_USD", 0.25),
-            five_hour_share: env_f64("FIVE_HOUR_SHARE", 0.50),
+            five_hour_share: env_f64("FIVE_HOUR_SHARE", 0.25),
             free_escalations_30d: std::env::var("FREE_ESCALATIONS_30D")
                 .ok()
                 .and_then(|v| v.parse::<i64>().ok())

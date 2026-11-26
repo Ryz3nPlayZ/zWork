@@ -104,7 +104,7 @@ cold, so the limits below don't count on it.
 |---|---|---|
 | `PRO_WEEKLY_USD` | $0.92 | $1.50 |
 | `MAX_WEEKLY_USD` | $3.83 | $6.00 |
-| `FIVE_HOUR_SHARE` | 0.35 | 0.50 |
+| `FIVE_HOUR_SHARE` | 0.35 | 0.25 |
 | `FREE_USER_WEEKLY_MAX_USD` | $0.10 | $0.25 |
 | `FREE_USER_WEEKLY_MIN_USD` | $0.03 | $0.05 |
 | `FREE_POOL_WEEKLY_USD` | $15 | $15 (unchanged) |
@@ -112,14 +112,15 @@ cold, so the limits below don't count on it.
 
 What this means in work, with the cheaper routing:
 
-| Plan | Weekly | 5-hour window | Work per week vs before |
-|---|---|---|---|
-| Free | $0.25 | $0.125 (was $0.035) | about 3.5× |
-| Pro | $1.50 | $0.75 (was $0.32) | about 2.2× |
-| Max | $6.00 | $3.00 (was $1.34) | about 2.2× |
+| Plan | Weekly | 5-hour window | Work per week vs before | Work per 5 hours vs before |
+|---|---|---|---|---|
+| Free | $0.25 | $0.0625 (was $0.035) | about 3.5× | about 2.5× |
+| Pro | $1.50 | $0.375 (was $0.32) | about 2.2× | about 1.6× |
+| Max | $6.00 | $1.50 (was $1.34) | about 2.2× | about 1.6× |
 
-The 5-hour window grows the most, since it is the one people hit. The heaviest
-5-hour stretch measured ($0.52, the Pro user) now fits.
+A 5-hour window is a quarter of the week, so it takes four full sessions to use
+up a week: one heavy day can't. The heaviest 5-hour stretch measured ($0.52,
+the Pro user) costs about $0.37 with the cheaper routing, so it now just fits.
 
 ### Margin
 
