@@ -343,7 +343,7 @@ All gated by `ensure_owner_or_service`. Endpoints with a window take `?days=N`
 | `GET /api/admin/users/:user_id/activity` | 365 | One user's requests, runs and spend per day, models, triggers, builds (version × OS) and the 15 most recent runs |
 | `GET /api/admin/usage/by-time` | 365 | Daily request/token rollup, newest first |
 | `GET /api/admin/usage/by-model` | 365 | Per-model request/token rollup for the window |
-| `PUT /api/admin/users/:user_id/tier` | | Change a user's tier (`free`, `pro`, `max`; audited). zWork only: it does not touch Stripe |
+| `PUT /api/admin/users/:user_id/tier` | | Change a user's tier (`free`, `pro`, `max`; audited). zWork only: it does not touch Stripe. The chosen plan is pinned (`admin_tier`): Stripe events never put the person below it, and never below what they pay for; `auto` unpins it. Stripe's own plan changes are audited too (actor `stripe_webhook`) |
 | `GET /api/admin/audit?limit=200` | | Recent admin actions (limit 1–1000) |
 
 When you add or change an endpoint, update the matching handler in

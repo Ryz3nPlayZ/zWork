@@ -1224,6 +1224,47 @@ async fn bootstrap_schema(db: &PgPool) -> Result<(), sqlx::Error> {
     .execute(db)
     .await?;
 
+    // A plan an admin picked by hand. While set, Stripe events don't change
+    // `tier` (they used to reset a hand-set Max to Pro on every renewal).
+    sqlx::query(
+        r#"
+        ALTER TABLE app_users
+        ADD COLUMN IF NOT EXISTS admin_tier TEXT CHECK (admin_tier IN ('free', 'pro', 'max'));
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    // The web app (Better Auth) and the desktop app (Google directly) give the
+    // same person different ids. Every other id a person signs in with points
+    // at their one app_users row.
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS app_user_aliases (
+            alias_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL REFERENCES app_users(user_id) ON DELETE CASCADE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    // One row per email. Fails while old duplicates are still there (see
+    // cloud-src/db/migrations/2026-11-25-merge-duplicate-app-users.sql), so
+    // it only warns: sign-in links by email either way.
+    if let Err(err) = sqlx::query(
+        r#"
+        CREATE UNIQUE INDEX IF NOT EXISTS app_users_email_lower_key
+        ON app_users (lower(email)) WHERE email <> '';
+        "#,
+    )
+    .execute(db)
+    .await
+    {
+        warn!("app_users email unique index not created (duplicate emails left?): {err}");
+    }
+
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS gateway_requests (
@@ -1906,37 +1947,136 @@ fn run_id_from_headers(headers: &HeaderMap) -> String {
         .unwrap_or_else(|| Uuid::new_v4().to_string())
 }
 
+const APP_USER_COLUMNS: &str = "user_id, email, name, tier, coupon_code, \
+     stripe_customer_id, subscription_id, subscription_status, \
+     subscription_price_id, subscription_current_period_end, created_at, updated_at";
+
+/// Which app_users row a sign-in belongs to.
+#[derive(Debug, PartialEq)]
+enum SignInMatch {
+    /// This id has a row, or was linked to one before.
+    Existing(String),
+    /// A new id with an email we already have: the same person signing in
+    /// from the other app. Link the id to that row.
+    LinkTo(String),
+    /// Someone new.
+    New,
+}
+
+fn match_sign_in(
+    login_id: &str,
+    linked_to: Option<String>,
+    id_has_row: bool,
+    row_with_email: Option<String>,
+) -> SignInMatch {
+    if let Some(user_id) = linked_to {
+        return SignInMatch::Existing(user_id);
+    }
+    if id_has_row {
+        return SignInMatch::Existing(login_id.to_string());
+    }
+    match row_with_email {
+        Some(user_id) => SignInMatch::LinkTo(user_id),
+        None => SignInMatch::New,
+    }
+}
+
+/// The row for a signed-in person, created on first sign-in. The web app and
+/// the desktop app give one person two different ids (Better Auth's and
+/// Google's), so both are matched to one row by email; before this, each app
+/// made its own row and a plan set on one didn't show in the other. Both
+/// emails are verified: Google's, and Better Auth's (requireEmailVerification).
 async fn upsert_app_user(
     state: &AppState,
     auth_user: &BetterAuthUser,
 ) -> Result<AppUser, StatusCode> {
-    let email = auth_user.email.clone().unwrap_or_default();
+    let email = auth_user.email.clone().unwrap_or_default().trim().to_string();
     let name = auth_user
         .name
         .clone()
         .unwrap_or_else(|| "zWork user".to_string());
+    let db_err = |_| StatusCode::INTERNAL_SERVER_ERROR;
 
-    sqlx::query_as::<_, AppUser>(
-        r#"
-        INSERT INTO app_users (user_id, email, name)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (user_id)
-        DO UPDATE SET
-            email = EXCLUDED.email,
-            name = EXCLUDED.name,
-            updated_at = NOW()
-        RETURNING user_id, email, name, tier, coupon_code,
-                  stripe_customer_id, subscription_id, subscription_status,
-                  subscription_price_id, subscription_current_period_end,
-                  created_at, updated_at
-        "#,
-    )
-    .bind(&auth_user.id)
-    .bind(&email)
-    .bind(&name)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+    // Two first sign-ins at once can both see "New"; the email index stops
+    // the second insert, and the retry links it instead.
+    for _attempt in 0..2 {
+        let (linked_to, id_has_row, row_with_email): (Option<String>, bool, Option<String>) =
+            sqlx::query_as(
+                r#"
+                SELECT
+                    (SELECT user_id FROM app_user_aliases WHERE alias_id = $1),
+                    EXISTS (SELECT 1 FROM app_users WHERE user_id = $1),
+                    (SELECT user_id FROM app_users
+                      WHERE $2 <> '' AND lower(email) = lower($2)
+                      ORDER BY created_at LIMIT 1)
+                "#,
+            )
+            .bind(&auth_user.id)
+            .bind(&email)
+            .fetch_one(&state.db)
+            .await
+            .map_err(db_err)?;
+
+        let user_id = match match_sign_in(&auth_user.id, linked_to, id_has_row, row_with_email) {
+            SignInMatch::Existing(user_id) => user_id,
+            SignInMatch::LinkTo(user_id) => {
+                sqlx::query(
+                    "INSERT INTO app_user_aliases (alias_id, user_id) VALUES ($1, $2) \
+                     ON CONFLICT (alias_id) DO NOTHING",
+                )
+                .bind(&auth_user.id)
+                .bind(&user_id)
+                .execute(&state.db)
+                .await
+                .map_err(db_err)?;
+                user_id
+            }
+            SignInMatch::New => {
+                let inserted = sqlx::query_as::<_, AppUser>(&format!(
+                    "INSERT INTO app_users (user_id, email, name) VALUES ($1, $2, $3) \
+                     ON CONFLICT (user_id) DO NOTHING RETURNING {APP_USER_COLUMNS}"
+                ))
+                .bind(&auth_user.id)
+                .bind(&email)
+                .bind(&name)
+                .fetch_optional(&state.db)
+                .await;
+                match inserted {
+                    Ok(Some(user)) => return Ok(user),
+                    // Lost a race (same id or same email): look again.
+                    Ok(None) => continue,
+                    Err(sqlx::Error::Database(e)) if e.is_unique_violation() => continue,
+                    Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
+                }
+            }
+        };
+
+        // Keep the name and email fresh, unless the new email is another
+        // person's row.
+        return sqlx::query_as::<_, AppUser>(&format!(
+            r#"
+            UPDATE app_users
+            SET name = $3,
+                email = CASE
+                    WHEN $2 <> '' AND NOT EXISTS (
+                        SELECT 1 FROM app_users o
+                        WHERE lower(o.email) = lower($2) AND o.user_id <> $1
+                    ) THEN $2
+                    ELSE email
+                END,
+                updated_at = NOW()
+            WHERE user_id = $1
+            RETURNING {APP_USER_COLUMNS}
+            "#
+        ))
+        .bind(&user_id)
+        .bind(&email)
+        .bind(&name)
+        .fetch_one(&state.db)
+        .await
+        .map_err(db_err);
+    }
+    Err(StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 fn is_owner_email(state: &AppState, email: &str) -> bool {
@@ -3826,6 +3966,17 @@ fn subscription_tier(status: &str, price_id: Option<&String>) -> String {
     }
 }
 
+/// The plan a person gets: what they pay for, or the plan an admin picked if
+/// that's higher. So a renewal can't undo a hand-set Max, and an admin can't
+/// take away a plan someone pays for (cancel it in Stripe for that).
+/// The Stripe webhook's SQL does the same.
+fn effective_plan(admin_tier: Option<&str>, paid_tier: &str) -> String {
+    match admin_tier {
+        Some(admin) if plan_rank(admin) > plan_rank(paid_tier) => admin.to_string(),
+        _ => paid_tier.to_string(),
+    }
+}
+
 fn stripe_timestamp_to_datetime(value: Option<i64>) -> Option<DateTime<Utc>> {
     value.and_then(|seconds| DateTime::<Utc>::from_timestamp(seconds, 0))
 }
@@ -4068,7 +4219,8 @@ async fn stripe_webhook(
                     SET stripe_customer_id = NULLIF($2, ''),
                         subscription_id = NULLIF($3, ''),
                         updated_at = NOW()
-                    WHERE user_id = $1
+                    WHERE user_id = COALESCE(
+                        (SELECT a.user_id FROM app_user_aliases a WHERE a.alias_id = $1), $1)
                     "#,
                 )
                 .bind(user_id)
@@ -4127,62 +4279,71 @@ async fn stripe_webhook(
                 let is_active = status == "active" || status == "trialing";
                 let is_terminated = event_type == "customer.subscription.deleted"
                     || status == "canceled";
-                let result = if user_id.is_empty() {
-                    sqlx::query(
-                        r#"
-                        UPDATE app_users
-                        SET subscription_id = CASE WHEN $2 = 'customer.subscription.deleted' THEN NULL ELSE NULLIF($3, '') END,
-                            subscription_status = NULLIF($4, ''),
-                            subscription_price_id = $5,
-                            subscription_current_period_end = $6,
-                            tier = $7,
-                            subscription_started_at = COALESCE(subscription_started_at, CASE WHEN $8 THEN NOW() ELSE NULL END),
-                            subscription_ended_at = CASE WHEN $9 THEN NOW() ELSE subscription_ended_at END,
-                            updated_at = NOW()
-                        WHERE stripe_customer_id = $1
-                        "#,
+                // Find the row by user id (or an id linked to it), else by
+                // Stripe customer. `prev` holds the plan from before the
+                // update, for the audit log.
+                let stripe_tier = subscription_tier(status, price_id.as_ref());
+                let changed: Vec<(String, String, String)> = sqlx::query_as(
+                    r#"
+                    WITH prev AS (
+                        SELECT user_id, tier FROM app_users
+                        WHERE CASE
+                            WHEN $1 <> '' THEN user_id = COALESCE(
+                                (SELECT a.user_id FROM app_user_aliases a WHERE a.alias_id = $1), $1)
+                            ELSE stripe_customer_id = NULLIF($2, '')
+                        END
+                        FOR UPDATE
                     )
-                    .bind(customer_id)
-                    .bind(event_type)
-                    .bind(subscription_id)
-                    .bind(status)
-                    .bind(&price_id)
-                    .bind(current_period_end)
-                    .bind(subscription_tier(status, price_id.as_ref()))
-                    .bind(is_active)
-                    .bind(is_terminated)
-                    .execute(&state.db)
-                    .await
-                } else {
-                    sqlx::query(
-                        r#"
-                        UPDATE app_users
-                        SET stripe_customer_id = NULLIF($2, ''),
-                            subscription_id = CASE WHEN $3 = 'customer.subscription.deleted' THEN NULL ELSE NULLIF($4, '') END,
-                            subscription_status = NULLIF($5, ''),
-                            subscription_price_id = $6,
-                            subscription_current_period_end = $7,
-                            tier = $8,
-                            subscription_started_at = COALESCE(subscription_started_at, CASE WHEN $9 THEN NOW() ELSE NULL END),
-                            subscription_ended_at = CASE WHEN $10 THEN NOW() ELSE subscription_ended_at END,
-                            updated_at = NOW()
-                        WHERE user_id = $1
-                        "#,
+                    UPDATE app_users u
+                    SET stripe_customer_id = COALESCE(NULLIF($2, ''), u.stripe_customer_id),
+                        subscription_id = CASE WHEN $3 = 'customer.subscription.deleted' THEN NULL ELSE NULLIF($4, '') END,
+                        subscription_status = NULLIF($5, ''),
+                        subscription_price_id = $6,
+                        subscription_current_period_end = $7,
+                        tier = CASE
+                            WHEN u.admin_tier IS NOT NULL
+                             AND (CASE u.admin_tier WHEN 'max' THEN 3 WHEN 'pro' THEN 2 ELSE 1 END)
+                               > (CASE $8 WHEN 'max' THEN 3 WHEN 'pro' THEN 2 ELSE 1 END)
+                            THEN u.admin_tier ELSE $8 END,
+                        subscription_started_at = COALESCE(u.subscription_started_at, CASE WHEN $9 THEN NOW() ELSE NULL END),
+                        subscription_ended_at = CASE WHEN $10 THEN NOW() ELSE u.subscription_ended_at END,
+                        updated_at = NOW()
+                    FROM prev
+                    WHERE u.user_id = prev.user_id
+                    RETURNING u.user_id, prev.tier, u.tier
+                    "#,
+                )
+                .bind(&user_id)
+                .bind(customer_id)
+                .bind(event_type)
+                .bind(subscription_id)
+                .bind(status)
+                .bind(&price_id)
+                .bind(current_period_end)
+                .bind(&stripe_tier)
+                .bind(is_active)
+                .bind(is_terminated)
+                .fetch_all(&state.db)
+                .await
+                .unwrap_or_else(|err| {
+                    error!("stripe webhook: app_users update failed: {err}");
+                    Vec::new()
+                });
+                for (target, from, to) in changed.iter().filter(|(_, from, to)| from != to) {
+                    audit_admin_action(
+                        &state,
+                        Some("stripe_webhook"),
+                        "tier_change",
+                        Some(target),
+                        Some(serde_json::json!({
+                            "from": from,
+                            "to": to,
+                            "stripe_event": event_type,
+                            "subscription_status": status,
+                        })),
                     )
-                    .bind(user_id)
-                    .bind(customer_id)
-                    .bind(event_type)
-                    .bind(subscription_id)
-                    .bind(status)
-                    .bind(&price_id)
-                    .bind(current_period_end)
-                    .bind(subscription_tier(status, price_id.as_ref()))
-                    .bind(is_active)
-                    .bind(is_terminated)
-                    .execute(&state.db)
-                    .await
-                };
-                let _ = result;
+                    .await;
+                }
             }
         }
         _ => {}
@@ -4311,7 +4472,7 @@ async fn redeem_coupon(
     let user = sqlx::query_as::<_, AppUser>(
         r#"
         UPDATE app_users
-        SET tier = 'pro',
+        SET tier = CASE WHEN tier = 'max' THEN 'max' ELSE 'pro' END,
             coupon_code = $2,
             updated_at = NOW()
         WHERE user_id = $1
@@ -4605,32 +4766,37 @@ async fn admin_update_user_tier(
 ) -> Result<Json<AppUser>, StatusCode> {
     let (actor_email, _owner) = ensure_owner_or_service_with_actor(&state, &headers).await?;
 
-    let valid_tiers = ["free", "pro", "max"];
-    if !valid_tiers.contains(&body.tier.as_str()) {
-        return Err(StatusCode::BAD_REQUEST);
-    }
+    // "free" / "pro" / "max" pin the plan: Stripe events keep it unless the
+    // person pays for more (see effective_plan). "auto" unpins it and goes
+    // back to what the subscription pays for.
+    let pinned = match body.tier.as_str() {
+        "free" | "pro" | "max" => Some(body.tier.clone()),
+        "auto" => None,
+        _ => return Err(StatusCode::BAD_REQUEST),
+    };
 
-    // Capture the prior tier for the audit trail before mutating.
-    let prior_tier: Option<String> = sqlx::query_scalar(
-        r#"SELECT tier FROM app_users WHERE user_id = $1"#,
+    // Capture the prior plan for the audit trail before mutating.
+    let (prior_tier, status, price_id): (String, Option<String>, Option<String>) = sqlx::query_as(
+        r#"SELECT tier, subscription_status, subscription_price_id FROM app_users WHERE user_id = $1"#,
     )
     .bind(&user_id)
     .fetch_optional(&state.db)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    .ok_or(StatusCode::NOT_FOUND)?;
+    let paid = subscription_tier(status.as_deref().unwrap_or(""), price_id.as_ref());
+    let tier = effective_plan(pinned.as_deref(), &paid);
 
-    let user = sqlx::query_as::<_, AppUser>(
+    let user = sqlx::query_as::<_, AppUser>(&format!(
         r#"
         UPDATE app_users
-        SET tier = $1, updated_at = NOW()
-        WHERE user_id = $2
-        RETURNING user_id, email, name, tier, coupon_code,
-                  stripe_customer_id, subscription_id, subscription_status,
-                  subscription_price_id, subscription_current_period_end,
-                  created_at, updated_at
-        "#,
-    )
-    .bind(&body.tier)
+        SET tier = $1, admin_tier = $2, updated_at = NOW()
+        WHERE user_id = $3
+        RETURNING {APP_USER_COLUMNS}
+        "#
+    ))
+    .bind(&tier)
+    .bind(&pinned)
     .bind(&user_id)
     .fetch_optional(&state.db)
     .await
@@ -4644,7 +4810,8 @@ async fn admin_update_user_tier(
         Some(&user_id),
         Some(serde_json::json!({
             "from": prior_tier,
-            "to": body.tier,
+            "to": tier,
+            "pinned": pinned.is_some(),
         })),
     )
     .await;
@@ -7054,27 +7221,14 @@ async fn desktop_auth_exchange(
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    let claimed = sqlx::query_as::<_, AppUser>(
+    let claimed = sqlx::query_as::<_, (String, String, String)>(
         r#"
-        WITH claimed AS (
-            UPDATE desktop_auth_codes
-            SET used_at = NOW()
-            WHERE code = $1
-              AND used_at IS NULL
-              AND expires_at > NOW()
-            RETURNING user_id, email, name
-        )
-        INSERT INTO app_users (user_id, email, name)
-        SELECT user_id, email, name FROM claimed
-        ON CONFLICT (user_id)
-        DO UPDATE SET
-            email = EXCLUDED.email,
-            name = EXCLUDED.name,
-            updated_at = NOW()
-        RETURNING user_id, email, name, tier, coupon_code,
-                  stripe_customer_id, subscription_id, subscription_status,
-                  subscription_price_id, subscription_current_period_end,
-                  created_at, updated_at
+        UPDATE desktop_auth_codes
+        SET used_at = NOW()
+        WHERE code = $1
+          AND used_at IS NULL
+          AND expires_at > NOW()
+        RETURNING user_id, email, name
         "#,
     )
     .bind(code)
@@ -7083,7 +7237,16 @@ async fn desktop_auth_exchange(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    Ok(Json(mint_desktop_access_token(&state, &claimed).await?))
+    // Same matching as every other sign-in, so a desktop sign-in lands on the
+    // person's one row.
+    let (user_id, email, name) = claimed;
+    let app_user = upsert_app_user(
+        &state,
+        &BetterAuthUser { id: user_id, email: Some(email), name: Some(name) },
+    )
+    .await?;
+
+    Ok(Json(mint_desktop_access_token(&state, &app_user).await?))
 }
 
 async fn desktop_auth_logout(
@@ -8034,6 +8197,45 @@ async fn main() {
 #[cfg(test)]
 mod router_tests {
     use super::*;
+
+    #[test]
+    fn stripe_renewal_keeps_a_hand_set_plan() {
+        // The bug: admin set Max on a Pro subscriber, the monthly renewal
+        // put them back on Pro.
+        assert_eq!(effective_plan(Some("max"), "pro"), "max");
+        // Not pinned: whatever they pay for.
+        assert_eq!(effective_plan(None, "pro"), "pro");
+        assert_eq!(effective_plan(None, "free"), "free");
+        // Pinned lower than what they pay for: they keep what they pay for.
+        assert_eq!(effective_plan(Some("free"), "pro"), "pro");
+        // A comp outlives a cancelled subscription.
+        assert_eq!(effective_plan(Some("pro"), "free"), "pro");
+    }
+
+    #[test]
+    fn one_person_signing_in_from_web_and_desktop_gets_one_row() {
+        let new = |id| match_sign_in(id, None, false, None);
+        // First sign-in anywhere: a new row.
+        assert_eq!(new("ba_123"), SignInMatch::New);
+        // The same id again: that row.
+        assert_eq!(match_sign_in("ba_123", None, true, Some("ba_123".into())), SignInMatch::Existing("ba_123".into()));
+        // The other app's id with the same email: link it, no second row.
+        assert_eq!(
+            match_sign_in("google_987", None, false, Some("ba_123".into())),
+            SignInMatch::LinkTo("ba_123".into())
+        );
+        // Once linked, that id always means the first row, whatever the email.
+        assert_eq!(
+            match_sign_in("google_987", Some("ba_123".into()), false, None),
+            SignInMatch::Existing("ba_123".into())
+        );
+        // A linked id that also has an old row of its own (left from before
+        // the merge) still goes to the linked row.
+        assert_eq!(
+            match_sign_in("google_987", Some("ba_123".into()), true, Some("google_987".into())),
+            SignInMatch::Existing("ba_123".into())
+        );
+    }
 
     #[test]
     fn reads_generated_image_from_openrouter_response() {
