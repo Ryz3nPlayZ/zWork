@@ -168,7 +168,8 @@ pub async fn idle_teardown_task() {
 /// (pid, window_id) and replaces it on the next snapshot, so we must reuse the
 /// exact window_id a capture returned for subsequent element-index actions.
 struct TargetCache {
-    by_app: HashMap<String, (i64, i64)>,
+    /// app -> (pid, window_id, snapshot_id of the last capture, if any)
+    by_app: HashMap<String, (i64, i64, Option<Value>)>,
     last_app: Option<String>,
 }
 
@@ -220,7 +221,7 @@ async fn resolve_pid(app: &str) -> Result<i64, String> {
 /// Resolve `(pid, window_id)` for an element-indexed action. Requires a prior
 /// `desktop_capture` (or `desktop_launch_app`) for the target app — the iron
 /// workflow. If `app` is None, uses the last captured/launched app.
-async fn resolve_target(app: Option<&str>) -> Result<(i64, i64), String> {
+async fn resolve_target(app: Option<&str>) -> Result<(i64, i64, Option<Value>), String> {
     let key = match app {
         Some(a) if !a.is_empty() => a.to_string(),
         _ => cache()
@@ -246,6 +247,17 @@ async fn resolve_target(app: Option<&str>) -> Result<(i64, i64), String> {
                  — element indices are only valid from the most recent capture."
             )
         })
+}
+
+/// Address an element from the last capture: index + window + the capture's snapshot_id.
+fn add_element(params: &mut Value, element: u32, window_id: i64, snap: &Option<Value>) {
+    params["element_index"] = json!(element);
+    if window_id > 0 {
+        params["window_id"] = json!(window_id);
+    }
+    if let Some(s) = snap {
+        params["snapshot_id"] = s.clone();
+    }
 }
 
 /// Coerce an action result (click/type/key/etc.) into the ActionResult shape.
@@ -327,7 +339,10 @@ pub async fn capture(app: Option<&str>) -> Result<CaptureResult, String> {
     // reuse the same window's element map without re-resolving.
     {
         let mut cache = cache().lock_unpoisoned();
-        cache.by_app.insert(app_name.clone(), (pid, window_id));
+        // cua-driver >= 0.22 rejects a bare element_index: it must come with the
+        // snapshot_id of the capture that produced it.
+        let snap = result.get("snapshot_id").filter(|v| !v.is_null()).cloned();
+        cache.by_app.insert(app_name.clone(), (pid, window_id, snap));
         cache.last_app = Some(app_name.clone());
     }
 
@@ -459,12 +474,10 @@ fn truncate_tree(tree: &str, max_elements: usize) -> (String, bool) {
 /// captured app if `app` is None).
 pub async fn click(element: u32, app: Option<&str>) -> Result<ActionResult, String> {
     mark_desktop_use();
-    let (pid, window_id) = resolve_target(app).await?;
+    let (pid, window_id, snap) = resolve_target(app).await?;
     let c = client().await?;
-    let mut params = json!({ "pid": pid, "element_index": element });
-    if window_id > 0 {
-        params["window_id"] = json!(window_id);
-    }
+    let mut params = json!({ "pid": pid });
+    add_element(&mut params, element, window_id, &snap);
     let result = c.call("click", params).await?;
     parse_action(result, "click")
 }
@@ -477,14 +490,14 @@ pub async fn type_text(
     app: Option<&str>,
 ) -> Result<ActionResult, String> {
     mark_desktop_use();
-    let (pid, window_id) = resolve_target(app).await?;
+    let (pid, window_id, snap) = resolve_target(app).await?;
     let c = client().await?;
     let mut params = json!({ "pid": pid, "text": text });
-    if let Some(e) = element {
-        params["element_index"] = json!(e);
-        if window_id > 0 {
-            params["window_id"] = json!(window_id);
-        }
+    match element {
+        Some(e) => add_element(&mut params, e, window_id, &snap),
+        // Without a window the driver refuses apps with several windows (Chrome).
+        None if window_id > 0 => params["window_id"] = json!(window_id),
+        None => {}
     }
     let result = c.call("type_text", params).await?;
     parse_action(result, "type")
@@ -500,7 +513,7 @@ pub async fn type_text(
 /// mode. These are irreversible one-keystroke accidents, not intentional work.
 pub async fn key(keys: &str, app: Option<&str>) -> Result<ActionResult, String> {
     mark_desktop_use();
-    let (pid, window_id) = resolve_target(app).await?;
+    let (pid, window_id, _) = resolve_target(app).await?;
     let parts: Vec<&str> = keys
         .split('+')
         .map(|s| s.trim())
@@ -577,7 +590,7 @@ fn blocked_key_combo(parts: &[&str]) -> Option<&'static str> {
 /// horizontally.
 pub async fn scroll(direction: &str, amount: i32, app: Option<&str>) -> Result<ActionResult, String> {
     mark_desktop_use();
-    let (pid, window_id) = resolve_target(app).await?;
+    let (pid, window_id, _) = resolve_target(app).await?;
     let amount = amount.clamp(1, 50);
     let c = client().await?;
     let mut params = json!({ "pid": pid, "direction": direction, "by": "line", "amount": amount });
@@ -592,7 +605,7 @@ pub async fn scroll(direction: &str, amount: i32, app: Option<&str>) -> Result<A
 /// pick a `<select>` option or move a slider — no focus reliance, no keystrokes.
 pub async fn set_value(element: u32, value: &str, app: Option<&str>) -> Result<ActionResult, String> {
     mark_desktop_use();
-    let (pid, window_id) = resolve_target(app).await?;
+    let (pid, window_id, snap) = resolve_target(app).await?;
     if window_id == 0 {
         return Err(
             "desktop_set_value needs a window_id from a prior desktop_capture. \
@@ -601,7 +614,8 @@ pub async fn set_value(element: u32, value: &str, app: Option<&str>) -> Result<A
         );
     }
     let c = client().await?;
-    let params = json!({ "pid": pid, "window_id": window_id, "element_index": element, "value": value });
+    let mut params = json!({ "pid": pid, "value": value });
+    add_element(&mut params, element, window_id, &snap);
     let result = c.call("set_value", params).await?;
     parse_action(result, "set_value")
 }
@@ -656,7 +670,7 @@ pub async fn launch_app(app: &str) -> Result<ActionResult, String> {
         .unwrap_or(0);
     if pid > 0 {
         let mut cache = cache().lock_unpoisoned();
-        cache.by_app.insert(app.to_string(), (pid, first_window));
+        cache.by_app.insert(app.to_string(), (pid, first_window, None));
         cache.last_app = Some(app.to_string());
     }
     parse_action(result, "launch_app")
@@ -1113,6 +1127,16 @@ fn app_name_of(a: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn element_actions_carry_the_capture_snapshot() {
+        let mut p = json!({ "pid": 1 });
+        add_element(&mut p, 4, 77, &Some(json!("s0a1b2c3d")));
+        assert_eq!(p, json!({ "pid": 1, "element_index": 4, "window_id": 77, "snapshot_id": "s0a1b2c3d" }));
+        let mut q = json!({ "pid": 1 });
+        add_element(&mut q, 4, 0, &None);
+        assert_eq!(q, json!({ "pid": 1, "element_index": 4 }));
+    }
 
     #[test]
     fn counts_and_caps_both_drivers_tree_formats() {
