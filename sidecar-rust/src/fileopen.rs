@@ -47,7 +47,7 @@ fn is_runnable(p: &Path) -> bool {
         || p.to_string_lossy().contains(".app/")
 }
 
-fn launch(p: &Path, reveal: bool) -> std::io::Result<()> {
+pub(crate) fn launch(p: &Path, reveal: bool) -> std::io::Result<()> {
     #[cfg(target_os = "macos")]
     let mut cmd = {
         let mut c = Command::new("open");
