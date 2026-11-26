@@ -1,6 +1,14 @@
 # Deploy plan: router cost changes and the pending API changes
 
-Status: **waiting for approval. Nothing is deployed.**
+Status: **deployed 2026-11-26.** Built from `c996758` (branch
+`claude/router-accounts-deploy`): this branch at `aa94a59` merged with the
+accounts fix `87b5e5e`, so the live accounts code stays. Live image
+`401f6f495f61`; rollback tag `cloud-axum_api:rollback-20261126` (= `ffdd082b`,
+the accounts image); source backup `~/cloud/api/src/main.rs.bak-20261126`.
+Smoke test and probes passed: `/health` 200, admin 401 without auth, public
+`/health` 200, no startup warnings (the email index exists since the accounts
+merge). A/B is off (no env override on the VM). Still to do: the first-requests
+check and the after-a-week checks below.
 
 This deploys the API (`axum_api`) on the prod VM from one commit of this branch
 (`claude/zen-taussig-01eb25`, or `main` once merged). The web app, landing and
@@ -79,8 +87,8 @@ environment and to `~/cloud/.env`.
 
 ## Rollback
 
-`sudo docker tag cloud-axum_api:rollback-20261125 cloud-axum_api:latest && cd ~/cloud && sudo docker compose up -d --no-deps axum_api`,
-then restore `main.rs.bak-20261125`. Older tags: `rollback-20261121`,
+`sudo docker tag cloud-axum_api:rollback-20261126 cloud-axum_api:latest && cd ~/cloud && sudo docker compose up -d --no-deps axum_api`,
+then restore `main.rs.bak-20261126`. Older tags: `rollback-20261125`, `rollback-20261121`,
 `rollback-20261120`, `rollback-20261116`. No database migration is involved,
 so rollback is just the image.
 
