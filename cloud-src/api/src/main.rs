@@ -160,6 +160,13 @@ struct GatewayConfig {
     /// Send runs with a new image to the Vision route (Gemini). Off: they
     /// stay on Flash, whose models read images too.
     vision_for_images: bool,
+    /// Free-plan runs go to OpenRouter's free models (Particle, then ERNIE),
+    /// with paid Flash as failover. `ROUTER_FREE_MODELS=0` turns it off.
+    free_models: bool,
+    /// NVIDIA's API (build.nvidia.com), used only by the hidden
+    /// `zwork-nvidia-test` tier. Empty key: those calls fall through to Flash.
+    nvidia_api_key: String,
+    nvidia_base_url: String,
     /// How far past the budget a run already under way may go.
     continuation_headroom: f64,
     /// Dollars per usage unit shown in the app (≈ one typical Flash message).
@@ -279,6 +286,8 @@ struct HostedTier {
 const HOSTED_TIERS: &[HostedTier] = &[
     HostedTier { alias: "zwork-auto", plan: "free" },
     HostedTier { alias: "zwork-apex", plan: "pro" },
+    // Hidden test tier: NVIDIA-hosted models. Not in any model list.
+    HostedTier { alias: "zwork-nvidia-test", plan: "pro" },
 ];
 
 /// Map a requested model id to its tier. Every retired tier id, and the
@@ -291,6 +300,7 @@ fn hosted_tier(model: &str) -> Option<&'static HostedTier> {
         | "z-ai/glm-5.3-flash" | "gemma4:31b" | "llama-3.2-90b-vision"
         | "meta-llama/llama-4-scout-17b-16e-instruct" => "zwork-auto",
         "zwork-apex" => "zwork-apex",
+        "zwork-nvidia-test" => "zwork-nvidia-test",
         _ => return None,
     };
     HOSTED_TIERS.iter().find(|t| t.alias == alias)
@@ -312,6 +322,15 @@ const GPT_SOL: &str = "openai/gpt-6.2-sol:floor";
 const GPT_LUNA: &str = "openai/gpt-6-luna:floor";
 const GLM_FLASH: &str = "z-ai/glm-5.3-flash:floor";
 const CLAUDE_HAIKU: &str = "anthropic/claude-haiku-5.5:floor";
+/// OpenRouter free models: no charge, but one shared limit of 1,000
+/// requests a day for the whole account, so paid Flash backs them up.
+const PARTICLE_FREE: &str = "particle-ai/particle-1:free";
+const ERNIE_FREE: &str = "baidu/ernie-5.5-flash-preview:free";
+/// Models served by NVIDIA's API instead of OpenRouter (see `upstream_for`).
+const NVIDIA_PREFIX: &str = "nvidia-api:";
+const NV_NEMOTRON_ULTRA: &str = "nvidia-api:nvidia/nemotron-3-ultra-550b-a55b";
+const NV_MINIMAX: &str = "nvidia-api:minimaxai/minimax-m3.1-flash";
+const NV_KIMI: &str = "nvidia-api:moonshotai/kimi-k3.1-pro";
 
 /// Which model serves a run. Chosen on the run's first call and stored on
 /// every request (`gateway_requests.route`), so a run stays on one model and
@@ -331,6 +350,10 @@ enum Route {
     AbGlm,
     /// The `zwork-apex` tier.
     Apex,
+    /// Free-plan runs: OpenRouter's free models, then paid Flash.
+    Free,
+    /// The hidden `zwork-nvidia-test` tier.
+    NvidiaTest,
 }
 
 impl Route {
@@ -343,6 +366,8 @@ impl Route {
             Route::AbHaiku => "ab-haiku",
             Route::AbGlm => "ab-glm",
             Route::Apex => "apex",
+            Route::Free => "free",
+            Route::NvidiaTest => "nvidia-test",
         }
     }
 
@@ -355,6 +380,8 @@ impl Route {
             "ab-haiku" => Route::AbHaiku,
             "ab-glm" => Route::AbGlm,
             "apex" => Route::Apex,
+            "free" => Route::Free,
+            "nvidia-test" => Route::NvidiaTest,
             _ => return None,
         })
     }
@@ -369,6 +396,8 @@ impl Route {
             Route::AbHaiku => &[CLAUDE_HAIKU, DEEPSEEK_FLASH],
             Route::AbGlm => &[GLM_FLASH, DEEPSEEK_FLASH],
             Route::Apex => &[GPT_SOL],
+            Route::Free => &[PARTICLE_FREE, ERNIE_FREE, GLM_FLASH, DEEPSEEK_FLASH],
+            Route::NvidiaTest => &[NV_NEMOTRON_ULTRA, NV_MINIMAX, NV_KIMI, GLM_FLASH],
         }
     }
 }
@@ -645,12 +674,18 @@ async fn choose_route(
     if tier.alias == "zwork-apex" {
         return (Route::Apex, serde_json::json!({ "reason": "apex" }));
     }
+    if tier.alias == "zwork-nvidia-test" {
+        return (Route::NvidiaTest, serde_json::json!({ "reason": "nvidia_test" }));
+    }
     let has_tools = request_has_tools(body);
     // Every Flash model reads images, so a screenshot only moves a run to
     // the Vision route when `ROUTER_VISION_FOR_IMAGES` is on.
     let has_images = latest_has_images(body);
     let to_vision = has_images && state.gateway.vision_for_images;
     let paid = user.is_some_and(|u| plan_rank(&u.tier) > 0);
+    // Signed-in free users run on the free models; the public demo (no user)
+    // and paid plans stay on Flash.
+    let base = if user.is_some() && !paid && state.gateway.free_models { Route::Free } else { Route::Flash };
 
     let (prior, calls_in_run): (Option<String>, i64) = match user {
         Some(u) => sqlx::query_as(
@@ -702,13 +737,13 @@ async fn choose_route(
             .await
             .unwrap_or((None, 0, true));
             if should_hand_back(first.as_deref(), escalated_calls, handed_back, has_images, after) {
-                return (Route::Flash, serde_json::json!({ "reason": "handback", "escalated_calls": escalated_calls }));
+                return (base, serde_json::json!({ "reason": "handback", "escalated_calls": escalated_calls }));
             }
         }
         return (Route::Escalated, serde_json::json!({ "reason": "sticky" }));
     }
 
-    if let Some(route) = prior.or((kind == RequestKind::Continuation).then_some(Route::Flash)) {
+    if let Some(route) = prior.or((kind == RequestKind::Continuation).then_some(base)) {
         if has_tools {
             let signals = struggle_signals(body);
             if let Some(why) = should_escalate(&signals, calls_in_run, state.gateway.escalate_after_calls) {
@@ -720,7 +755,7 @@ async fn choose_route(
                 }
             }
         }
-        if to_vision && matches!(route, Route::Flash | Route::AbLuna | Route::AbHaiku | Route::AbGlm) {
+        if to_vision && matches!(route, Route::Flash | Route::Free | Route::AbLuna | Route::AbHaiku | Route::AbGlm) {
             return (Route::Vision, serde_json::json!({ "reason": "images", "from": route.as_str() }));
         }
         return (route, serde_json::json!({ "reason": "sticky" }));
@@ -737,12 +772,12 @@ async fn choose_route(
         if let Some(ab) = ab_route(run_id, if paid { state.gateway.router_ab_percent } else { 0 }) {
             return (ab, serde_json::json!({ "reason": "ab_test", "classifier_cost_usd": cost }));
         }
-        return (Route::Flash, serde_json::json!({ "reason": "classifier_easy", "classifier_cost_usd": cost }));
+        return (base, serde_json::json!({ "reason": "classifier_easy", "classifier_cost_usd": cost }));
     }
     if to_vision {
         return (Route::Vision, serde_json::json!({ "reason": "images" }));
     }
-    (Route::Flash, serde_json::json!({ "reason": "default" }))
+    (base, serde_json::json!({ "reason": "default" }))
 }
 
 /// The router's only upstream is OpenRouter. It is registered twice: the
@@ -767,6 +802,42 @@ fn load_gateway_providers() -> Vec<GatewayProvider> {
         // POST {base}/v1/messages.
         provider(env_or("OPENROUTER_ANTHROPIC_BASE_URL", "https://openrouter.ai/api"), GatewayProtocol::Anthropic),
     ]
+}
+
+/// Where a candidate model is served. `nvidia-api:` models go to NVIDIA's
+/// API with its own key (OpenAI shape only); `None` skips the candidate when
+/// that isn't possible. Everything else goes to OpenRouter.
+fn upstream_for<'a>(gw: &GatewayConfig, openrouter: &GatewayProvider, model: &'a str) -> Option<(GatewayProvider, &'a str)> {
+    upstream_for_keys(&gw.nvidia_api_key, &gw.nvidia_base_url, openrouter, model)
+}
+
+fn upstream_for_keys<'a>(
+    nvidia_key: &str,
+    nvidia_base: &str,
+    openrouter: &GatewayProvider,
+    model: &'a str,
+) -> Option<(GatewayProvider, &'a str)> {
+    match model.strip_prefix(NVIDIA_PREFIX) {
+        None => Some((openrouter.clone(), model)),
+        Some(_) if nvidia_key.is_empty() || openrouter.protocol != GatewayProtocol::OpenAi => None,
+        Some(m) => Some((
+            GatewayProvider {
+                name: "NVIDIA".to_string(),
+                base_url: nvidia_base.to_string(),
+                api_key: nvidia_key.to_string(),
+                ..openrouter.clone()
+            },
+            m,
+        )),
+    }
+}
+
+/// NVIDIA rejects OpenRouter's own request fields with a 400.
+fn strip_openrouter_fields(body: &mut Value) {
+    if let Some(obj) = body.as_object_mut() {
+        obj.remove("session_id");
+        obj.remove("usage");
+    }
 }
 
 /// Ask OpenRouter to report the billed cost in the response's `usage`, pass
@@ -2973,11 +3044,18 @@ async fn ai_proxy(
     });
     let mut failures: Vec<String> = Vec::new();
 
-    for (attempt_index, model_name) in candidates.iter().enumerate() {
+    for (attempt_index, candidate) in candidates.iter().enumerate() {
         let attempt_number = attempt_index as i32 + 1;
         let attempt_started = Utc::now();
+        let Some((provider, model_name)) = upstream_for(&state.gateway, &provider, candidate) else {
+            failures.push(format!("{candidate}: upstream not configured for this request"));
+            continue;
+        };
         let mut attempt_body = body_json.clone();
         prepare_upstream_body(&mut attempt_body, model_name, &run_id);
+        if provider.name == "NVIDIA" {
+            strip_openrouter_fields(&mut attempt_body);
+        }
         if wants_stream {
             if let Some(obj) = attempt_body.as_object_mut() {
                 obj.insert("stream_options".to_string(), serde_json::json!({ "include_usage": true }));
@@ -3377,11 +3455,18 @@ async fn ai_proxy_anthropic(
     });
     let mut failures: Vec<String> = Vec::new();
 
-    for (attempt_index, model_name) in candidates.iter().enumerate() {
+    for (attempt_index, candidate) in candidates.iter().enumerate() {
         let attempt_number = attempt_index as i32 + 1;
         let attempt_started = Utc::now();
+        let Some((provider, model_name)) = upstream_for(&state.gateway, &provider, candidate) else {
+            failures.push(format!("{candidate}: upstream not configured for this request"));
+            continue;
+        };
         let mut attempt_body = body_json.clone();
         prepare_upstream_body(&mut attempt_body, model_name, &run_id);
+        if provider.name == "NVIDIA" {
+            strip_openrouter_fields(&mut attempt_body);
+        }
         if let Some(obj) = attempt_body.as_object_mut() {
             obj.insert("stream".to_string(), Value::Bool(true));
         }
@@ -7899,6 +7984,10 @@ async fn main() {
                 .unwrap_or(6),
             vision_for_images: std::env::var("ROUTER_VISION_FOR_IMAGES")
                 .is_ok_and(|v| matches!(v.trim(), "1" | "true" | "yes")),
+            free_models: !std::env::var("ROUTER_FREE_MODELS")
+                .is_ok_and(|v| matches!(v.trim(), "0" | "false" | "no")),
+            nvidia_api_key: std::env::var("NVIDIA_API_KEY").unwrap_or_default().trim().to_string(),
+            nvidia_base_url: env_or("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1"),
             continuation_headroom: env_f64("CONTINUATION_HEADROOM", 1.5),
             usage_unit_usd: env_f64("USAGE_UNIT_USD", 0.008),
             dev_coupon_codes: std::env::var("DEV_COUPON_CODES")
@@ -8154,14 +8243,45 @@ mod router_tests {
         }
         assert_eq!(hosted_tier("zwork-apex").unwrap().plan, "pro");
         assert!(hosted_tier("gpt-4o").is_none());
+        assert_eq!(hosted_tier("zwork-nvidia-test").unwrap().plan, "pro");
         for route in [Route::Flash, Route::Vision, Route::Escalated, Route::AbLuna, Route::AbHaiku, Route::AbGlm, Route::Apex] {
             assert_eq!(Route::parse(route.as_str()), Some(route));
             assert!(route.candidates().iter().all(|m| m.ends_with(":floor")));
         }
+        // Free and NVIDIA routes end on paid Flash, so a spent free quota
+        // or a missing NVIDIA key never fails the request.
+        for route in [Route::Free, Route::NvidiaTest] {
+            assert_eq!(Route::parse(route.as_str()), Some(route));
+            assert!(route.candidates().last().unwrap().ends_with(":floor"));
+        }
+        assert_eq!(Route::Free.candidates()[..2], [PARTICLE_FREE, ERNIE_FREE]);
         assert_eq!(Route::Flash.candidates(), [GLM_FLASH, DEEPSEEK_1017, DEEPSEEK_FLASH]);
         assert_eq!(Route::AbHaiku.candidates()[0], CLAUDE_HAIKU);
         assert_eq!(Route::Escalated.candidates()[0], MIMO_PRO);
         assert_eq!(Route::Vision.candidates()[0], GEMINI_FLASH);
+    }
+
+    #[test]
+    fn nvidia_models_go_to_nvidia_only_with_a_key() {
+        let or = GatewayProvider {
+            name: "OpenRouter".into(),
+            base_url: "https://openrouter.ai/api/v1".into(),
+            api_key: "or".into(),
+            primary_model: String::new(),
+            fallback_model: String::new(),
+            protocol: GatewayProtocol::OpenAi,
+        };
+        let (p, m) = upstream_for_keys("nv", "https://nv/v1", &or, NV_NEMOTRON_ULTRA).unwrap();
+        assert_eq!((p.name.as_str(), p.api_key.as_str(), m), ("NVIDIA", "nv", "nvidia/nemotron-3-ultra-550b-a55b"));
+        assert!(upstream_for_keys("", "https://nv/v1", &or, NV_KIMI).is_none());
+        let anthropic = GatewayProvider { protocol: GatewayProtocol::Anthropic, ..or.clone() };
+        assert!(upstream_for_keys("nv", "https://nv/v1", &anthropic, NV_KIMI).is_none());
+        let (p, m) = upstream_for_keys("nv", "https://nv/v1", &or, PARTICLE_FREE).unwrap();
+        assert_eq!((p.name.as_str(), m), ("OpenRouter", PARTICLE_FREE));
+        let mut body = serde_json::json!({ "model": "x" });
+        prepare_upstream_body(&mut body, "x", "run-1");
+        strip_openrouter_fields(&mut body);
+        assert!(body.get("session_id").is_none() && body.get("usage").is_none());
     }
 
     #[test]
