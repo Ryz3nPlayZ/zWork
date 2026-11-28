@@ -95,6 +95,28 @@ jobs:
       - name: cargo test
         working-directory: ./sidecar-rust
         run: cargo test
+      # Starts the real backend on Windows and drives it like the app does:
+      # a long streamed reply, a command with long output, a connector, a
+      # restart and Send logs (scripts/windows-smoke/smoke.py).
+      - name: Setup Python
+        if: ${{ !cancelled() }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Backend smoke test
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15
+        shell: bash
+        run: |
+          cargo build --manifest-path sidecar-rust/Cargo.toml
+          python scripts/windows-smoke/smoke.py sidecar-rust/target/debug/rwork-backend.exe "$RUNNER_TEMP/smoke"
+      - name: Keep smoke test output
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-smoke
+          path: ${{ runner.temp }}/smoke
+          if-no-files-found: ignore
       # Same driver version and layout the release bundles (release.yml).
       - name: Desktop control against the real driver
         working-directory: ./sidecar-rust
