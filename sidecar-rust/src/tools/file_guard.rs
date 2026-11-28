@@ -67,7 +67,9 @@ pub fn user_file_changed_by(command: &str, cwd: &Path) -> Option<PathBuf> {
     let mut cwd = cwd.to_path_buf();
     for segment in segments(&without_script_bodies(command)) {
         let resolve = |s: &str, cwd: &Path| resolve_to_cwd(&expand_home_var(s), cwd);
-        for target in segment.iter().filter(|t| t.redirect) {
+        // Output thrown away (`2>/dev/null`, PowerShell's `$null`, cmd's `NUL`).
+        let discard = |t: &str| matches!(t.to_ascii_lowercase().as_str(), "/dev/null" | "$null" | "nul");
+        for target in segment.iter().filter(|t| t.redirect && !discard(&t.text)) {
             let p = resolve(&target.text, &cwd);
             if is_users(&p, &roots) {
                 return Some(p);

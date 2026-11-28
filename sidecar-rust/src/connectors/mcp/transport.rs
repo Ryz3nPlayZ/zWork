@@ -350,6 +350,8 @@ impl Drop for ProcessGuard {
             let _ = nix::sys::signal::killpg(nix::unistd::Pid::from_raw(pgid), nix::sys::signal::Signal::SIGTERM);
         }
         // Windows: `cmd /C npx …` — killing cmd alone leaves node running.
+        // Wait for it: `kill_on_drop` kills cmd right after this, and once
+        // cmd is gone `/T` can no longer find the tree under it.
         #[cfg(windows)]
         if let Some(pid) = self.pid {
             use std::os::windows::process::CommandExt;
@@ -359,7 +361,7 @@ impl Drop for ProcessGuard {
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .creation_flags(0x0800_0000)
-                .spawn();
+                .status();
         }
     }
 }
