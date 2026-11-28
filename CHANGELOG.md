@@ -2,6 +2,38 @@
 
 All notable changes to zWork are documented in this file.
 
+## v0.7.0
+
+### New
+- **Crew.** Make crew members — a name, a look, a colour and a short briefing — and pick one for a chat from Ask… in the composer, or assign one to a scheduled task. Their instructions join the turn, only their own connected apps reach the agent, and they answer as themselves, with their avatar on the chat, in the sidebar and in the Inbox. A Crew page adds, edits and removes them, and making one is a full-window stage where they stand in a light of their colour while you name and brief them. Avatars show what a member is doing: working while one of their chats runs, asleep while they wait on a scheduled task.
+- **A finance desk.** An index strip, an S&P 500 heatmap by market value, the day's movers and calendar; candlestick charts with volume and indicators; a page per stock for overview, financials (annual and quarterly), earnings, filings, news and ownership; Compare for up to five tickers; a screener you describe in words and save; a portfolio entered by hand or imported from Fidelity, Schwab, Robinhood or Webull, with its sector mix and value next to the S&P 500; and a practice account with $100k of pretend money and market or limit orders. Price alerts and a weekday morning brief arrive in the Inbox, and the chat beside the desk sees the stock you have open, so "how did it do?" works. A `/` command bar, `j`/`k`, `1`–`7` and `w` shortcuts, and a compact density for terminals-at-heart.
+- **A skills shelf.** A Skills page in the sidebar lists office skills from skills.sh with search and a page per skill showing what it tells zWork, its licence and any programs it runs — one step to add, one to remove. The skills that ship with zWork and the ones your other AI apps left on this computer are listed too.
+- **Connectors is a storefront.** 129 apps from Composio's catalogue, the popular office ones first, grouped in plain words, with a page per app that says what zWork can do there, example requests and a one-click connect. The 52 most common apps (Gmail, Outlook, Teams, Drive, Slack, Jira, HubSpot and more) carry their own full-colour logo, bundled so they work offline.
+- **Picture making.** Ask zWork for a picture and describe its shape (square, widescreen, a phone screen); it's made on your plan's allowance, saved to the outputs folder and shown under the reply in its own frame, with Open, Copy, Show in folder and Try again beneath it.
+- **Dictation.** The mic beside Send listens; words appear in the message box as you speak, a glow along its bottom edge follows your voice, and Done, Esc or Enter stops without sending.
+- **Diagrams in replies.** A reply can draw a mermaid diagram — flows, timelines, how things connect — rendered as a clean picture in your theme instead of code, alongside the self-contained pages it could already make.
+- **Edit a sent message.** Choose Edit on any of your messages and it loads back into the composer; sending rewinds the chat — the old turn is parked as a Version and leaves the model's context — then runs fresh, so the answer follows what you meant, not what you mistyped.
+- **The app icon follows your Mac.** A dark-mode icon that tracks light, dark and tinted appearance, with a setting to pin it to Light or Dark if you'd rather it stay put.
+
+### Improvements
+- **A much lighter appetite for tokens.** A connected app's actions stay off until zWork turns that app on for the task, so a plain message no longer ships every Gmail and Notion action to the model — about 14k tokens a step instead of about 87k — and the agent's own instructions are a third shorter.
+- **Your allowance tells the truth.** When it's used up the chat says so within a second instead of thinking for minutes, and the chat box warns you at 80% and when it's gone, with a See usage link.
+- **Live runs survive a reload.** Reload the app while a chat is working and it picks the live reply back up instead of showing it finished; send a message to a chat that's still working and it joins that run as a follow-up instead of starting a second one beside it.
+- **Attachments read and show properly.** Attached PDFs and Office files open with the built-in document reader, files can be dropped anywhere on the window, and attachments appear as a thumbnail or a file card with its type and size. Pictures open full size, in the composer and in replies.
+- **Web reading degrades gracefully.** Search falls back to DuckDuckGo when the primary allowance runs out, and pages that need JavaScript or block plain requests are read through a free reader service.
+- **Setup and analytics are rebuilt.** Onboarding is one screen — pick a first job if you want one, pick a look, start — with a Redo onboarding button in Settings. Analytics is three calm panels: last week's messages against the week before, your plan's limits, and a year of days with the busiest one called out.
+- **Scheduled tasks start from a box.** Describe the task in plain words, then Repeat, Days, Time and Crew — the name comes from the plan when you leave it blank, and Enter opens the editor.
+- **One look everywhere.** Rows, menus, cards and the sidebar share a single sliding hover and one selected fill; saved themes show as preview tiles; a Chat text size slider sizes replies from 13 to 19 px; the dictation glow follows your theme or palette; and the todo list sits in a plain box above the composer that pushes the chat up instead of covering it.
+- **Sharper failure talk.** A reply cut off by the model's own output limit says so, instead of claiming the context window was exceeded.
+- **Signing out on the web signs you out.** Reloading app.tryzwork.app no longer signs you straight back in after you sign out.
+
+### Fixes
+- **The composer shows itself again.** The dictation glow clipped everything outside its box, so the composer's outline and its menus vanished or were cut off; it now clips only while listening.
+- **Scheduled tasks work on a fresh install.** A task runs on whichever model is set up rather than an unsigned-in default, and when none is, the Inbox says to sign in or add a key — once, not every run.
+- **Made pictures stay made.** Generated images kept disappearing when you reopened the chat; the image call's details are now saved by the code path that actually runs it.
+- **Sidebar documents stop guessing.** The per-turn note offers a sidebar document as an option instead of reading "photograph" as a graph and overriding image requests.
+- **Menus, dialogs and themes behave.** Dialogs stop at the window's height and scroll; tooltips draw above panels and flip below buttons near the top; dithered themes like Riso tint the sidebar enough to read; and the interface size slider applies when you let go instead of rescaling under the pointer.
+
 ## v0.6.1
 
 ### New
