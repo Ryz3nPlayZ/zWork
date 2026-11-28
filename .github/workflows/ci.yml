@@ -2,7 +2,8 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # site/redesign too, so Windows-only breakage shows up before a release.
+    branches: [main, site/redesign]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -88,11 +89,12 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: sidecar-rust -> target
-      # shortcut: only the shell tool and the approval gate run here; widen to
-      # plain `cargo test` once the Unix-only tests are gated.
-      - name: Run Windows-relevant tests
+      - name: cargo check
         working-directory: ./sidecar-rust
-        run: cargo test -- harness::tools::bash catches_powershell blocks_this_platforms doc_extract
+        run: cargo check --all-targets
+      - name: cargo test
+        working-directory: ./sidecar-rust
+        run: cargo test
       # Same driver version and layout the release bundles (release.yml).
       - name: Desktop control against the real driver
         working-directory: ./sidecar-rust
@@ -177,6 +179,45 @@ jobs:
           [ -f binaries/cua-driver ] || { echo '#!/bin/sh' > binaries/cua-driver; chmod +x binaries/cua-driver; }
           [ -f zWork-Skills/.placeholder ] || echo 'CI placeholder — real skills staged by prepare-bundle.cjs' > zWork-Skills/.placeholder
           [ -f CuaDriver.app/Contents/MacOS/cua-driver ] || { echo '#!/bin/sh' > CuaDriver.app/Contents/MacOS/cua-driver; chmod +x CuaDriver.app/Contents/MacOS/cua-driver; }
+      - name: cargo check
+        working-directory: ./app/src-tauri
+        run: cargo check
+
+  tauri-windows:
+    # The desktop shell has Windows-only code (taskkill, CREATE_NO_WINDOW,
+    # %LOCALAPPDATA% logs) that the ubuntu check never compiles.
+    name: Tauri app cargo check (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri -> target
+      - name: Build frontend
+        working-directory: ./app
+        run: |
+          npm ci
+          npm run build
+      # Same placeholders as tauri-check; the backend sidecar name carries the
+      # target triple and .exe on Windows.
+      - name: Stage placeholder bundled resources
+        working-directory: ./app/src-tauri
+        shell: bash
+        run: |
+          mkdir -p binaries zWork-Skills CuaDriver.app/Contents/MacOS
+          [ -f binaries/cua-driver.exe ] || echo placeholder > binaries/cua-driver.exe
+          [ -f binaries/zwork-backend-x86_64-pc-windows-msvc.exe ] || echo placeholder > binaries/zwork-backend-x86_64-pc-windows-msvc.exe
+          [ -f zWork-Skills/.placeholder ] || echo placeholder > zWork-Skills/.placeholder
+          [ -f CuaDriver.app/Contents/MacOS/cua-driver ] || echo placeholder > CuaDriver.app/Contents/MacOS/cua-driver
       - name: cargo check
         working-directory: ./app/src-tauri
         run: cargo check
