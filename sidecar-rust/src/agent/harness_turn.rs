@@ -104,7 +104,14 @@ struct TurnShared {
     usage: Mutex<Usage>,
     /// The run's durable lane, so `use_app` can switch connector actions on mid-run.
     lane: Mutex<Option<Arc<crate::harness::runtime::lane::Lane>>>,
+    /// When streamed text was last saved. Saving on every delta rewrites the
+    /// whole chat file each time; on a slow disk the event mapper then falls
+    /// so far behind that the end of a long reply missed the drain window.
+    last_delta_persist: Mutex<Option<std::time::Instant>>,
 }
+
+/// How often streamed text is saved mid-reply; the reply's end always saves.
+const DELTA_PERSIST_EVERY: std::time::Duration = std::time::Duration::from_millis(250);
 
 impl TurnShared {
     async fn send(&self, v: Value) {
@@ -914,6 +921,9 @@ async fn map_harness_events(
             HarnessEvent::MessageEnd { message, recovery, .. } => {
                 if recovery == Some(true) {
                     recover_assistant_text(&shared, &message).await;
+                } else {
+                    // Deltas save on a timer; this saves the reply's tail.
+                    shared.persist().await;
                 }
                 record_assistant_end(&shared, &message, seq).await;
             }
@@ -1316,7 +1326,17 @@ async fn handle_stream_event(shared: &TurnShared, event: AssistantMessageEvent, 
                 return;
             }
             shared.accumulated_text.lock_unpoisoned().push_str(&delta);
-            shared.persist().await;
+            let due = {
+                let mut last = shared.last_delta_persist.lock_unpoisoned();
+                let due = last.is_none_or(|t| t.elapsed() >= DELTA_PERSIST_EVERY);
+                if due {
+                    *last = Some(std::time::Instant::now());
+                }
+                due
+            };
+            if due {
+                shared.persist().await;
+            }
             shared.send_seq(seq, json!({ "type": "delta", "text": delta })).await;
         }
         AssistantMessageEvent::ThinkingDelta { delta, .. } => {
@@ -2025,6 +2045,7 @@ pub fn run_agent_turn(
             traces: Mutex::new(Vec::new()),
             usage: Mutex::new(Usage::empty()),
             lane: Mutex::new(None),
+            last_delta_persist: Mutex::new(None),
         });
 
         // ── Tools ───────────────────────────────────────────────────────
@@ -2749,6 +2770,7 @@ async fn resume_one_interrupted(
         traces: Mutex::new(Vec::new()),
         usage: Mutex::new(Usage::empty()),
         lane: Mutex::new(None),
+        last_delta_persist: Mutex::new(None),
     });
 
     // Toolset: the same menu a live turn builds (plan-mode read-only not
