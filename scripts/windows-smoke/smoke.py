@@ -18,6 +18,7 @@ Usage: python smoke.py <path to rwork-backend[.exe]> <output dir>
 Exits non-zero on the first failed check; every check is printed.
 """
 import json
+import re
 import os
 import shutil
 import socket
@@ -46,6 +47,13 @@ else:
 
 results = []
 received_logs = {}
+
+
+def gaps(text):
+    """Which of the reply's numbered parts are missing, for diagnosing loss."""
+    seen = {int(n) for n in re.findall(r"Part (\d+) of a long", text)}
+    missing = [i for i in range(REPLY_CHUNKS) if i not in seen]
+    return f"{len(missing)} parts missing" + (f" (first {missing[:5]}, last {missing[-3:]})" if missing else "")
 
 
 def check(name, ok, detail=""):
@@ -298,7 +306,11 @@ def main():
         check("command with long output finished", tool_result and tool_result.get("ok") and CMD_MARK in msg,
               f"{len(msg)} chars back, ok={tool_result and tool_result.get('ok')}")
         check("live command updates stayed small", counts.get("status", 0) < 2000, f"{counts.get('status', 0)} status events")
-        check("long reply streamed to the end", text.endswith(END_MARK), f"{len(text)} chars in {took:.1f}s")
+        (out / "reply.txt").write_text(text, encoding="utf-8")
+        status, chat = api(base, "GET", f"/api/chats/{chat_id}")
+        saved = json.dumps(chat or {})
+        check("long reply streamed to the end", text.endswith(END_MARK),
+              f"{len(text)} chars in {took:.1f}s; streamed {gaps(text)}; saved {gaps(saved)}")
         check("turn finished in time", took < 240, f"{took:.1f}s")
         check("turn reported done", counts.get("done", 0) >= 1)
 
@@ -308,8 +320,6 @@ def main():
         check("no shell left running after the turn", not any("powershell" in k.lower() or k.lower().startswith("bash") for k in kids),
               f"children: {kids}")
 
-        status, chat = api(base, "GET", f"/api/chats/{chat_id}")
-        saved = json.dumps(chat or {})
         check("chat saved with the full reply", status == 200 and END_MARK in saved, f"chat {chat_id}")
         leftovers = [p.name for p in (home / "chats").glob("*.tmp")] if (home / "chats").exists() else []
         check("no half-written save files left", not leftovers, str(leftovers))
