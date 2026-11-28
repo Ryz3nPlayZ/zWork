@@ -46,7 +46,7 @@ import { KeybindRecorder } from "./KeybindRecorder";
 import { COMPANION_CREW_KEY, COMPANION_ENABLED, COMPANION_KEY, configureCompanion } from "../lib/companionBus";
 import { GlideGroup } from "./Glide";
 import { REDO_ONBOARDING_KEY } from "../lib/store";
-import { Badge, Button, EmptyState, Switch } from "./page/Page";
+import { Badge, Button, EmptyState, Switch, useConfirm } from "./page/Page";
 
 type Section = "account" | "appearance" | "general" | "memory" | "models" | "integrations";
 
@@ -1397,6 +1397,8 @@ function GeneralPanel({
         </div>
       </section>
 
+      {!IS_WEB && <LogsSection />}
+
       {!IS_WEB && <RuntimeSection />}
 
       {/* Default model */}
@@ -1915,6 +1917,77 @@ function Field({
 
 /** Python + Node that zWork installs for itself, so office files, skills and
  *  `npx` / `uvx` connectors work without the user installing developer tools. */
+/** "Send logs": one click uploads the error logs (no chat text, no keys)
+ *  and shows a short code the user can pass to whoever is helping them. */
+function LogsSection() {
+  const [confirmNode, confirm] = useConfirm();
+  const [sending, setSending] = useState(false);
+  const [code, setCode] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const send = async () => {
+    const ok = await confirm({
+      title: "Send logs to the zWork team?",
+      body: "Only zWork's error logs. Your messages, replies, files and keys are left out.",
+      confirmLabel: "Send",
+      variant: "primary",
+    });
+    if (!ok) return;
+    setSending(true);
+    setError(null);
+    setCode(null);
+    try {
+      setCode(await api.sendLogs());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't send the logs. Try again.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const openFolder = async () => {
+    setError(null);
+    try {
+      await api.openLogFolder();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't open the log folder.");
+    }
+  };
+
+  return (
+    <section className="rounded-2xl border border-line bg-paper-raised p-4">
+      {confirmNode}
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0 space-y-0.5">
+          <div className="text-[13px] font-medium text-ink">Problem with zWork?</div>
+          <p className="text-[11.5px] leading-relaxed text-ink-muted">
+            Send us zWork's error logs and tell whoever is helping you the code you get back.
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button onClick={openFolder}>Open log folder</Button>
+          <Button
+            variant="primary"
+            onClick={send}
+            disabled={sending}
+            icon={sending ? <RefreshCw className="animate-spin" /> : undefined}
+          >
+            {sending ? "Sending" : "Send logs"}
+          </Button>
+        </div>
+      </div>
+      {code && (
+        <p className="mt-3 text-[12px] text-ink-muted">
+          Sent. Your code is{" "}
+          <span className="select-text font-mono text-[12.5px] font-semibold text-ink">{code}</span>. Send it to whoever
+          is helping you.
+        </p>
+      )}
+      {error && <p className="mt-3 text-[12px] text-error">{error}</p>}
+    </section>
+  );
+}
+
 function RuntimeSection() {
   const [status, setStatus] = useState<RuntimeStatus | null>(null);
 

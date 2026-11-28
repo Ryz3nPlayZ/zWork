@@ -26,13 +26,18 @@ fn turn_budget_line(turn: u32, max_turns: u32) -> Option<String> {
     Some(format!("<turn-budget>{} / {} turns used</turn-budget>", turn, max_turns))
 }
 
-/// Best-effort `git status -sb` for the current working directory. Cached per
-/// process; never blocks the turn if git is absent or the dir isn't a repo.
+/// Best-effort `git status -sb` for the current working directory. Runs at
+/// each turn start; returns None if git is absent or the dir isn't a repo.
 fn git_state_line(cwd: &str) -> Option<String> {
-    let output = std::process::Command::new("git")
-        .args(["-C", cwd, "status", "-sb"])
-        .output()
-        .ok()?;
+    let mut cmd = std::process::Command::new("git");
+    cmd.args(["-C", cwd, "status", "-sb"]);
+    // Without this, Windows opens a console window for a moment on every turn.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let output = cmd.output().ok()?;
     if !output.status.success() {
         return None;
     }

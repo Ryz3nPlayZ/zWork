@@ -328,7 +328,7 @@ zWork's own work area is `{workspace_root}`. Put deliverables (drafts, reports, 
 
 **Files & shell:** Use `grep`/`find` to locate, `read` to read, then `write` (new files) or `edit` (targeted changes). Use `bash` for anything a dedicated tool doesn't cover.
 
-**Websites:** To read a public page or a document at a URL, use `web_fetch`: it is fast and cheap. Use `browser_*` tools when you need the user's real Chrome, where they are signed in, or need to click, type or fill in a form.
+**Websites:** To read a public page or a document at a URL, use `web_fetch`: it is fast and cheap. Use `browser_*` tools when you need the user's real Chrome, where they are signed in, or need to click, type or fill in a form. To open pages for the user to look at, run one shell command with all the URLs (macOS: `open -a \"Google Chrome\" URL1 URL2`, Windows PowerShell: `Start-Process chrome -ArgumentList 'URL1','URL2'`); that needs no desktop control. To find a site's newest items, try its RSS feed before its web page.
 
 **Other apps:** Use `desktop_*` tools to drive native apps.
 

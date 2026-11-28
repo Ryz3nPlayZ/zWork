@@ -2894,7 +2894,8 @@ export const useApp = create<AppState>((set, get) => ({
               const existing = updated[idx];
               updated[idx] = {
                 ...existing,
-                deltaAccumulator: (existing.deltaAccumulator || "") + evt.text,
+                // Bounded: a long run used to grow this without limit.
+                deltaAccumulator: ((existing.deltaAccumulator || "") + evt.text).slice(-4000),
               };
               return { subagents: updated };
             });
@@ -3116,12 +3117,22 @@ export const useApp = create<AppState>((set, get) => ({
 if (typeof window !== "undefined") {
   // Serialising every chat on each streamed token blocked the UI thread, so
   // write at most once a second; the cache is only an offline fallback.
+  // While a reply streams, chats change every second and each write turned
+  // every open chat (tool output included) into one big string on the UI
+  // thread, so writes wait until no chat is working, and skip when nothing
+  // they save has changed.
   let cacheTimer: ReturnType<typeof setTimeout> | null = null;
+  let savedChats: unknown = null;
+  let savedSummaries: unknown = null;
   useApp.subscribe(() => {
     if (cacheTimer) return;
     cacheTimer = setTimeout(() => {
       cacheTimer = null;
       const state = useApp.getState();
+      if (state.chats === savedChats && state.chatSummaries === savedSummaries) return;
+      if (Object.values(state.chats).some((c) => c.working)) return;
+      savedChats = state.chats;
+      savedSummaries = state.chatSummaries;
       try {
         // Version the cache shape so a message-model change (e.g. the
         // content→parts migration) doesn't hydrate stale messages that crash

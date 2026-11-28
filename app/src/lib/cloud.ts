@@ -145,6 +145,8 @@ export interface AnalyticsSummary {
   five_hour_used: number;
   weekly_limit: number;
   weekly_used: number;
+  /** When new tasks are allowed again; absent while under both limits (and on older servers). */
+  refills_at?: string | null;
   past_week: AnalyticsDay[];
   past_month: AnalyticsDay[];
   /** Daily activity for the last 53 weeks, oldest first (the heatmap). */

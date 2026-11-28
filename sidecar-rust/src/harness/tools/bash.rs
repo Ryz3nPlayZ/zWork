@@ -137,6 +137,23 @@ impl Drop for GroupGuard {
     }
 }
 
+/// How long to keep reading output after the shell itself has exited.
+const PIPE_DRAIN_GRACE: Duration = Duration::from_secs(2);
+
+/// Wait for the pipe readers to reach end of output, but only briefly once
+/// the shell has exited. A program the command left running holds the pipes
+/// open for as long as it runs: on Windows that is any desktop app started
+/// straight from PowerShell (`notepad notes.txt`, `excel report.xlsx`), and
+/// the chat used to sit on "Working" until the user closed that app.
+async fn drain_pipes(handles: [tokio::task::JoinHandle<()>; 2], grace: Duration) {
+    let deadline = tokio::time::Instant::now() + grace;
+    for mut h in handles {
+        if tokio::time::timeout_at(deadline, &mut h).await.is_err() {
+            h.abort();
+        }
+    }
+}
+
 enum ExecOutcome {
     Exited(Option<i32>),
     Aborted,
@@ -346,8 +363,7 @@ impl AgentTool for BashTool {
             };
             guard.0 = None;
 
-            let _ = h1.await;
-            let _ = h2.await;
+            drain_pipes([h1, h2], PIPE_DRAIN_GRACE).await;
             timer.abort();
             let (snapshot, last_line_bytes) = {
                 let mut out = output.lock().unwrap_or_else(|e| e.into_inner());
@@ -387,6 +403,17 @@ mod tests {
 
     fn noop() -> AgentToolUpdateCallback {
         Arc::new(|_| {})
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn returns_when_a_background_program_keeps_the_output_open() {
+        // The subshell inherits stdout and outlives bash by 30s.
+        let tool = BashTool::new(std::env::temp_dir());
+        let started = Instant::now();
+        let r = tool.execute("1", json!({"command": "(sleep 30) & echo hi"}), None, noop()).await.unwrap();
+        assert!(r.text_content().contains("hi"));
+        assert!(started.elapsed() < Duration::from_secs(10), "waited {:?}", started.elapsed());
     }
 
     #[cfg(unix)]

@@ -39,6 +39,8 @@ import type { SecurityPreset } from "../lib/store";
 import { api, IS_WEB, type QueuedItem, type UploadedFile } from "../lib/api";
 import { isDemoMode } from "../lib/preview";
 import { fetchAnalyticsSummary, getCloudToken } from "../lib/cloud";
+import { allowanceFrom, type Allowance } from "../lib/allowance";
+import { AllowanceNote } from "./AllowanceNote";
 import {
   filterTemplates,
   mergeCommands,
@@ -335,31 +337,28 @@ export function ChatInput({
   const clearPendingShareImage = useApp((s) => s.clearPendingShareImage);
   const currentModel = providers?.models.find((m) => m.id === model);
 
-  // zWork's own models draw on the plan allowance: warn before sending, not
-  // after a failed run. Rechecked whenever a run ends.
-  const [allowanceNote, setAllowanceNote] = useState<string | null>(null);
+  // zWork's own models draw on the plan allowance: say so before sending, not
+  // after a failed run. Rechecked whenever a run ends, and when it refills.
+  const [allowance, setAllowance] = useState<Allowance | null>(null);
+  const [allowanceTick, setAllowanceTick] = useState(0);
   useEffect(() => {
     if (!model.startsWith("zwork-") || IS_WEB || !getCloudToken() || working) {
-      if (!model.startsWith("zwork-")) setAllowanceNote(null);
+      if (!model.startsWith("zwork-")) setAllowance(null);
       return;
     }
     let live = true;
     fetchAnalyticsSummary()
-      .then((s) => {
-        if (!live) return;
-        const hours = s.five_hour_used / Math.max(1, s.five_hour_limit);
-        const week = s.weekly_used / Math.max(1, s.weekly_limit);
-        setAllowanceNote(
-          week >= 1 ? "You've used this week's allowance. It refills over the next few days; upgrading raises it."
-          : hours >= 1 ? "You've used this period's allowance. It refills over the next few hours; upgrading raises it."
-          : week >= 0.8 ? `You've used ${Math.round(week * 100)}% of this week's allowance.`
-          : hours >= 0.8 ? `You've used ${Math.round(hours * 100)}% of your 5-hour allowance.`
-          : null,
-        );
-      })
+      .then((s) => { if (live) setAllowance(allowanceFrom(s)); })
       .catch(() => {});
     return () => { live = false; };
-  }, [model, working]);
+  }, [model, working, allowanceTick]);
+  useEffect(() => {
+    if (allowance?.kind !== "out" || !allowance.refillsAt) return;
+    const wait = allowance.refillsAt.getTime() - Date.now() + 5_000;
+    if (wait > 2 ** 31 - 1) return;
+    const t = window.setTimeout(() => setAllowanceTick((n) => n + 1), Math.max(wait, 5_000));
+    return () => window.clearTimeout(t);
+  }, [allowance]);
   const modelLabel = currentModel?.name ?? (providers?.models.length ? "Model" : "No models");
 
   const slashMatches = useMemo(
@@ -981,17 +980,12 @@ export function ChatInput({
 
   // Queued messages waiting against the live run, above the draft. A word
   // label instead of an icon per kind; the x cancels.
-  const allowanceLine = allowanceNote && (
-    <div role="status" className="mx-3 mt-3 flex items-start gap-3 rounded-xl border border-warning/20 bg-warning/5 px-3 py-2 text-[12px] leading-5 text-warning">
-      <span className="min-w-0 flex-1">{allowanceNote}</span>
-      <button
-        type="button"
-        onClick={() => useApp.getState().setView("analytics")}
-        className="press ring-focus shrink-0 rounded-md px-1.5 font-medium underline-offset-2 hover:underline"
-      >
-        See usage
-      </button>
-    </div>
+  const allowanceLine = allowance && (
+    <AllowanceNote
+      allowance={allowance}
+      onSeeUsage={() => useApp.getState().setView("analytics")}
+      onUpgrade={() => useApp.getState().setView("plan")}
+    />
   );
 
   const queueChips = queuedItems.length > 0 && (

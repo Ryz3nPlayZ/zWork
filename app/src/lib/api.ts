@@ -343,7 +343,10 @@ async function waitForBackendReady(attempts = 60) {
   let lastError: unknown = null;
   for (let i = 0; i < attempts; i += 1) {
     try {
-      if (i === 0 || (i > 0 && i % 15 === 0)) await invokeBackendCommand("ensure_backend");
+      // Ask the shell to (re)start the backend only after a failed check:
+      // this runs before nearly every request, and a healthy backend needs
+      // nothing from the shell.
+      if (i === 1 || (i > 0 && i % 15 === 0)) await invokeBackendCommand("ensure_backend");
       return await healthFetch();
     } catch (err) {
       lastError = err;
@@ -696,6 +699,24 @@ export const api = {
     const body = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(body.error || "Couldn't open the file.");
     return body as { ok: boolean; path: string; revealed: boolean };
+  },
+
+  /** Sends the app's error logs (keys and chat text removed) to the zWork
+   *  team. Resolves to the short code the user passes on. */
+  sendLogs: async () => {
+    const r = await localFetch("/api/logs/send", { method: "POST" });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok || !body.code) throw new Error(body.error || "Couldn't send the logs. Try again.");
+    return body.code as string;
+  },
+
+  /** Opens the folder that holds zWork's log files. */
+  openLogFolder: async () => {
+    const r = await localFetch("/api/logs/open", { method: "POST" });
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}));
+      throw new Error(body.error || "Couldn't open the log folder.");
+    }
   },
 
   /** An image zWork made (outputs folder only), as a same-origin blob so the

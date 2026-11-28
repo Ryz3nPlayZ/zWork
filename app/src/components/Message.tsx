@@ -1,6 +1,6 @@
 /* Hallmark · genre: modern-minimal · macrostructure: Workbench · design-system: design.md · designed-as-app */
 
-import { useState, useCallback, useEffect, useMemo, useRef, lazy, Suspense } from "react";
+import { memo, useState, useCallback, useEffect, useMemo, useRef, lazy, Suspense } from "react";
 import { parseChartSpec } from "./finance/chartSpec";
 import { THINKING_WORDS, shuffled } from "../lib/thinkingWords";
 import ReactMarkdown from "react-markdown";
@@ -729,7 +729,12 @@ function TypewriterText({ text, active }: { text: string; active: boolean }) {
 }
 
 // ---- Main Message component ----
-export function Message({
+// Memoised: every streamed event re-renders the chat, and without this each
+// earlier reply re-parsed its markdown (and maths) on every event, which made
+// long chats freeze the window. Earlier replies keep the same props.
+export const Message = memo(MessageView);
+
+function MessageView({
   message,
   onRetry,
   onBadResponse,

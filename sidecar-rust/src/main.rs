@@ -124,6 +124,7 @@ mod deploy;
 mod office;
 mod runtime;
 mod fileopen;
+mod logs_report;
 
 fn main() {
     // Before the runtime starts threads: `set_var` is only sound while the
@@ -300,6 +301,8 @@ async fn run() {
         .route("/api/uploads", get(server::list_uploads).post(server::upload_files))
         .route("/api/uploads/:filename", get(server::get_upload))
         .route("/api/files/open", post(fileopen::open_file))
+        .route("/api/logs/send", post(logs_report::send_logs))
+        .route("/api/logs/open", post(logs_report::open_log_folder))
         .route("/api/files/stat", post(fileopen::stat_files))
         .route("/api/files/output-image", post(fileopen::output_image))
         .route("/api/screenshot", post(server::screenshot))
