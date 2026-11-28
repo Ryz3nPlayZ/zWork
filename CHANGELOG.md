@@ -2,6 +2,23 @@
 
 All notable changes to zWork are documented in this file.
 
+## v0.7.1
+
+### New
+- **Send logs when something goes wrong.** Settings has a "Problem with zWork?" box. Send logs uploads zWork's error logs after one confirm. It never includes your messages, replies, files or keys. You get a short code like ZW-4F7K9Q to pass on. Open log folder sits beside it.
+
+### Improvements
+- **A calmer usage note.** When your allowance is used up, the message box says when you can start new tasks again (for example "on Sunday at 12:13 PM"). It has See usage and, on plans with a bigger option, an Upgrade button, in neutral colours instead of an amber warning. Once that time comes, it checks again on its own. Near the limit it's one quiet line with a small meter.
+- **Long runs use far fewer tokens.** Older screen reads and web pages are shortened before each step, so one big page no longer rides along on every later step. The saved chat keeps them in full.
+
+### Fixes
+- **Long chats no longer freeze the window.** Earlier replies aren't redrawn while a new one streams in, and a busy background process can no longer lock up the whole app. A slow chat no longer gets the others restarted with it.
+- **Long answers keep their ending.** zWork saved the chat after every word, and on slower computers (Windows especially) it fell so far behind that the end of a long reply was lost. It now saves in batches.
+- **Commands with lots of output stay smooth.** A long listing no longer floods the window line by line, and a command that opens a desktop app no longer hangs the chat.
+- **Windows tidies up after itself.** Removing a connector or quitting zWork stops the programs it started. Saving chats no longer fails when antivirus briefly holds the file, and no console windows flash up.
+- **Clicking items on screen works again** with the current CuaDriver.
+- **macOS window buttons line up** with the search and sidebar icons again.
+
 ## v0.7.0
 
 ### New
