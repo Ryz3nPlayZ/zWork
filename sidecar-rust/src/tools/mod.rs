@@ -1329,7 +1329,10 @@ fn detect_hardware_profile() -> serde_json::Value {
     let mut vram_mb: Option<u32> = None;
 
     // 1. NVIDIA GPU via nvidia-smi
-    if let Ok(out) = std::process::Command::new("nvidia-smi")
+    let mut smi = std::process::Command::new("nvidia-smi");
+    #[cfg(windows)]
+    std::os::windows::process::CommandExt::creation_flags(&mut smi, 0x0800_0000); // CREATE_NO_WINDOW
+    if let Ok(out) = smi
         .args(["--query-gpu=name,memory.total", "--format=csv,noheader,nounits"])
         .output()
     {
@@ -1779,6 +1782,7 @@ mod tests {
         let out = crate::paths::workspace_outputs_dir();
         let script = format!("cat << 'EOF' > {}/sum.py\nif total > limit:\n    print(total)\nEOF\npython3 {}/sum.py", out.display(), out.display());
         assert!(!gated(&script));
+        #[cfg(unix)]
         assert!(!gated("cat << 'EOF' > /private/tmp/sum.py\nprint(1)\nEOF"));
         // A `>` in the script body isn't a redirect, whatever folder this runs from.
         assert!(!gated_with_cwd(&script, "/work/proj"));
@@ -1800,6 +1804,7 @@ mod tests {
         assert!(!gated("grep -r foo ."));
         assert!(!gated("echo hi > out.txt"));
         assert!(!gated("echo hi >> append.txt"));
+        #[cfg(unix)]
         assert!(!gated("echo hi > /tmp/scratch.txt"));
         assert!(!gated("some_cmd 2>/dev/null"));
         assert!(!gated("find . -name '*.rs'"));

@@ -345,3 +345,59 @@ pub fn settle_cwd() {
 pub fn crew_path() -> PathBuf {
     home_dir().join("crew.json")
 }
+
+/// Write `contents` to `path` through a temp file and a rename, so a reader
+/// never sees half a file. The temp name is unique per call: two saves of the
+/// same chat at once must not write into one temp file. On Windows the rename
+/// fails while antivirus or the search indexer briefly holds the target open,
+/// so it is retried for a moment instead of dropping the save.
+pub fn replace_file(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp = path.with_extension(format!("{}.{n}.tmp", std::process::id()));
+    std::fs::write(&tmp, contents)?;
+    let mut tries = 0;
+    loop {
+        match std::fs::rename(&tmp, path) {
+            Ok(()) => return Ok(()),
+            // 5 access denied, 32 sharing violation, 33 lock violation.
+            Err(e) if cfg!(windows) && tries < 10 && matches!(e.raw_os_error(), Some(5 | 32 | 33)) => {
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(30));
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&tmp);
+                return Err(e);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod replace_file_tests {
+    #[test]
+    fn concurrent_saves_of_one_file_all_land() {
+        let dir = std::env::temp_dir().join(format!("zwork-replace-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("chat.json");
+        let threads: Vec<_> = (0..8)
+            .map(|i| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    for j in 0..25 {
+                        super::replace_file(&path, format!("{{\"v\":{}}}", i * 100 + j).as_bytes()).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(serde_json::from_str::<serde_json::Value>(&text).is_ok(), "{text}");
+        let leftovers = std::fs::read_dir(&dir).unwrap().count();
+        assert_eq!(leftovers, 1, "temp files left behind");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

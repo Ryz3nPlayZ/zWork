@@ -249,9 +249,8 @@ pub fn get(chat_id: &str) -> Option<Chat> {
 pub fn save(chat: &Chat) {
     let p = chat_file_path(&chat.id);
     if let Ok(content) = serde_json::to_string_pretty(chat) {
-        let tmp = p.with_extension("tmp");
-        if fs::write(&tmp, content).is_ok() {
-            let _ = fs::rename(tmp, p);
+        if let Err(e) = crate::paths::replace_file(&p, content.as_bytes()) {
+            tracing::warn!("could not save {}: {e}", p.display());
         }
     }
 }

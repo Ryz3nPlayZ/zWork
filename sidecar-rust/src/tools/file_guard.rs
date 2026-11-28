@@ -139,7 +139,8 @@ fn segments(command: &str) -> Vec<Vec<Token>> {
             (Some(q), c) if c == q => quote = None,
             (Some(_), c) => word.push(c),
             (None, '\'' | '"') => quote = Some(c),
-            (None, '\\') => word.extend(chars.next()),
+            // PowerShell paths use `\` as the separator, not an escape.
+            (None, '\\') if !cfg!(windows) => word.extend(chars.next()),
             (None, ' ' | '\t') => flush(&mut out, &mut word, &mut redirect_next),
             (None, ';' | '&' | '|' | '\n' | '(' | ')') => {
                 flush(&mut out, &mut word, &mut redirect_next);
@@ -191,6 +192,7 @@ mod tests {
     #[test]
     fn agent_space_is_free() {
         assert!(user_file_written("outputs/report.md", &zwork()).is_none());
+        #[cfg(unix)]
         assert!(user_file_written("/tmp/x.csv", &zwork()).is_none());
         assert!(!changes("python3 build.py > outputs/log.txt 2>&1"));
         assert!(!changes("cp ~/Documents/data.csv scratch/"));

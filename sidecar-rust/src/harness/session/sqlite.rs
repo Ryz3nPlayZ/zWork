@@ -904,13 +904,16 @@ mod tests {
                 ))
                 .await_test();
         }
-        // Reopen from disk: the entry survives.
-        let session = repo.open("s1").unwrap();
-        let branch = session.branch("main").unwrap().unwrap();
-        let entries = branch.find_entries(BranchScan::default()).unwrap();
-        assert_eq!(entries.len(), 1);
-        let stats = session.get_stats().unwrap();
-        assert_eq!(stats.message_count, 1);
+        // Reopen from disk: the entry survives. Closed again before the
+        // delete, since Windows can't remove a file that's still open.
+        {
+            let session = repo.open("s1").unwrap();
+            let branch = session.branch("main").unwrap().unwrap();
+            let entries = branch.find_entries(BranchScan::default()).unwrap();
+            assert_eq!(entries.len(), 1);
+            let stats = session.get_stats().unwrap();
+            assert_eq!(stats.message_count, 1);
+        }
         let listed = repo.list().unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].id, "s1");

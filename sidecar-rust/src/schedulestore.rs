@@ -87,9 +87,8 @@ fn load_data() -> ScheduleStoreData {
 fn save_data(data: &ScheduleStoreData) {
     let p = schedules_path();
     if let Ok(content) = serde_json::to_string_pretty(data) {
-        let tmp = p.with_extension("tmp");
-        if fs::write(&tmp, content).is_ok() {
-            let _ = fs::rename(tmp, p);
+        if let Err(e) = crate::paths::replace_file(&p, content.as_bytes()) {
+            tracing::warn!("could not save {}: {e}", p.display());
         }
     }
 }

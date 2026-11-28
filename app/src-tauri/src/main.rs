@@ -42,6 +42,19 @@ impl BackendChild {
 
     fn shutdown(self) {
         let BackendChild::Packaged(child) = self;
+        // Windows: killing the backend alone leaves its connectors (node),
+        // shell commands and the desktop driver running; take the tree.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            let _ = Command::new("taskkill")
+                .args(["/F", "/T", "/PID", &child.pid().to_string()])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+                .status();
+        }
         let _ = child.kill();
         // Clean the backend's PID lock so the next spawn doesn't refuse to
         // start ("already running").

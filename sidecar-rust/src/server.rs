@@ -1395,12 +1395,14 @@ pub async fn list_integrations() -> impl IntoResponse {
 }
 
 fn which_tool(name: &str) -> Option<String> {
-    let output = std::process::Command::new("which")
-        .arg(name)
-        .output()
-        .ok()?;
+    // Windows has no `which`; `where` prints every match, one per line.
+    let mut cmd = std::process::Command::new(if cfg!(windows) { "where" } else { "which" });
+    #[cfg(windows)]
+    std::os::windows::process::CommandExt::creation_flags(&mut cmd, 0x0800_0000); // CREATE_NO_WINDOW
+    let output = cmd.arg(name).output().ok()?;
     if output.status.success() {
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let path = stdout.lines().next().unwrap_or("").trim().to_string();
         if !path.is_empty() {
             return Some(path);
         }

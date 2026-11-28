@@ -337,6 +337,8 @@ struct ProcessGuard {
     _child: tokio::process::Child,
     #[cfg(unix)]
     pgid: Option<i32>,
+    #[cfg(windows)]
+    pid: Option<u32>,
 }
 
 impl Drop for ProcessGuard {
@@ -347,6 +349,18 @@ impl Drop for ProcessGuard {
         if let Some(pgid) = self.pgid {
             let _ = nix::sys::signal::killpg(nix::unistd::Pid::from_raw(pgid), nix::sys::signal::Signal::SIGTERM);
         }
+        // Windows: `cmd /C npx …` — killing cmd alone leaves node running.
+        #[cfg(windows)]
+        if let Some(pid) = self.pid {
+            use std::os::windows::process::CommandExt;
+            let _ = std::process::Command::new("taskkill")
+                .args(["/F", "/T", "/PID", &pid.to_string()])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .creation_flags(0x0800_0000)
+                .spawn();
+        }
     }
 }
 
@@ -354,6 +368,12 @@ fn spawn_stdio(command: &str, args: &[String], env: &BTreeMap<String, String>, c
     use std::process::Stdio;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
+    // `cmd /C` starts even when the program is missing and only prints
+    // "not recognized", so look it up first to keep the install hint.
+    #[cfg(windows)]
+    if !windows_can_run(command) {
+        return Err(spawn_error(command, &std::io::Error::from(std::io::ErrorKind::NotFound)));
+    }
     let mut cmd = if cfg!(windows) {
         // `npx` & co. are `.cmd` shims on Windows; only the shell resolves them.
         let mut c = tokio::process::Command::new("cmd");
@@ -370,6 +390,9 @@ fn spawn_stdio(command: &str, args: &[String], env: &BTreeMap<String, String>, c
     }
     #[cfg(unix)]
     cmd.process_group(0);
+    // Without this every connector opens a console window beside the app.
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
 
     let mut child = cmd.spawn().map_err(|e| spawn_error(command, &e))?;
     let (stdin, stdout, stderr) = (child.stdin.take(), child.stdout.take(), child.stderr.take());
@@ -423,6 +446,8 @@ fn spawn_stdio(command: &str, args: &[String], env: &BTreeMap<String, String>, c
 
     #[cfg(unix)]
     let pgid = child.id().map(|id| id as i32);
+    #[cfg(windows)]
+    let pid = child.id();
     Ok(Peer {
         shared,
         tasks: vec![writer, reader, stderr_tail],
@@ -431,9 +456,33 @@ fn spawn_stdio(command: &str, args: &[String], env: &BTreeMap<String, String>, c
                 _child: child,
                 #[cfg(unix)]
                 pgid,
+                #[cfg(windows)]
+                pid,
             },
         },
     })
+}
+
+/// Whether `cmd /C command` would find something to run: a path that exists,
+/// or a name on PATH with one of PATHEXT's extensions (`npx` is `npx.cmd`).
+#[cfg(windows)]
+fn windows_can_run(command: &str) -> bool {
+    let p = std::path::Path::new(command);
+    let exts: Vec<String> = std::env::var("PATHEXT")
+        .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into())
+        .split(';')
+        .filter(|e| !e.is_empty())
+        .map(str::to_string)
+        .collect();
+    let hit = |base: &std::path::Path| {
+        base.is_file() || exts.iter().any(|e| base.with_extension(e.trim_start_matches('.')).is_file())
+    };
+    if p.components().count() > 1 || p.is_absolute() {
+        return hit(p);
+    }
+    std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).any(|dir| hit(&dir.join(p))))
+        .unwrap_or(true)
 }
 
 /// "Not found" is the common failure for non-developers: say what to install.

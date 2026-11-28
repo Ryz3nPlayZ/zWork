@@ -139,6 +139,8 @@ pub fn relative_posix(path: &Path, base: &Path) -> Option<String> {
 mod tests {
     use super::*;
 
+    // `/Desktop/a.pdf` has no drive, so it isn't absolute on Windows.
+    #[cfg(unix)]
     #[test]
     fn absolute_path_missing_the_home_folder_is_rehomed() {
         let home = std::env::temp_dir().join(format!("zw-home-{}", std::process::id()));
