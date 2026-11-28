@@ -152,7 +152,7 @@ Each bullet has an id and counts of how often it helped or hurt. The playbook is
 
 It is peer-reviewed and the code is released. I found no reproduction outside the authors.
 
-**Licence.** Apache-2.0 ([LICENSE](https://github.com/ace-agent/ace/blob/main/LICENSE)).
+**Licence.** Apache-2.0 (see the [repo](https://github.com/ace-agent/ace)).
 
 **What zWork could adopt.** This is the best match for zWork's positioning: the same paperwork, done again every week.
 

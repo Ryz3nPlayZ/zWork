@@ -2,7 +2,7 @@
   "$schema": "https://github.com/tcort/markdown-link-check",
   "ignorePatterns": [
     {
-      "comment": "GitHub meta-pages that 404 for repos with no stars / no discussions enabled. These are badge link targets, not documentation links — their availability depends on repo state, not link rot.",
+      "comment": "GitHub meta-pages that 404 for repos with no stars / no discussions enabled. These are badge link targets, not documentation links \u2014 their availability depends on repo state, not link rot.",
       "pattern": "^https://github.com/[^/]+/[^/]+/(stargazers|discussions)"
     },
     {
@@ -16,6 +16,10 @@
     {
       "comment": "eWEEK returns 403 to CI runners though the page is up.",
       "pattern": "^https://www\\.eweek\\.com/"
+    },
+    {
+      "comment": "aiwiki.ai rate-limits CI runners (429) though the page is up.",
+      "pattern": "^https://aiwiki\\.ai/"
     }
   ],
   "replacementPatterns": [],
